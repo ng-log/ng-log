@@ -39,14 +39,14 @@
 #include <cstdio>
 #include <cstdlib>
 
-#include "base/googleinit.h"
 #include "config.h"
-#include "glog/flags.h"
-#include "glog/logging.h"
+#include "initializer.h"
+#include "ng-log/flags.h"
+#include "ng-log/logging.h"
 #include "stacktrace.h"
 #include "symbolize.h"
 
-#ifdef GLOG_OS_ANDROID
+#ifdef NGLOG_OS_ANDROID
 #  include <android/log.h>
 #endif
 #ifdef HAVE_SYS_TIME_H
@@ -73,26 +73,26 @@ extern char* __progname;
 
 using std::string;
 
-namespace google {
+namespace nglog {
 
 static const char* g_program_invocation_short_name = nullptr;
 
-bool IsGoogleLoggingInitialized() {
+bool IsLoggingInitialized() {
   return g_program_invocation_short_name != nullptr;
 }
 
-inline namespace glog_internal_namespace_ {
+inline namespace tools {
 
 constexpr int FileDescriptor::InvalidHandle;
 
 void AlsoErrorWrite(LogSeverity severity, const char* tag,
                     const char* message) noexcept {
-#if defined(GLOG_OS_WINDOWS)
+#if defined(NGLOG_OS_WINDOWS)
   (void)severity;
   (void)tag;
   // On Windows, also output to the debugger
   ::OutputDebugStringA(message);
-#elif defined(GLOG_OS_ANDROID)
+#elif defined(NGLOG_OS_ANDROID)
   constexpr int android_log_levels[] = {
       ANDROID_LOG_INFO,
       ANDROID_LOG_WARN,
@@ -108,9 +108,9 @@ void AlsoErrorWrite(LogSeverity severity, const char* tag,
 #endif
 }
 
-}  // namespace glog_internal_namespace_
+}  // namespace tools
 
-}  // namespace google
+}  // namespace nglog
 
 // The following APIs are all internal.
 #ifdef HAVE_STACKTRACE
@@ -119,7 +119,7 @@ void AlsoErrorWrite(LogSeverity severity, const char* tag,
 #  include "stacktrace.h"
 #  include "symbolize.h"
 
-namespace google {
+namespace nglog {
 
 using DebugWriter = void(const char*, void*);
 
@@ -132,8 +132,7 @@ static void DebugWriteToStderr(const char* data, void*) {
   if (write(fileno(stderr), data, strlen(data)) < 0) {
     // Ignore errors.
   }
-  AlsoErrorWrite(GLOG_FATAL,
-                 glog_internal_namespace_::ProgramInvocationShortName(), data);
+  AlsoErrorWrite(NGLOG_FATAL, tools::ProgramInvocationShortName(), data);
 }
 
 static void DebugWriteToString(const char* data, void* arg) {
@@ -202,7 +201,7 @@ DumpStackTraceAndExit() {
     sigemptyset(&sig_action.sa_mask);
     sig_action.sa_handler = SIG_DFL;
     sigaction(SIGABRT, &sig_action, nullptr);
-#  elif defined(GLOG_OS_WINDOWS)
+#  elif defined(NGLOG_OS_WINDOWS)
     signal(SIGABRT, SIG_DFL);
 #  endif  // HAVE_SIGACTION
   }
@@ -210,17 +209,17 @@ DumpStackTraceAndExit() {
   abort();
 }
 
-}  // namespace google
+}  // namespace nglog
 
 #endif  // HAVE_STACKTRACE
 
-namespace google {
+namespace nglog {
 
-inline namespace glog_internal_namespace_ {
+inline namespace tools {
 
 const char* const_basename(const char* filepath) {
   const char* base = strrchr(filepath, '/');
-#ifdef GLOG_OS_WINDOWS  // Look for either path separator in Windows
+#ifdef NGLOG_OS_WINDOWS  // Look for either path separator in Windows
   if (!base) base = strrchr(filepath, '\\');
 #endif
   return base ? (base + 1) : filepath;
@@ -259,7 +258,7 @@ static string g_my_user_name;
 const string& MyUserName() { return g_my_user_name; }
 static void MyUserNameInitializer() {
   // TODO(hamaji): Probably this is not portable.
-#if defined(GLOG_OS_WINDOWS)
+#if defined(NGLOG_OS_WINDOWS)
   const char* user = getenv("USERNAME");
 #else
   const char* user = getenv("USER");
@@ -289,16 +288,15 @@ REGISTER_MODULE_INITIALIZER(utilities, MyUserNameInitializer())
 
 // We use an atomic operation to prevent problems with calling CrashReason
 // from inside the Mutex implementation (potentially through RAW_CHECK).
-static std::atomic<const logging::internal::CrashReason*> g_reason{nullptr};
+static std::atomic<const internal::CrashReason*> g_reason{nullptr};
 
-void SetCrashReason(const logging::internal::CrashReason* r) {
-  const logging::internal::CrashReason* expected = nullptr;
+void SetCrashReason(const internal::CrashReason* r) {
+  const internal::CrashReason* expected = nullptr;
   g_reason.compare_exchange_strong(expected, r);
 }
 
-void InitGoogleLoggingUtilities(const char* argv0) {
-  CHECK(!IsGoogleLoggingInitialized())
-      << "You called InitGoogleLogging() twice!";
+void InitializeLoggingUtilities(const char* argv0) {
+  CHECK(!IsLoggingInitialized()) << "You called InitializeLogging() twice!";
   g_program_invocation_short_name = const_basename(argv0);
 
 #ifdef HAVE_STACKTRACE
@@ -306,17 +304,17 @@ void InitGoogleLoggingUtilities(const char* argv0) {
 #endif
 }
 
-void ShutdownGoogleLoggingUtilities() {
-  CHECK(IsGoogleLoggingInitialized())
-      << "You called ShutdownGoogleLogging() without calling "
-         "InitGoogleLogging() first!";
+void ShutdownLoggingUtilities() {
+  CHECK(IsLoggingInitialized())
+      << "You called ShutdownLogging() without calling "
+         "InitializeLogging() first!";
   g_program_invocation_short_name = nullptr;
 #ifdef HAVE_SYSLOG_H
   closelog();
 #endif
 }
 
-}  // namespace glog_internal_namespace_
+}  // namespace tools
 
 #ifdef HAVE_STACKTRACE
 std::string GetStackTrace() {
@@ -326,4 +324,4 @@ std::string GetStackTrace() {
 }
 #endif
 
-}  // namespace google
+}  // namespace nglog

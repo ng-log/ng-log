@@ -27,16 +27,13 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Author: Sergiu Deitsch
 
-#include <glog/logging.h>
+#ifndef NGLOG_COMPAT_FLAGS_H
+#define NGLOG_COMPAT_FLAGS_H
 
-int main() {
-  // Must not compile
-  google::LogMessage{__FILE__, __LINE__, -1};
-  // Cast to int to avoid implicit conversoin to nullptr
-  google::LogMessage{__FILE__, __LINE__, static_cast<int>(0)};
-  google::LogMessage{__FILE__, __LINE__, 1};
-  google::LogMessage{__FILE__, __LINE__, 2};
-  google::LogMessage{__FILE__, __LINE__, 3};
-}
+#include "ng-log/flags.h"
+
+#pragma message( \
+    "<glog/flags.h> is deprecated and will be removed in ng-log 0.9.0. Please use <ng-log/flags.h> instead.")
+
+#endif  // NGLOG_COMPAT_FLAGS_H

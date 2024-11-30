@@ -1,14 +1,14 @@
 # Notes for Windows Users
 
-glog defines the severity level `ERROR`, which is also defined by `windows.h`.
-You can make glog not define `INFO`, `WARNING`, `ERROR`, and `FATAL` by defining
-`GLOG_NO_ABBREVIATED_SEVERITIES` before including `glog/logging.h`. Even with
-this macro, you can still use the iostream like logging facilities:
+ng-log defines the severity level `ERROR`, which is also defined by `windows.h`.
+You can make nglog not define `INFO`, `WARNING`, `ERROR`, and `FATAL` by
+defining `NGLOG_NO_ABBREVIATED_SEVERITIES` before including `nglog/logging.h`.
+Even with this macro, you can still use the iostream like logging facilities:
 
 ``` cpp
-#define GLOG_NO_ABBREVIATED_SEVERITIES
+#define NGLOG_NO_ABBREVIATED_SEVERITIES
 #include <windows.h>
-#include <glog/logging.h>
+#include <ng-log/logging.h>
 
 // ...
 
@@ -17,20 +17,20 @@ LOG_IF(ERROR, x > y) << "This should be also OK";
 ```
 
 However, you cannot use `INFO`, `WARNING`, `ERROR`, and `FATAL` anymore for
-functions defined in `glog/logging.h`.
+functions defined in `nglog/logging.h`.
 
 ``` cpp
-#define GLOG_NO_ABBREVIATED_SEVERITIES
+#define NGLOG_NO_ABBREVIATED_SEVERITIES
 #include <windows.h>
-#include <glog/logging.h>
+#include <ng-log/logging.h>
 
 // ...
 
 // This won’t work.
-// google::FlushLogFiles(google::ERROR);
+// nglog::FlushLogFiles(nglog::ERROR);
 
 // Use this instead.
-google::FlushLogFiles(google::GLOG_ERROR);
+nglog::FlushLogFiles(nglog::NGLOG_ERROR);
 ```
 
 If you don't need `ERROR` defined by `windows.h`, there are a couple of more

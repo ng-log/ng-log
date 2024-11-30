@@ -1,6 +1,6 @@
 # Adjusting Output
 
-Several flags influence glog's output behavior.
+Several flags influence ng-log's output behavior.
 
 ## Using Command-line Parameters and Environment Variables
 
@@ -10,7 +10,7 @@ the build system will automatically detect and use it, allowing you to
 pass flags on the command line.
 
 !!! example "Activate `--logtostderr` in an application from the command line"
-    A binary `you_application` that uses glog can be started using
+    A binary `you_application` that uses ng-log can be started using
     ``` bash
     ./your_application --logtostderr=1
     ```
@@ -23,11 +23,11 @@ pass flags on the command line.
 
 
 If the Google gflags library isn't installed, you set flags via
-environment variables, prefixing the flag name with `GLOG_`, e.g.,
+environment variables, prefixing the flag name with `NGLOG_`, e.g.,
 
 !!! example "Activate `logtostderr` without gflags"
     ``` bash
-    GLOG_logtostderr=1 ./your_application
+    NGLOG_logtostderr=1 ./your_application
     ```
 
 The following flags are most commonly used:
@@ -69,7 +69,7 @@ The following flags are most commonly used:
     logging](logging.md#verbose-logging) for more details.
 
 Additional flags are defined in
-[flags.cc](https://github.com/google/glog/blob/master/src/flags.cc). Please see
+[flags.cc](https://github.com/ng-log/ng-log/blob/master/src/flags.cc). Please see
 the source for their complete list.
 
 ## Modifying Flags Programmatically
@@ -77,7 +77,7 @@ the source for their complete list.
 You can also modify flag values in your program by modifying global variables
 `FLAGS_*`. Most settings start working immediately after you update `FLAGS_*`.
 The exceptions are the flags related to destination files. For instance, you
-might want to set `FLAGS_log_dir` before calling `google::InitGoogleLogging`.
+might want to set `FLAGS_log_dir` before calling `nglog::InitializeLogging`.
 
 !!! example "Setting `log_dir` at runtime"
     ``` cpp
@@ -87,7 +87,7 @@ might want to set `FLAGS_log_dir` before calling `google::InitGoogleLogging`.
     LOG(INFO) << "stderr";
     FLAGS_logtostderr = 0;
     // This won’t change the log destination. If you want to set this
-    // value, you should do this before google::InitGoogleLogging .
+    // value, you should do this before nglog::InitializeLogging .
     FLAGS_log_dir = "/some/log/directory";
     LOG(INFO) << "the same file";
     ```

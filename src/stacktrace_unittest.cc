@@ -29,12 +29,13 @@
 
 #include "stacktrace.h"
 
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 
 #include "base/commandlineflags.h"
 #include "config.h"
-#include "glog/logging.h"
+#include "ng-log/logging.h"
 #include "utilities.h"
 
 #ifdef HAVE_EXECINFO_BACKTRACE_SYMBOLS
@@ -130,7 +131,7 @@ static void ATTRIBUTE_NOINLINE CheckStackTraceLeaf() {
   ADJUST_ADDRESS_RANGE_FROM_RA(&expected_range[1]);
   INIT_ADDRESS_RANGE(CheckStackTraceLeaf, start, end, &expected_range[0]);
   DECLARE_ADDRESS_LABEL(start);
-  size = google::GetStackTrace(stack, STACK_LEN, 0);
+  size = nglog::GetStackTrace(stack, STACK_LEN, 0);
   printf("Obtained %d stack frames.\n", size);
   CHECK_GE(size, 1);
   CHECK_LE(size, STACK_LEN);
@@ -225,11 +226,23 @@ static
 #    pragma clang diagnostic pop
 #  endif
 
+namespace {
+void handle_abort(int /*code*/) { std::exit(EXIT_FAILURE); }
+}  // namespace
+
+
 //-----------------------------------------------------------------------//
 
 int main(int, char** argv) {
+#  if defined(_MSC_VER)
+  // Avoid presenting an interactive dialog that will cause the test to time
+  // out.
+  _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+#  endif  // defined(_MSC_VER)
+  std::signal(SIGABRT, handle_abort);
+
   FLAGS_logtostderr = true;
-  google::InitGoogleLogging(argv[0]);
+  nglog::InitializeLogging(argv[0]);
 
   CheckStackTrace(0);
 
@@ -240,10 +253,10 @@ int main(int, char** argv) {
 #else
 int main() {
 
-#  ifdef GLOG_BAZEL_BUILD
+#  ifdef NGLOG_BAZEL_BUILD
   printf("HAVE_STACKTRACE is expected to be defined in Bazel tests\n");
   exit(EXIT_FAILURE);
-#  endif  // GLOG_BAZEL_BUILD
+#  endif  // NGLOG_BAZEL_BUILD
 
   printf("PASS (no stacktrace support)\n");
   return 0;

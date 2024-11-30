@@ -1,8 +1,8 @@
-# Google Logging Library
+# ng-log
 
-Google Logging (glog) is a C++14 library that implements application-level
-logging. The library provides logging APIs based on C++-style streams and
-various helper macros.
+ng-log (formely Google Logging Library or glog) is a C++14 library
+that implements application-level logging. The library provides logging APIs
+based on C++-style streams and various helper macros.
 
 # How to Use
 
@@ -10,19 +10,19 @@ You can log a message by simply streaming things to `LOG`(<a particular
 [severity level](logging.md#severity-levels)\>), e.g.,
 
 ``` cpp title="main.cpp"
-#include <glog/logging.h>
+#include <ng-log/logging.h>
 
 int main(int argc, char* argv[]) {
-    google::InitGoogleLogging(argv[0]); // (1)!
+    nglog::InitializeLogging(argv[0]); // (1)!
     LOG(INFO) << "Found " << num_cookies << " cookies"; // (2)!
 }
 ```
 
-1. Initialize the Google Logging Library
+1. Initialize library
 2. Log a message with informational severity
 
 The library can be installed using various [package managers](packages.md) or
-compiled [from source](build.md). For a detailed overview of glog features and
+compiled [from source](build.md). For a detailed overview of ng-log features and
 their usage, please refer to the [user guide](logging.md).
 
 !!! warning

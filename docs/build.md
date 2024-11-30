@@ -2,44 +2,44 @@
 
 ## Bazel
 
-To use glog within a project which uses the [Bazel](https://bazel.build/) build
+To use ng-log within a project which uses the [Bazel](https://bazel.build/) build
 tool, add the following lines to your `MODULE.bazel` file:
 
 ``` bazel title="MODULE.bazel"
 bazel_dep(name = "glog")
 
 archive_override(
-    module_name = "glog",
-    urls = "https://github.com/google/glog/archive/cc0de6c200375b33d907ee7632eee2f173b33a09.tar.gz",
-    strip_prefix = "glog-cc0de6c200375b33d907ee7632eee2f173b33a09",  # Latest commit as of 2024-06-08.
+    module_name = "ng-log",
+    urls = "https://github.com/ng-log/ng-log/archive/cc0de6c200375b33d907ee7632eee2f173b33a09.tar.gz",
+    strip_prefix = "ng-log-cc0de6c200375b33d907ee7632eee2f173b33a09",  # Latest commit as of 2024-06-08.
     integrity = "sha256-rUrv4EBkdc+4Wbhfxp+KoRstlj2Iw842/OpLfDq0ivg=",
 )
 ```
 
-You can then add `@glog//:glog` to
+You can then add `@ng-log//:ng-log` to
 the deps section of a `cc_binary` or
-`cc_library` rule, and `#!cpp #include <glog/logging.h>` to
+`cc_library` rule, and `#!cpp #include <ng-log/logging.h>` to
 include it in your source code.
 
-!!! example "Using glog in a Bazel project"
+!!! example "Using ng-log in a Bazel project"
     ``` bazel
     cc_binary(
         name = "main",
         srcs = ["main.cc"],
-        deps = ["@glog//:glog"],
+        deps = ["@ng-log//:ng-log"],
     )
     ```
 
 ## CMake
 
-glog can be compiled using [CMake](http://www.cmake.org) on a wide range of
-platforms. The typical workflow for building glog on a Unix-like system with GNU
+ng-log can be compiled using [CMake](http://www.cmake.org) on a wide range of
+platforms. The typical workflow for building ng-log on a Unix-like system with GNU
 Make as build tool is as follows:
 
 1.  Clone the repository and change into source directory.
   ``` bash
-  git clone https://github.com/google/glog.git
-  cd glog
+  git clone https://github.com/ng-log/ng-log.git
+  cd ng-log
   ```
 2.  Run CMake to configure the build tree.
   ``` bash
@@ -63,4 +63,4 @@ Make as build tool is as follows:
   cmake --build build --target install
   ```
 
-Once successfully built, glog can be [integrated into own projects](usage.md).
+Once successfully built, ng-log can be [integrated into own projects](usage.md).

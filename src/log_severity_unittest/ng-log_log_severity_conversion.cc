@@ -1,4 +1,4 @@
-// Copyright (c) 2008, Google Inc.
+// Copyright (c) 2024, Google Inc.
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -26,24 +26,17 @@
 // THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//
+// Author: Sergiu Deitsch
 
-// ---
-// Author: Jacob Hoffman-Andrews
+#include <ng-log/logging.h>
 
-#ifndef _GOOGLEINIT_H
-#define _GOOGLEINIT_H
-
-class GoogleInitializer {
- public:
-  using void_function = void (*)();
-  GoogleInitializer(const char*, void_function f) { f(); }
-};
-
-#define REGISTER_MODULE_INITIALIZER(name, body)       \
-  namespace {                                         \
-  static void google_init_module_##name() { body; }   \
-  GoogleInitializer google_initializer_module_##name( \
-      #name, google_init_module_##name);              \
-  }
-
-#endif /* _GOOGLEINIT_H */
+int main() {
+  // Must not compile
+  nglog::LogMessage{__FILE__, __LINE__, -1};
+  // Cast to int to avoid implicit conversoin to nullptr
+  nglog::LogMessage{__FILE__, __LINE__, static_cast<int>(0)};
+  nglog::LogMessage{__FILE__, __LINE__, 1};
+  nglog::LogMessage{__FILE__, __LINE__, 2};
+  nglog::LogMessage{__FILE__, __LINE__, 3};
+}

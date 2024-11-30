@@ -54,22 +54,22 @@
 
 #include "config.h"
 
-#ifdef GLOG_USE_GFLAGS
+#ifdef NGLOG_USE_GFLAGS
 
 #  include <gflags/gflags.h>
 
 #else
 
-#  include "glog/logging.h"
+#  include "ng-log/logging.h"
 
 #  define DECLARE_VARIABLE(type, shorttype, name, tn) \
     namespace fL##shorttype {                         \
-      extern GLOG_EXPORT type FLAGS_##name;           \
+      extern NGLOG_EXPORT type FLAGS_##name;          \
     }                                                 \
     using fL##shorttype::FLAGS_##name
 #  define DEFINE_VARIABLE(type, shorttype, name, value, meaning, tn) \
     namespace fL##shorttype {                                        \
-      GLOG_EXPORT type FLAGS_##name(value);                          \
+      NGLOG_EXPORT type FLAGS_##name(value);                         \
       char FLAGS_no##name;                                           \
     }                                                                \
     using fL##shorttype::FLAGS_##name
@@ -80,53 +80,60 @@
     DEFINE_VARIABLE(bool, B, name, value, meaning, bool)
 
 // int32 specialization
-#  define DECLARE_int32(name) DECLARE_VARIABLE(google::int32, I, name, int32)
+#  define DECLARE_int32(name) DECLARE_VARIABLE(nglog::int32, I, name, int32)
 #  define DEFINE_int32(name, value, meaning) \
-    DEFINE_VARIABLE(google::int32, I, name, value, meaning, int32)
+    DEFINE_VARIABLE(nglog::int32, I, name, value, meaning, int32)
 
 // uint32 specialization
 #  ifndef DECLARE_uint32
 #    define DECLARE_uint32(name) \
-      DECLARE_VARIABLE(google::uint32, U, name, uint32)
+      DECLARE_VARIABLE(nglog::uint32, U, name, uint32)
 #  endif  // DECLARE_uint64
 #  define DEFINE_uint32(name, value, meaning) \
-    DEFINE_VARIABLE(google::uint32, U, name, value, meaning, uint32)
+    DEFINE_VARIABLE(nglog::uint32, U, name, value, meaning, uint32)
 
 // Special case for string, because we have to specify the namespace
 // std::string, which doesn't play nicely with our FLAG__namespace hackery.
-#  define DECLARE_string(name)                    \
-    namespace fLS {                               \
-    extern GLOG_EXPORT std::string& FLAGS_##name; \
-    }                                             \
+#  define DECLARE_string(name)                     \
+    namespace fLS {                                \
+    extern NGLOG_EXPORT std::string& FLAGS_##name; \
+    }                                              \
     using fLS::FLAGS_##name
-#  define DEFINE_string(name, value, meaning)                   \
-    namespace fLS {                                             \
-    std::string FLAGS_##name##_buf(value);                      \
-    GLOG_EXPORT std::string& FLAGS_##name = FLAGS_##name##_buf; \
-    char FLAGS_no##name;                                        \
-    }                                                           \
+#  define DEFINE_string(name, value, meaning)                    \
+    namespace fLS {                                              \
+    std::string FLAGS_##name##_buf(value);                       \
+    NGLOG_EXPORT std::string& FLAGS_##name = FLAGS_##name##_buf; \
+    char FLAGS_no##name;                                         \
+    }                                                            \
     using fLS::FLAGS_##name
 
-#endif  // GLOG_USE_GFLAGS
+#endif  // NGLOG_USE_GFLAGS
 
-// Define GLOG_DEFINE_* using DEFINE_* . By using these macros, we
-// have GLOG_* environ variables even if we have gflags installed.
+// Define NGLOG_DEFINE_* using DEFINE_* . By using these macros, we
+// have NGLOG_* environ variables even if we have gflags installed.
 //
 // If both an environment variable and a flag are specified, the value
-// specified by a flag wins. E.g., if GLOG_v=0 and --v=1, the
+// specified by a flag wins. E.g., if NGLOG_v=0 and --v=1, the
 // verbosity will be 1, not 0.
 
-#define GLOG_DEFINE_bool(name, value, meaning) \
-  DEFINE_bool(name, EnvToBool("GLOG_" #name, value), meaning)
+#define NGLOG_DEFINE_bool(name, value, meaning)                           \
+  DEFINE_bool(name,                                                       \
+              EnvToBool("NGLOG_" #name, EnvToBool("GLOG_" #name, value)), \
+              meaning)
 
-#define GLOG_DEFINE_int32(name, value, meaning) \
-  DEFINE_int32(name, EnvToInt("GLOG_" #name, value), meaning)
+#define NGLOG_DEFINE_int32(name, value, meaning)                               \
+  DEFINE_int32(name, EnvToInt("NGLOG_" #name, EnvToInt("GLOG_" #name, value)), \
+               meaning)
 
-#define GLOG_DEFINE_uint32(name, value, meaning) \
-  DEFINE_uint32(name, EnvToUInt("GLOG_" #name, value), meaning)
+#define NGLOG_DEFINE_uint32(name, value, meaning)                           \
+  DEFINE_uint32(name,                                                       \
+                EnvToUInt("NGLOG_" #name, EnvToUInt("GLOG_" #name, value)), \
+                meaning)
 
-#define GLOG_DEFINE_string(name, value, meaning) \
-  DEFINE_string(name, EnvToString("GLOG_" #name, value), meaning)
+#define NGLOG_DEFINE_string(name, value, meaning)                           \
+  DEFINE_string(                                                            \
+      name, EnvToString("NGLOG_" #name, EnvToString("GLOG_" #name, value)), \
+      meaning)
 
 // These macros (could be functions, but I don't want to bother with a .cc
 // file), make it easier to initialize flags from the environment.

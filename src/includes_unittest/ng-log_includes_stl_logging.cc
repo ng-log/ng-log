@@ -29,11 +29,6 @@
 //
 // Author: Sergiu Deitsch
 
-#include <glog/logging.h>
+#include <ng-log/stl_logging.h>
 
-int main() {
-  LOG(INFO) << "info";
-  LOG(WARNING) << "warning";
-  LOG(ERROR) << "error";
-  LOG(FATAL) << "fatal";
-}
+int main() {}

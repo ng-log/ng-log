@@ -2,7 +2,7 @@
 
 Under certain circumstances, it is useful to send the log output to a
 destination other than a file, `stderr` and/or `stdout`. In case, the library
-provides the `#!cpp google::LogSink` interface whose implementations can be used
+provides the `#!cpp nglog::LogSink` interface whose implementations can be used
 to write the log output to arbitrary locations.
 
 ## Basic Interface
@@ -19,7 +19,7 @@ class LogSink {
 };
 ```
 
-The user must implement `#!cpp google::LogSink::send`, which is called by the
+The user must implement `#!cpp nglog::LogSink::send`, which is called by the
 library every time a message is logged.
 
 !!! warning "Possible deadlock due to nested logging"
@@ -29,12 +29,12 @@ library every time a message is logged.
 ## Registering Log Sinks
 
 To use the custom sink and instance of the above interface implementation must
-be registered using `google::AddLogSink` which expects a pointer to the
-`google::LogSink` instance. To unregister use `google::RemoveLogSink`. Both
+be registered using `nglog::AddLogSink` which expects a pointer to the
+`nglog::LogSink` instance. To unregister use `nglog::RemoveLogSink`. Both
 functions are thread-safe.
 
 !!! danger "`LogSink` ownership"
-    The `google::LogSink` instance must not be destroyed until the referencing
+    The `nglog::LogSink` instance must not be destroyed until the referencing
     pointer is unregistered.
 
 ## Direct Logging
@@ -56,7 +56,7 @@ will avoid the latter.
     4. A sink does not need to be registered globally. However, then, messages
        must be logged using dedicated macros.
 
-    Running the above example as `#!bash GLOG_log_dir=. ./custom_sink_example`
+    Running the above example as `#!bash NGLOG_log_dir=. ./custom_sink_example`
     will produce
 
     <div class="annotate" markdown>

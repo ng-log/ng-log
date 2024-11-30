@@ -33,7 +33,7 @@
 
 #include "utilities.h"  // for OS_* macros
 
-#if !defined(GLOG_OS_WINDOWS)
+#if !defined(NGLOG_OS_WINDOWS)
 #  include <sys/mman.h>
 #  include <unistd.h>
 #endif
@@ -42,8 +42,8 @@
 
 #include "stacktrace.h"
 
-namespace google {
-inline namespace glog_internal_namespace_ {
+namespace nglog {
+inline namespace tools {
 
 // Given a pointer to a stack frame, locate and return the calling
 // stackframe, or return nullptr if no stackframe can be found. Perform sanity
@@ -85,7 +85,7 @@ static void** NextStackFrame(void** old_sp) {
   // last two pages in the address space
   if ((uintptr_t)new_sp >= 0xffffe000) return nullptr;
 #endif
-#if !defined(GLOG_OS_WINDOWS)
+#if !defined(NGLOG_OS_WINDOWS)
   if (!STRICT_UNWINDING) {
     // Lax sanity checks cause a crash in 32-bit tcmalloc/crash_reason_test
     // on AMD-based machines with VDSO-enabled kernels.
@@ -156,5 +156,5 @@ int GetStackTrace(void** result, int max_depth, int skip_count) {
   }
   return n;
 }
-}  // namespace glog_internal_namespace_
-}  // namespace google
+}  // namespace tools
+}  // namespace nglog

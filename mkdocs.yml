@@ -1,10 +1,10 @@
 ---
-site_name: Google Logging Library
-site_url: https://google.github.io/glog/
-repo_url: https://github.com/google/glog
-repo_name: google/glog
+site_name: ng-log
+site_url: https://ng-log.github.io/ng-log/
+repo_url: https://github.com/ng-log/ng-log
+repo_name: ng-log/ng-log
 edit_uri: edit/master/docs/
-copyright: Copyright &copy; 2024 Google Inc. &amp; contributors - <a href="#__consent">Change cookie settings</a>
+copyright: Copyright &copy; 2025 The ng-log contributors - <a href="#__consent">Change cookie settings</a>
 markdown_extensions:
   - admonition
   - attr_list

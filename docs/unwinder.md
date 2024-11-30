@@ -4,7 +4,7 @@
     The description on this page is possibly not up-to-date.
 
 The [glibc built-in stack-unwinder](#glibc-built-in-stack-unwinder) on 64-bit
-systems has some problems with glog. In particular, if you are using
+systems has some problems with ng-log. In particular, if you are using
 [`InstallFailureSignalHandler()`](failures.md), the signal may be raised in the
 middle of `malloc`, holding some `malloc`-related locks when they invoke the
 stack unwinder. The built-in stack unwinder may call `malloc` recursively, which
@@ -15,7 +15,7 @@ deadlock.
 
 For above reason, if you use a 64-bit system and you need
 `InstallFailureSignalHandler()`, we strongly recommend you install `libunwind`
-before trying to configure or install google glog. libunwind can be found
+before trying to configure or install ng-log. libunwind can be found
 [here](http://download.savannah.nongnu.org/releases/libunwind/libunwind-snap-070410.tar.gz).
 
 Even if you already have `libunwind` installed, you will probably still need to
@@ -23,7 +23,7 @@ install from the snapshot to get the latest version.
 
 !!! warning
     If you install libunwind from the URL above, be aware that you may have
-    trouble if you try to statically link your binary with glog: that is, if you
+    trouble if you try to statically link your binary with ng-log: that is, if you
     link with `gcc -static -lgcc_eh ...`. This is because both `libunwind` and
     `libgcc` implement the same C++ exception handling APIs, but they implement
     them differently on some platforms. This is not likely to be a problem on
@@ -52,6 +52,6 @@ chooses this unwinder by default.
 
 ### Frame Pointer based Stack-unwinder
 
-The frame pointer based stack unwinder requires that your application, the glog
+The frame pointer based stack unwinder requires that your application, the ng-log
 library, and system libraries like libc, all be compiled with a frame pointer.
 This is *not* the default for x86-64.

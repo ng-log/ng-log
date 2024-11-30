@@ -40,8 +40,8 @@
 #include <thread>
 
 #include "config.h"
-#include "glog/logging.h"
-#include "glog/platform.h"
+#include "ng-log/logging.h"
+#include "ng-log/platform.h"
 #include "stacktrace.h"
 #include "symbolize.h"
 #include "utilities.h"
@@ -56,7 +56,7 @@
 #  include <unistd.h>
 #endif
 
-namespace google {
+namespace nglog {
 
 namespace {
 
@@ -71,7 +71,7 @@ const struct {
 } kFailureSignals[] = {
     {SIGSEGV, "SIGSEGV"}, {SIGILL, "SIGILL"},
     {SIGFPE, "SIGFPE"},   {SIGABRT, "SIGABRT"},
-#if !defined(GLOG_OS_WINDOWS)
+#if !defined(NGLOG_OS_WINDOWS)
     {SIGBUS, "SIGBUS"},
 #endif
     {SIGTERM, "SIGTERM"},
@@ -79,7 +79,7 @@ const struct {
 
 static bool kFailureSignalHandlerInstalled = false;
 
-#if !defined(GLOG_OS_WINDOWS)
+#if !defined(NGLOG_OS_WINDOWS)
 // Returns the program counter from signal context, nullptr if unknown.
 void* GetPC(void* ucontext_in_void) {
 #  if (defined(HAVE_UCONTEXT_H) || defined(HAVE_SYS_UCONTEXT_H)) && \
@@ -219,7 +219,7 @@ void DumpSignalInfo(int signal_number, siginfo_t* siginfo) {
 
   formatter.AppendString(") ");
   // Only linux has the PID of the signal sender in si_pid.
-#  ifdef GLOG_OS_LINUX
+#  ifdef NGLOG_OS_LINUX
   formatter.AppendString("from PID ");
   formatter.AppendUint64(static_cast<uint64>(siginfo->si_pid), 10);
   formatter.AppendString("; ");
@@ -269,7 +269,7 @@ void InvokeDefaultSignalHandler(int signal_number) {
   sig_action.sa_handler = SIG_DFL;
   sigaction(signal_number, &sig_action, nullptr);
   kill(getpid(), signal_number);
-#elif defined(GLOG_OS_WINDOWS)
+#elif defined(NGLOG_OS_WINDOWS)
   signal(signal_number, SIG_DFL);
   raise(signal_number);
 #endif
@@ -282,7 +282,7 @@ void InvokeDefaultSignalHandler(int signal_number) {
 static std::once_flag signaled;
 
 static void HandleSignal(int signal_number
-#if !defined(GLOG_OS_WINDOWS)
+#if !defined(NGLOG_OS_WINDOWS)
                          ,
                          siginfo_t* signal_info, void* ucontext
 #endif
@@ -296,7 +296,7 @@ static void HandleSignal(int signal_number
   // First dump time info.
   DumpTimeInfo();
 
-#if !defined(GLOG_OS_WINDOWS)
+#if !defined(NGLOG_OS_WINDOWS)
   // Get the program counter from ucontext.
   void* pc = GetPC(ucontext);
   DumpStackFrameInfo("PC: ", pc);
@@ -309,14 +309,14 @@ static void HandleSignal(int signal_number
   const int depth = GetStackTrace(stack, ARRAYSIZE(stack), 1);
 #  ifdef HAVE_SIGACTION
   DumpSignalInfo(signal_number, signal_info);
-#  elif !defined(GLOG_OS_WINDOWS)
+#  elif !defined(NGLOG_OS_WINDOWS)
   (void)signal_info;
 #  endif
   // Dump the stack traces.
   for (int i = 0; i < depth; ++i) {
     DumpStackFrameInfo("    ", stack[i]);
   }
-#elif !defined(GLOG_OS_WINDOWS)
+#elif !defined(NGLOG_OS_WINDOWS)
   (void)signal_info;
 #endif
 
@@ -331,7 +331,7 @@ static void HandleSignal(int signal_number
 
   // Flush the logs before we do anything in case 'anything'
   // causes problems.
-  FlushLogFilesUnsafe(GLOG_INFO);
+  FlushLogFilesUnsafe(NGLOG_INFO);
 
   // Kill ourself by the default signal handler.
   InvokeDefaultSignalHandler(signal_number);
@@ -339,7 +339,7 @@ static void HandleSignal(int signal_number
 
 // Dumps signal and stack frame information, and invokes the default
 // signal handler once our job is done.
-#if defined(GLOG_OS_WINDOWS)
+#if defined(NGLOG_OS_WINDOWS)
 void FailureSignalHandler(int signal_number)
 #else
 void FailureSignalHandler(int signal_number, siginfo_t* signal_info,
@@ -347,7 +347,7 @@ void FailureSignalHandler(int signal_number, siginfo_t* signal_info,
 #endif
 {
   std::call_once(signaled, &HandleSignal, signal_number
-#if !defined(GLOG_OS_WINDOWS)
+#if !defined(NGLOG_OS_WINDOWS)
                  ,
                  signal_info, ucontext
 #endif
@@ -366,7 +366,7 @@ bool IsFailureSignalHandlerInstalled() {
   if (sig_action.sa_sigaction == &FailureSignalHandler) {
     return true;
   }
-#elif defined(GLOG_OS_WINDOWS)
+#elif defined(NGLOG_OS_WINDOWS)
   return kFailureSignalHandlerInstalled;
 #endif  // HAVE_SIGACTION
   return false;
@@ -385,7 +385,7 @@ void InstallFailureSignalHandler() {
     CHECK_ERR(sigaction(kFailureSignal.number, &sig_action, nullptr));
   }
   kFailureSignalHandlerInstalled = true;
-#elif defined(GLOG_OS_WINDOWS)
+#elif defined(NGLOG_OS_WINDOWS)
   for (size_t i = 0; i < ARRAYSIZE(kFailureSignals); ++i) {
     CHECK_NE(signal(kFailureSignals[i].number, &FailureSignalHandler), SIG_ERR);
   }
@@ -394,9 +394,9 @@ void InstallFailureSignalHandler() {
 }
 
 void InstallFailureWriter(void (*writer)(const char* data, size_t size)) {
-#if defined(HAVE_SIGACTION) || defined(GLOG_OS_WINDOWS)
+#if defined(HAVE_SIGACTION) || defined(NGLOG_OS_WINDOWS)
   g_failure_writer = writer;
 #endif  // HAVE_SIGACTION
 }
 
-}  // namespace google
+}  // namespace nglog

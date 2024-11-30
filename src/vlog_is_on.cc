@@ -39,23 +39,23 @@
 #include <mutex>
 #include <string>
 
-#include "glog/raw_logging.h"
+#include "ng-log/raw_logging.h"
 
 // glog doesn't have annotation
 #define ANNOTATE_BENIGN_RACE(address, description)
 
 using std::string;
 
-namespace google {
+namespace nglog {
 
-inline namespace glog_internal_namespace_ {
+inline namespace tools {
 
 // Implementation of fnmatch that does not need 0-termination
 // of arguments and does not allocate any memory,
 // but we only support "*" and "?" wildcards, not the "[...]" patterns.
 // It's not a static function for the unittest.
-GLOG_NO_EXPORT bool SafeFNMatch_(const char* pattern, size_t patt_len,
-                                 const char* str, size_t str_len) {
+NGLOG_NO_EXPORT bool SafeFNMatch_(const char* pattern, size_t patt_len,
+                                  const char* str, size_t str_len) {
   size_t p = 0;
   size_t s = 0;
   while (true) {
@@ -82,9 +82,9 @@ GLOG_NO_EXPORT bool SafeFNMatch_(const char* pattern, size_t patt_len,
   }
 }
 
-}  // namespace glog_internal_namespace_
+}  // namespace tools
 
-using glog_internal_namespace_::SafeFNMatch_;
+using tools::SafeFNMatch_;
 
 // List of per-module log levels from FLAGS_vmodule.
 // Once created each element is never deleted/modified
@@ -200,8 +200,8 @@ int SetVLOGLevel(const char* module_pattern, int log_level) {
 
 // NOTE: Individual VLOG statements cache the integer log level pointers.
 // NOTE: This function must not allocate memory or require any locks.
-bool InitVLOG3__(SiteFlag* site_flag, int32* level_default, const char* fname,
-                 int32 verbose_level) {
+bool InitializeVLOG3(SiteFlag* site_flag, int32* level_default,
+                     const char* fname, int32 verbose_level) {
   std::lock_guard<std::mutex> l(vmodule_mutex);
   bool read_vmodule_flag = inited_vmodule;
   if (!read_vmodule_flag) {
@@ -259,8 +259,8 @@ bool InitVLOG3__(SiteFlag* site_flag, int32* level_default, const char* fname,
     // If VLOG flag has been cached to the default site pointer,
     // we want to add to the cached list in order to invalidate in case
     // SetVModule is called afterwards with new modules.
-    // The performance penalty here is neglible, because InitVLOG3__ is called
-    // once per site.
+    // The performance penalty here is neglible, because InitializeVLOG3 is
+    // called once per site.
     if (site_flag_value == level_default && !site_flag->base_name) {
       site_flag->base_name = base;
       site_flag->base_len = base_length;
@@ -275,4 +275,4 @@ bool InitVLOG3__(SiteFlag* site_flag, int32* level_default, const char* fname,
   return *site_flag_value >= verbose_level;
 }
 
-}  // namespace google
+}  // namespace nglog

@@ -55,30 +55,30 @@
 #endif
 #include <fcntl.h>  // for open()
 
-#include "glog/logging.h"
-#include "glog/raw_logging.h"
+#include "ng-log/logging.h"
+#include "ng-log/raw_logging.h"
 #include "stacktrace.h"
 #include "utilities.h"
 
-#if (defined(HAVE_SYSCALL_H) || defined(HAVE_SYS_SYSCALL_H)) &&    \
-    (!(defined(GLOG_OS_MACOSX)) && !(defined(GLOG_OS_OPENBSD))) && \
-    !defined(GLOG_OS_EMSCRIPTEN)
+#if (defined(HAVE_SYSCALL_H) || defined(HAVE_SYS_SYSCALL_H)) &&      \
+    (!(defined(NGLOG_OS_MACOSX)) && !(defined(NGLOG_OS_OPENBSD))) && \
+    !defined(NGLOG_OS_EMSCRIPTEN)
 #  define safe_write(fd, s, len) syscall(SYS_write, fd, s, len)
 #else
 // Not so safe, but what can you do?
 #  define safe_write(fd, s, len) write(fd, s, len)
 #endif
 
-namespace google {
+namespace nglog {
 
 #if defined(__GNUC__)
-#  define GLOG_ATTRIBUTE_FORMAT(archetype, stringIndex, firstToCheck) \
+#  define NGLOG_ATTRIBUTE_FORMAT(archetype, stringIndex, firstToCheck) \
     __attribute__((format(archetype, stringIndex, firstToCheck)))
-#  define GLOG_ATTRIBUTE_FORMAT_ARG(stringIndex) \
+#  define NGLOG_ATTRIBUTE_FORMAT_ARG(stringIndex) \
     __attribute__((format_arg(stringIndex)))
 #else
-#  define GLOG_ATTRIBUTE_FORMAT(archetype, stringIndex, firstToCheck)
-#  define GLOG_ATTRIBUTE_FORMAT_ARG(stringIndex)
+#  define NGLOG_ATTRIBUTE_FORMAT(archetype, stringIndex, firstToCheck)
+#  define NGLOG_ATTRIBUTE_FORMAT_ARG(stringIndex)
 #endif
 
 // CAVEAT: std::vsnprintf called from *DoRawLog below has some (exotic) code
@@ -86,10 +86,10 @@ namespace google {
 // this becomes a problem we should reimplement a subset of std::vsnprintf that
 // does not need locks and malloc.
 
-// Helper for RawLog__ below.
+// Helper for RawLog below.
 // *DoRawLog writes to *buf of *size and move them past the written portion.
 // It returns true iff there was no overflow or error.
-GLOG_ATTRIBUTE_FORMAT(printf, 3, 4)
+NGLOG_ATTRIBUTE_FORMAT(printf, 3, 4)
 static bool DoRawLog(char** buf, size_t* size, const char* format, ...) {
   va_list ap;
   va_start(ap, format);
@@ -101,7 +101,7 @@ static bool DoRawLog(char** buf, size_t* size, const char* format, ...) {
   return true;
 }
 
-// Helper for RawLog__ below.
+// Helper for RawLog below.
 inline static bool VADoRawLog(char** buf, size_t* size, const char* format,
                               va_list ap) {
 #if defined(__GNUC__)
@@ -120,7 +120,7 @@ inline static bool VADoRawLog(char** buf, size_t* size, const char* format,
 
 static const int kLogBufSize = 3000;
 static std::once_flag crashed;
-static logging::internal::CrashReason crash_reason;
+static internal::CrashReason crash_reason;
 static char crash_buf[kLogBufSize + 1] = {0};  // Will end in '\0'
 
 namespace {
@@ -143,12 +143,12 @@ class StaticStringBuf : public std::streambuf {
 };
 }  // namespace
 
-GLOG_ATTRIBUTE_FORMAT(printf, 4, 5)
-void RawLog__(LogSeverity severity, const char* file, int line,
-              const char* format, ...) {
+NGLOG_ATTRIBUTE_FORMAT(printf, 4, 5)
+void RawLog(LogSeverity severity, const char* file, int line,
+            const char* format, ...) {
   if (!(FLAGS_logtostdout || FLAGS_logtostderr ||
         severity >= FLAGS_stderrthreshold || FLAGS_alsologtostderr ||
-        !IsGoogleLoggingInitialized())) {
+        !IsLoggingInitialized())) {
     return;  // this stderr log message is suppressed
   }
 
@@ -187,9 +187,9 @@ void RawLog__(LogSeverity severity, const char* file, int line,
   // We make a raw syscall to write directly to the stderr file descriptor,
   // avoiding FILE buffering (to avoid invoking malloc()), and bypassing
   // libc (to side-step any libc interception).
-  // We write just once to avoid races with other invocations of RawLog__.
+  // We write just once to avoid races with other invocations of RawLog.
   safe_write(fileno(stderr), buffer, strlen(buffer));
-  if (severity == GLOG_FATAL) {
+  if (severity == NGLOG_FATAL) {
     std::call_once(crashed, [file, line, msg_start, msg_size] {
       crash_reason.filename = file;
       crash_reason.line_number = line;
@@ -207,4 +207,4 @@ void RawLog__(LogSeverity severity, const char* file, int line,
   }
 }
 
-}  // namespace google
+}  // namespace nglog

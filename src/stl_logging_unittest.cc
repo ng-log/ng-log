@@ -27,7 +27,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include "glog/stl_logging.h"
+#include "ng-log/stl_logging.h"
 
 #include <functional>
 #include <iostream>
@@ -37,8 +37,8 @@
 #include <vector>
 
 #include "config.h"
-#include "glog/logging.h"
 #include "googletest.h"
+#include "ng-log/logging.h"
 
 using namespace std;
 

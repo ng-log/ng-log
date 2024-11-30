@@ -43,11 +43,11 @@
 
 #include "config.h"
 
-#if defined(GLOG_USE_GLOG_EXPORT)
-#  include "glog/export.h"
+#if defined(NGLOG_USE_EXPORT)
+#  include "ng-log/export.h"
 #endif
 
-#if !defined(GLOG_EXPORT)
+#if !defined(NGLOG_EXPORT)
 #  error "port.h" was not included correctly.
 #endif
 
@@ -119,23 +119,23 @@
 
 #  endif  // _MSC_VER
 
-namespace google {
-inline namespace glog_internal_namespace_ {
+namespace nglog {
+inline namespace tools {
 #  ifndef HAVE_LOCALTIME_R
-GLOG_NO_EXPORT std::tm* localtime_r(const std::time_t* timep, std::tm* result);
+NGLOG_NO_EXPORT std::tm* localtime_r(const std::time_t* timep, std::tm* result);
 #  endif  // not HAVE_LOCALTIME_R
 
 #  ifndef HAVE_GMTIME_R
-GLOG_NO_EXPORT std::tm* gmtime_r(const std::time_t* timep, std::tm* result);
+NGLOG_NO_EXPORT std::tm* gmtime_r(const std::time_t* timep, std::tm* result);
 #  endif  // not HAVE_GMTIME_R
 
-GLOG_NO_EXPORT
+NGLOG_NO_EXPORT
 inline char* strerror_r(int errnum, char* buf, std::size_t buflen) {
   strerror_s(buf, buflen, errnum);
   return buf;
 }
-}  // namespace glog_internal_namespace_
-}  // namespace google
+}  // namespace tools
+}  // namespace nglog
 
 #endif /* _WIN32 */
 

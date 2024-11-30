@@ -39,12 +39,12 @@
 
 #include "base/commandlineflags.h"
 #include "config.h"
-#include "glog/logging.h"
+#include "ng-log/logging.h"
 
-GLOG_DEFINE_bool(check_mode, false, "Prints 'opt' or 'dbg'");
+NGLOG_DEFINE_bool(check_mode, false, "Prints 'opt' or 'dbg'");
 
 using std::string;
-using namespace google;
+using namespace nglog;
 
 int CheckNoReturn(bool b) {
   string s;
@@ -72,7 +72,7 @@ int main(int, char* argv[]) {
   std::signal(SIGABRT, handle_abort);
 
   FLAGS_logtostderr = true;
-  InitGoogleLogging(argv[0]);
+  InitializeLogging(argv[0]);
   if (FLAGS_check_mode) {
     printf("%s\n", DEBUG_MODE ? "dbg" : "opt");
     return 0;

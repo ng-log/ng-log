@@ -35,8 +35,8 @@
 
 #include "stacktrace.h"
 
-namespace google {
-inline namespace glog_internal_namespace_ {
+namespace nglog {
+inline namespace tools {
 
 struct trace_arg_t {
   void** result;
@@ -102,5 +102,5 @@ int GetStackTrace(void** result, int max_depth, int skip_count) {
   return targ.count;
 }
 
-}  // namespace glog_internal_namespace_
-}  // namespace google
+}  // namespace tools
+}  // namespace nglog

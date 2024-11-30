@@ -38,20 +38,20 @@
 #include <string>
 
 #include "config.h"
-#include "glog/logging.h"
 #include "googletest.h"
+#include "ng-log/logging.h"
 #include "utilities.h"
 
-#ifdef GLOG_USE_GFLAGS
+#ifdef NGLOG_USE_GFLAGS
 #  include <gflags/gflags.h>
 using namespace GFLAGS_NAMESPACE;
 #endif
 
-GLOG_DEFINE_bool(demangle_filter, false,
-                 "Run demangle_unittest in filter mode");
+NGLOG_DEFINE_bool(demangle_filter, false,
+                  "Run demangle_unittest in filter mode");
 
 using namespace std;
-using namespace google;
+using namespace nglog;
 
 // A wrapper function for Demangle() to make the unit test simple.
 static const char* DemangleIt(const char* const mangled) {
@@ -63,7 +63,7 @@ static const char* DemangleIt(const char* const mangled) {
   }
 }
 
-#if defined(GLOG_OS_WINDOWS)
+#if defined(NGLOG_OS_WINDOWS)
 
 #  if defined(HAVE_DBGHELP) && !defined(NDEBUG)
 TEST(Demangle, Windows) {
@@ -146,12 +146,12 @@ TEST(Demangle, FromFile) {
 
 int main(int argc, char** argv) {
   InitGoogleTest(&argc, argv);
-#ifdef GLOG_USE_GFLAGS
+#ifdef NGLOG_USE_GFLAGS
   ParseCommandLineFlags(&argc, &argv, true);
 #endif
 
   FLAGS_logtostderr = true;
-  InitGoogleLogging(argv[0]);
+  InitializeLogging(argv[0]);
   if (FLAGS_demangle_filter) {
     // Read from cin and write to cout.
     string line;

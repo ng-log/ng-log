@@ -33,8 +33,8 @@
 // Pretty much everybody needs to #include this file so that they can
 // log various happenings.
 //
-#ifndef GLOG_LOGGING_H
-#define GLOG_LOGGING_H
+#ifndef NGLOG_LOGGING_H
+#define NGLOG_LOGGING_H
 
 #include <atomic>
 #include <cerrno>
@@ -52,34 +52,34 @@
 #include <utility>
 #include <vector>
 
-#if defined(GLOG_USE_GLOG_EXPORT)
-#  include "glog/export.h"
+#if defined(NGLOG_USE_EXPORT)
+#  include "ng-log/export.h"
 #endif
 
-#if !defined(GLOG_EXPORT) || !defined(GLOG_NO_EXPORT)
-#  error <glog/logging.h> was not included correctly. See the documentation for how to consume the library.
+#if !defined(NGLOG_EXPORT) || !defined(NGLOG_NO_EXPORT)
+#  error <ng-log/logging.h> was not included correctly. See the documentation for how to consume the library.
 #endif
 
-#include "glog/flags.h"
-#include "glog/platform.h"
-#include "glog/types.h"
+#include "ng-log/flags.h"
+#include "ng-log/platform.h"
+#include "ng-log/types.h"
 
 #if defined(__has_attribute)
 #  if __has_attribute(used)
-#    define GLOG_USED __attribute__((used))
+#    define NGLOG_USED __attribute__((used))
 #  endif  // __has_attribute(used)
 #endif    // defined(__has_attribute)
 
-#if !defined(GLOG_USED)
-#  define GLOG_USED
-#endif  // !defined(GLOG_USED)
+#if !defined(NGLOG_USED)
+#  define NGLOG_USED
+#endif  // !defined(NGLOG_USED)
 
-#include "glog/log_severity.h"
-#include "glog/vlog_is_on.h"
+#include "ng-log/log_severity.h"
+#include "ng-log/vlog_is_on.h"
 
-namespace google {
+namespace nglog {
 
-struct GLOG_EXPORT LogMessageTime {
+struct NGLOG_EXPORT LogMessageTime {
   LogMessageTime();
   explicit LogMessageTime(std::chrono::system_clock::time_point now);
 
@@ -107,19 +107,19 @@ struct GLOG_EXPORT LogMessageTime {
   std::chrono::seconds gmtoffset_;
 };
 
-}  // namespace google
+}  // namespace nglog
 
-// The global value of GOOGLE_STRIP_LOG. All the messages logged to
-// LOG(XXX) with severity less than GOOGLE_STRIP_LOG will not be displayed.
+// The global value of NGLOG_STRIP_LOG. All the messages logged to
+// LOG(XXX) with severity less than NGLOG_STRIP_LOG will not be displayed.
 // If it can be determined at compile time that the message will not be
 // printed, the statement will be compiled out.
 //
 // Example: to strip out all INFO and WARNING messages, use the value
 // of 2 below. To make an exception for WARNING messages from a single
-// file, add "#define GOOGLE_STRIP_LOG 1" to that file _before_ including
+// file, add "#define NGLOG_STRIP_LOG 1" to that file _before_ including
 // base/logging.h
-#ifndef GOOGLE_STRIP_LOG
-#  define GOOGLE_STRIP_LOG 0
+#ifndef NGLOG_STRIP_LOG
+#  define NGLOG_STRIP_LOG 0
 #endif
 
 // GCC can be told that a certain branch is not likely to be taken (for
@@ -129,46 +129,46 @@ struct GLOG_EXPORT LogMessageTime {
 //
 #if defined(__has_builtin)
 #  if __has_builtin(__builtin_expect)
-#    define GLOG_BUILTIN_EXPECT_PRESENT
+#    define NGLOG_BUILTIN_EXPECT_PRESENT
 #  endif
 #endif
 
-#if !defined(GLOG_BUILTIN_EXPECT_PRESENT) && defined(__GNUG__)
+#if !defined(NGLOG_BUILTIN_EXPECT_PRESENT) && defined(__GNUG__)
 // __has_builtin is not available prior to GCC 10
-#  define GLOG_BUILTIN_EXPECT_PRESENT
+#  define NGLOG_BUILTIN_EXPECT_PRESENT
 #endif
 
-#if defined(GLOG_BUILTIN_EXPECT_PRESENT)
+#if defined(NGLOG_BUILTIN_EXPECT_PRESENT)
 
-#  ifndef GOOGLE_PREDICT_BRANCH_NOT_TAKEN
-#    define GOOGLE_PREDICT_BRANCH_NOT_TAKEN(x) (__builtin_expect(x, 0))
+#  ifndef NGLOG_PREDICT_BRANCH_NOT_TAKEN
+#    define NGLOG_PREDICT_BRANCH_NOT_TAKEN(x) (__builtin_expect(x, 0))
 #  endif
 
-#  ifndef GOOGLE_PREDICT_FALSE
-#    define GOOGLE_PREDICT_FALSE(x) (__builtin_expect(x, 0))
+#  ifndef NGLOG_PREDICT_FALSE
+#    define NGLOG_PREDICT_FALSE(x) (__builtin_expect(x, 0))
 #  endif
 
-#  ifndef GOOGLE_PREDICT_TRUE
-#    define GOOGLE_PREDICT_TRUE(x) (__builtin_expect(!!(x), 1))
+#  ifndef NGLOG_PREDICT_TRUE
+#    define NGLOG_PREDICT_TRUE(x) (__builtin_expect(!!(x), 1))
 #  endif
 
 #else
 
-#  ifndef GOOGLE_PREDICT_BRANCH_NOT_TAKEN
-#    define GOOGLE_PREDICT_BRANCH_NOT_TAKEN(x) x
+#  ifndef NGLOG_PREDICT_BRANCH_NOT_TAKEN
+#    define NGLOG_PREDICT_BRANCH_NOT_TAKEN(x) x
 #  endif
 
-#  ifndef GOOGLE_PREDICT_TRUE
-#    define GOOGLE_PREDICT_FALSE(x) x
+#  ifndef NGLOG_PREDICT_TRUE
+#    define NGLOG_PREDICT_FALSE(x) x
 #  endif
 
-#  ifndef GOOGLE_PREDICT_TRUE
-#    define GOOGLE_PREDICT_TRUE(x) x
+#  ifndef NGLOG_PREDICT_TRUE
+#    define NGLOG_PREDICT_TRUE(x) x
 #  endif
 
 #endif
 
-#undef GLOG_BUILTIN_EXPECT_PRESENT
+#undef NGLOG_BUILTIN_EXPECT_PRESENT
 
 // Make a bunch of macros for logging.  The way to log things is to stream
 // things to LOG(<a particular severity level>).  E.g.,
@@ -191,21 +191,21 @@ struct GLOG_EXPORT LogMessageTime {
 // You can also do occasional logging (log every n'th occurrence of an
 // event):
 //
-//   LOG_EVERY_N(INFO, 10) << "Got the " << google::COUNTER << "th cookie";
+//   LOG_EVERY_N(INFO, 10) << "Got the " << nglog::COUNTER << "th cookie";
 //
 // The above will cause log messages to be output on the 1st, 11th, 21st, ...
-// times it is executed.  Note that the special google::COUNTER value is used
+// times it is executed.  Note that the special nglog::COUNTER value is used
 // to identify which repetition is happening.
 //
 // You can also do occasional conditional logging (log every n'th
 // occurrence of an event, when condition is satisfied):
 //
-//   LOG_IF_EVERY_N(INFO, (size > 1024), 10) << "Got the " << google::COUNTER
+//   LOG_IF_EVERY_N(INFO, (size > 1024), 10) << "Got the " << nglog::COUNTER
 //                                           << "th big cookie";
 //
 // You can log messages the first N times your code executes a line. E.g.
 //
-//   LOG_FIRST_N(INFO, 20) << "Got the " << google::COUNTER << "th cookie";
+//   LOG_FIRST_N(INFO, 20) << "Got the " << nglog::COUNTER << "th cookie";
 //
 // Outputs log messages for the first 20 times it is executed.
 //
@@ -222,7 +222,7 @@ struct GLOG_EXPORT LogMessageTime {
 //
 //   DLOG_IF(INFO, num_cookies > 10) << "Got lots of cookies";
 //
-//   DLOG_EVERY_N(INFO, 10) << "Got the " << google::COUNTER << "th cookie";
+//   DLOG_EVERY_N(INFO, 10) << "Got the " << nglog::COUNTER << "th cookie";
 //
 // All "debug mode" logging is compiled away to nothing for non-debug mode
 // compiles.
@@ -266,11 +266,11 @@ struct GLOG_EXPORT LogMessageTime {
 //         "program with --v=1 or more";
 //   VLOG_EVERY_N(1, 10)
 //      << "I'm printed every 10th occurrence, and when you run the program "
-//         "with --v=1 or more. Present occurrence is " << google::COUNTER;
+//         "with --v=1 or more. Present occurrence is " << nglog::COUNTER;
 //   VLOG_IF_EVERY_N(1, (size > 1024), 10)
 //      << "I'm printed on every 10th occurrence of case when size is more "
 //         " than 1024, when you run the program with --v=1 or more. ";
-//         "Present occurrence is " << google::COUNTER;
+//         "Present occurrence is " << nglog::COUNTER;
 //
 // The supported severity levels for macros that allow you to specify one
 // are (in increasing order of severity) INFO, WARNING, ERROR, and FATAL.
@@ -324,49 +324,49 @@ struct GLOG_EXPORT LogMessageTime {
 // synchronized.  Hence, use caution when comparing the low bits of
 // timestamps from different machines.
 
-// Log messages below the GOOGLE_STRIP_LOG level will be compiled away for
+// Log messages below the NGLOG_STRIP_LOG level will be compiled away for
 // security reasons. See LOG(severity) below.
 
 // A few definitions of macros that don't generate much code.  Since
 // LOG(INFO) and its ilk are used all over our code, it's
 // better to have compact code for these operations.
 
-#if GOOGLE_STRIP_LOG == 0
-#  define COMPACT_GOOGLE_LOG_INFO google::LogMessage(__FILE__, __LINE__)
+#if NGLOG_STRIP_LOG == 0
+#  define NGLOG_COMPACT_LOG_INFO nglog::LogMessage(__FILE__, __LINE__)
 #  define LOG_TO_STRING_INFO(message) \
-    google::LogMessage(__FILE__, __LINE__, google::GLOG_INFO, message)
+    nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_INFO, message)
 #else
-#  define COMPACT_GOOGLE_LOG_INFO google::NullStream()
-#  define LOG_TO_STRING_INFO(message) google::NullStream()
+#  define NGLOG_COMPACT_LOG_INFO nglog::NullStream()
+#  define LOG_TO_STRING_INFO(message) nglog::NullStream()
 #endif
 
-#if GOOGLE_STRIP_LOG <= 1
-#  define COMPACT_GOOGLE_LOG_WARNING \
-    google::LogMessage(__FILE__, __LINE__, google::GLOG_WARNING)
+#if NGLOG_STRIP_LOG <= 1
+#  define NGLOG_COMPACT_LOG_WARNING \
+    nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_WARNING)
 #  define LOG_TO_STRING_WARNING(message) \
-    google::LogMessage(__FILE__, __LINE__, google::GLOG_WARNING, message)
+    nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_WARNING, message)
 #else
-#  define COMPACT_GOOGLE_LOG_WARNING google::NullStream()
-#  define LOG_TO_STRING_WARNING(message) google::NullStream()
+#  define NGLOG_COMPACT_LOG_WARNING nglog::NullStream()
+#  define LOG_TO_STRING_WARNING(message) nglog::NullStream()
 #endif
 
-#if GOOGLE_STRIP_LOG <= 2
-#  define COMPACT_GOOGLE_LOG_ERROR \
-    google::LogMessage(__FILE__, __LINE__, google::GLOG_ERROR)
+#if NGLOG_STRIP_LOG <= 2
+#  define NGLOG_COMPACT_LOG_ERROR \
+    nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_ERROR)
 #  define LOG_TO_STRING_ERROR(message) \
-    google::LogMessage(__FILE__, __LINE__, google::GLOG_ERROR, message)
+    nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_ERROR, message)
 #else
-#  define COMPACT_GOOGLE_LOG_ERROR google::NullStream()
-#  define LOG_TO_STRING_ERROR(message) google::NullStream()
+#  define NGLOG_COMPACT_LOG_ERROR nglog::NullStream()
+#  define LOG_TO_STRING_ERROR(message) nglog::NullStream()
 #endif
 
-#if GOOGLE_STRIP_LOG <= 3
-#  define COMPACT_GOOGLE_LOG_FATAL google::LogMessageFatal(__FILE__, __LINE__)
+#if NGLOG_STRIP_LOG <= 3
+#  define NGLOG_COMPACT_LOG_FATAL nglog::LogMessageFatal(__FILE__, __LINE__)
 #  define LOG_TO_STRING_FATAL(message) \
-    google::LogMessage(__FILE__, __LINE__, google::GLOG_FATAL, message)
+    nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_FATAL, message)
 #else
-#  define COMPACT_GOOGLE_LOG_FATAL google::NullStreamFatal()
-#  define LOG_TO_STRING_FATAL(message) google::NullStreamFatal()
+#  define NGLOG_COMPACT_LOG_FATAL nglog::NullStreamFatal()
+#  define LOG_TO_STRING_FATAL(message) nglog::NullStreamFatal()
 #endif
 
 #if defined(NDEBUG) && !defined(DCHECK_ALWAYS_ON)
@@ -378,44 +378,44 @@ struct GLOG_EXPORT LogMessageTime {
 // For DFATAL, we want to use LogMessage (as opposed to
 // LogMessageFatal), to be consistent with the original behavior.
 #if !DCHECK_IS_ON()
-#  define COMPACT_GOOGLE_LOG_DFATAL COMPACT_GOOGLE_LOG_ERROR
-#elif GOOGLE_STRIP_LOG <= 3
-#  define COMPACT_GOOGLE_LOG_DFATAL \
-    google::LogMessage(__FILE__, __LINE__, google::GLOG_FATAL)
+#  define NGLOG_COMPACT_LOG_DFATAL NGLOG_COMPACT_LOG_ERROR
+#elif NGLOG_STRIP_LOG <= 3
+#  define NGLOG_COMPACT_LOG_DFATAL \
+    nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_FATAL)
 #else
-#  define COMPACT_GOOGLE_LOG_DFATAL google::NullStreamFatal()
+#  define NGLOG_COMPACT_LOG_DFATAL nglog::NullStreamFatal()
 #endif
 
-#define GOOGLE_LOG_INFO(counter)                                     \
-  google::LogMessage(__FILE__, __LINE__, google::GLOG_INFO, counter, \
-                     &google::LogMessage::SendToLog)
-#define SYSLOG_INFO(counter)                                         \
-  google::LogMessage(__FILE__, __LINE__, google::GLOG_INFO, counter, \
-                     &google::LogMessage::SendToSyslogAndLog)
-#define GOOGLE_LOG_WARNING(counter)                                     \
-  google::LogMessage(__FILE__, __LINE__, google::GLOG_WARNING, counter, \
-                     &google::LogMessage::SendToLog)
-#define SYSLOG_WARNING(counter)                                         \
-  google::LogMessage(__FILE__, __LINE__, google::GLOG_WARNING, counter, \
-                     &google::LogMessage::SendToSyslogAndLog)
-#define GOOGLE_LOG_ERROR(counter)                                     \
-  google::LogMessage(__FILE__, __LINE__, google::GLOG_ERROR, counter, \
-                     &google::LogMessage::SendToLog)
-#define SYSLOG_ERROR(counter)                                         \
-  google::LogMessage(__FILE__, __LINE__, google::GLOG_ERROR, counter, \
-                     &google::LogMessage::SendToSyslogAndLog)
-#define GOOGLE_LOG_FATAL(counter)                                     \
-  google::LogMessage(__FILE__, __LINE__, google::GLOG_FATAL, counter, \
-                     &google::LogMessage::SendToLog)
-#define SYSLOG_FATAL(counter)                                         \
-  google::LogMessage(__FILE__, __LINE__, google::GLOG_FATAL, counter, \
-                     &google::LogMessage::SendToSyslogAndLog)
-#define GOOGLE_LOG_DFATAL(counter)                                      \
-  google::LogMessage(__FILE__, __LINE__, google::DFATAL_LEVEL, counter, \
-                     &google::LogMessage::SendToLog)
-#define SYSLOG_DFATAL(counter)                                          \
-  google::LogMessage(__FILE__, __LINE__, google::DFATAL_LEVEL, counter, \
-                     &google::LogMessage::SendToSyslogAndLog)
+#define NGLOG_LOG_INFO(counter)                                     \
+  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_INFO, counter, \
+                    &nglog::LogMessage::SendToLog)
+#define SYSLOG_INFO(counter)                                        \
+  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_INFO, counter, \
+                    &nglog::LogMessage::SendToSyslogAndLog)
+#define NGLOG_LOG_WARNING(counter)                                     \
+  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_WARNING, counter, \
+                    &nglog::LogMessage::SendToLog)
+#define SYSLOG_WARNING(counter)                                        \
+  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_WARNING, counter, \
+                    &nglog::LogMessage::SendToSyslogAndLog)
+#define NGLOG_LOG_ERROR(counter)                                     \
+  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_ERROR, counter, \
+                    &nglog::LogMessage::SendToLog)
+#define SYSLOG_ERROR(counter)                                        \
+  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_ERROR, counter, \
+                    &nglog::LogMessage::SendToSyslogAndLog)
+#define NGLOG_LOG_FATAL(counter)                                     \
+  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_FATAL, counter, \
+                    &nglog::LogMessage::SendToLog)
+#define SYSLOG_FATAL(counter)                                        \
+  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_FATAL, counter, \
+                    &nglog::LogMessage::SendToSyslogAndLog)
+#define NGLOG_LOG_DFATAL(counter)                                     \
+  nglog::LogMessage(__FILE__, __LINE__, nglog::DFATAL_LEVEL, counter, \
+                    &nglog::LogMessage::SendToLog)
+#define SYSLOG_DFATAL(counter)                                        \
+  nglog::LogMessage(__FILE__, __LINE__, nglog::DFATAL_LEVEL, counter, \
+                    &nglog::LogMessage::SendToSyslogAndLog)
 
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || \
     defined(__CYGWIN__) || defined(__CYGWIN32__)
@@ -431,8 +431,8 @@ struct GLOG_EXPORT LogMessageTime {
       std::unique_ptr<char, decltype(&LocalFree)> release{message,             \
                                                           &LocalFree};         \
       if (message_length > 0) {                                                \
-        google::LogMessage(__FILE__, __LINE__, google::GLOG_ERROR, 0,          \
-                           &google::LogMessage::SendToLog)                     \
+        nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_ERROR, 0,           \
+                          &nglog::LogMessage::SendToLog)                       \
                 .stream()                                                      \
             << reinterpret_cast<const char*>(message);                         \
       }                                                                        \
@@ -440,27 +440,27 @@ struct GLOG_EXPORT LogMessageTime {
 #endif
 
 // We use the preprocessor's merging operator, "##", so that, e.g.,
-// LOG(INFO) becomes the token GOOGLE_LOG_INFO.  There's some funny
+// LOG(INFO) becomes the token NGLOG_LOG_INFO.  There's some funny
 // subtle difference between ostream member streaming functions (e.g.,
 // ostream::operator<<(int) and ostream non-member streaming functions
 // (e.g., ::operator<<(ostream&, string&): it turns out that it's
 // impossible to stream something like a string directly to an unnamed
 // ostream. We employ a neat hack by calling the stream() member
 // function of LogMessage which seems to avoid the problem.
-#define LOG(severity) COMPACT_GOOGLE_LOG_##severity.stream()
+#define LOG(severity) NGLOG_COMPACT_LOG_##severity.stream()
 #define SYSLOG(severity) SYSLOG_##severity(0).stream()
 
-namespace google {
+namespace nglog {
 
-// Initialize google's logging library. You will see the program name
-// specified by argv0 in log outputs.
-GLOG_EXPORT void InitGoogleLogging(const char* argv0);
+// Initialize logging. You will see the program name specified by argv0 in log
+// outputs.
+NGLOG_EXPORT void InitializeLogging(const char* argv0);
 
-// Check if google's logging library has been initialized.
-GLOG_EXPORT bool IsGoogleLoggingInitialized();
+// Check if logging has been initialized.
+NGLOG_EXPORT bool IsLoggingInitialized();
 
-// Shutdown google's logging library.
-GLOG_EXPORT void ShutdownGoogleLogging();
+// Shutdown logging.
+NGLOG_EXPORT void ShutdownLogging();
 
 #if defined(__GNUC__)
 typedef void (*logging_fail_func_t)() __attribute__((noreturn));
@@ -473,18 +473,18 @@ class LogMessage;
 using PrefixFormatterCallback = void (*)(std::ostream&, const LogMessage&,
                                          void*);
 
-GLOG_EXPORT void InstallPrefixFormatter(PrefixFormatterCallback callback,
-                                        void* data = nullptr);
+NGLOG_EXPORT void InstallPrefixFormatter(PrefixFormatterCallback callback,
+                                         void* data = nullptr);
 
 // Install a function which will be called after LOG(FATAL). Returns the
 // previously set function.
-GLOG_EXPORT logging_fail_func_t
+NGLOG_EXPORT logging_fail_func_t
 InstallFailureFunction(logging_fail_func_t fail_func);
 
 // Enable/Disable old log cleaner.
-GLOG_EXPORT void EnableLogCleaner(const std::chrono::minutes& overdue);
-GLOG_EXPORT void DisableLogCleaner();
-GLOG_EXPORT void SetApplicationFingerprint(const std::string& fingerprint);
+NGLOG_EXPORT void EnableLogCleaner(const std::chrono::minutes& overdue);
+NGLOG_EXPORT void DisableLogCleaner();
+NGLOG_EXPORT void SetApplicationFingerprint(const std::string& fingerprint);
 
 class LogSink;  // defined below
 
@@ -496,13 +496,13 @@ class LogSink;  // defined below
 //   LogSink* sink;
 //   LogSeverity severity;
 // The cast is to disambiguate nullptr arguments.
-#define LOG_TO_SINK(sink, severity)                               \
-  google::LogMessage(__FILE__, __LINE__, google::GLOG_##severity, \
-                     static_cast<google::LogSink*>(sink), true)   \
+#define LOG_TO_SINK(sink, severity)                              \
+  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_##severity, \
+                    static_cast<nglog::LogSink*>(sink), true)    \
       .stream()
-#define LOG_TO_SINK_BUT_NOT_TO_LOGFILE(sink, severity)            \
-  google::LogMessage(__FILE__, __LINE__, google::GLOG_##severity, \
-                     static_cast<google::LogSink*>(sink), false)  \
+#define LOG_TO_SINK_BUT_NOT_TO_LOGFILE(sink, severity)           \
+  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_##severity, \
+                    static_cast<nglog::LogSink*>(sink), false)   \
       .stream()
 
 // If a non-nullptr string pointer is given, we write this message to that
@@ -531,14 +531,12 @@ class LogSink;  // defined below
 
 #define LOG_IF(severity, condition) \
   static_cast<void>(0),             \
-      !(condition)                  \
-          ? (void)0                 \
-          : google::logging::internal::LogMessageVoidify() & LOG(severity)
+      !(condition) ? (void)0        \
+                   : nglog::internal::LogMessageVoidify() & LOG(severity)
 #define SYSLOG_IF(severity, condition) \
   static_cast<void>(0),                \
-      !(condition)                     \
-          ? (void)0                    \
-          : google::logging::internal::LogMessageVoidify() & SYSLOG(severity)
+      !(condition) ? (void)0           \
+                   : nglog::internal::LogMessageVoidify() & SYSLOG(severity)
 
 #define LOG_ASSERT(condition) \
   LOG_IF(FATAL, !(condition)) << "Assert failed: " #condition
@@ -549,11 +547,10 @@ class LogSink;  // defined below
 // controlled by DCHECK_IS_ON(), so the check will be executed regardless of
 // compilation mode.  Therefore, it is safe to do things like:
 //    CHECK(fp->Write(x) == 4)
-#define CHECK(condition)                                       \
-  LOG_IF(FATAL, GOOGLE_PREDICT_BRANCH_NOT_TAKEN(!(condition))) \
+#define CHECK(condition)                                      \
+  LOG_IF(FATAL, NGLOG_PREDICT_BRANCH_NOT_TAKEN(!(condition))) \
       << "Check failed: " #condition " "
 
-namespace logging {
 namespace internal {
 
 // A container for a string pointer which can be evaluated to a bool -
@@ -561,7 +558,7 @@ namespace internal {
 struct CheckOpString {
   CheckOpString(std::unique_ptr<std::string> str) : str_(std::move(str)) {}
   explicit operator bool() const noexcept {
-    return GOOGLE_PREDICT_BRANCH_NOT_TAKEN(str_ != nullptr);
+    return NGLOG_PREDICT_BRANCH_NOT_TAKEN(str_ != nullptr);
   }
   std::unique_ptr<std::string> str_;
 };
@@ -608,17 +605,18 @@ inline void MakeCheckOpValueString(std::ostream* os, const T& v) {
 // Overrides for char types provide readable values for unprintable
 // characters.
 template <>
-GLOG_EXPORT void MakeCheckOpValueString(std::ostream* os, const char& v);
+NGLOG_EXPORT void MakeCheckOpValueString(std::ostream* os, const char& v);
 template <>
-GLOG_EXPORT void MakeCheckOpValueString(std::ostream* os, const signed char& v);
+NGLOG_EXPORT void MakeCheckOpValueString(std::ostream* os,
+                                         const signed char& v);
 template <>
-GLOG_EXPORT void MakeCheckOpValueString(std::ostream* os,
-                                        const unsigned char& v);
+NGLOG_EXPORT void MakeCheckOpValueString(std::ostream* os,
+                                         const unsigned char& v);
 
 // Provide printable value for nullptr_t
 template <>
-GLOG_EXPORT void MakeCheckOpValueString(std::ostream* os,
-                                        const std::nullptr_t& v);
+NGLOG_EXPORT void MakeCheckOpValueString(std::ostream* os,
+                                         const std::nullptr_t& v);
 
 // Build the error message string. Specify no inlining for code size.
 template <typename T1, typename T2>
@@ -637,7 +635,7 @@ std::unique_ptr<std::string> MakeCheckOpString(const T1& v1, const T2& v2,
 // base::BuildCheckOpString(exprtext, base::Print<T1>, &v1,
 // base::Print<T2>, &v2), however this approach has complications
 // related to volatile arguments and function-pointer arguments).
-class GLOG_EXPORT CheckOpMessageBuilder {
+class NGLOG_EXPORT CheckOpMessageBuilder {
  public:
   // Inserts "exprtext" and " (" to the stream.
   explicit CheckOpMessageBuilder(const char* exprtext);
@@ -671,7 +669,7 @@ std::unique_ptr<std::string> MakeCheckOpString(const T1& v1, const T2& v2,
   template <typename T1, typename T2>                                        \
   inline std::unique_ptr<std::string> name##Impl(const T1& v1, const T2& v2, \
                                                  const char* exprtext) {     \
-    if (GOOGLE_PREDICT_TRUE(v1 op v2)) {                                     \
+    if (NGLOG_PREDICT_TRUE(v1 op v2)) {                                      \
       return nullptr;                                                        \
     }                                                                        \
     return MakeCheckOpString(v1, v2, exprtext);                              \
@@ -711,34 +709,34 @@ DEFINE_CHECK_OP_IMPL(Check_GT, >)
 // file is included).  Save the current meaning now and use it
 // in the macro.
 using _Check_string = std::string;
-#  define CHECK_OP_LOG(name, op, val1, val2, log)                              \
-    while (std::unique_ptr<google::logging::internal::_Check_string> _result = \
-               google::logging::internal::Check##name##Impl(                   \
-                   google::logging::internal::GetReferenceableValue(val1),     \
-                   google::logging::internal::GetReferenceableValue(val2),     \
-                   #val1 " " #op " " #val2))                                   \
-    log(__FILE__, __LINE__,                                                    \
-        google::logging::internal::CheckOpString(std::move(_result)))          \
+#  define CHECK_OP_LOG(name, op, val1, val2, log)                    \
+    while (std::unique_ptr<nglog::internal::_Check_string> _result = \
+               nglog::internal::Check##name##Impl(                   \
+                   nglog::internal::GetReferenceableValue(val1),     \
+                   nglog::internal::GetReferenceableValue(val2),     \
+                   #val1 " " #op " " #val2))                         \
+    log(__FILE__, __LINE__,                                          \
+        nglog::internal::CheckOpString(std::move(_result)))          \
         .stream()
 #else
 // In optimized mode, use CheckOpString to hint to compiler that
 // the while condition is unlikely.
-#  define CHECK_OP_LOG(name, op, val1, val2, log)                          \
-    while (google::logging::internal::CheckOpString _result =              \
-               google::logging::internal::Check##name##Impl(               \
-                   google::logging::internal::GetReferenceableValue(val1), \
-                   google::logging::internal::GetReferenceableValue(val2), \
-                   #val1 " " #op " " #val2))                               \
+#  define CHECK_OP_LOG(name, op, val1, val2, log)                \
+    while (nglog::internal::CheckOpString _result =              \
+               nglog::internal::Check##name##Impl(               \
+                   nglog::internal::GetReferenceableValue(val1), \
+                   nglog::internal::GetReferenceableValue(val2), \
+                   #val1 " " #op " " #val2))                     \
     log(__FILE__, __LINE__, _result).stream()
 #endif  // STATIC_ANALYSIS, DCHECK_IS_ON()
 
-#if GOOGLE_STRIP_LOG <= 3
+#if NGLOG_STRIP_LOG <= 3
 #  define CHECK_OP(name, op, val1, val2) \
-    CHECK_OP_LOG(name, op, val1, val2, google::LogMessageFatal)
+    CHECK_OP_LOG(name, op, val1, val2, nglog::LogMessageFatal)
 #else
 #  define CHECK_OP(name, op, val1, val2) \
-    CHECK_OP_LOG(name, op, val1, val2, google::NullStreamFatal)
-#endif  // STRIP_LOG <= 3
+    CHECK_OP_LOG(name, op, val1, val2, nglog::NullStreamFatal)
+#endif  // NGLOG_STRIP_LOG <= 3
 
 // Equality/Inequality checks - compare two values, and log a FATAL message
 // including the two values when the result is not as expected.  The values
@@ -768,14 +766,14 @@ using _Check_string = std::string;
 // Check that the input is non nullptr.  This very useful in constructor
 // initializer lists.
 
-#define CHECK_NOTNULL(val)                 \
-  google::logging::internal::CheckNotNull( \
-      __FILE__, __LINE__, "'" #val "' Must be non nullptr", (val))
+#define CHECK_NOTNULL(val)                          \
+  nglog::internal::CheckNotNull(__FILE__, __LINE__, \
+                                "'" #val "' Must be non nullptr", (val))
 
 // Helper functions for string comparisons.
 // To avoid bloat, the definitions are in logging.cc.
-#define DECLARE_CHECK_STROP_IMPL(func, expected)                        \
-  GLOG_EXPORT std::unique_ptr<std::string> Check##func##expected##Impl( \
+#define DECLARE_CHECK_STROP_IMPL(func, expected)                         \
+  NGLOG_EXPORT std::unique_ptr<std::string> Check##func##expected##Impl( \
       const char* s1, const char* s2, const char* names);
 
 DECLARE_CHECK_STROP_IMPL(strcmp, true)
@@ -784,16 +782,15 @@ DECLARE_CHECK_STROP_IMPL(strcasecmp, true)
 DECLARE_CHECK_STROP_IMPL(strcasecmp, false)
 
 }  // namespace internal
-}  // namespace logging
 
 #undef DECLARE_CHECK_STROP_IMPL
 
 // Helper macro for string comparisons.
 // Don't use this macro directly in your code, use CHECK_STREQ et al below.
-#define CHECK_STROP(func, op, expected, s1, s2)                      \
-  while (google::logging::internal::CheckOpString _result =          \
-             google::logging::internal::Check##func##expected##Impl( \
-                 (s1), (s2), #s1 " " #op " " #s2))                   \
+#define CHECK_STROP(func, op, expected, s1, s2)            \
+  while (nglog::internal::CheckOpString _result =          \
+             nglog::internal::Check##func##expected##Impl( \
+                 (s1), (s2), #s1 " " #op " " #s2))         \
   LOG(FATAL) << (*_result.str_)
 
 // String (char*) equality/inequality checks.
@@ -814,7 +811,7 @@ DECLARE_CHECK_STROP_IMPL(strcasecmp, false)
 #define CHECK_DOUBLE_EQ(val1, val2)                \
   do {                                             \
     CHECK_LE((val1), (val2) + 0.000000000000001L); \
-    CHECK_GE((val1), (val2)-0.000000000000001L);   \
+    CHECK_GE((val1), (val2) - 0.000000000000001L); \
   } while (0)
 
 #define CHECK_NEAR(val1, val2, margin)   \
@@ -829,23 +826,22 @@ DECLARE_CHECK_STROP_IMPL(strcasecmp, false)
 // CHECK equivalents with the addition that they postpend a description
 // of the current state of errno to their output lines.
 
-#define PLOG(severity) GOOGLE_PLOG(severity, 0).stream()
+#define PLOG(severity) NGLOG_PLOG(severity, 0).stream()
 
-#define GOOGLE_PLOG(severity, counter)                                 \
-  google::ErrnoLogMessage(__FILE__, __LINE__, google::GLOG_##severity, \
-                          counter, &google::LogMessage::SendToLog)
+#define NGLOG_PLOG(severity, counter)                                          \
+  nglog::ErrnoLogMessage(__FILE__, __LINE__, nglog::NGLOG_##severity, counter, \
+                         &nglog::LogMessage::SendToLog)
 
 #define PLOG_IF(severity, condition) \
   static_cast<void>(0),              \
-      !(condition)                   \
-          ? (void)0                  \
-          : google::logging::internal::LogMessageVoidify() & PLOG(severity)
+      !(condition) ? (void)0         \
+                   : nglog::internal::LogMessageVoidify() & PLOG(severity)
 
 // A CHECK() macro that postpends errno if the condition is false. E.g.
 //
 // if (poll(fds, nfds, timeout) == -1) { PCHECK(errno == EINTR); ... }
-#define PCHECK(condition)                                       \
-  PLOG_IF(FATAL, GOOGLE_PREDICT_BRANCH_NOT_TAKEN(!(condition))) \
+#define PCHECK(condition)                                      \
+  PLOG_IF(FATAL, NGLOG_PREDICT_BRANCH_NOT_TAKEN(!(condition))) \
       << "Check failed: " #condition " "
 
 // A CHECK() macro that lets you assert the success of a function that
@@ -856,8 +852,8 @@ DECLARE_CHECK_STROP_IMPL(strcasecmp, false)
 // or
 //
 // int fd = open(filename, flags); CHECK_ERR(fd) << ": open " << filename;
-#define CHECK_ERR(invocation)                                         \
-  PLOG_IF(FATAL, GOOGLE_PREDICT_BRANCH_NOT_TAKEN((invocation) == -1)) \
+#define CHECK_ERR(invocation)                                        \
+  PLOG_IF(FATAL, NGLOG_PREDICT_BRANCH_NOT_TAKEN((invocation) == -1)) \
       << #invocation
 
 // Use macro expansion to create, for each use of LOG_EVERY_N(), static
@@ -874,19 +870,19 @@ DECLARE_CHECK_STROP_IMPL(strcasecmp, false)
 #define LOG_CURRENT_TIME LOG_EVERY_N_VARNAME(currentTime_, __LINE__)
 #define LOG_PREVIOUS_TIME LOG_EVERY_N_VARNAME(previousTime_, __LINE__)
 
-}  // namespace google
+}  // namespace nglog
 
-namespace google {
+namespace nglog {
 
 #define SOME_KIND_OF_LOG_EVERY_T(severity, seconds)                            \
   constexpr std::chrono::nanoseconds LOG_TIME_PERIOD =                         \
       std::chrono::duration_cast<std::chrono::nanoseconds>(                    \
           std::chrono::duration<double>(seconds));                             \
-  static std::atomic<google::int64> LOG_PREVIOUS_TIME_RAW;                     \
-  GLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                         \
-      __FILE__, __LINE__, &LOG_TIME_PERIOD, sizeof(google::int64), ""));       \
-  GLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                         \
-      __FILE__, __LINE__, &LOG_PREVIOUS_TIME_RAW, sizeof(google::int64), "")); \
+  static std::atomic<nglog::int64> LOG_PREVIOUS_TIME_RAW;                      \
+  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                        \
+      __FILE__, __LINE__, &LOG_TIME_PERIOD, sizeof(nglog::int64), ""));        \
+  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                        \
+      __FILE__, __LINE__, &LOG_PREVIOUS_TIME_RAW, sizeof(nglog::int64), ""));  \
   const auto LOG_CURRENT_TIME =                                                \
       std::chrono::duration_cast<std::chrono::nanoseconds>(                    \
           std::chrono::steady_clock::now().time_since_epoch());                \
@@ -900,110 +896,107 @@ namespace google {
             .count(),                                                          \
         std::memory_order_relaxed);                                            \
   if (LOG_TIME_DELTA > LOG_TIME_PERIOD)                                        \
-  google::LogMessage(__FILE__, __LINE__, google::GLOG_##severity).stream()
+  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_##severity).stream()
 
 #define SOME_KIND_OF_LOG_EVERY_N(severity, n, what_to_do)               \
   static std::atomic<int> LOG_OCCURRENCES(0), LOG_OCCURRENCES_MOD_N(0); \
-  GLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                  \
+  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                 \
       __FILE__, __LINE__, &LOG_OCCURRENCES, sizeof(int), ""));          \
-  GLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                  \
+  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                 \
       __FILE__, __LINE__, &LOG_OCCURRENCES_MOD_N, sizeof(int), ""));    \
   ++LOG_OCCURRENCES;                                                    \
   if (++LOG_OCCURRENCES_MOD_N > n) LOG_OCCURRENCES_MOD_N -= n;          \
   if (LOG_OCCURRENCES_MOD_N == 1)                                       \
-  google::LogMessage(__FILE__, __LINE__, google::GLOG_##severity,       \
-                     LOG_OCCURRENCES, &what_to_do)                      \
+  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_##severity,        \
+                    LOG_OCCURRENCES, &what_to_do)                       \
       .stream()
 
 #define SOME_KIND_OF_LOG_IF_EVERY_N(severity, condition, n, what_to_do)       \
   static std::atomic<int> LOG_OCCURRENCES(0), LOG_OCCURRENCES_MOD_N(0);       \
-  GLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                        \
+  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                       \
       __FILE__, __LINE__, &LOG_OCCURRENCES, sizeof(int), ""));                \
-  GLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                        \
+  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                       \
       __FILE__, __LINE__, &LOG_OCCURRENCES_MOD_N, sizeof(int), ""));          \
   ++LOG_OCCURRENCES;                                                          \
   if ((condition) &&                                                          \
       ((LOG_OCCURRENCES_MOD_N = (LOG_OCCURRENCES_MOD_N + 1) % n) == (1 % n))) \
-  google::LogMessage(__FILE__, __LINE__, google::GLOG_##severity,             \
-                     LOG_OCCURRENCES, &what_to_do)                            \
+  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_##severity,              \
+                    LOG_OCCURRENCES, &what_to_do)                             \
       .stream()
 
 #define SOME_KIND_OF_PLOG_EVERY_N(severity, n, what_to_do)              \
   static std::atomic<int> LOG_OCCURRENCES(0), LOG_OCCURRENCES_MOD_N(0); \
-  GLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                  \
+  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                 \
       __FILE__, __LINE__, &LOG_OCCURRENCES, sizeof(int), ""));          \
-  GLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                  \
+  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                 \
       __FILE__, __LINE__, &LOG_OCCURRENCES_MOD_N, sizeof(int), ""));    \
   ++LOG_OCCURRENCES;                                                    \
   if (++LOG_OCCURRENCES_MOD_N > n) LOG_OCCURRENCES_MOD_N -= n;          \
   if (LOG_OCCURRENCES_MOD_N == 1)                                       \
-  google::ErrnoLogMessage(__FILE__, __LINE__, google::GLOG_##severity,  \
-                          LOG_OCCURRENCES, &what_to_do)                 \
+  nglog::ErrnoLogMessage(__FILE__, __LINE__, nglog::NGLOG_##severity,   \
+                         LOG_OCCURRENCES, &what_to_do)                  \
       .stream()
 
-#define SOME_KIND_OF_LOG_FIRST_N(severity, n, what_to_do)         \
-  static std::atomic<int> LOG_OCCURRENCES(0);                     \
-  GLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(            \
-      __FILE__, __LINE__, &LOG_OCCURRENCES, sizeof(int), ""));    \
-  if (LOG_OCCURRENCES <= n) ++LOG_OCCURRENCES;                    \
-  if (LOG_OCCURRENCES <= n)                                       \
-  google::LogMessage(__FILE__, __LINE__, google::GLOG_##severity, \
-                     LOG_OCCURRENCES, &what_to_do)                \
+#define SOME_KIND_OF_LOG_FIRST_N(severity, n, what_to_do)        \
+  static std::atomic<int> LOG_OCCURRENCES(0);                    \
+  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(          \
+      __FILE__, __LINE__, &LOG_OCCURRENCES, sizeof(int), ""));   \
+  if (LOG_OCCURRENCES <= n) ++LOG_OCCURRENCES;                   \
+  if (LOG_OCCURRENCES <= n)                                      \
+  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_##severity, \
+                    LOG_OCCURRENCES, &what_to_do)                \
       .stream()
 
-namespace logging {
 namespace internal {
 template <bool>
 struct CompileAssert {};
 struct CrashReason;
 }  // namespace internal
-}  // namespace logging
 
 #define LOG_EVERY_N(severity, n) \
-  SOME_KIND_OF_LOG_EVERY_N(severity, (n), google::LogMessage::SendToLog)
+  SOME_KIND_OF_LOG_EVERY_N(severity, (n), nglog::LogMessage::SendToLog)
 
 #define LOG_EVERY_T(severity, T) SOME_KIND_OF_LOG_EVERY_T(severity, (T))
 
-#define SYSLOG_EVERY_N(severity, n)       \
-  SOME_KIND_OF_LOG_EVERY_N(severity, (n), \
-                           google::LogMessage::SendToSyslogAndLog)
+#define SYSLOG_EVERY_N(severity, n) \
+  SOME_KIND_OF_LOG_EVERY_N(severity, (n), nglog::LogMessage::SendToSyslogAndLog)
 
 #define PLOG_EVERY_N(severity, n) \
-  SOME_KIND_OF_PLOG_EVERY_N(severity, (n), google::LogMessage::SendToLog)
+  SOME_KIND_OF_PLOG_EVERY_N(severity, (n), nglog::LogMessage::SendToLog)
 
 #define LOG_FIRST_N(severity, n) \
-  SOME_KIND_OF_LOG_FIRST_N(severity, (n), google::LogMessage::SendToLog)
+  SOME_KIND_OF_LOG_FIRST_N(severity, (n), nglog::LogMessage::SendToLog)
 
 #define LOG_IF_EVERY_N(severity, condition, n)            \
   SOME_KIND_OF_LOG_IF_EVERY_N(severity, (condition), (n), \
-                              google::LogMessage::SendToLog)
+                              nglog::LogMessage::SendToLog)
 
 // We want the special COUNTER value available for LOG_EVERY_X()'ed messages
 struct Counter_t {};
-GLOG_INLINE_VARIABLE constexpr Counter_t COUNTER{};
+NGLOG_INLINE_VARIABLE constexpr Counter_t COUNTER{};
 
-#ifdef GLOG_NO_ABBREVIATED_SEVERITIES
+#ifdef NGLOG_NO_ABBREVIATED_SEVERITIES
 // wingdi.h defines ERROR to be 0. When we call LOG(ERROR), it gets
-// substituted with 0, and it expands to COMPACT_GOOGLE_LOG_0. To allow us
+// substituted with 0, and it expands to NGLOG_COMPACT_LOG_0. To allow us
 // to keep using this syntax, we define this macro to do the same thing
-// as COMPACT_GOOGLE_LOG_ERROR.
-#  define COMPACT_GOOGLE_LOG_0 COMPACT_GOOGLE_LOG_ERROR
+// as NGLOG_COMPACT_LOG_ERROR.
+#  define NGLOG_COMPACT_LOG_0 NGLOG_COMPACT_LOG_ERROR
 #  define SYSLOG_0 SYSLOG_ERROR
 #  define LOG_TO_STRING_0 LOG_TO_STRING_ERROR
 // Needed for LOG_IS_ON(ERROR).
-GLOG_INLINE_VARIABLE
-constexpr LogSeverity GLOG_0 = GLOG_ERROR;
+NGLOG_INLINE_VARIABLE
+constexpr LogSeverity NGLOG_0 = NGLOG_ERROR;
 #else
 // Users may include windows.h after logging.h without
-// GLOG_NO_ABBREVIATED_SEVERITIES nor WIN32_LEAN_AND_MEAN.
+// NGLOG_NO_ABBREVIATED_SEVERITIES nor WIN32_LEAN_AND_MEAN.
 // For this case, we cannot detect if ERROR is defined before users
 // actually use ERROR. Let's make an undefined symbol to warn users.
-#  define GLOG_ERROR_MSG \
+#  define NGLOG_ERROR_MSG \
     ERROR_macro_is_defined_Define_GLOG_NO_ABBREVIATED_SEVERITIES_before_including_logging_h_See_the_document_for_detail
-#  define COMPACT_GOOGLE_LOG_0 GLOG_ERROR_MSG
-#  define SYSLOG_0 GLOG_ERROR_MSG
-#  define LOG_TO_STRING_0 GLOG_ERROR_MSG
-#  define GLOG_0 GLOG_ERROR_MSG
+#  define NGLOG_COMPACT_LOG_0 NGLOG_ERROR_MSG
+#  define SYSLOG_0 NGLOG_ERROR_MSG
+#  define LOG_TO_STRING_0 NGLOG_ERROR_MSG
+#  define NGLOG_0 NGLOG_ERROR_MSG
 #endif
 
 // Plus some debug-logging macros that get compiled to nothing for production
@@ -1038,93 +1031,89 @@ constexpr LogSeverity GLOG_0 = GLOG_ERROR;
 
 #  define DLOG(severity)  \
     static_cast<void>(0), \
-        true ? (void)0    \
-             : google::logging::internal::LogMessageVoidify() & LOG(severity)
+        true ? (void)0 : nglog::internal::LogMessageVoidify() & LOG(severity)
 
 #  define DVLOG(verboselevel)               \
     static_cast<void>(0),                   \
         (true || !VLOG_IS_ON(verboselevel)) \
             ? (void)0                       \
-            : google::logging::internal::LogMessageVoidify() & LOG(INFO)
+            : nglog::internal::LogMessageVoidify() & LOG(INFO)
 
 #  define DLOG_IF(severity, condition) \
     static_cast<void>(0),              \
         (true || !(condition))         \
             ? (void)0                  \
-            : google::logging::internal::LogMessageVoidify() & LOG(severity)
+            : nglog::internal::LogMessageVoidify() & LOG(severity)
 
 #  define DLOG_EVERY_N(severity, n) \
     static_cast<void>(0),           \
-        true ? (void)0              \
-             : google::logging::internal::LogMessageVoidify() & LOG(severity)
+        true ? (void)0 : nglog::internal::LogMessageVoidify() & LOG(severity)
 
 #  define DLOG_IF_EVERY_N(severity, condition, n) \
     static_cast<void>(0),                         \
         (true || !(condition))                    \
             ? (void)0                             \
-            : google::logging::internal::LogMessageVoidify() & LOG(severity)
+            : nglog::internal::LogMessageVoidify() & LOG(severity)
 
 #  define DLOG_FIRST_N(severity, n) \
     static_cast<void>(0),           \
-        true ? (void)0              \
-             : google::logging::internal::LogMessageVoidify() & LOG(severity)
+        true ? (void)0 : nglog::internal::LogMessageVoidify() & LOG(severity)
 
 #  define DLOG_EVERY_T(severity, T) \
     static_cast<void>(0),           \
-        true ? (void)0              \
-             : google::logging::internal::LogMessageVoidify() & LOG(severity)
+        true ? (void)0 : nglog::internal::LogMessageVoidify() & LOG(severity)
 
 #  define DLOG_ASSERT(condition) \
     static_cast<void>(0), true ? (void)0 : (LOG_ASSERT(condition))
 
 // MSVC warning C4127: conditional expression is constant
-#  define DCHECK(condition)              \
-    GLOG_MSVC_PUSH_DISABLE_WARNING(4127) \
-    while (false) GLOG_MSVC_POP_WARNING() CHECK(condition)
+#  define DCHECK(condition)               \
+    NGLOG_MSVC_PUSH_DISABLE_WARNING(4127) \
+    while (false) NGLOG_MSVC_POP_WARNING() CHECK(condition)
 
-#  define DCHECK_EQ(val1, val2)          \
-    GLOG_MSVC_PUSH_DISABLE_WARNING(4127) \
-    while (false) GLOG_MSVC_POP_WARNING() CHECK_EQ(val1, val2)
+#  define DCHECK_EQ(val1, val2)           \
+    NGLOG_MSVC_PUSH_DISABLE_WARNING(4127) \
+    while (false) NGLOG_MSVC_POP_WARNING() CHECK_EQ(val1, val2)
 
-#  define DCHECK_NE(val1, val2)          \
-    GLOG_MSVC_PUSH_DISABLE_WARNING(4127) \
-    while (false) GLOG_MSVC_POP_WARNING() CHECK_NE(val1, val2)
+#  define DCHECK_NE(val1, val2)           \
+    NGLOG_MSVC_PUSH_DISABLE_WARNING(4127) \
+    while (false) NGLOG_MSVC_POP_WARNING() CHECK_NE(val1, val2)
 
-#  define DCHECK_LE(val1, val2)          \
-    GLOG_MSVC_PUSH_DISABLE_WARNING(4127) \
-    while (false) GLOG_MSVC_POP_WARNING() CHECK_LE(val1, val2)
+#  define DCHECK_LE(val1, val2)           \
+    NGLOG_MSVC_PUSH_DISABLE_WARNING(4127) \
+    while (false) NGLOG_MSVC_POP_WARNING() CHECK_LE(val1, val2)
 
-#  define DCHECK_LT(val1, val2)          \
-    GLOG_MSVC_PUSH_DISABLE_WARNING(4127) \
-    while (false) GLOG_MSVC_POP_WARNING() CHECK_LT(val1, val2)
+#  define DCHECK_LT(val1, val2)           \
+    NGLOG_MSVC_PUSH_DISABLE_WARNING(4127) \
+    while (false) NGLOG_MSVC_POP_WARNING() CHECK_LT(val1, val2)
 
-#  define DCHECK_GE(val1, val2)          \
-    GLOG_MSVC_PUSH_DISABLE_WARNING(4127) \
-    while (false) GLOG_MSVC_POP_WARNING() CHECK_GE(val1, val2)
+#  define DCHECK_GE(val1, val2)           \
+    NGLOG_MSVC_PUSH_DISABLE_WARNING(4127) \
+    while (false) NGLOG_MSVC_POP_WARNING() CHECK_GE(val1, val2)
 
-#  define DCHECK_GT(val1, val2)          \
-    GLOG_MSVC_PUSH_DISABLE_WARNING(4127) \
-    while (false) GLOG_MSVC_POP_WARNING() CHECK_GT(val1, val2)
+#  define DCHECK_GT(val1, val2)           \
+    NGLOG_MSVC_PUSH_DISABLE_WARNING(4127) \
+    while (false) NGLOG_MSVC_POP_WARNING() CHECK_GT(val1, val2)
 
 // You may see warnings in release mode if you don't use the return
 // value of DCHECK_NOTNULL. Please just use DCHECK for such cases.
 #  define DCHECK_NOTNULL(val) (val)
 
-#  define DCHECK_STREQ(str1, str2)       \
-    GLOG_MSVC_PUSH_DISABLE_WARNING(4127) \
-    while (false) GLOG_MSVC_POP_WARNING() CHECK_STREQ(str1, str2)
+#  define DCHECK_STREQ(str1, str2)        \
+    NGLOG_MSVC_PUSH_DISABLE_WARNING(4127) \
+    while (false) NGLOG_MSVC_POP_WARNING() CHECK_STREQ(str1, str2)
 
-#  define DCHECK_STRCASEEQ(str1, str2)   \
-    GLOG_MSVC_PUSH_DISABLE_WARNING(4127) \
-    while (false) GLOG_MSVC_POP_WARNING() CHECK_STRCASEEQ(str1, str2)
+#  define DCHECK_STRCASEEQ(str1, str2)    \
+    NGLOG_MSVC_PUSH_DISABLE_WARNING(4127) \
+    while (false) NGLOG_MSVC_POP_WARNING() CHECK_STRCASEEQ(str1, str2)
 
-#  define DCHECK_STRNE(str1, str2)       \
-    GLOG_MSVC_PUSH_DISABLE_WARNING(4127) \
-    while (false) GLOG_MSVC_POP_WARNING() CHECK_STRNE(str1, str2)
+#  define DCHECK_STRNE(str1, str2)        \
+    NGLOG_MSVC_PUSH_DISABLE_WARNING(4127) \
+    while (false) NGLOG_MSVC_POP_WARNING() CHECK_STRNE(str1, str2)
 
-#  define DCHECK_STRCASENE(str1, str2)   \
-    GLOG_MSVC_PUSH_DISABLE_WARNING(4127) \
-    while (false) GLOG_MSVC_POP_WARNING() CHECK_STRCASENE(str1, str2)
+#  define DCHECK_STRCASENE(str1, str2)    \
+    NGLOG_MSVC_PUSH_DISABLE_WARNING(4127) \
+    while (false) NGLOG_MSVC_POP_WARNING() CHECK_STRCASENE(str1, str2)
 
 #endif  // DCHECK_IS_ON()
 
@@ -1146,7 +1135,7 @@ namespace base_logging {
 // LogMessage::LogStream is a std::ostream backed by this streambuf.
 // This class ignores overflow and leaves two bytes at the end of the
 // buffer to allow for a '\n' and '\0'.
-class GLOG_EXPORT LogStreamBuf : public std::streambuf {
+class NGLOG_EXPORT LogStreamBuf : public std::streambuf {
  public:
   // REQUIREMENTS: "len" must be >= 2 to account for the '\n' and '\0'.
   LogStreamBuf(char* buf, int len) { setp(buf, buf + len - 2); }
@@ -1161,11 +1150,9 @@ class GLOG_EXPORT LogStreamBuf : public std::streambuf {
 
 }  // namespace base_logging
 
-namespace logging {
 namespace internal {
-struct GLOG_NO_EXPORT LogMessageData;
+struct NGLOG_NO_EXPORT LogMessageData;
 }  // namespace internal
-}  // namespace logging
 
 //
 // This class more or less represents a particular log message.  You
@@ -1176,7 +1163,7 @@ struct GLOG_NO_EXPORT LogMessageData;
 // You shouldn't actually use LogMessage's constructor to log things,
 // though.  You should use the LOG() macro (and variants thereof)
 // above.
-class GLOG_EXPORT LogMessage {
+class NGLOG_EXPORT LogMessage {
  public:
   enum {
     // Passing kNoLogPrefix for the line number disables the
@@ -1193,15 +1180,15 @@ class GLOG_EXPORT LogMessage {
   // 2005 if you are deriving from a type in the Standard C++ Library"
   // http://msdn.microsoft.com/en-us/library/3tdb471s(VS.80).aspx
   // Let's just ignore the warning.
-  GLOG_MSVC_PUSH_DISABLE_WARNING(4275)
-  class GLOG_EXPORT LogStream : public std::ostream {
-    GLOG_MSVC_POP_WARNING()
+  NGLOG_MSVC_PUSH_DISABLE_WARNING(4275)
+  class NGLOG_EXPORT LogStream : public std::ostream {
+    NGLOG_MSVC_POP_WARNING()
    public:
     // In some cases, like when compiling glog as a static library with GCC and
     // linking against a Clang-built executable, this constructor will be
     // removed by the linker. We use this attribute to prevent the linker from
     // discarding it.
-    GLOG_USED
+    NGLOG_USED
     LogStream(char* buf, int len, int64 ctr)
         : std::ostream(nullptr), streambuf_(buf, len), ctr_(ctr), self_(this) {
       rdbuf(&streambuf_);
@@ -1283,8 +1270,7 @@ class GLOG_EXPORT LogMessage {
              std::string* message);
 
   // A special constructor used for check failures
-  LogMessage(const char* file, int line,
-             const logging::internal::CheckOpString& result);
+  LogMessage(const char* file, int line, const internal::CheckOpString& result);
 
   ~LogMessage() noexcept(false);
 
@@ -1336,15 +1322,15 @@ class GLOG_EXPORT LogMessage {
             void (LogMessage::*send_method)());
 
   // Used to fill in crash information during LOG(FATAL) failures.
-  void RecordCrashReason(logging::internal::CrashReason* reason);
+  void RecordCrashReason(internal::CrashReason* reason);
 
   // Counts of messages sent at each priority:
   static int64 num_messages_[NUM_SEVERITIES];  // under log_mutex
 
   // We keep the data in a separate struct so that each instance of
   // LogMessage uses less stack space.
-  logging::internal::LogMessageData* allocated_;
-  logging::internal::LogMessageData* data_;
+  internal::LogMessageData* allocated_;
+  internal::LogMessageData* data_;
   LogMessageTime time_;
 
   friend class LogDestination;
@@ -1353,11 +1339,11 @@ class GLOG_EXPORT LogMessage {
 // This class happens to be thread-hostile because all instances share
 // a single data buffer, but since it can only be created just before
 // the process dies, we don't worry so much.
-class GLOG_EXPORT LogMessageFatal : public LogMessage {
+class NGLOG_EXPORT LogMessageFatal : public LogMessage {
  public:
   LogMessageFatal(const char* file, int line);
   LogMessageFatal(const char* file, int line,
-                  const logging::internal::CheckOpString& result);
+                  const internal::CheckOpString& result);
   [[noreturn]] ~LogMessageFatal() noexcept(false);
 };
 
@@ -1372,15 +1358,15 @@ inline void LogAtLevel(LogSeverity severity, std::string const& msg) {
 // file name and the line number where this macro is put like other
 // LOG macros, 2. this macro can be used as C++ stream.
 #define LOG_AT_LEVEL(severity) \
-  google::LogMessage(__FILE__, __LINE__, severity).stream()
+  nglog::LogMessage(__FILE__, __LINE__, severity).stream()
 
 // Allow folks to put a counter in the LOG_EVERY_X()'ed messages. This
 // only works if ostream is a LogStream. If the ostream is not a
 // LogStream you'll get an assert saying as much at runtime.
-GLOG_EXPORT std::ostream& operator<<(std::ostream& os, const Counter_t&);
+NGLOG_EXPORT std::ostream& operator<<(std::ostream& os, const Counter_t&);
 
 // Derived class for PLOG*() above.
-class GLOG_EXPORT ErrnoLogMessage : public LogMessage {
+class NGLOG_EXPORT ErrnoLogMessage : public LogMessage {
  public:
   ErrnoLogMessage(const char* file, int line, LogSeverity severity, int64 ctr,
                   void (LogMessage::*send_method)());
@@ -1397,7 +1383,6 @@ class GLOG_EXPORT ErrnoLogMessage : public LogMessage {
 // logging macros.  This avoids compiler warnings like "value computed
 // is not used" and "statement has no effect".
 
-namespace logging {
 namespace internal {
 
 // Helper for CHECK_NOTNULL().
@@ -1423,24 +1408,23 @@ struct LogMessageVoidify {
 };
 
 }  // namespace internal
-}  // namespace logging
 
 // Flushes all log files that contains messages that are at least of
 // the specified severity level.  Thread-safe.
-GLOG_EXPORT void FlushLogFiles(LogSeverity min_severity);
+NGLOG_EXPORT void FlushLogFiles(LogSeverity min_severity);
 
 // Flushes all log files that contains messages that are at least of
 // the specified severity level. Thread-hostile because it ignores
 // locking -- used for catastrophic failures.
-GLOG_EXPORT void FlushLogFilesUnsafe(LogSeverity min_severity);
+NGLOG_EXPORT void FlushLogFilesUnsafe(LogSeverity min_severity);
 
 //
 // Set the destination to which a particular severity level of log
 // messages is sent.  If base_filename is "", it means "don't log this
 // severity".  Thread-safe.
 //
-GLOG_EXPORT void SetLogDestination(LogSeverity severity,
-                                   const char* base_filename);
+NGLOG_EXPORT void SetLogDestination(LogSeverity severity,
+                                    const char* base_filename);
 
 //
 // Set the basename of the symlink to the latest log file at a given
@@ -1448,15 +1432,15 @@ GLOG_EXPORT void SetLogDestination(LogSeverity severity,
 // you don't call this function, the symlink basename is the
 // invocation name of the program.  Thread-safe.
 //
-GLOG_EXPORT void SetLogSymlink(LogSeverity severity,
-                               const char* symlink_basename);
+NGLOG_EXPORT void SetLogSymlink(LogSeverity severity,
+                                const char* symlink_basename);
 
 //
 // Used to send logs to some other kind of destination
 // Users should subclass LogSink and override send to do whatever they want.
 // Implementations must be thread-safe because a shared instance will
 // be called from whichever thread ran the LOG(XXX) line.
-class GLOG_EXPORT LogSink {
+class NGLOG_EXPORT LogSink {
  public:
   virtual ~LogSink();
 
@@ -1491,8 +1475,8 @@ class GLOG_EXPORT LogSink {
 };
 
 // Add or remove a LogSink as a consumer of logging data.  Thread-safe.
-GLOG_EXPORT void AddLogSink(LogSink* destination);
-GLOG_EXPORT void RemoveLogSink(LogSink* destination);
+NGLOG_EXPORT void AddLogSink(LogSink* destination);
+NGLOG_EXPORT void RemoveLogSink(LogSink* destination);
 
 //
 // Specify an "extension" added to the filename specified via
@@ -1500,19 +1484,19 @@ GLOG_EXPORT void RemoveLogSink(LogSink* destination);
 // often used to append the port we're listening on to the logfile
 // name.  Thread-safe.
 //
-GLOG_EXPORT void SetLogFilenameExtension(const char* filename_extension);
+NGLOG_EXPORT void SetLogFilenameExtension(const char* filename_extension);
 
 //
 // Make it so that all log messages of at least a particular severity
 // are logged to stderr (in addition to logging to the usual log
 // file(s)).  Thread-safe.
 //
-GLOG_EXPORT void SetStderrLogging(LogSeverity min_severity);
+NGLOG_EXPORT void SetStderrLogging(LogSeverity min_severity);
 
 //
 // Make it so that all log messages go only to stderr.  Thread-safe.
 //
-GLOG_EXPORT void LogToStderr();
+NGLOG_EXPORT void LogToStderr();
 
 //
 // Make it so that all log messages of at least a particular severity are
@@ -1520,20 +1504,20 @@ GLOG_EXPORT void LogToStderr();
 // usual log file(s)).  The list of addresses is just a string containing
 // the email addresses to send to (separated by spaces, say).  Thread-safe.
 //
-GLOG_EXPORT void SetEmailLogging(LogSeverity min_severity,
-                                 const char* addresses);
+NGLOG_EXPORT void SetEmailLogging(LogSeverity min_severity,
+                                  const char* addresses);
 
 // A simple function that sends email. dest is a comma-separated
 // list of addresses.  Thread-safe.
-GLOG_EXPORT bool SendEmail(const char* dest, const char* subject,
-                           const char* body);
+NGLOG_EXPORT bool SendEmail(const char* dest, const char* subject,
+                            const char* body);
 
-GLOG_EXPORT const std::vector<std::string>& GetLoggingDirectories();
+NGLOG_EXPORT const std::vector<std::string>& GetLoggingDirectories();
 
 // Print any fatal message again -- useful to call from signal handler
 // so that the last thing in the output is the fatal message.
 // Thread-hostile, but a race is unlikely.
-GLOG_EXPORT void ReprintFatalMessage();
+NGLOG_EXPORT void ReprintFatalMessage();
 
 // Truncate a log file that may be the append-only output of multiple
 // processes and hence can't simply be renamed/reopened (typically a
@@ -1542,16 +1526,16 @@ GLOG_EXPORT void ReprintFatalMessage();
 // be racing with other writers, this approach has the potential to
 // lose very small amounts of data. For security, only follow symlinks
 // if the path is /proc/self/fd/*
-GLOG_EXPORT void TruncateLogFile(const char* path, uint64 limit, uint64 keep);
+NGLOG_EXPORT void TruncateLogFile(const char* path, uint64 limit, uint64 keep);
 
 // Truncate stdout and stderr if they are over the value specified by
 // --max_log_size; keep the final 1MB.  This function has the same
 // race condition as TruncateLogFile.
-GLOG_EXPORT void TruncateStdoutStderr();
+NGLOG_EXPORT void TruncateStdoutStderr();
 
 // Return the string representation of the provided LogSeverity level.
 // Thread-safe.
-GLOG_EXPORT const char* GetLogSeverityName(LogSeverity severity);
+NGLOG_EXPORT const char* GetLogSeverityName(LogSeverity severity);
 
 // ---------------------------------------------------------------------
 // Implementation details that are not useful to most clients
@@ -1566,7 +1550,7 @@ GLOG_EXPORT const char* GetLogSeverityName(LogSeverity severity);
 
 namespace base {
 
-class GLOG_EXPORT Logger {
+class NGLOG_EXPORT Logger {
  public:
   virtual ~Logger();
 
@@ -1594,17 +1578,17 @@ class GLOG_EXPORT Logger {
 // Get the logger for the specified severity level.  The logger
 // remains the property of the logging module and should not be
 // deleted by the caller.  Thread-safe.
-extern GLOG_EXPORT Logger* GetLogger(LogSeverity level);
+extern NGLOG_EXPORT Logger* GetLogger(LogSeverity level);
 
 // Set the logger for the specified severity level.  The logger
 // becomes the property of the logging module and should not
 // be deleted by the caller.  Thread-safe.
-extern GLOG_EXPORT void SetLogger(LogSeverity level, Logger* logger);
+extern NGLOG_EXPORT void SetLogger(LogSeverity level, Logger* logger);
 
 }  // namespace base
 
 // A class for which we define operator<<, which does nothing.
-class GLOG_EXPORT NullStream : public LogMessage::LogStream {
+class NGLOG_EXPORT NullStream : public LogMessage::LogStream {
  public:
   // Initialize the LogStream so the messages can be written somewhere
   // (they'll never be actually displayed). This will be needed if a
@@ -1612,7 +1596,7 @@ class GLOG_EXPORT NullStream : public LogMessage::LogStream {
   // the overloaded NullStream::operator<< will not be invoked.
   NullStream();
   NullStream(const char* /*file*/, int /*line*/,
-             const logging::internal::CheckOpString& /*result*/);
+             const internal::CheckOpString& /*result*/);
   NullStream& stream();
 
  private:
@@ -1635,12 +1619,12 @@ inline NullStream& operator<<(NullStream& str, const T&) {
 
 // Similar to NullStream, but aborts the program (without stack
 // trace), like LogMessageFatal.
-class GLOG_EXPORT NullStreamFatal : public NullStream {
+class NGLOG_EXPORT NullStreamFatal : public NullStream {
  public:
   using NullStream::NullStream;
   [[noreturn]]
   // Prevent the linker from discarding the destructor.
-  GLOG_USED ~NullStreamFatal();
+  NGLOG_USED ~NullStreamFatal();
 };
 
 // Install a signal handler that will dump signal information and a stack
@@ -1659,21 +1643,21 @@ class GLOG_EXPORT NullStreamFatal : public NullStream {
 // to use the failure signal handler for all threads.  The stack trace
 // will be shown only for the thread that receives the signal.  In other
 // words, stack traces of other threads won't be shown.
-GLOG_EXPORT void InstallFailureSignalHandler();
+NGLOG_EXPORT void InstallFailureSignalHandler();
 
 // Returns true if FailureSignalHandler is installed.
-GLOG_EXPORT bool IsFailureSignalHandlerInstalled();
+NGLOG_EXPORT bool IsFailureSignalHandlerInstalled();
 
 // Installs a function that is used for writing the failure dump.  "data"
 // is the pointer to the beginning of a message to be written, and "size"
 // is the size of the message.  You should not expect the data is
 // terminated with '\0'.
-GLOG_EXPORT void InstallFailureWriter(void (*writer)(const char* data,
-                                                     size_t size));
+NGLOG_EXPORT void InstallFailureWriter(void (*writer)(const char* data,
+                                                      size_t size));
 
 // Dump stack trace as a string.
-GLOG_EXPORT std::string GetStackTrace();
+NGLOG_EXPORT std::string GetStackTrace();
 
-}  // namespace google
+}  // namespace nglog
 
-#endif  // GLOG_LOGGING_H
+#endif  // NGLOG_LOGGING_H

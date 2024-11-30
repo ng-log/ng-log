@@ -36,8 +36,8 @@
 // CHECK_EQ(v1, v2);
 //
 
-#ifndef GLOG_STL_LOGGING_H
-#define GLOG_STL_LOGGING_H
+#ifndef NGLOG_STL_LOGGING_H
+#define NGLOG_STL_LOGGING_H
 
 #include <deque>
 #include <list>
@@ -55,7 +55,7 @@
 template <class First, class Second>
 std::ostream& operator<<(std::ostream& out, const std::pair<First, Second>& p);
 
-namespace google {
+namespace nglog {
 
 template <class Iter>
 void PrintSequence(std::ostream& out, Iter begin, Iter end);
@@ -65,7 +65,7 @@ void PrintSequence(std::ostream& out, Iter begin, Iter end);
   template <class T1, class T2>                                  \
   inline std::ostream& operator<<(std::ostream& out,             \
                                   const Sequence<T1, T2>& seq) { \
-    google::PrintSequence(out, seq.begin(), seq.end());          \
+    nglog::PrintSequence(out, seq.begin(), seq.end());           \
     return out;                                                  \
   }
 
@@ -78,7 +78,7 @@ OUTPUT_TWO_ARG_CONTAINER(std::list)
   template <class T1, class T2, class T3>                            \
   inline std::ostream& operator<<(std::ostream& out,                 \
                                   const Sequence<T1, T2, T3>& seq) { \
-    google::PrintSequence(out, seq.begin(), seq.end());              \
+    nglog::PrintSequence(out, seq.begin(), seq.end());               \
     return out;                                                      \
   }
 
@@ -91,7 +91,7 @@ OUTPUT_THREE_ARG_CONTAINER(std::multiset)
   template <class T1, class T2, class T3, class T4>                      \
   inline std::ostream& operator<<(std::ostream& out,                     \
                                   const Sequence<T1, T2, T3, T4>& seq) { \
-    google::PrintSequence(out, seq.begin(), seq.end());                  \
+    nglog::PrintSequence(out, seq.begin(), seq.end());                   \
     return out;                                                          \
   }
 
@@ -105,7 +105,7 @@ OUTPUT_FOUR_ARG_CONTAINER(std::unordered_multiset)
   template <class T1, class T2, class T3, class T4, class T5>                \
   inline std::ostream& operator<<(std::ostream& out,                         \
                                   const Sequence<T1, T2, T3, T4, T5>& seq) { \
-    google::PrintSequence(out, seq.begin(), seq.end());                      \
+    nglog::PrintSequence(out, seq.begin(), seq.end());                       \
     return out;                                                              \
   }
 
@@ -121,7 +121,7 @@ inline std::ostream& operator<<(std::ostream& out,
   return out;
 }
 
-namespace google {
+namespace nglog {
 
 template <class Iter>
 inline void PrintSequence(std::ostream& out, Iter begin, Iter end) {
@@ -135,7 +135,7 @@ inline void PrintSequence(std::ostream& out, Iter begin, Iter end) {
   }
 }
 
-}  // namespace google
+}  // namespace nglog
 
 // Note that this is technically undefined behavior! We are adding things into
 // the std namespace for a reason though -- we are providing new operations on
@@ -165,4 +165,4 @@ namespace std {
 using ::operator<<;
 }
 
-#endif  // GLOG_STL_LOGGING_H
+#endif  // NGLOG_STL_LOGGING_H

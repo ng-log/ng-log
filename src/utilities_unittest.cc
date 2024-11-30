@@ -30,22 +30,22 @@
 // Author: Shinichiro Hamaji
 #include "utilities.h"
 
-#include "glog/logging.h"
 #include "googletest.h"
+#include "ng-log/logging.h"
 
-#ifdef GLOG_USE_GFLAGS
+#ifdef NGLOG_USE_GFLAGS
 #  include <gflags/gflags.h>
 using namespace GFLAGS_NAMESPACE;
 #endif
 
-using namespace google;
+using namespace nglog;
 
-TEST(utilities, InitGoogleLoggingDeathTest) {
-  ASSERT_DEATH(InitGoogleLogging("foobar"), "");
+TEST(utilities, InitializeLoggingDeathTest) {
+  ASSERT_DEATH(InitializeLogging("foobar"), "");
 }
 
 int main(int argc, char** argv) {
-  InitGoogleLogging(argv[0]);
+  InitializeLogging(argv[0]);
   InitGoogleTest(&argc, argv);
 
   CHECK_EQ(RUN_ALL_TESTS(), 0);

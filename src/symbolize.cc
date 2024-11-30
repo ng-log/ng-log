@@ -45,12 +45,12 @@
 // some functions which are not guaranteed to be so, such as memchr()
 // and memmove().  We assume they are async-signal-safe.
 //
-// Additional header can be specified by the GLOG_BUILD_CONFIG_INCLUDE
-// macro to add platform specific defines (e.g. GLOG_OS_OPENBSD).
+// Additional header can be specified by the NGLOG_BUILD_CONFIG_INCLUDE
+// macro to add platform specific defines (e.g. NGLOG_OS_OPENBSD).
 
-#ifdef GLOG_BUILD_CONFIG_INCLUDE
-#  include GLOG_BUILD_CONFIG_INCLUDE
-#endif  // GLOG_BUILD_CONFIG_INCLUDE
+#ifdef NGLOG_BUILD_CONFIG_INCLUDE
+#  include NGLOG_BUILD_CONFIG_INCLUDE
+#endif  // NGLOG_BUILD_CONFIG_INCLUDE
 
 #include "symbolize.h"
 
@@ -68,10 +68,10 @@
 // We don't use assert() since it's not guaranteed to be
 // async-signal-safe.  Instead we define a minimal assertion
 // macro. So far, we don't need pretty printing for __FILE__, etc.
-#  define GLOG_SAFE_ASSERT(expr) ((expr) ? 0 : (std::abort(), 0))
+#  define NGLOG_SAFE_ASSERT(expr) ((expr) ? 0 : (std::abort(), 0))
 
-namespace google {
-inline namespace glog_internal_namespace_ {
+namespace nglog {
+inline namespace tools {
 
 namespace {
 
@@ -89,7 +89,7 @@ void DemangleInplace(char* out, size_t out_size) {
     // Demangling succeeded. Copy to out if the space allows.
     size_t len = strlen(demangled);
     if (len + 1 <= out_size) {  // +1 for '\0'.
-      GLOG_SAFE_ASSERT(len < sizeof(demangled));
+      NGLOG_SAFE_ASSERT(len < sizeof(demangled));
       memmove(out, demangled, len + 1);
     }
   }
@@ -106,8 +106,8 @@ void InstallSymbolizeOpenObjectFileCallback(
   g_symbolize_open_object_file_callback = callback;
 }
 
-}  // namespace glog_internal_namespace_
-}  // namespace google
+}  // namespace tools
+}  // namespace nglog
 
 #  if defined(HAVE_LINK_H)
 
@@ -128,11 +128,11 @@ void InstallSymbolizeOpenObjectFileCallback(
 #    include <cstring>
 
 #    include "config.h"
-#    include "glog/raw_logging.h"
+#    include "ng-log/raw_logging.h"
 #    include "symbolize.h"
 
-namespace google {
-inline namespace glog_internal_namespace_ {
+namespace nglog {
+inline namespace tools {
 
 namespace {
 
@@ -156,9 +156,9 @@ auto FailureRetry(Functor run, int error = EINTR) noexcept(noexcept(run())) {
 // -1.
 static ssize_t ReadFromOffset(const int fd, void* buf, const size_t count,
                               const size_t offset) {
-  GLOG_SAFE_ASSERT(fd >= 0);
-  GLOG_SAFE_ASSERT(count <=
-                   static_cast<size_t>(std::numeric_limits<ssize_t>::max()));
+  NGLOG_SAFE_ASSERT(fd >= 0);
+  NGLOG_SAFE_ASSERT(count <=
+                    static_cast<size_t>(std::numeric_limits<ssize_t>::max()));
   char* buf0 = reinterpret_cast<char*>(buf);
   size_t num_bytes = 0;
   while (num_bytes < count) {
@@ -174,7 +174,7 @@ static ssize_t ReadFromOffset(const int fd, void* buf, const size_t count,
     }
     num_bytes += static_cast<size_t>(len);
   }
-  GLOG_SAFE_ASSERT(num_bytes <= count);
+  NGLOG_SAFE_ASSERT(num_bytes <= count);
   return static_cast<ssize_t>(num_bytes);
 }
 
@@ -221,9 +221,9 @@ static ATTRIBUTE_NOINLINE bool GetSectionHeaderByType(const int fd,
     if (len == -1) {
       return false;
     }
-    GLOG_SAFE_ASSERT(static_cast<size_t>(len) % sizeof(buf[0]) == 0);
+    NGLOG_SAFE_ASSERT(static_cast<size_t>(len) % sizeof(buf[0]) == 0);
     const size_t num_headers_in_buf = static_cast<size_t>(len) / sizeof(buf[0]);
-    GLOG_SAFE_ASSERT(num_headers_in_buf <= sizeof(buf) / sizeof(buf[0]));
+    NGLOG_SAFE_ASSERT(num_headers_in_buf <= sizeof(buf) / sizeof(buf[0]));
     for (size_t j = 0; j < num_headers_in_buf; ++j) {
       if (buf[j].sh_type == type) {
         *out = buf[j];
@@ -317,9 +317,9 @@ static ATTRIBUTE_NOINLINE bool FindSymbol(uint64_t pc, const int fd, char* out,
     size_t num_symbols_to_read = std::min(NUM_SYMBOLS, num_symbols - i);
     const ssize_t len =
         ReadFromOffset(fd, &buf, sizeof(buf[0]) * num_symbols_to_read, offset);
-    GLOG_SAFE_ASSERT(static_cast<size_t>(len) % sizeof(buf[0]) == 0);
+    NGLOG_SAFE_ASSERT(static_cast<size_t>(len) % sizeof(buf[0]) == 0);
     const size_t num_symbols_in_buf = static_cast<size_t>(len) / sizeof(buf[0]);
-    GLOG_SAFE_ASSERT(num_symbols_in_buf <= num_symbols_to_read);
+    NGLOG_SAFE_ASSERT(num_symbols_in_buf <= num_symbols_to_read);
     for (unsigned j = 0; j < num_symbols_in_buf; ++j) {
       const ElfW(Sym)& symbol = buf[j];
       uint64_t start_address = symbol.st_value;
@@ -419,7 +419,7 @@ class LineReader {
       bol_ = buf_;
     } else {
       bol_ = eol_ + 1;  // Advance to the next line in the buffer.
-      GLOG_SAFE_ASSERT(bol_ <= eod_);  // "bol_" can point to "eod_".
+      NGLOG_SAFE_ASSERT(bol_ <= eod_);  // "bol_" can point to "eod_".
       if (!HasCompleteLine()) {
         const auto incomplete_line_length = static_cast<size_t>(eod_ - bol_);
         // Move the trailing incomplete line to the beginning.
@@ -494,7 +494,7 @@ static char* GetHex(const char* start, const char* end, uint64_t* hex) {
       break;
     }
   }
-  GLOG_SAFE_ASSERT(p <= end);
+  NGLOG_SAFE_ASSERT(p <= end);
   return const_cast<char*>(p);
 }
 
@@ -712,7 +712,7 @@ static char* itoa_r(uintptr_t i, char* buf, size_t sz, unsigned base,
 // buffer size |dest_size| and guarantees that |dest| is null-terminated.
 static void SafeAppendString(const char* source, char* dest, size_t dest_size) {
   size_t dest_string_length = strlen(dest);
-  GLOG_SAFE_ASSERT(dest_string_length < dest_size);
+  NGLOG_SAFE_ASSERT(dest_string_length < dest_size);
   dest += dest_string_length;
   dest_size -= dest_string_length;
   strncpy(dest, source, dest_size);
@@ -815,17 +815,17 @@ static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(
   return true;
 }
 
-}  // namespace glog_internal_namespace_
-}  // namespace google
+}  // namespace tools
+}  // namespace nglog
 
-#  elif defined(GLOG_OS_MACOSX) && defined(HAVE_DLADDR)
+#  elif defined(NGLOG_OS_MACOSX) && defined(HAVE_DLADDR)
 
 #    include <dlfcn.h>
 
 #    include <cstring>
 
-namespace google {
-inline namespace glog_internal_namespace_ {
+namespace nglog {
+inline namespace tools {
 
 static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(
     void* pc, char* out, size_t out_size, SymbolizeOptions /*options*/) {
@@ -843,16 +843,16 @@ static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(
   return false;
 }
 
-}  // namespace glog_internal_namespace_
-}  // namespace google
+}  // namespace tools
+}  // namespace nglog
 
-#  elif defined(GLOG_OS_WINDOWS) || defined(GLOG_OS_CYGWIN)
+#  elif defined(NGLOG_OS_WINDOWS) || defined(NGLOG_OS_CYGWIN)
 
 #    include <dbghelp.h>
 #    include <windows.h>
 
-namespace google {
-inline namespace glog_internal_namespace_ {
+namespace nglog {
+inline namespace tools {
 
 namespace {
 
@@ -943,21 +943,21 @@ static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(void* pc, char* out,
   return false;
 }
 
-}  // namespace glog_internal_namespace_
-}  // namespace google
+}  // namespace tools
+}  // namespace nglog
 
 #  else
 #    error BUG: HAVE_SYMBOLIZE was wrongly set
 #  endif
 
-namespace google {
-inline namespace glog_internal_namespace_ {
+namespace nglog {
+inline namespace tools {
 
 bool Symbolize(void* pc, char* out, size_t out_size, SymbolizeOptions options) {
   return SymbolizeAndDemangle(pc, out, out_size, options);
 }
 
-}  // namespace glog_internal_namespace_
-}  // namespace google
+}  // namespace tools
+}  // namespace nglog
 
 #endif

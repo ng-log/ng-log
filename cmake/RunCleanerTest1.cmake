@@ -1,7 +1,7 @@
 set (RUNS 3)
 
 foreach (iter RANGE 1 ${RUNS})
-  set (ENV{GOOGLE_LOG_DIR} ${TEST_DIR})
+  set (ENV{NGLOG_DIR} ${TEST_DIR})
   execute_process (COMMAND ${LOGCLEANUP} RESULT_VARIABLE _RESULT)
 
   if (NOT _RESULT EQUAL 0)

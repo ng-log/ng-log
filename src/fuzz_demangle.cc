@@ -27,6 +27,6 @@ extern "C" int LLVMFuzzerTestOneInput(const unsigned char* Data,
   std::memcpy(Buffer, Data, Size);
   Buffer[Size] = 0;
   char demangled[4096];
-  google::Demangle(Buffer, demangled, Size);
+  nglog::Demangle(Buffer, demangled, Size);
   return 0;
 }

@@ -2,9 +2,9 @@ licenses(["notice"])
 
 exports_files(["COPYING"])
 
-load(":bazel/glog.bzl", "glog_library")
+load(":bazel/ng-log.bzl", "nglog_library")
 
-glog_library()
+nglog_library()
 
 # platform() to build with clang-cl on Bazel CI. This is enabled with
 # the flags in .bazelci/presubmit.yml:

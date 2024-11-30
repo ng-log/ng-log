@@ -27,13 +27,16 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Author: Sergiu Deitsch
+// Author: Shinichiro Hamaji
+//
+// Detect supported platforms.
 
-#include <glog/raw_logging.h>
+#ifndef NGLOG_COMPAT_PLATFORM_H
+#define NGLOG_COMPAT_PLATFORM_H
 
-int main() {
-  RAW_LOG(INFO, "info");
-  RAW_LOG(WARNING, "warning");
-  RAW_LOG(ERROR, "error");
-  RAW_LOG(FATAL, "fatal");
-}
+#include "ng-log/platform.h"
+
+#pragma message( \
+    "<glog/platform.h> is deprecated and will be removed in ng-log 0.9.0. Please use <ng-log/logging.h> instead.")
+
+#endif  // NGLOG_COMPAT_PLATFORM_H

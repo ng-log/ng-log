@@ -59,13 +59,13 @@
 #endif
 
 #include "base/commandlineflags.h"
-#include "glog/logging.h"
-#include "glog/raw_logging.h"
 #include "googletest.h"
+#include "ng-log/logging.h"
+#include "ng-log/raw_logging.h"
 #include "stacktrace.h"
 #include "utilities.h"
 
-#ifdef GLOG_USE_GFLAGS
+#ifdef NGLOG_USE_GFLAGS
 #  include <gflags/gflags.h>
 using namespace GFLAGS_NAMESPACE;
 #endif
@@ -75,7 +75,7 @@ using namespace GFLAGS_NAMESPACE;
 
 #  include "mock-log.h"
 // Introduce several symbols from gmock.
-using google::glog_testing::ScopedMockLog;
+using nglog::nglog_testing::ScopedMockLog;
 using testing::_;
 using testing::AllOf;
 using testing::AnyNumber;
@@ -86,17 +86,17 @@ using testing::StrNe;
 #endif
 
 using namespace std;
-using namespace google;
+using namespace nglog;
 
 // Some non-advertised functions that we want to test or use.
-namespace google {
+namespace nglog {
 namespace base {
 namespace internal {
 bool GetExitOnDFatal();
 void SetExitOnDFatal(bool value);
 }  // namespace internal
 }  // namespace base
-}  // namespace google
+}  // namespace nglog
 
 static void TestLogging(bool check_counts);
 static void TestRawLogging();
@@ -215,22 +215,22 @@ int main(int argc, char** argv) {
   // on recent windows.
   setbuf(stderr, nullptr);
 
-  // Test some basics before InitGoogleLogging:
+  // Test some basics before InitializeLogging:
   CaptureTestStderr();
   LogWithLevels(FLAGS_v, FLAGS_stderrthreshold, FLAGS_logtostderr,
                 FLAGS_alsologtostderr);
   LogWithLevels(0, 0, false, false);  // simulate "before global c-tors"
   const string early_stderr = GetCapturedTestStderr();
 
-  EXPECT_FALSE(IsGoogleLoggingInitialized());
+  EXPECT_FALSE(IsLoggingInitialized());
 
   // Setting a custom prefix generator (it will use the default format so that
   // the golden outputs can be reused):
   string prefix_attacher_data = "good data";
-  InitGoogleLogging(argv[0]);
+  InitializeLogging(argv[0]);
   InstallPrefixFormatter(&PrefixAttacher, &prefix_attacher_data);
 
-  EXPECT_TRUE(IsGoogleLoggingInitialized());
+  EXPECT_TRUE(IsLoggingInitialized());
 
   RunSpecifiedBenchmarks();
 
@@ -241,7 +241,7 @@ int main(int argc, char** argv) {
   InitGoogleMock(&argc, argv);
 #endif
 
-#ifdef GLOG_USE_GFLAGS
+#ifdef NGLOG_USE_GFLAGS
   ParseCommandLineFlags(&argc, &argv, true);
 #endif
 
@@ -251,7 +251,7 @@ int main(int argc, char** argv) {
   CaptureTestStderr();
 
   // re-emit early_stderr
-  LogMessage("dummy", LogMessage::kNoLogPrefix, GLOG_INFO).stream()
+  LogMessage("dummy", LogMessage::kNoLogPrefix, NGLOG_INFO).stream()
       << early_stderr;
 
   TestLogging(true);
@@ -304,9 +304,9 @@ int main(int argc, char** argv) {
 }
 
 void TestLogging(bool check_counts) {
-  int64 base_num_infos = LogMessage::num_messages(GLOG_INFO);
-  int64 base_num_warning = LogMessage::num_messages(GLOG_WARNING);
-  int64 base_num_errors = LogMessage::num_messages(GLOG_ERROR);
+  int64 base_num_infos = LogMessage::num_messages(NGLOG_INFO);
+  int64 base_num_warning = LogMessage::num_messages(NGLOG_WARNING);
+  int64 base_num_errors = LogMessage::num_messages(NGLOG_ERROR);
 
   LOG(INFO) << string("foo ") << "bar " << 10 << ' ' << 3.4;
   for (int i = 0; i < 10; ++i) {
@@ -338,19 +338,19 @@ void TestLogging(bool check_counts) {
   LOG(INFO) << "foo " << std::setw(10) << 1.0;
 
   {
-    google::LogMessage outer(__FILE__, __LINE__, GLOG_ERROR);
+    nglog::LogMessage outer(__FILE__, __LINE__, NGLOG_ERROR);
     outer.stream() << "outer";
 
     LOG(ERROR) << "inner";
   }
 
-  LogMessage("foo", LogMessage::kNoLogPrefix, GLOG_INFO).stream()
+  LogMessage("foo", LogMessage::kNoLogPrefix, NGLOG_INFO).stream()
       << "no prefix";
 
   if (check_counts) {
-    CHECK_EQ(base_num_infos + 15, LogMessage::num_messages(GLOG_INFO));
-    CHECK_EQ(base_num_warning + 3, LogMessage::num_messages(GLOG_WARNING));
-    CHECK_EQ(base_num_errors + 17, LogMessage::num_messages(GLOG_ERROR));
+    CHECK_EQ(base_num_infos + 15, LogMessage::num_messages(NGLOG_INFO));
+    CHECK_EQ(base_num_warning + 3, LogMessage::num_messages(NGLOG_WARNING));
+    CHECK_EQ(base_num_errors + 17, LogMessage::num_messages(NGLOG_ERROR));
   }
 }
 
@@ -516,16 +516,16 @@ void LogWithLevels(int v, int severity, bool err, bool alsoerr) {
 }
 
 void TestLoggingLevels() {
-  LogWithLevels(0, GLOG_INFO, false, false);
-  LogWithLevels(1, GLOG_INFO, false, false);
-  LogWithLevels(-1, GLOG_INFO, false, false);
-  LogWithLevels(0, GLOG_WARNING, false, false);
-  LogWithLevels(0, GLOG_ERROR, false, false);
-  LogWithLevels(0, GLOG_FATAL, false, false);
-  LogWithLevels(0, GLOG_FATAL, true, false);
-  LogWithLevels(0, GLOG_FATAL, false, true);
-  LogWithLevels(1, GLOG_WARNING, false, false);
-  LogWithLevels(1, GLOG_FATAL, false, true);
+  LogWithLevels(0, NGLOG_INFO, false, false);
+  LogWithLevels(1, NGLOG_INFO, false, false);
+  LogWithLevels(-1, NGLOG_INFO, false, false);
+  LogWithLevels(0, NGLOG_WARNING, false, false);
+  LogWithLevels(0, NGLOG_ERROR, false, false);
+  LogWithLevels(0, NGLOG_FATAL, false, false);
+  LogWithLevels(0, NGLOG_FATAL, true, false);
+  LogWithLevels(0, NGLOG_FATAL, false, true);
+  LogWithLevels(1, NGLOG_WARNING, false, false);
+  LogWithLevels(1, NGLOG_FATAL, false, true);
 }
 
 int TestVlogHelper() {
@@ -650,7 +650,7 @@ void TestLogSink() {
 
   LOG(INFO) << "Captured by LOG_TO_SINK:";
   for (auto& error : sink.errors) {
-    LogMessage("foo", LogMessage::kNoLogPrefix, GLOG_INFO).stream() << error;
+    LogMessage("foo", LogMessage::kNoLogPrefix, NGLOG_INFO).stream() << error;
   }
 }
 
@@ -671,7 +671,7 @@ void TestCHECK() {
 
   // Tests using CHECK*() on anonymous enums.
   // Apple's GCC doesn't like this.
-#if !defined(GLOG_OS_MACOSX)
+#if !defined(NGLOG_OS_MACOSX)
   CHECK_EQ(CASE_A, CASE_A);
   CHECK_NE(CASE_A, CASE_B);
   CHECK_GE(CASE_A, CASE_A);
@@ -752,7 +752,7 @@ static void GetFiles(const string& pattern, vector<string>* files) {
     files->push_back(string(g.gl_pathv[i]));
   }
   globfree(&g);
-#elif defined(GLOG_OS_WINDOWS)
+#elif defined(NGLOG_OS_WINDOWS)
   WIN32_FIND_DATAA data;
   HANDLE handle = FindFirstFileA(pattern.c_str(), &data);
   size_t index = pattern.rfind('\\');
@@ -811,9 +811,9 @@ static void TestBasename() {
   const string dest = FLAGS_test_tmpdir + "/logging_test_basename";
   DeleteFiles(dest + "*");
 
-  SetLogDestination(GLOG_INFO, dest.c_str());
+  SetLogDestination(NGLOG_INFO, dest.c_str());
   LOG(INFO) << "message to new base";
-  FlushLogFiles(GLOG_INFO);
+  FlushLogFiles(NGLOG_INFO);
 
   CheckFile(dest, "message to new base");
 
@@ -837,9 +837,9 @@ static void TestBasenameAppendWhenNoTimestamp() {
   CheckFile(dest, "test preexisting content");
 
   FLAGS_timestamp_in_logfile_name = false;
-  SetLogDestination(GLOG_INFO, dest.c_str());
+  SetLogDestination(NGLOG_INFO, dest.c_str());
   LOG(INFO) << "message to new base, appending to preexisting file";
-  FlushLogFiles(GLOG_INFO);
+  FlushLogFiles(NGLOG_INFO);
   FLAGS_timestamp_in_logfile_name = true;
 
   // if the logging overwrites the file instead of appending it will fail.
@@ -864,16 +864,16 @@ static void TestTwoProcessesWrite() {
 
   // make both processes write into the same file (easier test)
   FLAGS_timestamp_in_logfile_name = false;
-  SetLogDestination(GLOG_INFO, dest.c_str());
+  SetLogDestination(NGLOG_INFO, dest.c_str());
   LOG(INFO) << "message to new base, parent";
-  FlushLogFiles(GLOG_INFO);
+  FlushLogFiles(NGLOG_INFO);
 
   pid_t pid = fork();
   CHECK_ERR(pid);
   if (pid == 0) {
     LOG(INFO) << "message to new base, child - should only appear on STDERR "
                  "not on the file";
-    ShutdownGoogleLogging();  // for children proc
+    ShutdownLogging();  // for children proc
     exit(EXIT_SUCCESS);
   } else if (pid > 0) {
     wait(nullptr);
@@ -893,17 +893,17 @@ static void TestTwoProcessesWrite() {
 }
 
 static void TestSymlink() {
-#ifndef GLOG_OS_WINDOWS
+#ifndef NGLOG_OS_WINDOWS
   fprintf(stderr, "==== Test setting log file symlink\n");
   string dest = FLAGS_test_tmpdir + "/logging_test_symlink";
   string sym = FLAGS_test_tmpdir + "/symlinkbase";
   DeleteFiles(dest + "*");
   DeleteFiles(sym + "*");
 
-  SetLogSymlink(GLOG_INFO, "symlinkbase");
-  SetLogDestination(GLOG_INFO, dest.c_str());
+  SetLogSymlink(NGLOG_INFO, "symlinkbase");
+  SetLogDestination(NGLOG_INFO, dest.c_str());
   LOG(INFO) << "message to new symlink";
-  FlushLogFiles(GLOG_INFO);
+  FlushLogFiles(NGLOG_INFO);
   CheckFile(sym, "message to new symlink");
 
   DeleteFiles(dest + "*");
@@ -916,10 +916,10 @@ static void TestExtension() {
   string dest = FLAGS_test_tmpdir + "/logging_test_extension";
   DeleteFiles(dest + "*");
 
-  SetLogDestination(GLOG_INFO, dest.c_str());
+  SetLogDestination(NGLOG_INFO, dest.c_str());
   SetLogFilenameExtension("specialextension");
   LOG(INFO) << "message to new extension";
-  FlushLogFiles(GLOG_INFO);
+  FlushLogFiles(NGLOG_INFO);
   CheckFile(dest, "message to new extension");
 
   // Check that file name ends with extension
@@ -960,14 +960,14 @@ static void TestWrapper() {
 
   bool custom_logger_deleted = false;
   auto* my_logger = new MyLogger(&custom_logger_deleted);
-  base::Logger* old_logger = base::GetLogger(GLOG_INFO);
-  base::SetLogger(GLOG_INFO, my_logger);
+  base::Logger* old_logger = base::GetLogger(NGLOG_INFO);
+  base::SetLogger(NGLOG_INFO, my_logger);
   LOG(INFO) << "Send to wrapped logger";
   CHECK(strstr(my_logger->data.c_str(), "Send to wrapped logger") != nullptr);
-  FlushLogFiles(GLOG_INFO);
+  FlushLogFiles(NGLOG_INFO);
 
   EXPECT_FALSE(custom_logger_deleted);
-  base::SetLogger(GLOG_INFO, old_logger);
+  base::SetLogger(NGLOG_INFO, old_logger);
   EXPECT_TRUE(custom_logger_deleted);
 }
 
@@ -1044,7 +1044,7 @@ static void TestTruncate() {
   // MacOSX 10.4 doesn't fail in this case.
   // Windows doesn't have symlink.
   // Let's just ignore this test for these cases.
-#  if !defined(GLOG_OS_MACOSX) && !defined(GLOG_OS_WINDOWS)
+#  if !defined(NGLOG_OS_MACOSX) && !defined(NGLOG_OS_WINDOWS)
   // Through a symlink should fail to truncate
   string linkname = path + ".link";
   unlink(linkname.c_str());
@@ -1053,7 +1053,7 @@ static void TestTruncate() {
 #  endif
 
   // The /proc/self path makes sense only for linux.
-#  if defined(GLOG_OS_LINUX)
+#  if defined(NGLOG_OS_LINUX)
   // Through an open fd symlink should work
   int fd;
   CHECK_ERR(fd = open(path.c_str(), O_APPEND | O_WRONLY));
@@ -1087,13 +1087,13 @@ struct RecordDeletionLogger : public base::Logger {
 
 static void TestCustomLoggerDeletionOnShutdown() {
   bool custom_logger_deleted = false;
-  base::SetLogger(GLOG_INFO,
+  base::SetLogger(NGLOG_INFO,
                   new RecordDeletionLogger(&custom_logger_deleted,
-                                           base::GetLogger(GLOG_INFO)));
-  EXPECT_TRUE(IsGoogleLoggingInitialized());
-  ShutdownGoogleLogging();
+                                           base::GetLogger(NGLOG_INFO)));
+  EXPECT_TRUE(IsLoggingInitialized());
+  ShutdownLogging();
   EXPECT_TRUE(custom_logger_deleted);
-  EXPECT_FALSE(IsGoogleLoggingInitialized());
+  EXPECT_FALSE(IsLoggingInitialized());
 }
 
 namespace LogTimes {
@@ -1155,13 +1155,13 @@ static void TestLogPeriodically() {
   }
 }
 
-namespace google {
-inline namespace glog_internal_namespace_ {
+namespace nglog {
+inline namespace tools {
 // in logging.cc
 extern bool SafeFNMatch_(const char* pattern, size_t patt_len, const char* str,
                          size_t str_len);
-}  // namespace glog_internal_namespace_
-}  // namespace google
+}  // namespace tools
+}  // namespace nglog
 
 static bool WrapSafeFNMatch(string pattern, string str) {
   pattern += "abc";
@@ -1359,8 +1359,8 @@ TEST(Strerror, logging) {
   CHECK_EQ(posix_strerror_r(errcode, buf.data(), 0), -1);
   CHECK_EQ(buf[0], 'A');
   CHECK_EQ(posix_strerror_r(errcode, nullptr, buf_size), -1);
-#if defined(GLOG_OS_MACOSX) || defined(GLOG_OS_FREEBSD) || \
-    defined(GLOG_OS_OPENBSD)
+#if defined(NGLOG_OS_MACOSX) || defined(NGLOG_OS_FREEBSD) || \
+    defined(NGLOG_OS_OPENBSD)
   // MacOSX or FreeBSD considers this case is an error since there is
   // no enough space.
   CHECK_EQ(posix_strerror_r(errcode, buf.data(), 1), -1);
@@ -1392,7 +1392,7 @@ TEST(DVLog, Basic) {
   // We are expecting that nothing is logged.
   EXPECT_CALL(log, Log(_, _, _)).Times(0);
 #  else
-  EXPECT_CALL(log, Log(GLOG_INFO, __FILE__, "debug log"));
+  EXPECT_CALL(log, Log(NGLOG_INFO, __FILE__, "debug log"));
 #  endif
 
   FLAGS_v = 1;
@@ -1413,13 +1413,13 @@ TEST(LogAtLevel, Basic) {
   ScopedMockLog log;
 
   // The function version outputs "logging.h" as a file name.
-  EXPECT_CALL(log, Log(GLOG_WARNING, StrNe(__FILE__), "function version"));
-  EXPECT_CALL(log, Log(GLOG_INFO, __FILE__, "macro version"));
+  EXPECT_CALL(log, Log(NGLOG_WARNING, StrNe(__FILE__), "function version"));
+  EXPECT_CALL(log, Log(NGLOG_INFO, __FILE__, "macro version"));
 
-  LogSeverity severity = GLOG_WARNING;
+  LogSeverity severity = NGLOG_WARNING;
   LogAtLevel(severity, "function version");
 
-  severity = GLOG_INFO;
+  severity = NGLOG_INFO;
   // We can use the macro version as a C++ stream.
   LOG_AT_LEVEL(severity) << "macro" << ' ' << "version";
 }
@@ -1440,9 +1440,9 @@ TEST(TestExitOnDFatal, ToBeOrNotToBe) {
     //  downgraded to ERROR if not debugging.
     const LogSeverity severity =
 #  if defined(NDEBUG)
-        GLOG_ERROR;
+        NGLOG_ERROR;
 #  else
-        GLOG_FATAL;
+        NGLOG_FATAL;
 #  endif
     EXPECT_CALL(log, Log(severity, __FILE__, "This should not be fatal"));
     LOG(DFATAL) << "This should not be fatal";
@@ -1532,7 +1532,7 @@ TEST(LogMsgTime, gmtoff) {
    * TODO: To properly test this API, we need a platform independent way to set
    * time-zone.
    * */
-  google::LogMessage log_obj(__FILE__, __LINE__);
+  nglog::LogMessage log_obj(__FILE__, __LINE__);
 
   std::chrono::seconds gmtoff = log_obj.time().gmtoffset();
   // GMT offset ranges from UTC-12:00 to UTC+14:00

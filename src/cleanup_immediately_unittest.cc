@@ -28,11 +28,11 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "base/commandlineflags.h"
-#include "glog/logging.h"
-#include "glog/raw_logging.h"
 #include "googletest.h"
+#include "ng-log/logging.h"
+#include "ng-log/raw_logging.h"
 
-#ifdef GLOG_USE_GFLAGS
+#ifdef NGLOG_USE_GFLAGS
 #  include <gflags/gflags.h>
 using namespace GFLAGS_NAMESPACE;
 #endif
@@ -42,7 +42,7 @@ using namespace GFLAGS_NAMESPACE;
 
 #  include "mock-log.h"
 // Introduce several symbols from gmock.
-using google::glog_testing::ScopedMockLog;
+using nglog::nglog_testing::ScopedMockLog;
 using testing::_;
 using testing::AllOf;
 using testing::AnyNumber;
@@ -52,39 +52,39 @@ using testing::StrictMock;
 using testing::StrNe;
 #endif
 
-using namespace google;
+using namespace nglog;
 
 TEST(CleanImmediately, logging) {
   using namespace std::chrono_literals;
-  google::SetLogFilenameExtension(".foobar");
-  google::EnableLogCleaner(0h);
+  nglog::SetLogFilenameExtension(".foobar");
+  nglog::EnableLogCleaner(0h);
 
   for (unsigned i = 0; i < 1000; ++i) {
     LOG(INFO) << "cleanup test";
   }
 
-  google::DisableLogCleaner();
+  nglog::DisableLogCleaner();
 }
 
 int main(int argc, char** argv) {
   FLAGS_colorlogtostderr = false;
   FLAGS_timestamp_in_logfile_name = true;
-#ifdef GLOG_USE_GFLAGS
+#ifdef NGLOG_USE_GFLAGS
   ParseCommandLineFlags(&argc, &argv, true);
 #endif
   // Make sure stderr is not buffered as stderr seems to be buffered
   // on recent windows.
   setbuf(stderr, nullptr);
 
-  // Test some basics before InitGoogleLogging:
+  // Test some basics before InitializeLogging:
   CaptureTestStderr();
   const string early_stderr = GetCapturedTestStderr();
 
-  EXPECT_FALSE(IsGoogleLoggingInitialized());
+  EXPECT_FALSE(IsLoggingInitialized());
 
-  InitGoogleLogging(argv[0]);
+  InitializeLogging(argv[0]);
 
-  EXPECT_TRUE(IsGoogleLoggingInitialized());
+  EXPECT_TRUE(IsLoggingInitialized());
 
   InitGoogleTest(&argc, argv);
 #ifdef HAVE_LIB_GMOCK

@@ -1,7 +1,7 @@
-# Implement a macro glog_library() that the BUILD.bazel file can load.
+# Implement a macro nglog_library() that the BUILD.bazel file can load.
 
-# By default, glog is built with gflags support.  You can change this behavior
-# by using glog_library(with_gflags=0)
+# By default, ng-log is built with gflags support.  You can change this behavior
+# by using nglog_library(with_gflags=0)
 #
 # This file is inspired by the following sample BUILD files:
 #       https://github.com/google/glog/issues/61
@@ -25,7 +25,7 @@ expand_template = rule(
     },
 )
 
-def glog_library(with_gflags = 1, **kwargs):
+def nglog_library(with_gflags = 1, **kwargs):
     if native.repository_name() != "@":
         repo_name = native.repository_name()[1:]  # Strip the first leading @
         gendir = "$(GENDIR)/external/" + repo_name
@@ -48,11 +48,11 @@ def glog_library(with_gflags = 1, **kwargs):
 
     common_copts = [
         "-std=c++14",
-        "-I%s/glog_internal" % gendir,
-    ] + (["-DGLOG_USE_GFLAGS"] if with_gflags else [])
+        "-I%s/ng-log_internal" % gendir,
+    ] + (["-DNGLOG_USE_GFLAGS"] if with_gflags else [])
 
     wasm_copts = [
-        # Disable warnings that exists in glog.
+        # Disable warnings that exists in ng-log.
         "-Wno-sign-compare",
         "-Wno-unused-function",
         "-Wno-unused-local-typedefs",
@@ -75,8 +75,8 @@ def glog_library(with_gflags = 1, **kwargs):
     ]
 
     linux_or_darwin_copts = wasm_copts + [
-        "-DGLOG_EXPORT=__attribute__((visibility(\\\"default\\\")))",
-        "-DGLOG_NO_EXPORT=__attribute__((visibility(\\\"default\\\")))",
+        "-DNGLOG_EXPORT=__attribute__((visibility(\\\"default\\\")))",
+        "-DNGLOG_NO_EXPORT=__attribute__((visibility(\\\"default\\\")))",
         "-DHAVE_POSIX_FADVISE",
         "-DHAVE_SSIZE_T",
         "-DHAVE_SYS_TYPES_H",
@@ -107,18 +107,18 @@ def glog_library(with_gflags = 1, **kwargs):
     ]
 
     windows_only_copts = [
-        # Override -DGLOG_EXPORT= from the cc_library's defines.
-        "-DGLOG_EXPORT=__declspec(dllexport)",
-        "-DGLOG_NO_ABBREVIATED_SEVERITIES",
-        "-DGLOG_NO_EXPORT=",
-        "-DGLOG_USE_WINDOWS_PORT",
+        # Override -DNGLOG_EXPORT= from the cc_library's defines.
+        "-DNGLOG_EXPORT=__declspec(dllexport)",
+        "-DNGLOG_NO_ABBREVIATED_SEVERITIES",
+        "-DNGLOG_NO_EXPORT=",
+        "-DNGLOG_USE_WINDOWS_PORT",
         "-DHAVE__CHSIZE_S",
         "-DHAVE_DBGHELP",
         "-I" + src_windows,
     ]
 
     clang_cl_only_copts = [
-        # Allow the override of -DGLOG_EXPORT.
+        # Allow the override of -DNGLOG_EXPORT.
         "-Wno-macro-redefined",
     ]
 
@@ -131,18 +131,18 @@ def glog_library(with_gflags = 1, **kwargs):
     gflags_deps = ["@gflags//:gflags"] if with_gflags else []
 
     final_lib_defines = select({
-        # GLOG_EXPORT is normally set by export.h, but that's not
+        # NGLOG_EXPORT is normally set by export.h, but that's not
         # generated for Bazel.
         "@bazel_tools//src/conditions:windows": [
-            "GLOG_DEPRECATED=__declspec(deprecated)",
-            "GLOG_EXPORT=",
-            "GLOG_NO_ABBREVIATED_SEVERITIES",
-            "GLOG_NO_EXPORT=",
+            "NGLOG_DEPRECATED=__declspec(deprecated)",
+            "NGLOG_EXPORT=",
+            "NGLOG_NO_ABBREVIATED_SEVERITIES",
+            "NGLOG_NO_EXPORT=",
         ],
         "//conditions:default": [
-            "GLOG_DEPRECATED=__attribute__((deprecated))",
-            "GLOG_EXPORT=__attribute__((visibility(\\\"default\\\")))",
-            "GLOG_NO_EXPORT=__attribute__((visibility(\\\"default\\\")))",
+            "NGLOG_DEPRECATED=__attribute__((deprecated))",
+            "NGLOG_EXPORT=__attribute__((visibility(\\\"default\\\")))",
+            "NGLOG_NO_EXPORT=__attribute__((visibility(\\\"default\\\")))",
         ],
     })
 
@@ -157,7 +157,8 @@ def glog_library(with_gflags = 1, **kwargs):
         "//conditions:default": [],
     })
 
-    # Needed to use these headers in `glog` and the test targets without exposing them as public targets in `glog`
+    # Needed to use these headers in `ng-log` and the test targets without
+    # exposing them as public targets in `ng-log`
     native.filegroup(
         name = "shared_headers",
         srcs = [
@@ -168,15 +169,15 @@ def glog_library(with_gflags = 1, **kwargs):
     )
 
     native.cc_library(
-        name = "glog",
+        name = "ng-log",
         visibility = ["//visibility:public"],
         srcs = [
             ":config_h",
             ":shared_headers",
-            "src/base/googleinit.h",
             "src/demangle.cc",
             "src/demangle.h",
             "src/flags.cc",
+            "src/initializer.h",
             "src/logging.cc",
             "src/raw_logging.cc",
             "src/signalhandler.cc",
@@ -198,14 +199,14 @@ def glog_library(with_gflags = 1, **kwargs):
             "//conditions:default": [],
         }),
         hdrs = [
-            "src/glog/flags.h",
-            "src/glog/log_severity.h",
-            "src/glog/logging.h",
-            "src/glog/platform.h",
-            "src/glog/raw_logging.h",
-            "src/glog/stl_logging.h",
-            "src/glog/types.h",
-            "src/glog/vlog_is_on.h",
+            "src/ng-log/flags.h",
+            "src/ng-log/log_severity.h",
+            "src/ng-log/logging.h",
+            "src/ng-log/platform.h",
+            "src/ng-log/raw_logging.h",
+            "src/ng-log/stl_logging.h",
+            "src/ng-log/types.h",
+            "src/ng-log/vlog_is_on.h",
         ],
         # https://github.com/google/glog/issues/837: Replacing
         # `strip_include_prefix` with `includes` would avoid spamming
@@ -213,7 +214,7 @@ def glog_library(with_gflags = 1, **kwargs):
         # private headers like stacktrace.h, because strip_include_prefix's
         # implementation only creates symlinks for the public hdrs. I suspect
         # the only way to avoid this is to refactor the project including the
-        # CMake build, so that the private headers are in a glog_internal
+        # CMake build, so that the private headers are in a ng-log_internal
         # subdirectory.
         strip_include_prefix = "src",
         defines = final_lib_defines,
@@ -260,7 +261,7 @@ def glog_library(with_gflags = 1, **kwargs):
             defines = final_lib_defines,
             copts = final_lib_copts + test_only_copts,
             deps = gflags_deps + [
-                ":glog",
+                ":ng-log",
                 "@googletest//:gtest",
             ],
             **kwargs
@@ -271,20 +272,20 @@ def glog_library(with_gflags = 1, **kwargs):
     native.cc_library(
         name = "strip_include_prefix_hack",
         hdrs = [
-            "src/glog/flags.h",
-            "src/glog/log_severity.h",
-            "src/glog/logging.h",
-            "src/glog/platform.h",
-            "src/glog/raw_logging.h",
-            "src/glog/stl_logging.h",
-            "src/glog/types.h",
-            "src/glog/vlog_is_on.h",
+            "src/ng-log/flags.h",
+            "src/ng-log/log_severity.h",
+            "src/ng-log/logging.h",
+            "src/ng-log/platform.h",
+            "src/ng-log/raw_logging.h",
+            "src/ng-log/stl_logging.h",
+            "src/ng-log/types.h",
+            "src/ng-log/vlog_is_on.h",
         ],
     )
 
     expand_template(
         name = "config_h",
         template = "src/config.h.cmake.in",
-        out = "glog_internal/config.h",
+        out = "ng-log_internal/config.h",
         substitutions = {"#cmakedefine": "//cmakedefine"},
     )

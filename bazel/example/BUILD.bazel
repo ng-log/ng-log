@@ -3,7 +3,7 @@ cc_test(
     size = "small",
     srcs = ["main.cc"],
     deps = [
-        "//:glog",
+        "//:ng-log",
         "@gflags//:gflags",
     ],
 )

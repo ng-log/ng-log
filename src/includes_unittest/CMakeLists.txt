@@ -1,16 +1,16 @@
 cmake_minimum_required (VERSION 3.16)
-project (glog_includes LANGUAGES CXX)
+project (ng-log_includes LANGUAGES CXX)
 
-find_package (glog REQUIRED NO_MODULE)
+find_package (ng-log REQUIRED NO_MODULE)
 
-add_executable (glog_includes_logging glog_includes_logging.cc)
-target_link_libraries (glog_includes_logging PRIVATE glog::glog)
+add_executable (ng-log_includes_logging ng-log_includes_logging.cc)
+target_link_libraries (ng-log_includes_logging PRIVATE ng-log::ng-log)
 
-add_executable (glog_includes_vlog_is_on glog_includes_vlog_is_on.cc)
-target_link_libraries (glog_includes_vlog_is_on PRIVATE glog::glog)
+add_executable (ng-log_includes_vlog_is_on ng-log_includes_vlog_is_on.cc)
+target_link_libraries (ng-log_includes_vlog_is_on PRIVATE ng-log::ng-log)
 
-add_executable (glog_includes_raw_logging glog_includes_raw_logging.cc)
-target_link_libraries (glog_includes_raw_logging PRIVATE glog::glog)
+add_executable (ng-log_includes_raw_logging ng-log_includes_raw_logging.cc)
+target_link_libraries (ng-log_includes_raw_logging PRIVATE ng-log::ng-log)
 
-add_executable (glog_includes_stl_logging glog_includes_stl_logging.cc)
-target_link_libraries (glog_includes_stl_logging PRIVATE glog::glog)
+add_executable (ng-log_includes_stl_logging ng-log_includes_stl_logging.cc)
+target_link_libraries (ng-log_includes_stl_logging PRIVATE ng-log::ng-log)

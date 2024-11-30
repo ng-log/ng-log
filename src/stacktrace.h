@@ -30,16 +30,16 @@
 // Routines to extract the current stack trace.  These functions are
 // thread-safe.
 
-#ifndef GLOG_INTERNAL_STACKTRACE_H
-#define GLOG_INTERNAL_STACKTRACE_H
+#ifndef NGLOG_INTERNAL_STACKTRACE_H
+#define NGLOG_INTERNAL_STACKTRACE_H
 
-#include "glog/platform.h"
+#include "ng-log/platform.h"
 
-#if defined(GLOG_USE_GLOG_EXPORT)
-#  include "glog/export.h"
+#if defined(NGLOG_USE_EXPORT)
+#  include "ng-log/export.h"
 #endif
 
-#if !defined(GLOG_NO_EXPORT)
+#if !defined(NGLOG_NO_EXPORT)
 #  error "stacktrace.h" was not included correctly.
 #endif
 
@@ -53,7 +53,7 @@
 #    define STACKTRACE_H "stacktrace_x86-inl.h"
 #  elif (defined(__ppc__) || defined(__PPC__)) && __GNUC__ >= 2
 #    define STACKTRACE_H "stacktrace_powerpc-inl.h"
-#  elif defined(GLOG_OS_WINDOWS)
+#  elif defined(NGLOG_OS_WINDOWS)
 #    define STACKTRACE_H "stacktrace_windows-inl.h"
 #  endif
 #endif
@@ -66,8 +66,8 @@
 #  define HAVE_STACKTRACE
 #endif
 
-namespace google {
-inline namespace glog_internal_namespace_ {
+namespace nglog {
+inline namespace tools {
 
 #if defined(HAVE_STACKTRACE)
 
@@ -87,11 +87,11 @@ inline namespace glog_internal_namespace_ {
 //           ....       ...
 //
 // "result" must not be nullptr.
-GLOG_NO_EXPORT int GetStackTrace(void** result, int max_depth, int skip_count);
+NGLOG_NO_EXPORT int GetStackTrace(void** result, int max_depth, int skip_count);
 
 #endif  // defined(HAVE_STACKTRACE)
 
-}  // namespace glog_internal_namespace_
-}  // namespace google
+}  // namespace tools
+}  // namespace nglog
 
-#endif  // GLOG_INTERNAL_STACKTRACE_H
+#endif  // NGLOG_INTERNAL_STACKTRACE_H

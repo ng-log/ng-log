@@ -40,14 +40,14 @@
 #include <thread>
 
 #include "config.h"
-#include "glog/logging.h"
+#include "ng-log/logging.h"
 #include "stacktrace.h"
 #include "symbolize.h"
 
 #if defined(HAVE_UNISTD_H)
 #  include <unistd.h>
 #endif
-#ifdef GLOG_USE_GFLAGS
+#ifdef NGLOG_USE_GFLAGS
 #  include <gflags/gflags.h>
 using namespace GFLAGS_NAMESPACE;
 #endif
@@ -55,7 +55,7 @@ using namespace GFLAGS_NAMESPACE;
 #  include <io.h>  // write
 #endif
 
-using namespace google;
+using namespace nglog;
 
 static void DieInThread(int* a) {
   std::ostringstream oss;
@@ -74,8 +74,8 @@ static void WriteToStdout(const char* data, size_t size) {
 
 int main(int argc, char** argv) {
 #if defined(HAVE_STACKTRACE) && defined(HAVE_SYMBOLIZE)
-  InitGoogleLogging(argv[0]);
-#  ifdef GLOG_USE_GFLAGS
+  InitializeLogging(argv[0]);
+#  ifdef NGLOG_USE_GFLAGS
   ParseCommandLineFlags(&argc, &argv, true);
 #  endif
   InstallFailureSignalHandler();

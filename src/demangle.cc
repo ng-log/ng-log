@@ -46,14 +46,14 @@
 #  include <cxxabi.h>
 #endif
 
-#if defined(GLOG_OS_WINDOWS)
+#if defined(NGLOG_OS_WINDOWS)
 #  include <dbghelp.h>
 #endif
 
-namespace google {
-inline namespace glog_internal_namespace_ {
+namespace nglog {
+inline namespace tools {
 
-#if !defined(GLOG_OS_WINDOWS) && !defined(HAVE___CXA_DEMANGLE)
+#if !defined(NGLOG_OS_WINDOWS) && !defined(HAVE___CXA_DEMANGLE)
 namespace {
 struct AbbrevPair {
   const char* const abbrev;
@@ -1311,7 +1311,7 @@ bool ParseTopLevelMangledName(State* state) {
 
 // The demangler entry point.
 bool Demangle(const char* mangled, char* out, size_t out_size) {
-#if defined(GLOG_OS_WINDOWS)
+#if defined(NGLOG_OS_WINDOWS)
 #  if defined(HAVE_DBGHELP)
   // When built with incremental linking, the Windows debugger
   // library provides a more complicated `Symbol->Name` with the
@@ -1359,5 +1359,5 @@ bool Demangle(const char* mangled, char* out, size_t out_size) {
 #endif
 }
 
-}  // namespace glog_internal_namespace_
-}  // namespace google
+}  // namespace tools
+}  // namespace nglog

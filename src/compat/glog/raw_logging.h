@@ -27,35 +27,22 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Author: Shinichiro Hamaji
+// Author: Maxim Lifantsev
 //
-// Detect supported platforms.
+// Thread-safe logging routines that do not allocate any memory or
+// acquire any locks, and can therefore be used by low-level memory
+// allocation and synchronization code.
 
-#ifndef GLOG_PLATFORM_H
-#define GLOG_PLATFORM_H
+#ifndef NGLOG_RAW_LOGGING_H
+#define NGLOG_RAW_LOGGING_H
 
-#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__)
-#  define GLOG_OS_WINDOWS
-#elif defined(__CYGWIN__) || defined(__CYGWIN32__)
-#  define GLOG_OS_CYGWIN
-#elif defined(linux) || defined(__linux) || defined(__linux__)
-#  define GLOG_OS_LINUX
-#  if defined(__ANDROID__)
-#    define GLOG_OS_ANDROID
-#  endif
-#elif defined(macintosh) || defined(__APPLE__) || defined(__APPLE_CC__)
-#  define GLOG_OS_MACOSX
-#elif defined(__FreeBSD__)
-#  define GLOG_OS_FREEBSD
-#elif defined(__NetBSD__)
-#  define GLOG_OS_NETBSD
-#elif defined(__OpenBSD__)
-#  define GLOG_OS_OPENBSD
-#elif defined(__EMSCRIPTEN__)
-#  define GLOG_OS_EMSCRIPTEN
-#else
-// TODO(hamaji): Add other platforms.
-#error Platform not supported by glog. Please consider to contribute platform information by submitting a pull request on Github.
-#endif
+#if defined(GLOG_STRIP_LOG)
+#  define NGLOG_STRIP_LOG GLOG_STRIP_LOG
+#endif  // defined(GLOG_STRIP_LOG)
 
-#endif  // GLOG_PLATFORM_H
+#include "ng-log/raw_logging.h"
+
+#pragma message( \
+    "<glog/raw_logging.h> is deprecated and will be removed in ng-log 0.9.0. Please use <ng-log/raw_logging.h> instead.")
+
+#endif  // NGLOG_RAW_LOGGING_H

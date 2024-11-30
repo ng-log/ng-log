@@ -42,8 +42,8 @@
 
 #include "config.h"
 
-namespace google {
-inline namespace glog_internal_namespace_ {
+namespace nglog {
+inline namespace tools {
 
 #ifndef HAVE_LOCALTIME_R
 struct tm* localtime_r(const std::time_t* timep, std::tm* result) {
@@ -58,5 +58,5 @@ struct tm* gmtime_r(const std::time_t* timep, std::tm* result) {
 }
 #endif  // not HAVE_GMTIME_R
 
-}  // namespace glog_internal_namespace_
-}  // namespace google
+}  // namespace tools
+}  // namespace nglog

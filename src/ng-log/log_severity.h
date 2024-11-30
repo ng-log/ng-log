@@ -27,18 +27,18 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef BASE_LOG_SEVERITY_H__
-#define BASE_LOG_SEVERITY_H__
+#ifndef NGLOG_LOG_SEVERITY_H
+#define NGLOG_LOG_SEVERITY_H
 
-#if defined(GLOG_USE_GLOG_EXPORT)
-#  include "glog/export.h"
+#if defined(NGLOG_USE_EXPORT)
+#  include "ng-log/export.h"
 #endif
 
-#if !defined(GLOG_EXPORT)
-#  error <glog/log_severity.h> was not included correctly. See the documentation for how to consume the library.
+#if !defined(NGLOG_EXPORT)
+#  error <ng-log/log_severity.h> was not included correctly. See the documentation for how to consume the library.
 #endif
 
-namespace google {
+namespace nglog {
 
 // The recommended semantics of the log levels are as follows:
 //
@@ -60,32 +60,32 @@ namespace google {
 // you ever need to change their values or add a new severity.
 
 enum LogSeverity {
-  GLOG_INFO = 0,
-  GLOG_WARNING = 1,
-  GLOG_ERROR = 2,
-  GLOG_FATAL = 3,
-#ifndef GLOG_NO_ABBREVIATED_SEVERITIES
+  NGLOG_INFO = 0,
+  NGLOG_WARNING = 1,
+  NGLOG_ERROR = 2,
+  NGLOG_FATAL = 3,
+#ifndef NGLOG_NO_ABBREVIATED_SEVERITIES
 #  ifdef ERROR
-#  error ERROR macro is defined. Define GLOG_NO_ABBREVIATED_SEVERITIES before including logging.h. See the document for detail.
+#  error ERROR macro is defined. Define NGLOG_NO_ABBREVIATED_SEVERITIES before including logging.h. See the document for detail.
 #  endif
-  INFO = GLOG_INFO,
-  WARNING = GLOG_WARNING,
-  ERROR = GLOG_ERROR,
-  FATAL = GLOG_FATAL
+  INFO = NGLOG_INFO,
+  WARNING = NGLOG_WARNING,
+  ERROR = NGLOG_ERROR,
+  FATAL = NGLOG_FATAL
 #endif
 };
 
 #if defined(__cpp_inline_variables)
 #  if (__cpp_inline_variables >= 201606L)
-#    define GLOG_INLINE_VARIABLE inline
+#    define NGLOG_INLINE_VARIABLE inline
 #  endif  // (__cpp_inline_variables >= 201606L)
 #endif    // defined(__cpp_inline_variables)
 
-#if !defined(GLOG_INLINE_VARIABLE)
-#  define GLOG_INLINE_VARIABLE
-#endif  // !defined(GLOG_INLINE_VARIABLE)
+#if !defined(NGLOG_INLINE_VARIABLE)
+#  define NGLOG_INLINE_VARIABLE
+#endif  // !defined(NGLOG_INLINE_VARIABLE)
 
-GLOG_INLINE_VARIABLE
+NGLOG_INLINE_VARIABLE
 constexpr int NUM_SEVERITIES = 4;
 
 // DFATAL is FATAL in debug mode, ERROR in normal mode
@@ -121,6 +121,6 @@ enum { DEBUG_MODE = 1 };
 #  define IF_DEBUG_MODE(x) x
 #endif
 
-} // namespace google
+}  // namespace nglog
 
-#endif  // BASE_LOG_SEVERITY_H__
+#endif  // NGLOG_LOG_SEVERITY_H

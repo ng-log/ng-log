@@ -58,21 +58,21 @@
 // CAVEAT: --vmodule functionality is not available in non gcc compilers.
 //
 
-#ifndef GLOG_VLOG_IS_ON_H
-#define GLOG_VLOG_IS_ON_H
+#ifndef NGLOG_VLOG_IS_ON_H
+#define NGLOG_VLOG_IS_ON_H
 
 #include <cstddef>
 
-#if defined(GLOG_USE_GLOG_EXPORT)
-#  include "glog/export.h"
+#if defined(NGLOG_USE_EXPORT)
+#  include "ng-log/export.h"
 #endif
 
-#if !defined(GLOG_EXPORT)
-#  error <glog/vlog_is_on.h> was not included correctly. See the documentation for how to consume the library.
+#if !defined(NGLOG_EXPORT)
+#  error <ng-log/vlog_is_on.h> was not included correctly. See the documentation for how to consume the library.
 #endif
 
-#include "glog/flags.h"
-#include "glog/types.h"
+#include "ng-log/flags.h"
+#include "ng-log/types.h"
 
 #if defined(__GNUC__)
 // We emit an anonymous static int* variable at every VLOG_IS_ON(n) site.
@@ -81,16 +81,16 @@
 // it's either FLAGS_v or an appropriate internal variable
 // matching the current source file that represents results of
 // parsing of --vmodule flag and/or SetVLOGLevel calls.
-#  define VLOG_IS_ON(verboselevel)                                       \
-    __extension__({                                                      \
-      static google::SiteFlag vlocal__ = {nullptr, nullptr, 0, nullptr}; \
-      GLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(               \
-          __FILE__, __LINE__, &vlocal__, sizeof(google::SiteFlag), "")); \
-      google::int32 verbose_level__ = (verboselevel);                    \
-      (vlocal__.level == nullptr                                         \
-           ? google::InitVLOG3__(&vlocal__, &FLAGS_v, __FILE__,          \
-                                 verbose_level__)                        \
-           : *vlocal__.level >= verbose_level__);                        \
+#  define VLOG_IS_ON(verboselevel)                                      \
+    __extension__({                                                     \
+      static nglog::SiteFlag vlocal__ = {nullptr, nullptr, 0, nullptr}; \
+      NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(             \
+          __FILE__, __LINE__, &vlocal__, sizeof(nglog::SiteFlag), "")); \
+      nglog::int32 verbose_level__ = (verboselevel);                    \
+      (vlocal__.level == nullptr                                        \
+           ? nglog::InitializeVLOG3(&vlocal__, &FLAGS_v, __FILE__,      \
+                                    verbose_level__)                    \
+           : *vlocal__.level >= verbose_level__);                       \
     })
 #else
 // GNU extensions not available, so we do not support --vmodule.
@@ -98,17 +98,17 @@
 #  define VLOG_IS_ON(verboselevel) (FLAGS_v >= (verboselevel))
 #endif
 
-namespace google {
+namespace nglog {
 
 // Set VLOG(_IS_ON) level for module_pattern to log_level.
 // This lets us dynamically control what is normally set by the --vmodule flag.
 // Returns the level that previously applied to module_pattern.
 // NOTE: To change the log level for VLOG(_IS_ON) sites
-//	 that have already executed after/during InitGoogleLogging,
+//	 that have already executed after/during InitializeLogging,
 //	 one needs to supply the exact --vmodule pattern that applied to them.
 //       (If no --vmodule pattern applied to them
 //       the value of FLAGS_v will continue to control them.)
-extern GLOG_EXPORT int SetVLOGLevel(const char* module_pattern, int log_level);
+extern NGLOG_EXPORT int SetVLOGLevel(const char* module_pattern, int log_level);
 
 // Various declarations needed for VLOG_IS_ON above: =========================
 
@@ -127,10 +127,9 @@ struct SiteFlag {
 //   verbose_level is the argument to VLOG_IS_ON
 // We will return the return value for VLOG_IS_ON
 // and if possible set *site_flag appropriately.
-extern GLOG_EXPORT bool InitVLOG3__(SiteFlag* site_flag,
-                                    int32* site_default,
-                                    const char* fname,
-                                    int32 verbose_level);
-} // namespace google
+extern NGLOG_EXPORT bool InitializeVLOG3(SiteFlag* site_flag,
+                                         int32* site_default, const char* fname,
+                                         int32 verbose_level);
+}  // namespace nglog
 
-#endif  // GLOG_VLOG_IS_ON_H
+#endif  // NGLOG_VLOG_IS_ON_H

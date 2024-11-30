@@ -29,7 +29,7 @@
 
 #define _GNU_SOURCE 1  // needed for O_NOFOLLOW and pread()/pwrite()
 
-#include "glog/logging.h"
+#include "ng-log/logging.h"
 
 #include <algorithm>
 #include <cassert>
@@ -48,12 +48,12 @@
 #include <utility>
 
 #include "config.h"
-#include "glog/platform.h"
-#include "glog/raw_logging.h"
+#include "ng-log/platform.h"
+#include "ng-log/raw_logging.h"
 #include "stacktrace.h"
 #include "utilities.h"
 
-#ifdef GLOG_OS_WINDOWS
+#ifdef NGLOG_OS_WINDOWS
 #  include "windows/dirent.h"
 #else
 #  include <dirent.h>  // for automatic removal of old logs
@@ -157,7 +157,7 @@ static void GetHostName(string* hostname) {
     *buf.nodename = '\0';
   }
   *hostname = buf.nodename;
-#elif defined(GLOG_OS_WINDOWS)
+#elif defined(NGLOG_OS_WINDOWS)
   char buf[MAX_COMPUTERNAME_LENGTH + 1];
   DWORD len = MAX_COMPUTERNAME_LENGTH + 1;
   if (GetComputerNameA(buf, &len)) {
@@ -174,7 +174,7 @@ static void GetHostName(string* hostname) {
 // Returns true iff terminal supports using colors in output.
 static bool TerminalSupportsColor() {
   bool term_supports_color = false;
-#ifdef GLOG_OS_WINDOWS
+#ifdef NGLOG_OS_WINDOWS
   // on Windows TERM variable is usually not set, but the console does
   // support colors.
   term_supports_color = true;
@@ -194,48 +194,48 @@ static bool TerminalSupportsColor() {
 }
 
 #if defined(__cpp_lib_unreachable) && (__cpp_lib_unreachable >= 202202L)
-#  define GLOG_UNREACHABLE std::unreachable()
+#  define NGLOG_UNREACHABLE std::unreachable()
 #elif !defined(NDEBUG)
-#  define GLOG_UNREACHABLE assert(false)
+#  define NGLOG_UNREACHABLE assert(false)
 #else
 #  if defined(_MSC_VER)
-#    define GLOG_UNREACHABLE __assume(false)
+#    define NGLOG_UNREACHABLE __assume(false)
 #  elif defined(__has_builtin)
 #    if __has_builtin(unreachable)
-#      define GLOG_UNREACHABLE __builtin_unreachable()
+#      define NGLOG_UNREACHABLE __builtin_unreachable()
 #    endif
 #  endif
-#  if !defined(GLOG_UNREACHABLE) && defined(__GNUG__)
-#    define GLOG_UNREACHABLE __builtin_unreachable()
+#  if !defined(NGLOG_UNREACHABLE) && defined(__GNUG__)
+#    define NGLOG_UNREACHABLE __builtin_unreachable()
 #  endif
-#  if !defined(GLOG_UNREACHABLE)
-#    define GLOG_UNREACHABLE
+#  if !defined(NGLOG_UNREACHABLE)
+#    define NGLOG_UNREACHABLE
 #  endif
 #endif
 
-namespace google {
+namespace nglog {
 
-GLOG_NO_EXPORT
+NGLOG_NO_EXPORT
 std::string StrError(int err);
 
 enum GLogColor { COLOR_DEFAULT, COLOR_RED, COLOR_GREEN, COLOR_YELLOW };
 
 static GLogColor SeverityToColor(LogSeverity severity) {
   switch (severity) {
-    case GLOG_INFO:
+    case NGLOG_INFO:
       return COLOR_DEFAULT;
-    case GLOG_WARNING:
+    case NGLOG_WARNING:
       return COLOR_YELLOW;
-    case GLOG_ERROR:
-    case GLOG_FATAL:
+    case NGLOG_ERROR:
+    case NGLOG_FATAL:
       return COLOR_RED;
   }
 
   // should never get here.
-  GLOG_UNREACHABLE;
+  NGLOG_UNREACHABLE;
 }
 
-#ifdef GLOG_OS_WINDOWS
+#ifdef NGLOG_OS_WINDOWS
 
 // Returns the character attribute for the given color.
 static WORD GetColorAttribute(GLogColor color) {
@@ -269,7 +269,7 @@ static const char* GetAnsiColorCode(GLogColor color) {
   return nullptr;  // stop warning about return type.
 }
 
-#endif  // GLOG_OS_WINDOWS
+#endif  // NGLOG_OS_WINDOWS
 
 // Safely get max_log_size, overriding to 1 if it somehow gets defined as 0
 static uint32 MaxLogSize() {
@@ -282,7 +282,6 @@ static uint32 MaxLogSize() {
 // is so that streaming can be done more efficiently.
 const size_t LogMessage::kMaxLogMessageLen = 30000;
 
-namespace logging {
 namespace internal {
 struct LogMessageData {
   LogMessageData();
@@ -313,7 +312,6 @@ struct LogMessageData {
   LogMessageData& operator=(const LogMessageData&) = delete;
 };
 }  // namespace internal
-}  // namespace logging
 
 // A mutex that allows only one thread to log at a time, to keep things from
 // getting jumbled.  Some other very uncommon logging operations (like
@@ -550,7 +548,7 @@ class LogDestination {
 
   // Wait for all registered sinks via WaitTillSent
   // including the optional one in "data".
-  static void WaitForSinks(logging::internal::LogMessageData* data);
+  static void WaitForSinks(internal::LogMessageData* data);
 
   static LogDestination* log_destination(LogSeverity severity);
 
@@ -701,7 +699,7 @@ inline void LogDestination::SetStderrLogging(LogSeverity min_severity) {
 inline void LogDestination::LogToStderr() {
   // *Don't* put this stuff in a mutex lock, since SetStderrLogging &
   // SetLogDestination already do the locking!
-  SetStderrLogging(GLOG_INFO);  // thus everything is "also" logged to stderr
+  SetStderrLogging(NGLOG_INFO);  // thus everything is "also" logged to stderr
   for (int i = 0; i < NUM_SEVERITIES; ++i) {
     SetLogDestination(static_cast<LogSeverity>(i),
                       "");  // "" turns off logging to a logfile
@@ -732,7 +730,7 @@ static void ColoredWriteToStderrOrStdout(FILE* output, LogSeverity severity,
     fwrite(message, len, 1, output);
     return;
   }
-#ifdef GLOG_OS_WINDOWS
+#ifdef NGLOG_OS_WINDOWS
   const HANDLE output_handle =
       GetStdHandle(is_stdout ? STD_OUTPUT_HANDLE : STD_ERROR_HANDLE);
 
@@ -755,7 +753,7 @@ static void ColoredWriteToStderrOrStdout(FILE* output, LogSeverity severity,
   fprintf(output, "\033[0;3%sm", GetAnsiColorCode(color));
   fwrite(message, len, 1, output);
   fprintf(output, "\033[m");  // Resets the terminal to default.
-#endif  // GLOG_OS_WINDOWS
+#endif  // NGLOG_OS_WINDOWS
 }
 
 static void ColoredWriteToStdout(LogSeverity severity, const char* message,
@@ -786,8 +784,7 @@ inline void LogDestination::MaybeLogToStderr(LogSeverity severity,
                                              size_t prefix_len) {
   if ((severity >= FLAGS_stderrthreshold) || FLAGS_alsologtostderr) {
     ColoredWriteToStderr(severity, message, message_len);
-    AlsoErrorWrite(severity,
-                   glog_internal_namespace_::ProgramInvocationShortName(),
+    AlsoErrorWrite(severity, tools::ProgramInvocationShortName(),
                    message + prefix_len);
   }
 }
@@ -802,9 +799,8 @@ inline void LogDestination::MaybeLogToEmail(LogSeverity severity,
       }
       to += addresses_;
     }
-    const string subject(
-        string("[LOG] ") + LogSeverityNames[severity] + ": " +
-        glog_internal_namespace_::ProgramInvocationShortName());
+    const string subject(string("[LOG] ") + LogSeverityNames[severity] + ": " +
+                         tools::ProgramInvocationShortName());
     string body(hostname());
     body += "\n\n";
     body.append(message, len);
@@ -857,8 +853,7 @@ inline void LogDestination::LogToSinks(LogSeverity severity,
   }
 }
 
-inline void LogDestination::WaitForSinks(
-    logging::internal::LogMessageData* data) {
+inline void LogDestination::WaitForSinks(internal::LogMessageData* data) {
   std::shared_lock<SinkMutex> l{sink_mutex_};
   if (sinks_) {
     for (size_t i = sinks_->size(); i-- > 0;) {
@@ -905,7 +900,7 @@ void SetApplicationFingerprint(const std::string& fingerprint) {
 namespace {
 
 // Directory delimiter; Windows supports both forward slashes and backslashes
-#ifdef GLOG_OS_WINDOWS
+#ifdef NGLOG_OS_WINDOWS
 const char possible_dir_delim[] = {'\\', '/'};
 #else
 const char possible_dir_delim[] = {'/'};
@@ -925,7 +920,7 @@ string PrettyDuration(const std::chrono::duration<int>& secs) {
 LogFileObject::LogFileObject(LogSeverity severity, const char* base_filename)
     : base_filename_selected_(base_filename != nullptr),
       base_filename_((base_filename != nullptr) ? base_filename : ""),
-      symlink_basename_(glog_internal_namespace_::ProgramInvocationShortName()),
+      symlink_basename_(tools::ProgramInvocationShortName()),
       filename_extension_(),
       severity_(severity),
       rollover_attempt_(kRolloverAttemptFrequency - 1),
@@ -1035,7 +1030,7 @@ bool LogFileObject::CreateLogfile(const string& time_pid_string) {
     }
     return false;
   }
-#ifdef GLOG_OS_WINDOWS
+#ifdef NGLOG_OS_WINDOWS
   // https://github.com/golang/go/issues/27638 - make sure we seek to the end to
   // append empirically replicated with wine over mingw build
   if (!FLAGS_timestamp_in_logfile_name) {
@@ -1061,7 +1056,7 @@ bool LogFileObject::CreateLogfile(const string& time_pid_string) {
     linkpath += linkname;
     unlink(linkpath.c_str());  // delete old one if it exists
 
-#if defined(GLOG_OS_WINDOWS)
+#if defined(NGLOG_OS_WINDOWS)
     // TODO(hamaji): Create lnk file on Windows?
 #elif defined(HAVE_UNISTD_H)
     // We must have unistd.h.
@@ -1158,8 +1153,7 @@ void LogFileObject::Write(
       //
       // Where does the file get put?  Successively try the directories
       // "/tmp", and "."
-      string stripped_filename(
-          glog_internal_namespace_::ProgramInvocationShortName());
+      string stripped_filename(tools::ProgramInvocationShortName());
       string hostname;
       GetHostName(&hostname);
 
@@ -1260,7 +1254,7 @@ void LogFileObject::Write(
   if (force_flush || (bytes_since_flush_ >= 1000000) ||
       (timestamp >= next_flush_time_)) {
     FlushUnlocked(timestamp);
-#ifdef GLOG_OS_LINUX
+#ifdef NGLOG_OS_LINUX
     // Only consider files >= 3MiB
     if (FLAGS_drop_log_memory && file_length_ >= (3U << 20U)) {
       // Don't evict the most recent 1-2MiB so as not to impact a tailer
@@ -1487,12 +1481,12 @@ bool LogCleaner::IsLogLastModifiedOver(
 // for exclusive use by the first thread, and one for shared use by
 // all other threads.
 static std::mutex fatal_msg_lock;
-static logging::internal::CrashReason crash_reason;
+static internal::CrashReason crash_reason;
 static bool fatal_msg_exclusive = true;
-static logging::internal::LogMessageData fatal_msg_data_exclusive;
-static logging::internal::LogMessageData fatal_msg_data_shared;
+static internal::LogMessageData fatal_msg_data_exclusive;
+static internal::LogMessageData fatal_msg_data_shared;
 
-#ifdef GLOG_THREAD_LOCAL_STORAGE
+#ifdef NGLOG_THREAD_LOCAL_STORAGE
 // Static thread-local log data space to use, because typically at most one
 // LogMessageData object exists (in this case glog makes zero heap memory
 // allocations).
@@ -1500,16 +1494,16 @@ static thread_local bool thread_data_available = true;
 
 #  if defined(__cpp_lib_byte) && __cpp_lib_byte >= 201603L
 // std::aligned_storage is deprecated in C++23
-alignas(logging::internal::LogMessageData) static thread_local std::byte
-    thread_msg_data[sizeof(logging::internal::LogMessageData)];
+alignas(internal::LogMessageData) static thread_local std::byte
+    thread_msg_data[sizeof(internal::LogMessageData)];
 #  else   // !(defined(__cpp_lib_byte) && __cpp_lib_byte >= 201603L)
 static thread_local std::aligned_storage<
-    sizeof(logging::internal::LogMessageData),
-    alignof(logging::internal::LogMessageData)>::type thread_msg_data;
+    sizeof(internal::LogMessageData), alignof(internal::LogMessageData)>::type
+    thread_msg_data;
 #  endif  // defined(__cpp_lib_byte) && __cpp_lib_byte >= 201603L
-#endif    // defined(GLOG_THREAD_LOCAL_STORAGE)
+#endif    // defined(NGLOG_THREAD_LOCAL_STORAGE)
 
-logging::internal::LogMessageData::LogMessageData()
+internal::LogMessageData::LogMessageData()
     : stream_(message_text_, LogMessage::kMaxLogMessageLen, 0) {}
 
 LogMessage::LogMessage(const char* file, int line, LogSeverity severity,
@@ -1520,14 +1514,14 @@ LogMessage::LogMessage(const char* file, int line, LogSeverity severity,
 }
 
 LogMessage::LogMessage(const char* file, int line,
-                       const logging::internal::CheckOpString& result)
+                       const internal::CheckOpString& result)
     : allocated_(nullptr) {
-  Init(file, line, GLOG_FATAL, &LogMessage::SendToLog);
+  Init(file, line, NGLOG_FATAL, &LogMessage::SendToLog);
   stream() << "Check failed: " << (*result.str_) << " ";
 }
 
 LogMessage::LogMessage(const char* file, int line) : allocated_(nullptr) {
-  Init(file, line, GLOG_INFO, &LogMessage::SendToLog);
+  Init(file, line, NGLOG_INFO, &LogMessage::SendToLog);
 }
 
 LogMessage::LogMessage(const char* file, int line, LogSeverity severity)
@@ -1561,20 +1555,20 @@ LogMessage::LogMessage(const char* file, int line, LogSeverity severity,
 void LogMessage::Init(const char* file, int line, LogSeverity severity,
                       void (LogMessage::*send_method)()) {
   allocated_ = nullptr;
-  if (severity != GLOG_FATAL || !exit_on_dfatal) {
-#ifdef GLOG_THREAD_LOCAL_STORAGE
+  if (severity != NGLOG_FATAL || !exit_on_dfatal) {
+#ifdef NGLOG_THREAD_LOCAL_STORAGE
     // No need for locking, because this is thread local.
     if (thread_data_available) {
       thread_data_available = false;
-      data_ = new (&thread_msg_data) logging::internal::LogMessageData;
+      data_ = new (&thread_msg_data) internal::LogMessageData;
     } else {
-      allocated_ = new logging::internal::LogMessageData();
+      allocated_ = new internal::LogMessageData();
       data_ = allocated_;
     }
-#else   // !defined(GLOG_THREAD_LOCAL_STORAGE)
-    allocated_ = new logging::internal::LogMessageData();
+#else   // !defined(NGLOG_THREAD_LOCAL_STORAGE)
+    allocated_ = new internal::LogMessageData();
     data_ = allocated_;
-#endif  // defined(GLOG_THREAD_LOCAL_STORAGE)
+#endif  // defined(NGLOG_THREAD_LOCAL_STORAGE)
     data_->first_fatal_ = false;
   } else {
     std::lock_guard<std::mutex> l{fatal_msg_lock};
@@ -1656,17 +1650,17 @@ const LogMessageTime& LogMessage::time() const noexcept { return time_; }
 
 LogMessage::~LogMessage() noexcept(false) {
   Flush();
-  bool fail = data_->severity_ == GLOG_FATAL && exit_on_dfatal;
-#ifdef GLOG_THREAD_LOCAL_STORAGE
+  bool fail = data_->severity_ == NGLOG_FATAL && exit_on_dfatal;
+#ifdef NGLOG_THREAD_LOCAL_STORAGE
   if (data_ == static_cast<void*>(&thread_msg_data)) {
     data_->~LogMessageData();
     thread_data_available = true;
   } else {
     delete allocated_;
   }
-#else   // !defined(GLOG_THREAD_LOCAL_STORAGE)
+#else   // !defined(NGLOG_THREAD_LOCAL_STORAGE)
   delete allocated_;
-#endif  // defined(GLOG_THREAD_LOCAL_STORAGE)
+#endif  // defined(NGLOG_THREAD_LOCAL_STORAGE)
         //
 
   if (fail) {
@@ -1674,9 +1668,7 @@ LogMessage::~LogMessage() noexcept(false) {
     if (write(fileno(stderr), message, strlen(message)) < 0) {
       // Ignore errors.
     }
-    AlsoErrorWrite(GLOG_FATAL,
-                   glog_internal_namespace_::ProgramInvocationShortName(),
-                   message);
+    AlsoErrorWrite(NGLOG_FATAL, tools::ProgramInvocationShortName(), message);
 #if defined(__cpp_lib_uncaught_exceptions) && \
     (__cpp_lib_uncaught_exceptions >= 201411L)
     if (std::uncaught_exceptions() == 0)
@@ -1762,13 +1754,13 @@ void ReprintFatalMessage() {
       // Also write to stderr (don't color to avoid terminal checks)
       WriteToStderr(fatal_message, n);
     }
-    LogDestination::LogToAllLogfiles(GLOG_ERROR, fatal_time, fatal_message, n);
+    LogDestination::LogToAllLogfiles(NGLOG_ERROR, fatal_time, fatal_message, n);
   }
 }
 
 // L >= log_mutex (callers must hold the log_mutex).
 void LogMessage::SendToLog() EXCLUSIVE_LOCKS_REQUIRED(log_mutex) {
-  static bool already_warned_before_initgoogle = false;
+  static bool already_warned_before_init = false;
 
   RAW_DCHECK(data_->num_chars_to_log_ > 0 &&
                  data_->message_text_[data_->num_chars_to_log_ - 1] == '\n',
@@ -1776,18 +1768,18 @@ void LogMessage::SendToLog() EXCLUSIVE_LOCKS_REQUIRED(log_mutex) {
 
   // Messages of a given severity get logged to lower severity logs, too
 
-  if (!already_warned_before_initgoogle && !IsGoogleLoggingInitialized()) {
+  if (!already_warned_before_init && !IsLoggingInitialized()) {
     const char w[] =
-        "WARNING: Logging before InitGoogleLogging() is "
+        "WARNING: Logging before InitializeLogging() is "
         "written to STDERR\n";
     WriteToStderr(w, strlen(w));
-    already_warned_before_initgoogle = true;
+    already_warned_before_init = true;
   }
 
   // global flag: never log to file if set.  Also -- don't log to a
   // file if we haven't parsed the command line flags to get the
   // program name.
-  if (FLAGS_logtostderr || FLAGS_logtostdout || !IsGoogleLoggingInitialized()) {
+  if (FLAGS_logtostderr || FLAGS_logtostdout || !IsLoggingInitialized()) {
     if (FLAGS_logtostdout) {
       ColoredWriteToStdout(data_->severity_, data_->message_text_,
                            data_->num_chars_to_log_);
@@ -1822,7 +1814,7 @@ void LogMessage::SendToLog() EXCLUSIVE_LOCKS_REQUIRED(log_mutex) {
   // If we log a FATAL message, flush all the log destinations, then toss
   // a signal for others to catch. We leave the logs in a state that
   // someone else can use them (as long as they flush afterwards)
-  if (data_->severity_ == GLOG_FATAL && exit_on_dfatal) {
+  if (data_->severity_ == NGLOG_FATAL && exit_on_dfatal) {
     if (data_->first_fatal_) {
       // Store crash information so that it is accessible from within signal
       // handlers that may be invoked later.
@@ -1850,7 +1842,7 @@ void LogMessage::SendToLog() EXCLUSIVE_LOCKS_REQUIRED(log_mutex) {
   }
 }
 
-void LogMessage::RecordCrashReason(logging::internal::CrashReason* reason) {
+void LogMessage::RecordCrashReason(internal::CrashReason* reason) {
   reason->filename = fatal_msg_data_exclusive.fullname_;
   reason->line_number = fatal_msg_data_exclusive.line_;
   reason->message = fatal_msg_data_exclusive.message_text_ +
@@ -1863,12 +1855,12 @@ void LogMessage::RecordCrashReason(logging::internal::CrashReason* reason) {
 #endif
 }
 
-GLOG_NO_EXPORT logging_fail_func_t g_logging_fail_func =
+NGLOG_NO_EXPORT logging_fail_func_t g_logging_fail_func =
     reinterpret_cast<logging_fail_func_t>(&abort);
 
 NullStream::NullStream() : LogMessage::LogStream(message_buffer_, 2, 0) {}
 NullStream::NullStream(const char* /*file*/, int /*line*/,
-                       const logging::internal::CheckOpString& /*result*/)
+                       const internal::CheckOpString& /*result*/)
     : LogMessage::LogStream(message_buffer_, 2, 0) {}
 NullStream& NullStream::stream() { return *this; }
 
@@ -1937,7 +1929,7 @@ void LogMessage::SendToSyslogAndLog() {
   // Before any calls to syslog(), make a single call to openlog()
   static bool openlog_already_called = false;
   if (!openlog_already_called) {
-    openlog(glog_internal_namespace_::ProgramInvocationShortName(),
+    openlog(tools::ProgramInvocationShortName(),
             LOG_CONS | LOG_NDELAY | LOG_PID, LOG_USER);
     openlog_already_called = true;
   }
@@ -2089,7 +2081,7 @@ void SetExitOnDFatal(bool value) {
 }  // namespace internal
 }  // namespace base
 
-#ifndef GLOG_OS_EMSCRIPTEN
+#ifndef NGLOG_OS_EMSCRIPTEN
 // Shell-escaping as we need to shell out ot /bin/mail.
 static const char kDontNeedShellEscapeChars[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -2138,7 +2130,7 @@ static inline void trim(std::string& s) {
 // log_mutex.
 static bool SendEmailInternal(const char* dest, const char* subject,
                               const char* body, bool use_logging) {
-#ifndef GLOG_OS_EMSCRIPTEN
+#ifndef NGLOG_OS_EMSCRIPTEN
   if (dest && *dest) {
     // Split the comma-separated list of email addresses, validate each one and
     // build a sanitized new comma-separated string without whitespace.
@@ -2245,7 +2237,7 @@ bool SendEmail(const char* dest, const char* subject, const char* body) {
 
 static void GetTempDirectories(vector<string>& list) {
   list.clear();
-#ifdef GLOG_OS_WINDOWS
+#ifdef NGLOG_OS_WINDOWS
   // On windows we'll try to find a directory in this order:
   //   C:/Documents & Settings/whomever/TEMP (or whatever GetTempPath() is)
   //   C:/TMP/
@@ -2306,7 +2298,7 @@ const vector<string>& GetLoggingDirectories() {
       }
     } else {
       GetTempDirectories(*logging_directories_list);
-#ifdef GLOG_OS_WINDOWS
+#ifdef NGLOG_OS_WINDOWS
       char tmp[MAX_PATH];
       if (GetWindowsDirectoryA(tmp, MAX_PATH))
         logging_directories_list->push_back(tmp);
@@ -2322,7 +2314,7 @@ const vector<string>& GetLoggingDirectories() {
 // Returns a set of existing temporary directories, which will be a
 // subset of the directories returned by GetLoggingDirectories().
 // Thread-safe.
-GLOG_NO_EXPORT
+NGLOG_NO_EXPORT
 void GetExistingTempDirectories(vector<string>& list) {
   GetTempDirectories(list);
   auto i_dir = list.begin();
@@ -2346,7 +2338,7 @@ void TruncateLogFile(const char* path, uint64 limit, uint64 keep) {
   // Don't follow symlinks unless they're our own fd symlinks in /proc
   int flags = O_RDWR;
   // TODO(hamaji): Support other environments.
-#  ifdef GLOG_OS_LINUX
+#  ifdef NGLOG_OS_LINUX
   const char* procfd_prefix = "/proc/self/fd/";
   if (strncmp(procfd_prefix, path, strlen(procfd_prefix))) flags |= O_NOFOLLOW;
 #  endif
@@ -2434,7 +2426,6 @@ void TruncateStdoutStderr() {
 #endif
 }
 
-namespace logging {
 namespace internal {
 // Helper functions for string comparisons.
 #define DEFINE_CHECK_STROP_IMPL(name, func, expected)                         \
@@ -2457,7 +2448,6 @@ DEFINE_CHECK_STROP_IMPL(CHECK_STRCASEEQ, strcasecmp, true)
 DEFINE_CHECK_STROP_IMPL(CHECK_STRCASENE, strcasecmp, false)
 #undef DEFINE_CHECK_STROP_IMPL
 }  // namespace internal
-}  // namespace logging
 
 // glibc has traditionally implemented two incompatible versions of
 // strerror_r(). There is a poorly defined convention for picking the
@@ -2470,7 +2460,7 @@ DEFINE_CHECK_STROP_IMPL(CHECK_STRCASENE, strcasecmp, false)
 // cases, you do not need to check the error code and you can directly
 // use the value of "buf". It will never have an undefined value.
 // DEPRECATED: Use StrError(int) instead.
-GLOG_NO_EXPORT
+NGLOG_NO_EXPORT
 int posix_strerror_r(int err, char* buf, size_t len) {
   // Sanity check input parameters
   if (buf == nullptr || len <= 0) {
@@ -2509,8 +2499,8 @@ int posix_strerror_r(int err, char* buf, size_t len) {
       return 0;
     } else {
       buf[0] = '\000';
-#if defined(GLOG_OS_MACOSX) || defined(GLOG_OS_FREEBSD) || \
-    defined(GLOG_OS_OPENBSD)
+#if defined(NGLOG_OS_MACOSX) || defined(NGLOG_OS_FREEBSD) || \
+    defined(NGLOG_OS_OPENBSD)
       if (reinterpret_cast<intptr_t>(rc) < sys_nerr) {
         // This means an error on MacOSX or FreeBSD.
         return -1;
@@ -2534,10 +2524,10 @@ string StrError(int err) {
 }
 
 LogMessageFatal::LogMessageFatal(const char* file, int line)
-    : LogMessage(file, line, GLOG_FATAL) {}
+    : LogMessage(file, line, NGLOG_FATAL) {}
 
 LogMessageFatal::LogMessageFatal(const char* file, int line,
-                                 const logging::internal::CheckOpString& result)
+                                 const internal::CheckOpString& result)
     : LogMessage(file, line, result) {}
 
 LogMessageFatal::~LogMessageFatal() noexcept(false) {
@@ -2545,7 +2535,6 @@ LogMessageFatal::~LogMessageFatal() noexcept(false) {
   LogMessage::Fail();
 }
 
-namespace logging {
 namespace internal {
 
 CheckOpMessageBuilder::CheckOpMessageBuilder(const char* exprtext)
@@ -2598,9 +2587,8 @@ void MakeCheckOpValueString(std::ostream* os, const std::nullptr_t& /*v*/) {
 }
 
 }  // namespace internal
-}  // namespace logging
 
-void InitGoogleLogging(const char* argv0) { InitGoogleLoggingUtilities(argv0); }
+void InitializeLogging(const char* argv0) { InitializeLoggingUtilities(argv0); }
 
 void InstallPrefixFormatter(PrefixFormatterCallback callback, void* data) {
   if (callback != nullptr) {
@@ -2610,8 +2598,8 @@ void InstallPrefixFormatter(PrefixFormatterCallback callback, void* data) {
   }
 }
 
-void ShutdownGoogleLogging() {
-  ShutdownGoogleLoggingUtilities();
+void ShutdownLogging() {
+  ShutdownLoggingUtilities();
   LogDestination::DeleteLogDestinations();
   logging_directories_list = nullptr;
   g_prefix_formatter = nullptr;
@@ -2709,4 +2697,4 @@ LogMessageTime::LogMessageTime(std::chrono::system_clock::time_point now)
       now - std::chrono::system_clock::from_time_t(timestamp));
 }
 
-}  // namespace google
+}  // namespace nglog

@@ -1,10 +1,10 @@
 cmake_minimum_required (VERSION 3.16)
-project (glog_log_severity LANGUAGES CXX)
+project (ng-log_log_severity LANGUAGES CXX)
 
-find_package (glog REQUIRED NO_MODULE)
+find_package (ng-log REQUIRED NO_MODULE)
 
-add_executable (glog_log_severity_constants glog_log_severity_constants.cc)
-target_link_libraries (glog_log_severity_constants PRIVATE glog::glog)
+add_executable (ng-log_log_severity_constants ng-log_log_severity_constants.cc)
+target_link_libraries (ng-log_log_severity_constants PRIVATE ng-log::ng-log)
 
-add_executable (glog_log_severity_conversion glog_log_severity_conversion.cc)
-target_link_libraries (glog_log_severity_conversion PRIVATE glog::glog)
+add_executable (ng-log_log_severity_conversion ng-log_log_severity_conversion.cc)
+target_link_libraries (ng-log_log_severity_conversion PRIVATE ng-log::ng-log)

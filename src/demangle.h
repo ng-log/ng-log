@@ -67,28 +67,28 @@
 // C++ ABI in the future.
 //
 
-#ifndef GLOG_INTERNAL_DEMANGLE_H
-#define GLOG_INTERNAL_DEMANGLE_H
+#ifndef NGLOG_INTERNAL_DEMANGLE_H
+#define NGLOG_INTERNAL_DEMANGLE_H
 
 #include <cstddef>
 
-#if defined(GLOG_USE_GLOG_EXPORT)
-#  include "glog/export.h"
+#if defined(NGLOG_USE_EXPORT)
+#  include "ng-log/export.h"
 #endif
 
-#if !defined(GLOG_NO_EXPORT)
+#if !defined(NGLOG_NO_EXPORT)
 #  error "demangle.h" was not included correctly.
 #endif
 
-namespace google {
-inline namespace glog_internal_namespace_ {
+namespace nglog {
+inline namespace tools {
 
 // Demangle "mangled".  On success, return true and write the
 // demangled symbol name to "out".  Otherwise, return false.
 // "out" is modified even if demangling is unsuccessful.
-bool GLOG_NO_EXPORT Demangle(const char* mangled, char* out, size_t out_size);
+bool NGLOG_NO_EXPORT Demangle(const char* mangled, char* out, size_t out_size);
 
-}  // namespace glog_internal_namespace_
-}  // namespace google
+}  // namespace tools
+}  // namespace nglog
 
-#endif  // GLOG_INTERNAL_DEMANGLE_H
+#endif  // NGLOG_INTERNAL_DEMANGLE_H

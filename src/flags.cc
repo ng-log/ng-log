@@ -28,19 +28,19 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
 
-#include "glog/flags.h"
+#include "ng-log/flags.h"
 
 #include <cstdlib>
 #include <cstring>
 
 #include "base/commandlineflags.h"
-#include "glog/log_severity.h"
+#include "ng-log/log_severity.h"
 
 namespace {
 
 // Compute the default value for --log_dir
 static const char* DefaultLogDir() {
-  constexpr const char* const names[]{"GOOGLE_LOG_DIR", "TEST_TMPDIR"};
+  constexpr const char* const names[]{"NGLOG_DIR", "TEST_TMPDIR"};
   for (const char* const name : names) {
     const char* const env = std::getenv(name);
     if (env != nullptr && env[0] != '\0') {
@@ -60,21 +60,21 @@ bool BoolFromEnv(const char* varname, bool defval) {
 
 }  // namespace
 
-GLOG_DEFINE_bool(timestamp_in_logfile_name,
-                 BoolFromEnv("GOOGLE_TIMESTAMP_IN_LOGFILE_NAME", true),
-                 "put a timestamp at the end of the log file name");
-GLOG_DEFINE_bool(logtostderr, BoolFromEnv("GOOGLE_LOGTOSTDERR", false),
-                 "log messages go to stderr instead of logfiles");
-GLOG_DEFINE_bool(alsologtostderr, BoolFromEnv("GOOGLE_ALSOLOGTOSTDERR", false),
-                 "log messages go to stderr in addition to logfiles");
-GLOG_DEFINE_bool(colorlogtostderr, false,
-                 "color messages logged to stderr (if supported by terminal)");
-GLOG_DEFINE_bool(colorlogtostdout, false,
-                 "color messages logged to stdout (if supported by terminal)");
-GLOG_DEFINE_bool(logtostdout, BoolFromEnv("GOOGLE_LOGTOSTDOUT", false),
-                 "log messages go to stdout instead of logfiles");
-#ifdef GLOG_OS_LINUX
-GLOG_DEFINE_bool(
+NGLOG_DEFINE_bool(timestamp_in_logfile_name,
+                  BoolFromEnv("NGLOG_TIMESTAMP_IN_LOGFILE_NAME", true),
+                  "put a timestamp at the end of the log file name");
+NGLOG_DEFINE_bool(logtostderr, BoolFromEnv("NGLOG_LOGTOSTDERR", false),
+                  "log messages go to stderr instead of logfiles");
+NGLOG_DEFINE_bool(alsologtostderr, BoolFromEnv("NGLOG_ALSOLOGTOSTDERR", false),
+                  "log messages go to stderr in addition to logfiles");
+NGLOG_DEFINE_bool(colorlogtostderr, false,
+                  "color messages logged to stderr (if supported by terminal)");
+NGLOG_DEFINE_bool(colorlogtostdout, false,
+                  "color messages logged to stdout (if supported by terminal)");
+NGLOG_DEFINE_bool(logtostdout, BoolFromEnv("NGLOG_LOGTOSTDOUT", false),
+                  "log messages go to stdout instead of logfiles");
+#ifdef NGLOG_OS_LINUX
+NGLOG_DEFINE_bool(
     drop_log_memory, true,
     "Drop in-memory buffers of log contents. "
     "Logs can grow very quickly and they are rarely read before they "
@@ -87,66 +87,66 @@ GLOG_DEFINE_bool(
 //
 // The default is ERROR instead of FATAL so that users can see problems
 // when they run a program without having to look in another file.
-GLOG_DEFINE_int32(
-    stderrthreshold, google::GLOG_ERROR,
+NGLOG_DEFINE_int32(
+    stderrthreshold, nglog::NGLOG_ERROR,
     "log messages at or above this level are copied to stderr in "
     "addition to logfiles.  This flag obsoletes --alsologtostderr.");
 
-GLOG_DEFINE_string(alsologtoemail, "",
-                   "log messages go to these email addresses "
-                   "in addition to logfiles");
-GLOG_DEFINE_bool(log_file_header, true,
-                 "Write the file header at the start of each log file");
-GLOG_DEFINE_bool(log_prefix, true,
-                 "Prepend the log prefix to the start of each log line");
-GLOG_DEFINE_bool(log_year_in_prefix, true,
-                 "Include the year in the log prefix");
-GLOG_DEFINE_int32(minloglevel, 0,
-                  "Messages logged at a lower level than this don't "
-                  "actually get logged anywhere");
-GLOG_DEFINE_int32(logbuflevel, 0,
-                  "Buffer log messages logged at this level or lower"
-                  " (-1 means don't buffer; 0 means buffer INFO only;"
-                  " ...)");
-GLOG_DEFINE_int32(logbufsecs, 30,
-                  "Buffer log messages for at most this many seconds");
+NGLOG_DEFINE_string(alsologtoemail, "",
+                    "log messages go to these email addresses "
+                    "in addition to logfiles");
+NGLOG_DEFINE_bool(log_file_header, true,
+                  "Write the file header at the start of each log file");
+NGLOG_DEFINE_bool(log_prefix, true,
+                  "Prepend the log prefix to the start of each log line");
+NGLOG_DEFINE_bool(log_year_in_prefix, true,
+                  "Include the year in the log prefix");
+NGLOG_DEFINE_int32(minloglevel, 0,
+                   "Messages logged at a lower level than this don't "
+                   "actually get logged anywhere");
+NGLOG_DEFINE_int32(logbuflevel, 0,
+                   "Buffer log messages logged at this level or lower"
+                   " (-1 means don't buffer; 0 means buffer INFO only;"
+                   " ...)");
+NGLOG_DEFINE_int32(logbufsecs, 30,
+                   "Buffer log messages for at most this many seconds");
 
-GLOG_DEFINE_int32(logcleansecs, 60 * 5,  // every 5 minutes
-                  "Clean overdue logs every this many seconds");
+NGLOG_DEFINE_int32(logcleansecs, 60 * 5,  // every 5 minutes
+                   "Clean overdue logs every this many seconds");
 
-GLOG_DEFINE_int32(logemaillevel, 999,
-                  "Email log messages logged at this level or higher"
-                  " (0 means email all; 3 means email FATAL only;"
-                  " ...)");
-GLOG_DEFINE_string(logmailer, "", "Mailer used to send logging email");
+NGLOG_DEFINE_int32(logemaillevel, 999,
+                   "Email log messages logged at this level or higher"
+                   " (0 means email all; 3 means email FATAL only;"
+                   " ...)");
+NGLOG_DEFINE_string(logmailer, "", "Mailer used to send logging email");
 
-GLOG_DEFINE_int32(logfile_mode, 0664, "Log file mode/permissions.");
+NGLOG_DEFINE_int32(logfile_mode, 0664, "Log file mode/permissions.");
 
-GLOG_DEFINE_string(
+NGLOG_DEFINE_string(
     log_dir, DefaultLogDir(),
     "If specified, logfiles are written into this directory instead "
     "of the default logging directory.");
-GLOG_DEFINE_string(log_link, "",
-                   "Put additional links to the log "
-                   "files in this directory");
+NGLOG_DEFINE_string(log_link, "",
+                    "Put additional links to the log "
+                    "files in this directory");
 
-GLOG_DEFINE_uint32(max_log_size, 1800,
-                   "approx. maximum log file size (in MB). A value of 0 will "
-                   "be silently overridden to 1.");
+NGLOG_DEFINE_uint32(max_log_size, 1800,
+                    "approx. maximum log file size (in MB). A value of 0 will "
+                    "be silently overridden to 1.");
 
-GLOG_DEFINE_bool(stop_logging_if_full_disk, false,
-                 "Stop attempting to log to disk if the disk is full.");
+NGLOG_DEFINE_bool(stop_logging_if_full_disk, false,
+                  "Stop attempting to log to disk if the disk is full.");
 
-GLOG_DEFINE_string(log_backtrace_at, "",
-                   "Emit a backtrace when logging at file:linenum.");
+NGLOG_DEFINE_string(log_backtrace_at, "",
+                    "Emit a backtrace when logging at file:linenum.");
 
-GLOG_DEFINE_bool(log_utc_time, false, "Use UTC time for logging.");
+NGLOG_DEFINE_bool(log_utc_time, false, "Use UTC time for logging.");
 
-GLOG_DEFINE_int32(v, 0,
-                  "Show all VLOG(m) messages for m <= this."
-                  " Overridable by --vmodule.");
+NGLOG_DEFINE_int32(v, 0,
+                   "Show all VLOG(m) messages for m <= this."
+                   " Overridable by --vmodule.");
 
-GLOG_DEFINE_string(
+NGLOG_DEFINE_string(
     vmodule, "",
     "per-module verbose level."
     " Argument is a comma-separated list of <module name>=<log level>."
@@ -154,5 +154,5 @@ GLOG_DEFINE_string(
     " (that is, name ignoring .cc/.h./-inl.h)."
     " <log level> overrides any value given by --v.");
 
-GLOG_DEFINE_bool(symbolize_stacktrace, true,
-                 "Symbolize the stack trace in the tombstone");
+NGLOG_DEFINE_bool(symbolize_stacktrace, true,
+                  "Symbolize the stack trace in the tombstone");

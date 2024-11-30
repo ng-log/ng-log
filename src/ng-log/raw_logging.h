@@ -33,21 +33,21 @@
 // acquire any locks, and can therefore be used by low-level memory
 // allocation and synchronization code.
 
-#ifndef GLOG_RAW_LOGGING_H
-#define GLOG_RAW_LOGGING_H
+#ifndef NGLOG_RAW_LOGGING_H
+#define NGLOG_RAW_LOGGING_H
 
-#if defined(GLOG_USE_GLOG_EXPORT)
-#  include "glog/export.h"
+#if defined(NGLOG_USE_EXPORT)
+#  include "ng-log/export.h"
 #endif
 
-#if !defined(GLOG_EXPORT)
-#  error <glog/raw_logging.h> was not included correctly. See the documentation for how to consume the library.
+#if !defined(NGLOG_EXPORT)
+#  error <ng-log/raw_logging.h> was not included correctly. See the documentation for how to consume the library.
 #endif
 
-#include "glog/log_severity.h"
-#include "glog/vlog_is_on.h"
+#include "ng-log/log_severity.h"
+#include "ng-log/vlog_is_on.h"
 
-namespace google {
+namespace nglog {
 
 // This is similar to LOG(severity) << format... and VLOG(level) << format..,
 // but
@@ -65,7 +65,7 @@ namespace google {
 //   I20200821 211317 file.cc:142] RAW: status is 20
 #define RAW_LOG(severity, ...)         \
   do {                                 \
-    switch (google::GLOG_##severity) { \
+    switch (nglog::NGLOG_##severity) { \
       case 0:                          \
         RAW_LOG_INFO(__VA_ARGS__);     \
         break;                         \
@@ -83,9 +83,10 @@ namespace google {
     }                                  \
   } while (0)
 
-// The following STRIP_LOG testing is performed in the header file so that it's
-// possible to completely compile out the logging code and the log messages.
-#if !defined(STRIP_LOG) || STRIP_LOG == 0
+// The following NGLOG_STRIP_LOG testing is performed in the header file so that
+// it's possible to completely compile out the logging code and the log
+// messages.
+#if !defined(NGLOG_STRIP_LOG) || NGLOG_STRIP_LOG == 0
 #  define RAW_VLOG(verboselevel, ...) \
     do {                              \
       if (VLOG_IS_ON(verboselevel)) { \
@@ -93,40 +94,40 @@ namespace google {
       }                               \
     } while (0)
 #else
-#  define RAW_VLOG(verboselevel, ...) RawLogStub__(0, __VA_ARGS__)
-#endif  // STRIP_LOG == 0
+#  define RAW_VLOG(verboselevel, ...) RawLogStub(0, __VA_ARGS__)
+#endif  // NGLOG_STRIP_LOG == 0
 
-#if !defined(STRIP_LOG) || STRIP_LOG == 0
+#if !defined(NGLOG_STRIP_LOG) || NGLOG_STRIP_LOG == 0
 #  define RAW_LOG_INFO(...) \
-    google::RawLog__(google::GLOG_INFO, __FILE__, __LINE__, __VA_ARGS__)
+    nglog::RawLog(nglog::NGLOG_INFO, __FILE__, __LINE__, __VA_ARGS__)
 #else
-#  define RAW_LOG_INFO(...) google::RawLogStub__(0, __VA_ARGS__)
-#endif  // STRIP_LOG == 0
+#  define RAW_LOG_INFO(...) nglog::RawLogStub(0, __VA_ARGS__)
+#endif  // NGLOG_STRIP_LOG == 0
 
-#if !defined(STRIP_LOG) || STRIP_LOG <= 1
+#if !defined(NGLOG_STRIP_LOG) || NGLOG_STRIP_LOG <= 1
 #  define RAW_LOG_WARNING(...) \
-    google::RawLog__(google::GLOG_WARNING, __FILE__, __LINE__, __VA_ARGS__)
+    nglog::RawLog(nglog::NGLOG_WARNING, __FILE__, __LINE__, __VA_ARGS__)
 #else
-#  define RAW_LOG_WARNING(...) google::RawLogStub__(0, __VA_ARGS__)
-#endif  // STRIP_LOG <= 1
+#  define RAW_LOG_WARNING(...) nglog::RawLogStub(0, __VA_ARGS__)
+#endif  // NGLOG_STRIP_LOG <= 1
 
-#if !defined(STRIP_LOG) || STRIP_LOG <= 2
+#if !defined(NGLOG_STRIP_LOG) || NGLOG_STRIP_LOG <= 2
 #  define RAW_LOG_ERROR(...) \
-    google::RawLog__(google::GLOG_ERROR, __FILE__, __LINE__, __VA_ARGS__)
+    nglog::RawLog(nglog::NGLOG_ERROR, __FILE__, __LINE__, __VA_ARGS__)
 #else
-#  define RAW_LOG_ERROR(...) google::RawLogStub__(0, __VA_ARGS__)
-#endif  // STRIP_LOG <= 2
+#  define RAW_LOG_ERROR(...) nglog::RawLogStub(0, __VA_ARGS__)
+#endif  // NGLOG_STRIP_LOG <= 2
 
-#if !defined(STRIP_LOG) || STRIP_LOG <= 3
+#if !defined(NGLOG_STRIP_LOG) || NGLOG_STRIP_LOG <= 3
 #  define RAW_LOG_FATAL(...) \
-    google::RawLog__(google::GLOG_FATAL, __FILE__, __LINE__, __VA_ARGS__)
+    nglog::RawLog(nglog::NGLOG_FATAL, __FILE__, __LINE__, __VA_ARGS__)
 #else
-#  define RAW_LOG_FATAL(...)                \
-    do {                                    \
-      google::RawLogStub__(0, __VA_ARGS__); \
-      exit(EXIT_FAILURE);                   \
+#  define RAW_LOG_FATAL(...)             \
+    do {                                 \
+      nglog::RawLogStub(0, __VA_ARGS__); \
+      exit(EXIT_FAILURE);                \
     } while (0)
-#endif  // STRIP_LOG <= 3
+#endif  // NGLOG_STRIP_LOG <= 3
 
 // Similar to CHECK(condition) << message,
 // but for low-level modules: we use only RAW_LOG that does not allocate memory.
@@ -156,21 +157,21 @@ namespace google {
 #endif  // NDEBUG
 
 // Stub log function used to work around for unused variable warnings when
-// building with STRIP_LOG > 0.
-static inline void RawLogStub__(int /* ignored */, ...) {}
+// building with NGLOG_STRIP_LOG > 0.
+static inline void RawLogStub(int /* ignored */, ...) {}
 
 // Helper function to implement RAW_LOG and RAW_VLOG
 // Logs format... at "severity" level, reporting it
 // as called from file:line.
 // This does not allocate memory or acquire locks.
-GLOG_EXPORT void RawLog__(LogSeverity severity, const char* file, int line,
-                          const char* format, ...)
+NGLOG_EXPORT void RawLog(LogSeverity severity, const char* file, int line,
+                         const char* format, ...)
 #if defined(__has_attribute)
 #  if __has_attribute(used)
     __attribute__((__format__(__printf__, 4, 5)))
 #  endif
 #endif
     ;
-}  // namespace google
+}  // namespace nglog
 
-#endif  // GLOG_RAW_LOGGING_H
+#endif  // NGLOG_RAW_LOGGING_H

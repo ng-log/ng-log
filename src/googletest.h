@@ -56,35 +56,36 @@
 #  include <unistd.h>
 #endif
 
-#if defined(GLOG_USE_WINDOWS_PORT)
+#if defined(NGLOG_USE_WINDOWS_PORT)
 #  include "port.h"
-#endif  // defined(GLOG_USE_WINDOWS_PORT)
+#endif  // defined(NGLOG_USE_WINDOWS_PORT)
 #include "base/commandlineflags.h"
+#include "ng-log/logging.h"
 #include "utilities.h"
 
 #if __cplusplus < 201103L && !defined(_MSC_VER)
-#  define GOOGLE_GLOG_THROW_BAD_ALLOC throw(std::bad_alloc)
+#  define NGLOG_GLOG_THROW_BAD_ALLOC throw(std::bad_alloc)
 #else
-#  define GOOGLE_GLOG_THROW_BAD_ALLOC
+#  define NGLOG_GLOG_THROW_BAD_ALLOC
 #endif
 
 using std::map;
 using std::string;
 using std::vector;
 
-namespace google {
+namespace nglog {
 extern void (*g_logging_fail_func)();
 extern void GetExistingTempDirectories(std::vector<std::string>& list);
 extern int posix_strerror_r(int err, char* buf, size_t len);
 extern std::string StrError(int err);
-}  // namespace google
+}  // namespace nglog
 
-#undef GLOG_EXPORT
-#define GLOG_EXPORT
+#undef NGLOG_EXPORT
+#define NGLOG_EXPORT
 
 static inline string GetTempDir() {
   vector<string> temp_directories_list;
-  google::GetExistingTempDirectories(temp_directories_list);
+  nglog::GetExistingTempDirectories(temp_directories_list);
 
   if (temp_directories_list.empty()) {
     fprintf(stderr, "No temporary directory found\n");
@@ -95,7 +96,7 @@ static inline string GetTempDir() {
   return temp_directories_list.front();
 }
 
-#if defined(GLOG_OS_WINDOWS) && defined(_MSC_VER) && !defined(TEST_SRC_DIR)
+#if defined(NGLOG_OS_WINDOWS) && defined(_MSC_VER) && !defined(TEST_SRC_DIR)
 // The test will run in glog/vsproject/<project name>
 // (e.g., glog/vsproject/logging_unittest).
 static const char TEST_SRC_DIR[] = "../..";
@@ -108,7 +109,7 @@ static const uint32_t PTR_TEST_VALUE = 0x12345678;
 
 DEFINE_string(test_tmpdir, GetTempDir(), "Dir we use for temp files");
 DEFINE_string(test_srcdir, TEST_SRC_DIR,
-              "Source-dir root, needed to find glog_unittest_flagfile");
+              "Source-dir root, needed to find nglog_unittest_flagfile");
 DEFINE_bool(run_benchmark, false, "If true, run benchmarks");
 #ifdef NDEBUG
 DEFINE_int32(benchmark_iters, 100000000, "Number of iterations per benchmark");
@@ -124,7 +125,7 @@ DEFINE_int32(benchmark_iters, 100000, "Number of iterations per benchmark");
 using testing::InitGoogleTest;
 #else
 
-namespace google {
+namespace nglog {
 
 void InitGoogleTest(int*, char**);
 
@@ -231,11 +232,11 @@ static inline int RUN_ALL_TESTS() {
   return 0;
 }
 
-}  // namespace google
+}  // namespace nglog
 
 #endif  // ! HAVE_LIB_GTEST
 
-namespace google {
+namespace nglog {
 
 static bool g_called_abort;
 static jmp_buf g_jmp_buf;
@@ -244,7 +245,7 @@ static inline void CalledAbort() {
   longjmp(g_jmp_buf, 1);
 }
 
-#ifdef GLOG_OS_WINDOWS
+#ifdef NGLOG_OS_WINDOWS
 // TODO(hamaji): Death test somehow doesn't work in Windows.
 #  define ASSERT_DEATH(fn, msg)
 #else
@@ -534,7 +535,7 @@ static inline bool MungeAndDiffTest(const string& golden_filename,
     WriteToFile(golden, munged_golden);
     string munged_captured = cap->filename() + ".munged";
     WriteToFile(captured, munged_captured);
-#ifdef GLOG_OS_WINDOWS
+#ifdef NGLOG_OS_WINDOWS
     string diffcmd("fc " + munged_golden + " " + munged_captured);
 #else
     string diffcmd("diff -u " + munged_golden + " " + munged_captured);
@@ -561,7 +562,7 @@ static inline bool MungeAndDiffTestStdout(const string& golden_filename) {
 }
 
 // Save flags used from logging_unittest.cc.
-#ifndef GLOG_USE_GFLAGS
+#ifndef NGLOG_USE_GFLAGS
 struct FlagSaver {
   FlagSaver()
       : v_(FLAGS_v),
@@ -588,16 +589,16 @@ struct FlagSaver {
 
 void (*g_new_hook)() = nullptr;
 
-}  // namespace google
+}  // namespace nglog
 
 void* operator new(size_t size, const std::nothrow_t&) noexcept {
-  if (google::g_new_hook) {
-    google::g_new_hook();
+  if (nglog::g_new_hook) {
+    nglog::g_new_hook();
   }
   return malloc(size);
 }
 
-void* operator new(size_t size) GOOGLE_GLOG_THROW_BAD_ALLOC {
+void* operator new(size_t size) NGLOG_GLOG_THROW_BAD_ALLOC {
   void* p = ::operator new(size, std::nothrow);
   if (p == nullptr) {
     throw std::bad_alloc{};
@@ -605,7 +606,7 @@ void* operator new(size_t size) GOOGLE_GLOG_THROW_BAD_ALLOC {
   return p;
 }
 
-void* operator new[](size_t size) GOOGLE_GLOG_THROW_BAD_ALLOC {
+void* operator new[](size_t size) NGLOG_GLOG_THROW_BAD_ALLOC {
   return ::operator new(size);
 }
 

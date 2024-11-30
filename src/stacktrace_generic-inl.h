@@ -37,8 +37,8 @@
 
 #include "stacktrace.h"
 
-namespace google {
-inline namespace glog_internal_namespace_ {
+namespace nglog {
+inline namespace tools {
 
 // If you change this function, also change GetStackFrames below.
 int GetStackTrace(void** result, int max_depth, int skip_count) {
@@ -62,5 +62,5 @@ int GetStackTrace(void** result, int max_depth, int skip_count) {
   return result_count;
 }
 
-}  // namespace glog_internal_namespace_
-}  // namespace google
+}  // namespace tools
+}  // namespace nglog

@@ -30,7 +30,7 @@
 // Author: Sergiu Deitsch
 //
 
-#include <glog/logging.h>
+#include <ng-log/logging.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -39,12 +39,12 @@
 
 namespace {
 
-struct MyLogSink : google::LogSink {  // (1)!
-  void send(google::LogSeverity severity, const char* /*full_filename*/,
+struct MyLogSink : nglog::LogSink {  // (1)!
+  void send(nglog::LogSeverity severity, const char* /*full_filename*/,
             const char* base_filename, int line,
-            const google::LogMessageTime& /*time*/, const char* message,
+            const nglog::LogMessageTime& /*time*/, const char* message,
             std::size_t message_len) override {
-    std::cout << google::GetLogSeverityName(severity) << ' ' << base_filename
+    std::cout << nglog::GetLogSeverityName(severity) << ' ' << base_filename
               << ':' << line << ' ';
     std::copy_n(message, message_len,
                 std::ostreambuf_iterator<char>{std::cout});
@@ -55,14 +55,14 @@ struct MyLogSink : google::LogSink {  // (1)!
 }  // namespace
 
 int main(int /*argc*/, char** argv) {
-  google::InitGoogleLogging(argv[0]);
+  nglog::InitializeLogging(argv[0]);
 
   MyLogSink sink;
-  google::AddLogSink(&sink);  // (2)!
+  nglog::AddLogSink(&sink);  // (2)!
 
   LOG(INFO) << "logging to MySink";
 
-  google::RemoveLogSink(&sink);  // (3)!
+  nglog::RemoveLogSink(&sink);  // (3)!
 
   // We can directly log to a sink without registering it
   LOG_TO_SINK(&sink, INFO) << "direct logging";  // (4)!

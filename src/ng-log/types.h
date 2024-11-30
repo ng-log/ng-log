@@ -1,3 +1,4 @@
+
 // Copyright (c) 2024, Google Inc.
 // All rights reserved.
 //
@@ -27,27 +28,54 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Author: Sergiu Deitsch
 
-#include <glog/logging.h>
+#ifndef NGLOG_TYPES_H
+#define NGLOG_TYPES_H
 
-int main(int /*argc*/, char** argv) {
-  google::InitGoogleLogging(argv[0]);
-  google::InstallFailureSignalHandler();
+#include <cstddef>
+#include <cstdint>
+
+namespace nglog {
+
+using int32 = std::int32_t;
+using uint32 = std::uint32_t;
+using int64 = std::int64_t;
+using uint64 = std::uint64_t;
+
+}  // namespace nglog
+
+#if defined(__has_feature)
+#  if __has_feature(thread_sanitizer)
+#    define NGLOG_SANITIZE_THREAD 1
+#  endif
+#endif
+
+#if !defined(NGLOG_SANITIZE_THREAD) && defined(__SANITIZE_THREAD__) && \
+    __SANITIZE_THREAD__
+#  define NGLOG_SANITIZE_THREAD 1
+#endif
+
+#if defined(NGLOG_SANITIZE_THREAD)
+#  define NGLOG_IFDEF_THREAD_SANITIZER(X) X
+#else
+#  define NGLOG_IFDEF_THREAD_SANITIZER(X)
+#endif
 
 #if defined(_MSC_VER)
-  // Avoid presenting an interactive dialog that will cause the test to time
-  // out.
-  _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
-#endif  // defined(_MSC_VER)
+#  define NGLOG_MSVC_PUSH_DISABLE_WARNING(n) \
+    __pragma(warning(push)) __pragma(warning(disable : n))
+#  define NGLOG_MSVC_POP_WARNING() __pragma(warning(pop))
+#else
+#  define NGLOG_MSVC_PUSH_DISABLE_WARNING(n)
+#  define NGLOG_MSVC_POP_WARNING()
+#endif
 
-  DLOG(INFO) << "no output";
-  DLOG(WARNING) << "no output";
-  DLOG(ERROR) << "no output";
+#if defined(NGLOG_SANITIZE_THREAD)
+// We need to identify the static variables as "benign" races
+// to avoid noisy reports from TSAN.
+extern "C" void AnnotateBenignRaceSized(const char* file, int line,
+                                        const volatile void* mem, size_t size,
+                                        const char* description);
+#endif  // defined(NGLOG_SANITIZE_THREAD)
 
-  // Must not fail in release build
-  DLOG_ASSERT(false);
-
-  // Must be the last expression
-  DLOG(FATAL) << "no output";
-}
+#endif  // NGLOG_TYPES_H

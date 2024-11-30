@@ -1,8 +1,8 @@
 # Logging
 
-glog defines a series of macros that simplify many common logging tasks. You can
-log messages by [severity level](#severity-levels), [control logging](flags.md)
-behavior from the command line, log based on
+ng-log defines a series of macros that simplify many common logging tasks. You
+can log messages by [severity level](#severity-levels), [control
+logging](flags.md) behavior from the command line, log based on
 [conditionals](#conditional-occasional-logging), abort the program when
 [expected conditions](#runtime-checks) are not met, introduce your [own logging
 levels](#verbose-logging), [customize the prefix](#format-customization)
@@ -33,7 +33,7 @@ production by automatically reducing the severity to `ERROR`.
 
 ## Log Files
 
-Unless otherwise specified, glog uses the format
+Unless otherwise specified, ng-log uses the format
 
     <tmp>/<program name>.<hostname>.<user name>.log.<severity level>.<date>-<time>.<pid>
 
@@ -42,7 +42,7 @@ determined according to the following rules.
 
 **Windows**
 
-:   glog uses the
+:   ng-log uses the
     [GetTempPathA](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-gettemppatha)
     API function to retrieve the directory for temporary files with a
     fallback to
@@ -65,7 +65,7 @@ The default path to a log file on Linux, for instance, could be
 
     /tmp/hello_world.example.com.hamaji.log.INFO.20080709-222411.10474
 
-By default, glog echos `ERROR` and `FATAL` messages to standard error in
+By default, ng-log echos `ERROR` and `FATAL` messages to standard error in
 addition to log files.
 
 ## Log Line Prefix Format
@@ -91,8 +91,8 @@ where the fields are defined as follows:
 !!! example "Default log line prefix format"
 
     ```
-    I1103 11:57:31.739339 24395 google.cc:2341] Command line: ./some_prog
-    I1103 11:57:31.739403 24395 google.cc:2342] Process id 24395
+    I1103 11:57:31.739339 24395 nglog.cc:2341] Command line: ./some_prog
+    I1103 11:57:31.739403 24395 nglog.cc:2342] Process id 24395
     ```
 
 !!! note
@@ -106,7 +106,7 @@ The predefined log line prefix can be replaced using a user-provided callback
 that formats the corresponding output.
 
 For each log entry, the callback will be invoked with a reference to a
-`google::LogMessage` instance containing the severity, filename, line
+`nglog::LogMessage` instance containing the severity, filename, line
 number, thread ID, and time of the event. It will also be given a
 reference to the output stream, whose contents will be prepended to the actual
 message in the final log line.
@@ -114,7 +114,7 @@ message in the final log line.
 To enable the use of a prefix formatter, use the
 
 ``` cpp
-google::InstallPrefixFormatter(&MyPrefixFormatter);
+nglog::InstallPrefixFormatter(&MyPrefixFormatter);
 ```
 
 function to pass a pointer to the corresponding `MyPrefixFormatter` callback
@@ -122,13 +122,13 @@ during initialization. `InstallPrefixFormatter` takes a second optional argument
 of type `#!cpp void*` that allows supplying user data to the callback.
 
 !!! example "Custom prefix formatter"
-    The following function outputs a prefix that matches glog's default format.
+    The following function outputs a prefix that matches ng-log's default format.
     The third parameter `data` can be used to access user-supplied data which
     unless specified defaults to `#!cpp nullptr`.
 
     ``` cpp
-    void MyPrefixFormatter(std::ostream& s, const google::LogMessage& m, void* /*data*/) {
-       s << google::GetLogSeverityName(m.severity())[0]
+    void MyPrefixFormatter(std::ostream& s, const nglog::LogMessage& m, void* /*data*/) {
+       s << nglog::GetLogSeverityName(m.severity())[0]
        << setw(4) << 1900 + m.time().year()
        << setw(2) << 1 + m.time().month()
        << setw(2) << m.time().day()
@@ -161,20 +161,20 @@ useful to only log a message at certain intervals. This kind of logging is most
 useful for informational messages.
 
 ``` cpp
-LOG_EVERY_N(INFO, 10) << "Got the " << google::COUNTER << "th cookie";
+LOG_EVERY_N(INFO, 10) << "Got the " << nglog::COUNTER << "th cookie";
 ```
 
 The above line outputs a log messages on the 1st, 11th, 21st, ... times
 it is executed.
 
 !!! note
-    The placeholder `#!cpp google::COUNTER` identifies the recurring repetition.
+    The placeholder `#!cpp nglog::COUNTER` identifies the recurring repetition.
 
 You can combine conditional and occasional logging with the following
 macro.
 
 ``` cpp
-LOG_IF_EVERY_N(INFO, (size > 1024), 10) << "Got the " << google::COUNTER
+LOG_IF_EVERY_N(INFO, (size > 1024), 10) << "Got the " << nglog::COUNTER
                                         << "th big cookie";
 ```
 
@@ -182,11 +182,11 @@ Instead of outputting a message every nth time, you can also limit the
 output to the first n occurrences:
 
 ``` cpp
-LOG_FIRST_N(INFO, 20) << "Got the " << google::COUNTER << "th cookie";
+LOG_FIRST_N(INFO, 20) << "Got the " << nglog::COUNTER << "th cookie";
 ```
 
 Outputs log messages for the first 20 times it is executed. The `#!cpp
-google::COUNTER` identifier indicates which repetition is happening.
+nglog::COUNTER` identifier indicates which repetition is happening.
 
 Other times, it is desired to only log a message periodically based on a
 time. For instance, to log a message every 10ms:
@@ -203,10 +203,10 @@ LOG_EVERY_T(INFO, 2.35) << "Got a cookie";
 
 ## Verbose Logging
 
-When you are chasing difficult bugs, thorough log messages are very
-useful. However, you may want to ignore too verbose messages in usual
-development. For such verbose logging, glog provides the `VLOG` macro, which
-allows you to define your own numeric logging levels.
+When you are chasing difficult bugs, thorough log messages are very useful.
+However, you may want to ignore too verbose messages in usual development. For
+such verbose logging, ng-log provides the `VLOG` macro, which allows you to
+define your own numeric logging levels.
 
 The `#!bash --v` command line option controls which verbose messages are logged:
 
@@ -270,16 +270,16 @@ VLOG_IF(1, (size > 1024))
       "program with --v=1 or more";
 VLOG_EVERY_N(1, 10)
    << "I’m printed every 10th occurrence, and when you run the program "
-      "with --v=1 or more. Present occurrence is " << google::COUNTER;
+      "with --v=1 or more. Present occurrence is " << nglog::COUNTER;
 VLOG_IF_EVERY_N(1, (size > 1024), 10)
    << "I’m printed on every 10th occurrence of case when size is more "
       " than 1024, when you run the program with --v=1 or more. ";
-      "Present occurrence is " << google::COUNTER;
+      "Present occurrence is " << nglog::COUNTER;
 ```
 
 
 !!! info "Performance"
-    The conditional logging macros provided by glog (e.g., `CHECK`, `LOG_IF`,
+    The conditional logging macros provided by nglog (e.g., `CHECK`, `LOG_IF`,
     `VLOG`, etc.) are carefully implemented and don't execute the right hand
     side expressions when the conditions are false. So, the following check may
     not sacrifice the performance of your application.
@@ -297,8 +297,8 @@ slowing down your production application due to excessive logging.
 ``` cpp
 DLOG(INFO) << "Found cookies";
 DLOG_IF(INFO, num_cookies > 10) << "Got lots of cookies";
-DLOG_EVERY_N(INFO, 10) << "Got the " << google::COUNTER << "th cookie";
-DLOG_FIRST_N(INFO, 10) << "Got the " << google::COUNTER << "th cookie";
+DLOG_EVERY_N(INFO, 10) << "Got the " << nglog::COUNTER << "th cookie";
+DLOG_FIRST_N(INFO, 10) << "Got the " << nglog::COUNTER << "th cookie";
 DLOG_EVERY_T(INFO, 0.01) << "Got a cookie";
 ```
 
@@ -393,11 +393,11 @@ argument, which specifies the acceptable error margin.
 
 ## Raw Logging
 
-The header file `<glog/raw_logging.h>` can be used for thread-safe logging,
+The header file `<ng-log/raw_logging.h>` can be used for thread-safe logging,
 which does not allocate any memory or acquire any locks. Therefore, the macros
 defined in this header file can be used by low-level memory allocation and
 synchronization code. Please check
-[src/glog/raw_logging.h](https://github.com/google/glog/blob/master/src/glog/raw_logging.h)
+[src/ng-log/raw_logging.h](https://github.com/ng-log/ng-log/blob/master/src/ng-log/raw_logging.h)
 for detail.
 
 ## Google Style `perror()`

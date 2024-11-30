@@ -28,25 +28,25 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
 
-#ifndef GLOG_FLAGS_H
-#define GLOG_FLAGS_H
+#ifndef NGLOG_FLAGS_H
+#define NGLOG_FLAGS_H
 
 #include <string>
 
-#if defined(GLOG_USE_GFLAGS)
+#if defined(NGLOG_USE_GFLAGS)
 #  include <gflags/gflags.h>
 #endif
 
-#if defined(GLOG_USE_GLOG_EXPORT)
-#  include "glog/export.h"
+#if defined(NGLOG_USE_EXPORT)
+#  include "ng-log/export.h"
 #endif
 
-#if !defined(GLOG_EXPORT)
-#  error <glog/flags.h> was not included correctly. See the documentation for how to consume the library.
+#if !defined(NGLOG_EXPORT)
+#  error <ng-log/flags.h> was not included correctly. See the documentation for how to consume the library.
 #endif
 
-#include "glog/platform.h"
-#include "glog/types.h"
+#include "ng-log/platform.h"
+#include "ng-log/types.h"
 
 #pragma push_macro("DECLARE_VARIABLE")
 #pragma push_macro("DECLARE_bool")
@@ -77,7 +77,7 @@
 #ifndef DECLARE_VARIABLE
 #  define DECLARE_VARIABLE(type, shorttype, name, tn) \
     namespace fL##shorttype {                         \
-      extern GLOG_EXPORT type FLAGS_##name;           \
+      extern NGLOG_EXPORT type FLAGS_##name;          \
     }                                                 \
     using fL##shorttype::FLAGS_##name
 
@@ -85,27 +85,27 @@
 #  define DECLARE_bool(name) DECLARE_VARIABLE(bool, B, name, bool)
 
 // int32 specialization
-#  define DECLARE_int32(name) DECLARE_VARIABLE(google::int32, I, name, int32)
+#  define DECLARE_int32(name) DECLARE_VARIABLE(nglog::int32, I, name, int32)
 
 #  if !defined(DECLARE_uint32)
 // uint32 specialization
 #    define DECLARE_uint32(name) \
-      DECLARE_VARIABLE(google::uint32, U, name, uint32)
-#  endif  // !defined(DECLARE_uint32) && !defined(GLOG_USE_GFLAGS)
+      DECLARE_VARIABLE(nglog::uint32, U, name, uint32)
+#  endif  // !defined(DECLARE_uint32) && !defined(NGLOG_USE_GFLAGS)
 
 // Special case for string, because we have to specify the namespace
 // std::string, which doesn't play nicely with our FLAG__namespace hackery.
-#  define DECLARE_string(name)                    \
-    namespace fLS {                               \
-    extern GLOG_EXPORT std::string& FLAGS_##name; \
-    }                                             \
+#  define DECLARE_string(name)                     \
+    namespace fLS {                                \
+    extern NGLOG_EXPORT std::string& FLAGS_##name; \
+    }                                              \
     using fLS::FLAGS_##name
 #endif
 
 DECLARE_int32(logemaillevel);
 DECLARE_int32(logcleansecs);
 
-#ifdef GLOG_OS_LINUX
+#ifdef NGLOG_OS_LINUX
 DECLARE_bool(drop_log_memory);
 #endif
 DECLARE_string(alsologtoemail);
@@ -188,4 +188,4 @@ DECLARE_bool(symbolize_stacktrace);
 #pragma pop_macro("DECLARE_int32")
 #pragma pop_macro("DECLARE_uint32")
 
-#endif  // GLOG_FLAGS_H
+#endif  // NGLOG_FLAGS_H

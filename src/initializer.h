@@ -1,4 +1,4 @@
-// Copyright (c) 2024, Google Inc.
+// Copyright (c) 2008, Google Inc.
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -26,15 +26,24 @@
 // THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-//
-// Author: Sergiu Deitsch
 
-#include <glog/logging.h>
+// ---
+// Author: Jacob Hoffman-Andrews
 
-int main() {
-  // Must not compile
-  LOG(0) << "type unsafe info";
-  LOG(1) << "type unsafe info";
-  LOG(2) << "type unsafe info";
-  LOG(3) << "type unsafe info";
-}
+#ifndef NGLOG_INTERNAL_INITIALIZER_H
+#define NGLOG_INTERNAL_INITIALIZER_H
+
+class Initializer {
+ public:
+  using void_function = void (*)();
+  Initializer(const char*, void_function f) { f(); }
+};
+
+#define REGISTER_MODULE_INITIALIZER(name, body)                          \
+  namespace {                                                            \
+  static void nglog_init_module_##name() { body; }                       \
+  Initializer nglog_initializer_module_##name(#name,                     \
+                                              nglog_init_module_##name); \
+  }
+
+#endif /* NGLOG_INTERNAL_INITIALIZER_H */

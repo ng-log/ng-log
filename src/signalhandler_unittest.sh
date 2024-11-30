@@ -73,7 +73,7 @@ if [ x`uname -p` = x"powerpc" ]; then
 fi
 
 # Test for a case the program kills itself by SIGSEGV.
-GOOGLE_LOG_DIR=. $BINARY segv 2> signalhandler.out1
+NGLOG_DIR=. $BINARY segv 2> signalhandler.out1
 for pattern in SIGSEGV 0xdead main "Aborted at [0-9]"; do
   if ! grep --quiet "$pattern" signalhandler.out1; then
     die "'$pattern' should appear in the output"

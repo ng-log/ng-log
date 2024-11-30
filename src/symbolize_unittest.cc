@@ -37,18 +37,18 @@
 #include <iostream>
 
 #include "config.h"
-#include "glog/logging.h"
 #include "googletest.h"
-#include "utilities.h"
+#include "ng-log/logging.h"
 #include "stacktrace.h"
+#include "utilities.h"
 
-#ifdef GLOG_USE_GFLAGS
+#ifdef NGLOG_USE_GFLAGS
 #  include <gflags/gflags.h>
 using namespace GFLAGS_NAMESPACE;
 #endif
 
 using namespace std;
-using namespace google;
+using namespace nglog;
 
 // Avoid compile error due to "cast between pointer-to-function and
 // pointer-to-object is an extension" warnings.
@@ -62,10 +62,10 @@ using namespace google;
 #  define always_inline
 
 #  if defined(HAVE_ELF_H) || defined(HAVE_SYS_EXEC_ELF_H) || \
-      defined(GLOG_OS_WINDOWS) || defined(GLOG_OS_CYGWIN)
+      defined(NGLOG_OS_WINDOWS) || defined(NGLOG_OS_CYGWIN)
 // A wrapper function for Symbolize() to make the unit test simple.
-static const char* TrySymbolize(void* pc, google::SymbolizeOptions options =
-                                              google::SymbolizeOptions::kNone) {
+static const char* TrySymbolize(void* pc, nglog::SymbolizeOptions options =
+                                              nglog::SymbolizeOptions::kNone) {
   static char symbol[4096];
   if (Symbolize(pc, symbol, sizeof(symbol), options)) {
     return symbol;
@@ -397,7 +397,7 @@ static void ATTRIBUTE_NOINLINE TestWithReturnAddress() {
 #    if defined(HAVE_ATTRIBUTE_NOINLINE)
   void* return_address = __builtin_return_address(0);
   const char* symbol =
-      TrySymbolize(return_address, google::SymbolizeOptions::kNoLineNumbers);
+      TrySymbolize(return_address, nglog::SymbolizeOptions::kNoLineNumbers);
 
 #      if !defined(_MSC_VER) || !defined(NDEBUG)
   CHECK(symbol != nullptr);
@@ -407,7 +407,7 @@ static void ATTRIBUTE_NOINLINE TestWithReturnAddress() {
 #    endif
 }
 
-#  elif defined(GLOG_OS_WINDOWS) || defined(GLOG_OS_CYGWIN)
+#  elif defined(NGLOG_OS_WINDOWS) || defined(NGLOG_OS_CYGWIN)
 
 #    ifdef _MSC_VER
 #      include <intrin.h>
@@ -443,7 +443,7 @@ __declspec(noinline) void TestWithReturnAddress() {
 #    endif
       ;
   const char* symbol =
-      TrySymbolize(return_address, google::SymbolizeOptions::kNoLineNumbers);
+      TrySymbolize(return_address, nglog::SymbolizeOptions::kNoLineNumbers);
 #    if !defined(_MSC_VER) || !defined(NDEBUG)
   CHECK(symbol != nullptr);
   CHECK_STREQ(symbol, "main");
@@ -455,7 +455,7 @@ __declspec(noinline) void TestWithReturnAddress() {
 
 int main(int argc, char** argv) {
   FLAGS_logtostderr = true;
-  InitGoogleLogging(argv[0]);
+  InitializeLogging(argv[0]);
   InitGoogleTest(&argc, argv);
 #if defined(HAVE_SYMBOLIZE) && defined(HAVE_STACKTRACE)
 #  if defined(HAVE_ELF_H) || defined(HAVE_SYS_EXEC_ELF_H)
@@ -467,10 +467,10 @@ int main(int argc, char** argv) {
   TestWithPCInsideNonInlineFunction();
   TestWithReturnAddress();
   return RUN_ALL_TESTS();
-#  elif defined(GLOG_OS_WINDOWS) || defined(GLOG_OS_CYGWIN)
+#  elif defined(NGLOG_OS_WINDOWS) || defined(NGLOG_OS_CYGWIN)
   TestWithReturnAddress();
   return RUN_ALL_TESTS();
-#  else   // GLOG_OS_WINDOWS
+#  else   // NGLOG_OS_WINDOWS
   printf("PASS (no symbolize_unittest support)\n");
   return 0;
 #  endif  // defined(HAVE_ELF_H) || defined(HAVE_SYS_EXEC_ELF_H)

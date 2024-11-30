@@ -32,8 +32,8 @@
 //
 // Define utilities for glog internal usage.
 
-#ifndef GLOG_INTERNAL_UTILITIES_H
-#define GLOG_INTERNAL_UTILITIES_H
+#ifndef NGLOG_INTERNAL_UTILITIES_H
+#define NGLOG_INTERNAL_UTILITIES_H
 
 #include <cstddef>
 #include <cstdio>
@@ -61,15 +61,15 @@
 #define PRIoS __PRIS_PREFIX "o"
 
 #include "config.h"
-#include "glog/platform.h"
-#if defined(GLOG_USE_WINDOWS_PORT)
+#include "ng-log/platform.h"
+#if defined(NGLOG_USE_WINDOWS_PORT)
 #  include "port.h"
 #endif
 #if defined(HAVE_UNISTD_H)
 #  include <unistd.h>
 #endif
 #if !defined(HAVE_SSIZE_T)
-#  if defined(GLOG_OS_WINDOWS)
+#  if defined(NGLOG_OS_WINDOWS)
 #    include <basetsd.h>
 using ssize_t = SSIZE_T;
 #  else
@@ -77,8 +77,8 @@ using ssize_t = std::ptrdiff_t;
 #  endif
 #endif
 
-#include "glog/log_severity.h"
-#include "glog/types.h"
+#include "ng-log/log_severity.h"
+#include "ng-log/types.h"
 
 // There are three different ways we can try to get the stack trace:
 //
@@ -107,9 +107,8 @@ using ssize_t = std::ptrdiff_t;
 #  define ARRAYSIZE(a) (sizeof(a) / sizeof(*(a)))
 #endif
 
-namespace google {
+namespace nglog {
 
-namespace logging {
 namespace internal {
 
 struct CrashReason {
@@ -126,9 +125,8 @@ struct CrashReason {
 };
 
 }  // namespace internal
-}  // namespace logging
 
-inline namespace glog_internal_namespace_ {
+inline namespace tools {
 
 #if defined(__has_attribute)
 #  if __has_attribute(noinline)
@@ -138,7 +136,7 @@ inline namespace glog_internal_namespace_ {
 #endif
 
 #if !defined(HAVE_ATTRIBUTE_NOINLINE)
-#  if defined(GLOG_OS_WINDOWS)
+#  if defined(NGLOG_OS_WINDOWS)
 #    define ATTRIBUTE_NOINLINE __declspec(noinline)
 #    define HAVE_ATTRIBUTE_NOINLINE
 #  endif
@@ -162,10 +160,10 @@ const std::string& MyUserName();
 // (Doesn't modify filepath, contrary to basename() in libgen.h.)
 const char* const_basename(const char* filepath);
 
-void SetCrashReason(const logging::internal::CrashReason* r);
+void SetCrashReason(const internal::CrashReason* r);
 
-void InitGoogleLoggingUtilities(const char* argv0);
-void ShutdownGoogleLoggingUtilities();
+void InitializeLoggingUtilities(const char* argv0);
+void ShutdownLoggingUtilities();
 
 template <class Functor>
 class ScopedExit final {
@@ -187,7 +185,7 @@ class ScopedExit final {
 
 // Thin wrapper around a file descriptor so that the file descriptor
 // gets closed for sure.
-class GLOG_NO_EXPORT FileDescriptor final {
+class NGLOG_NO_EXPORT FileDescriptor final {
   static constexpr int InvalidHandle = -1;
 
  public:
@@ -271,13 +269,13 @@ constexpr bool operator!=(std::nullptr_t, const FileDescriptor& rhs) noexcept {
   return static_cast<bool>(rhs);
 }
 
-}  // namespace glog_internal_namespace_
+}  // namespace tools
 
-}  // namespace google
+}  // namespace nglog
 
 template <>
 struct std::default_delete<std::FILE> {
   void operator()(FILE* p) const noexcept { fclose(p); }
 };
 
-#endif  // GLOG_INTERNAL_UTILITIES_H
+#endif  // NGLOG_INTERNAL_UTILITIES_H

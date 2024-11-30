@@ -37,11 +37,11 @@ extern "C" {
 #define UNW_LOCAL_ONLY
 #include <libunwind.h>
 }
-#include "glog/raw_logging.h"
+#include "ng-log/raw_logging.h"
 #include "stacktrace.h"
 
-namespace google {
-inline namespace glog_internal_namespace_ {
+namespace nglog {
+inline namespace tools {
 
 // Sometimes, we can try to get a stack trace from within a stack
 // trace, because libunwind can call mmap (maybe indirectly via an
@@ -91,5 +91,5 @@ int GetStackTrace(void** result, int max_depth, int skip_count) {
   return n;
 }
 
-}  // namespace glog_internal_namespace_
-}  // namespace google
+}  // namespace tools
+}  // namespace nglog

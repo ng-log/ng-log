@@ -1,0 +1,11 @@
+prefix=@prefix@
+exec_prefix=@exec_prefix@
+libdir=@libdir@
+includedir=@includedir@
+
+Name: libng-log
+Description: C++ logging framework
+Version: @VERSION@
+Libs: -L${libdir} -lng-log
+Libs.private: @ng-log_libraries_options_for_static_linking@
+Cflags: -I${includedir}

@@ -36,8 +36,8 @@
 #include <dbghelp.h>
 // clang-format on
 
-namespace google {
-inline namespace glog_internal_namespace_ {
+namespace nglog {
+inline namespace tools {
 
 int GetStackTrace(void** result, int max_depth, int skip_count) {
   if (max_depth > 64) {
@@ -49,5 +49,5 @@ int GetStackTrace(void** result, int max_depth, int skip_count) {
                                static_cast<DWORD>(max_depth), result, nullptr);
 }
 
-}  // namespace glog_internal_namespace_
-}  // namespace google
+}  // namespace tools
+}  // namespace nglog
