@@ -6,6 +6,10 @@ ng-log
 ng-log is a C++14 library that implements application-level logging. The library
 provides logging APIs based on C++-style streams and various helper macros.
 
+ng-log is a community maintained successor to Google's glog that is unrelated to
+Google or its employees. For a Google maintained logging library please refer to
+abseil-cpp.
+
 Getting Started
 ---------------
 
