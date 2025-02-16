@@ -1,13 +1,13 @@
 # ng-log
 
-ng-log (formely Google Logging Library or glog) is a C++14 library
+ng-log (formerly Google Logging Library or glog) is a C++14 library
 that implements application-level logging. The library provides logging APIs
 based on C++-style streams and various helper macros.
 
 !!! note "Compatibility to glog"
     To avoid trademark issues, ng-log introduces a new set of functions derived
     from their glog counterparts. During a grace period, ng-log will maintain
-    API compatibility to glog up to version 0.9.0 of the libary. We therefore
+    API compatibility to glog up to version 0.9.0 of the library. We therefore
     recommend updating the API as soon possible as the compatibility layer will
     be eventually removed.
 
