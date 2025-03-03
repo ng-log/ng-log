@@ -1,5 +1,5 @@
 module(
-    name = "glog",
+    name = "ng-log",
     compatibility_level = 1,
 )
 
