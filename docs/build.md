@@ -6,14 +6,8 @@ To use ng-log within a project which uses the [Bazel](https://bazel.build/) buil
 tool, add the following lines to your `MODULE.bazel` file:
 
 ``` bazel title="MODULE.bazel"
-bazel_dep(name = "glog")
-
-archive_override(
-    module_name = "ng-log",
-    urls = "https://github.com/ng-log/ng-log/archive/cc0de6c200375b33d907ee7632eee2f173b33a09.tar.gz",
-    strip_prefix = "ng-log-cc0de6c200375b33d907ee7632eee2f173b33a09",  # Latest commit as of 2024-06-08.
-    integrity = "sha256-rUrv4EBkdc+4Wbhfxp+KoRstlj2Iw842/OpLfDq0ivg=",
-)
+bazel_dep(name = "gflags", version = "2.2.2")
+bazel_dep(name = "ng-log", version = "0.8.0-rc1")
 ```
 
 You can then add `@ng-log//:ng-log` to
@@ -29,6 +23,17 @@ include it in your source code.
         deps = ["@ng-log//:ng-log"],
     )
     ```
+
+### Migrating from google/glog
+
+The Bazel target doesn't include the glog compatibility layer, so you'll need to
+adjust your code as follows:
+
+-   replace `<glog/logging.h>` with `<ng-log/logging.h>` and similarly for other heads (flags, log_severity, stl_logging, etc)
+-   replace the `google::` namespace with `nglog::`
+-   replace `InitGoogleLogging` with `InitializeLogging`
+-   replace `IsGoogleLoggingInitialized` with `IsLoggingInitialized`
+-   replace `ShutdownGoogleLogging` with `ShutdownLogging`
 
 ## CMake
 
