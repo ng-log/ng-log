@@ -1,9 +1,9 @@
 # Custom Sinks
 
 Under certain circumstances, it is useful to send the log output to a
-destination other than a file, `stderr` and/or `stdout`. In case, the library
-provides the `#!cpp nglog::LogSink` interface whose implementations can be used
-to write the log output to arbitrary locations.
+destination other than a file, `stderr` and/or `stdout`. For this purpose, the
+library provides the `#!cpp nglog::LogSink` interface whose implementations can
+be used to write the log output to arbitrary locations.
 
 ## Basic Interface
 
