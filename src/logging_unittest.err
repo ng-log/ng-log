@@ -4,7 +4,7 @@ IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] RAW: vlog 0
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] RAW: log info
 WYEARDATE TIME__ THREADID logging_unittest.cc:LINE] RAW: log warning
 EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] RAW: log error
-WARNING: Logging before InitGoogleLogging() is written to STDERR
+WARNING: Logging before InitializeLogging() is written to STDERR
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog -1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog 0
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log info
