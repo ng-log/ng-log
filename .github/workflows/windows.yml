@@ -45,7 +45,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: gtest/
-          key: ${{runner.os}}-gtest-1.14-${{matrix.lib}}-${{matrix.arch}}-${{matrix.build_type}}
+          key: ${{matrix.msvc}}-gtest-1.14-C++${{matrix.std}}-${{matrix.lib}}-${{matrix.arch}}-${{matrix.build_type}}
 
       - name: Download GTest
         if: steps.cache-gtest.outputs.cache-hit != 'true'
@@ -59,8 +59,11 @@ jobs:
           cmake -S googletest-1.14.0 -B build-googletest `
                 -A ${{matrix.arch}} `
                 -DBUILD_SHARED_LIBS=${{matrix.lib == 'shared'}} `
+                -DCMAKE_CXX_STANDARD=${{matrix.std}} `
+                -DCMAKE_CXX_STANDARD_REQUIRED=ON `
+                -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/gtest `
                 -Dgtest_force_shared_crt=ON `
-                -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/gtest
+                -G "${{matrix.generator}}"
           cmake --build build-googletest `
                 --config ${{matrix.build_type}} `
                 --target install
@@ -70,7 +73,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: gflags/
-          key: ${{runner.os}}-gflags-2.2.2-${{matrix.lib}}-${{matrix.arch}}-${{matrix.build_type}}
+          key: ${{matrix.msvc}}-gflags-2.2.2-C++${{matrix.std}}-${{matrix.lib}}-${{matrix.arch}}-${{matrix.build_type}}
 
       - name: Download gflags
         if: steps.cache-gflags.outputs.cache-hit != 'true'
@@ -84,7 +87,10 @@ jobs:
           cmake -S gflags-2.2.2 -B build-gflags `
                 -A ${{matrix.arch}} `
                 -DBUILD_SHARED_LIBS=${{matrix.lib == 'shared'}} `
-                -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/gflags
+                -DCMAKE_CXX_STANDARD=${{matrix.std}} `
+                -DCMAKE_CXX_STANDARD_REQUIRED=ON `
+                -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/gflags `
+                -G "${{matrix.generator}}"
           cmake --build build-gflags `
                 --config ${{matrix.build_type}} `
                 --target install
