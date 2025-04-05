@@ -521,6 +521,8 @@ if (BUILD_COMPAT)
   add_library (glog::glog ALIAS glog)
 
   target_include_directories (glog
+    PUBLIC "$<BUILD_INTERFACE:${ng-log_BINARY_DIR}>"
+    PUBLIC "$<BUILD_INTERFACE:${ng-log_SOURCE_DIR}/src/compat>"
     PUBLIC "$<INSTALL_INTERFACE:${_ng-log_CMake_INCLUDE_DIR}>"
     PRIVATE src/compat
   )
