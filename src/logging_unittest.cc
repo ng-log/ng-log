@@ -1279,10 +1279,10 @@ class TestLogSinkWriter {
 
   // data ---------------
 
-  std::thread t_;
   std::mutex mutex_;
   bool should_exit_{false};
   queue<string> messages_;  // messages to be logged
+  std::thread t_;
 };
 
 // A log sink that exercises WaitTillSent:
