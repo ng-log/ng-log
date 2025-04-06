@@ -90,6 +90,7 @@ jobs:
                 -DCMAKE_CXX_STANDARD=${{matrix.std}} `
                 -DCMAKE_CXX_STANDARD_REQUIRED=ON `
                 -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/gflags `
+                -DCMAKE_POLICY_VERSION_MINIMUM="3.22" `
                 -G "${{matrix.generator}}"
           cmake --build build-gflags `
                 --config ${{matrix.build_type}} `
