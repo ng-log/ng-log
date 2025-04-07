@@ -820,7 +820,7 @@ static void TestMaxLogSizeWhenNoTimestamp() {
   FLAGS_timestamp_in_logfile_name = false;
 
   // Set log destination
-  SetLogDestination(GLOG_INFO, dest.c_str());
+  SetLogDestination(NGLOG_INFO, dest.c_str());
 
   // 1e4 info logs -> is about 772 KB in size
   // 2e4 info logs -> is around 1500 KB in size -> 1.5MB
@@ -830,7 +830,7 @@ static void TestMaxLogSizeWhenNoTimestamp() {
   for (int i = 0; i < num_logs; i++) {
     LOG(INFO) << "Hello world";
   }
-  FlushLogFiles(GLOG_INFO);
+  FlushLogFiles(NGLOG_INFO);
 
   // Check log file size
   struct stat statbuf;
