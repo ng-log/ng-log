@@ -460,8 +460,8 @@ class LogCleaner {
   bool enabled_{false};
   std::chrono::minutes overdue_{
       std::chrono::duration<int, std::ratio<kSecondsInWeek>>{1}};
-  std::chrono::system_clock::time_point
-      next_cleanup_time_;  // cycle count at which to clean overdue log
+  // Maintain a separate cycle count for cleaning overdue logs for each base_filename.
+  std::unordered_map<std::string, std::chrono::system_clock::time_point> next_cleanup_time_map_;
 };
 
 LogCleaner log_cleaner;
@@ -1306,12 +1306,17 @@ void LogCleaner::Run(const std::chrono::system_clock::time_point& current_time,
   assert(enabled_);
   assert(!base_filename_selected || !base_filename.empty());
 
+  if (next_cleanup_time_map_.find(base_filename) == next_cleanup_time_map_.end()) {
+    next_cleanup_time_map_[base_filename] = std::chrono::system_clock::time_point{};
+  }
+  auto next_cleanup_time = next_cleanup_time_map_.at(base_filename);
+
   // avoid scanning logs too frequently
-  if (current_time < next_cleanup_time_) {
+  if (current_time < next_cleanup_time) {
     return;
   }
 
-  next_cleanup_time_ =
+  next_cleanup_time_map_[base_filename] =
       current_time +
       std::chrono::duration_cast<std::chrono::system_clock::duration>(
           std::chrono::duration<int32>{FLAGS_logcleansecs});
