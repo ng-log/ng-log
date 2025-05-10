@@ -806,6 +806,11 @@ if (BUILD_TESTING)
 
   target_link_libraries (cleanup_immediately_unittest PRIVATE ng-log_test)
 
+  add_executable (cleanup_multi_level_immediately_unittest
+  src/cleanup_multi_level_immediately_unittest.cc)
+
+  target_link_libraries (cleanup_multi_level_immediately_unittest PRIVATE ng-log_test)
+
   add_executable (cleanup_with_absolute_prefix_unittest
     src/cleanup_with_absolute_prefix_unittest.cc)
 
