@@ -395,6 +395,10 @@ add_library (ng-log_internal OBJECT
 target_compile_features (ng-log_internal PUBLIC $<TARGET_PROPERTY:ng-log,COMPILE_FEATURES>)
 set_target_properties (ng-log_internal PROPERTIES DEFINE_SYMBOL ng_log_EXPORTS)
 
+if (NGLOG_THREAD_LOCAL_STORAGE)
+  target_compile_definitions(ng-log_internal PRIVATE NGLOG_THREAD_LOCAL_STORAGE=1)
+endif ()
+
 # Some generators (such as Xcode) do not generate any output if the target does
 # not reference at least one source file.
 set (_ng-log_EMPTY_SOURCE ${ng-log_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/ng-log.cc)
