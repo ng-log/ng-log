@@ -527,6 +527,12 @@ if (BUILD_COMPAT)
     PRIVATE src/compat
   )
 
+  set_target_properties (glog PROPERTIES DEPRECATION
+"The glog::glog target is deprecated and will be removed in ng-log 0.9.0. \
+Please use the ng-log::ng-log import target instead. \
+For more details, refer to the google-glog to ng-log migration guide at https://ng-log.github.io/ng-log/0.8.0/build/#migrating-from-googleglog."
+  )
+
   if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options (glog PRIVATE
       -Wno-deprecated-declarations
