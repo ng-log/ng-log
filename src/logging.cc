@@ -1987,7 +1987,7 @@ int64 LogMessage::num_messages(int severity) {
 // Output the COUNTER value. This is only valid if ostream is a
 // LogStream.
 ostream& operator<<(ostream& os, const Counter_t&) {
-#ifdef DISABLE_RTTI
+#if !defined(__GXX_RTTI) && !defined(_CPPRTTI)
   LogMessage::LogStream* log = static_cast<LogMessage::LogStream*>(&os);
 #else
   auto* log = dynamic_cast<LogMessage::LogStream*>(&os);
