@@ -61,6 +61,8 @@ TEST(CleanImmediately, logging) {
 
   for (unsigned i = 0; i < 1000; ++i) {
     LOG(INFO) << "cleanup test";
+    LOG(WARNING) << "cleanup test";
+    LOG(ERROR) << "cleanup test";
   }
 
   nglog::DisableLogCleaner();
