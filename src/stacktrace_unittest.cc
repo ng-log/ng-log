@@ -230,7 +230,6 @@ namespace {
 void handle_abort(int /*code*/) { std::exit(EXIT_FAILURE); }
 }  // namespace
 
-
 //-----------------------------------------------------------------------//
 
 int main(int, char** argv) {

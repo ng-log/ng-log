@@ -89,7 +89,7 @@
 #    define popen _popen
 #    define pclose _pclose
 #    define R_OK 04 /* read-only (for access()) */
-#    define S_ISDIR(m) (((m)&_S_IFMT) == _S_IFDIR)
+#    define S_ISDIR(m) (((m) & _S_IFMT) == _S_IFDIR)
 
 #    define O_WRONLY _O_WRONLY
 #    define O_CREAT _O_CREAT

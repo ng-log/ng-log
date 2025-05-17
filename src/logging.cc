@@ -510,8 +510,8 @@ class LogDestination {
   // Use untimed shared mutex
   using SinkMutex = std::shared_mutex;
   using SinkLock = std::lock_guard<SinkMutex>;
-#else  // !(defined(__cpp_lib_shared_mutex) && (__cpp_lib_shared_mutex >=
-       // 201505L)) Fallback to timed shared mutex
+#else   // !(defined(__cpp_lib_shared_mutex) && (__cpp_lib_shared_mutex >=
+        // 201505L)) Fallback to timed shared mutex
   using SinkMutex = std::shared_timed_mutex;
   using SinkLock = std::unique_lock<SinkMutex>;
 #endif  // defined(__cpp_lib_shared_mutex) && (__cpp_lib_shared_mutex >=
@@ -2422,9 +2422,9 @@ void TruncateLogFile(const char* path, uint64 limit, uint64 keep) {
   }
   if (bytesin == -1) PLOG(ERROR) << "Unable to read from " << path;
 
-    // Truncate the remainder of the file. If someone else writes to the
-    // end of the file after our last read() above, we lose their latest
-    // data. Too bad ...
+  // Truncate the remainder of the file. If someone else writes to the
+  // end of the file after our last read() above, we lose their latest
+  // data. Too bad ...
 #  ifdef HAVE__CHSIZE_S
   if (_chsize_s(fd.get(), write_offset) != 0) {
 #  else

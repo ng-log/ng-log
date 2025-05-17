@@ -254,7 +254,7 @@ void DumpStackFrameInfo(const char* prefix, void* pc) {
   }
 #else
 #  pragma message( \
-          "Symbolize functionality is not available for target platform: stack dump will contain empty frames.")
+      "Symbolize functionality is not available for target platform: stack dump will contain empty frames.")
 #endif  // defined(HAVE_SYMBOLIZE)
 
   char buf[1024];  // Big enough for stack frame info.

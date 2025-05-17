@@ -89,8 +89,7 @@ int main(int argc, char** argv) {
     *a = 0;
   } else if (command == "loop") {
     fprintf(stderr, "looping\n");
-    while (true)
-      ;
+    while (true);
   } else if (command == "die_in_thread") {
     std::thread t{&DieInThread, nullptr};
     t.join();

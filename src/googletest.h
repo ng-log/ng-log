@@ -183,7 +183,7 @@ void InitGoogleTest(int*, char**) {}
 
 #  define EXPECT_DOUBLE_EQ(val1, val2)                             \
     do {                                                           \
-      if (((val1) < (val2)-0.001 || (val1) > (val2) + 0.001)) {    \
+      if (((val1) < (val2) - 0.001 || (val1) > (val2) + 0.001)) {  \
         fprintf(stderr, "Check failed: %s == %s\n", #val1, #val2); \
         exit(EXIT_FAILURE);                                        \
       }                                                            \
