@@ -1,5 +1,5 @@
-#ifndef GLOG_CONFIG_H
-#define GLOG_CONFIG_H
+#ifndef NGLOG_CONFIG_H
+#define NGLOG_CONFIG_H
 
 /* Define if you have the `dladdr' function */
 #cmakedefine HAVE_DLADDR
@@ -122,7 +122,7 @@
 #cmakedefine TEST_SRC_DIR ${TEST_SRC_DIR}
 
 /* Define if thread-local storage is enabled. */
-#cmakedefine GLOG_THREAD_LOCAL_STORAGE
+#cmakedefine NGLOG_THREAD_LOCAL_STORAGE
 
 /* define if abi::__cxa_demangle is available in cxxabi.h */
 #cmakedefine HAVE___CXA_DEMANGLE
@@ -139,4 +139,4 @@
 /* define if program_invocation_short_name is available in cerrno */
 #cmakedefine HAVE_PROGRAM_INVOCATION_SHORT_NAME
 
-#endif  // GLOG_CONFIG_H
+#endif  // NGLOG_CONFIG_H
