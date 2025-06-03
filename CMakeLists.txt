@@ -1066,13 +1066,6 @@ install (TARGETS ng-log
   LIBRARY DESTINATION ${_ng-log_CMake_LIBDIR}
   ARCHIVE DESTINATION ${_ng-log_CMake_LIBDIR})
 
-if (WITH_PKGCONFIG)
-  install (
-    FILES "${ng-log_BINARY_DIR}/libglog.pc"
-    DESTINATION "${_ng-log_CMake_LIBDIR}/pkgconfig"
-  )
-endif (WITH_PKGCONFIG)
-
 set (ng-log_CMake_VERSION 3.0)
 
 if (gflags_FOUND)
