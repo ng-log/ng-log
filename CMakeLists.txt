@@ -1068,7 +1068,7 @@ install (TARGETS ng-log
 
 if (WITH_PKGCONFIG)
   install (
-    FILES "${ng-log_BINARY_DIR}/libglog.pc"
+    FILES "${ng-log_BINARY_DIR}/libng-log.pc"
     DESTINATION "${_ng-log_CMake_LIBDIR}/pkgconfig"
   )
 endif (WITH_PKGCONFIG)
