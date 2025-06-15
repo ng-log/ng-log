@@ -32,7 +32,6 @@ include (GetCacheVariables)
 include (GNUInstallDirs)
 
 option (BUILD_SHARED_LIBS "Build shared libraries" ON)
-option (BUILD_COMPAT "Build glog compatibility layer" ON)
 option (BUILD_EXAMPLES "Build examples" ON)
 option (PRINT_UNSYMBOLIZED_STACK_TRACES
   "Print file offsets in traces instead of symbolizing" OFF)
@@ -504,90 +503,6 @@ target_compile_definitions (ng-log_internal PUBLIC
 generate_export_header (ng-log
   BASE_NAME NGLOG
   EXPORT_FILE_NAME ${ng-log_BINARY_DIR}/ng-log/export.h)
-
-if (BUILD_COMPAT)
-  add_library (glog
-    ${ng-log_BINARY_DIR}/glog/export.h
-    src/compat/glog/flags.h
-    src/compat/glog/log_severity.h
-    src/compat/glog/logging.cc
-    src/compat/glog/logging.h
-    src/compat/glog/platform.h
-    src/compat/glog/raw_logging.h
-    src/compat/glog/stl_logging.h
-    src/compat/glog/types.h
-    src/compat/glog/vlog_is_on.h
-  )
-  add_library (glog::glog ALIAS glog)
-
-  target_include_directories (glog
-    PUBLIC "$<BUILD_INTERFACE:${ng-log_BINARY_DIR}>"
-    PUBLIC "$<BUILD_INTERFACE:${ng-log_SOURCE_DIR}/src/compat>"
-    PUBLIC "$<INSTALL_INTERFACE:${_ng-log_CMake_INCLUDE_DIR}>"
-    PRIVATE src/compat
-  )
-
-  set_target_properties (glog PROPERTIES DEPRECATION
-"The glog::glog target is deprecated and will be removed in ng-log 0.9.0. \
-Please use the ng-log::ng-log import target instead. \
-For more details, refer to the google-glog to ng-log migration guide at https://ng-log.github.io/ng-log/0.8.0/build/#migrating-from-googleglog."
-  )
-
-  if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options (glog PRIVATE
-      -Wno-deprecated-declarations
-    )
-  endif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-
-  target_link_libraries (glog PUBLIC ng-log::ng-log)
-
-  set_target_properties (glog PROPERTIES VERSION ${ng-log_VERSION})
-  set_target_properties (glog PROPERTIES SOVERSION 3)
-
-  generate_export_header (glog
-    BASE_NAME NGLOG_COMPAT
-    EXPORT_FILE_NAME ${ng-log_BINARY_DIR}/glog/export.h)
-
-  set (_glog_CMake_INSTALLDIR ${_ng-log_CMake_LIBDIR}/cmake/glog)
-
-  configure_package_config_file (glog-config.cmake.in
-    ${ng-log_BINARY_DIR}/glog-config.cmake
-    INSTALL_DESTINATION ${_glog_CMake_INSTALLDIR}
-    NO_CHECK_REQUIRED_COMPONENTS_MACRO)
-
-  write_basic_package_version_file (
-    ${ng-log_BINARY_DIR}/glog-config-version.cmake
-    COMPATIBILITY SameMajorVersion)
-
-  export (TARGETS glog NAMESPACE glog:: FILE glog-targets.cmake)
-  export (PACKAGE glog)
-
-  install (FILES ${ng-log_BINARY_DIR}/glog/export.h
-    DESTINATION ${_ng-log_CMake_INCLUDE_DIR}/glog
-    COMPONENT Development
-  )
-
-  install (DIRECTORY src/compat/glog/
-    DESTINATION ${_ng-log_CMake_INCLUDE_DIR}/glog
-    COMPONENT Development
-    FILES_MATCHING PATTERN "*.h"
-  )
-
-  install (TARGETS glog
-    EXPORT glog-targets
-    RUNTIME DESTINATION ${_ng-log_CMake_BINDIR}
-    PUBLIC_HEADER DESTINATION ${_ng-log_CMake_INCLUDE_DIR}/glog
-    LIBRARY DESTINATION ${_ng-log_CMake_LIBDIR}
-    ARCHIVE DESTINATION ${_ng-log_CMake_LIBDIR})
-
-  install (FILES
-    ${ng-log_BINARY_DIR}/glog-config.cmake
-    ${ng-log_BINARY_DIR}/glog-config-version.cmake
-    DESTINATION ${_glog_CMake_INSTALLDIR})
-
-  install (EXPORT glog-targets NAMESPACE glog:: DESTINATION
-    ${_glog_CMake_INSTALLDIR})
-endif (BUILD_COMPAT)
 
 string (STRIP "${ng-log_libraries_options_for_static_linking}" ng-log_libraries_options_for_static_linking)
 
