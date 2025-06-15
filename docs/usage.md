@@ -8,7 +8,7 @@ find_package` to build against ng-log in your CMake project as follows:
 cmake_minimum_required (VERSION 3.16)
 project (myproj VERSION 1.0)
 
-find_package (ng-log 0.8.0 REQUIRED)
+find_package (ng-log 0.9.0 REQUIRED)
 
 add_executable (myapp main.cpp)
 target_link_libraries (myapp ng-log::ng-log)
