@@ -635,6 +635,8 @@ if (BUILD_TESTING)
     $<TARGET_PROPERTY:ng-log,LINK_LIBRARIES>)
   target_compile_definitions (ng-log_test INTERFACE NGLOG_STATIC_DEFINE
     $<TARGET_PROPERTY:ng-log,COMPILE_DEFINITIONS>)
+  target_compile_features (ng-log_test INTERFACE
+    $<TARGET_PROPERTY:ng-log,COMPILE_FEATURES>)
   target_include_directories (ng-log_test INTERFACE $<TARGET_PROPERTY:ng-log,INCLUDE_DIRECTORIES>)
 
   if (HAVE_LIB_GTEST)
