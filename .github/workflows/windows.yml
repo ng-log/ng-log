@@ -22,12 +22,9 @@ jobs:
         arch: [Win32, x64]
         build_type: [Debug, Release]
         lib: [shared, static]
-        msvc: [VS-16-2019, VS-17-2022]
+        msvc: [VS-17-2022]
         std: [14, 17, 20, 23]
         include:
-          - msvc: VS-16-2019
-            os: windows-2019
-            generator: 'Visual Studio 16 2019'
           - msvc: VS-17-2022
             os: windows-2022
             generator: 'Visual Studio 17 2022'
