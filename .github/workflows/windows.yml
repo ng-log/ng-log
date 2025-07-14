@@ -161,10 +161,8 @@ jobs:
         build_type: [Debug]
         lib: [shared, static]
         std: [14, 17, 20, 23]
-        sys: [mingw32, mingw64]
+        sys: [mingw64]
         include:
-         - sys: mingw32
-           env: i686
          - sys: mingw64
            env: x86_64
 
