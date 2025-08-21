@@ -7,7 +7,7 @@ tool, add the following lines to your `MODULE.bazel` file:
 
 ``` bazel title="MODULE.bazel"
 bazel_dep(name = "gflags", version = "2.2.2")
-bazel_dep(name = "ng-log", version = "0.8.1")
+bazel_dep(name = "ng-log", version = "0.8.2")
 ```
 
 You can then add `@ng-log//:ng-log` to
