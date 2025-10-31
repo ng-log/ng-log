@@ -992,7 +992,7 @@ constexpr LogSeverity NGLOG_0 = NGLOG_ERROR;
 // For this case, we cannot detect if ERROR is defined before users
 // actually use ERROR. Let's make an undefined symbol to warn users.
 #  define NGLOG_ERROR_MSG \
-    ERROR_macro_is_defined_Define_GLOG_NO_ABBREVIATED_SEVERITIES_before_including_logging_h_See_the_document_for_detail
+    ERROR_macro_is_defined_Define_NGLOG_NO_ABBREVIATED_SEVERITIES_before_including_logging_h_See_the_document_for_detail
 #  define NGLOG_COMPACT_LOG_0 NGLOG_ERROR_MSG
 #  define SYSLOG_0 NGLOG_ERROR_MSG
 #  define LOG_TO_STRING_0 NGLOG_ERROR_MSG
