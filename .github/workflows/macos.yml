@@ -19,7 +19,7 @@ jobs:
           - build_type: Debug
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Setup Dependencies
         run: |
