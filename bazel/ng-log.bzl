@@ -9,6 +9,9 @@
 #
 # Known issue: the namespace parameter is not supported on Win32.
 
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+
 def expand_template_impl(ctx):
     ctx.actions.expand_template(
         template = ctx.file.template,
@@ -165,10 +168,9 @@ def nglog_library(with_gflags = 1, **kwargs):
             "src/base/commandlineflags.h",
             "src/stacktrace.h",
             "src/utilities.h",
-        ]
+        ],
     )
-
-    native.cc_library(
+    cc_library(
         name = "ng-log",
         visibility = ["//visibility:public"],
         srcs = [
@@ -249,7 +251,7 @@ def nglog_library(with_gflags = 1, **kwargs):
     ]
 
     for test_name in test_list:
-        native.cc_test(
+        cc_test(
             name = test_name + "_test",
             visibility = ["//visibility:public"],
             srcs = [
@@ -269,7 +271,7 @@ def nglog_library(with_gflags = 1, **kwargs):
 
     # Workaround https://github.com/bazelbuild/bazel/issues/6337 by declaring
     # the dependencies without strip_include_prefix.
-    native.cc_library(
+    cc_library(
         name = "strip_include_prefix_hack",
         hdrs = [
             "src/ng-log/flags.h",
