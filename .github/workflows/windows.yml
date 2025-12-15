@@ -39,7 +39,7 @@ jobs:
 
       - name: Cache GTest
         id: cache-gtest
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: gtest/
           key: ${{matrix.msvc}}-gtest-1.14-C++${{matrix.std}}-${{matrix.lib}}-${{matrix.arch}}-${{matrix.build_type}}
@@ -67,7 +67,7 @@ jobs:
 
       - name: Cache gflags
         id: cache-gflags
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: gflags/
           key: ${{matrix.msvc}}-gflags-2.2.2-C++${{matrix.std}}-${{matrix.lib}}-${{matrix.arch}}-${{matrix.build_type}}
