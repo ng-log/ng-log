@@ -34,7 +34,7 @@
 int main() {
   // Must not compile
   nglog::LogMessage{__FILE__, __LINE__, -1};
-  // Cast to int to avoid implicit conversoin to nullptr
+  // Cast to int to avoid implicit conversion to nullptr
   nglog::LogMessage{__FILE__, __LINE__, static_cast<int>(0)};
   nglog::LogMessage{__FILE__, __LINE__, 1};
   nglog::LogMessage{__FILE__, __LINE__, 2};
