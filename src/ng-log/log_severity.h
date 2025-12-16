@@ -66,7 +66,7 @@ enum LogSeverity {
   NGLOG_FATAL = 3,
 #ifndef NGLOG_NO_ABBREVIATED_SEVERITIES
 #  ifdef ERROR
-#  error ERROR macro is defined. Define NGLOG_NO_ABBREVIATED_SEVERITIES before including logging.h. See the document for detail.
+#  error "ERROR macro is defined. Define NGLOG_NO_ABBREVIATED_SEVERITIES before including logging.h. See https://ng-log.github.io/ng-log/stable/windows/ for details."
 #  endif
   INFO = NGLOG_INFO,
   WARNING = NGLOG_WARNING,
