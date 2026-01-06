@@ -1,4 +1,5 @@
 Copyright © 2024, Google Inc.
+Copyright © 2026, The ng-log contributors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
