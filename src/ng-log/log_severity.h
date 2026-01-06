@@ -1,4 +1,5 @@
 // Copyright (c) 2024, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -122,5 +123,10 @@ enum { DEBUG_MODE = 1 };
 #endif
 
 }  // namespace nglog
+
+using nglog::NGLOG_ERROR;
+using nglog::NGLOG_FATAL;
+using nglog::NGLOG_INFO;
+using nglog::NGLOG_WARNING;
 
 #endif  // NGLOG_LOG_SEVERITY_H
