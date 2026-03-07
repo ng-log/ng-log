@@ -1,8 +1,8 @@
+load(":bazel/ng-log.bzl", "nglog_library")
+
 licenses(["notice"])
 
 exports_files(["COPYING"])
-
-load(":bazel/ng-log.bzl", "nglog_library")
 
 nglog_library()
 
