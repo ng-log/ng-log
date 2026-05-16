@@ -50,9 +50,9 @@ cmake_dependent_option (WITH_GMOCK "Use Google Mock" ON WITH_GTEST OFF)
 set (WITH_FUZZING none CACHE STRING "Fuzzing engine")
 set_property (CACHE WITH_FUZZING PROPERTY STRINGS none libfuzzer ossfuzz)
 
-if (WITH_UNWIND STREQUAL none)
+if (NOT WITH_UNWIND OR WITH_UNWIND STREQUAL none)
   set (CMAKE_DISABLE_FIND_PACKAGE_Unwind ON)
-endif (WITH_UNWIND STREQUAL none)
+endif (NOT WITH_UNWIND OR WITH_UNWIND STREQUAL none)
 
 if (NOT WITH_GTEST)
   set (CMAKE_DISABLE_FIND_PACKAGE_GTest ON)
@@ -163,11 +163,11 @@ set (CMAKE_REQUIRED_LIBRARIES dbghelp)
 check_cxx_symbol_exists (UnDecorateSymbolName "windows.h;dbghelp.h" HAVE_DBGHELP)
 cmake_pop_check_state ()
 
-if (WITH_FUZZING STREQUAL none)
+if (NOT WITH_FUZZING OR WITH_FUZZING STREQUAL none)
   # Disable compiler demangler if fuzzing is active; we only want to use the
   # ng-log demangler then.
   check_cxx_symbol_exists (abi::__cxa_demangle cxxabi.h HAVE___CXA_DEMANGLE)
-endif (WITH_FUZZING STREQUAL none)
+endif (NOT WITH_FUZZING OR WITH_FUZZING STREQUAL none)
 
 check_cxx_symbol_exists (__argv cstdlib HAVE___ARGV)
 check_cxx_symbol_exists (getprogname cstdlib HAVE_GETPROGNAME)
@@ -613,7 +613,7 @@ endif (WITH_PKGCONFIG)
 
 # Unit testing
 
-if (NOT WITH_FUZZING STREQUAL "none")
+if (WITH_FUZZING AND NOT WITH_FUZZING STREQUAL none)
   add_executable (fuzz_demangle
     src/fuzz_demangle.cc
   )
@@ -627,7 +627,7 @@ if (NOT WITH_FUZZING STREQUAL "none")
   else (WITH_FUZZING STREQUAL "libfuzzer")
     message (FATAL_ERROR "Unsupported fuzzing engine ${WITH_FUZZING}")
   endif (WITH_FUZZING STREQUAL "ossfuzz")
-endif (NOT WITH_FUZZING STREQUAL "none")
+endif (WITH_FUZZING AND NOT WITH_FUZZING STREQUAL none)
 
 if (BUILD_TESTING)
   add_library (ng-log_test INTERFACE)
