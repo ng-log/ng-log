@@ -1,4 +1,5 @@
 // Copyright (c) 2024, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -81,7 +82,9 @@ const struct {
     {SIGTERM, "SIGTERM"},
 };
 
+#if defined(NGLOG_OS_WINDOWS)
 static bool kFailureSignalHandlerInstalled = false;
+#endif  // defined(NGLOG_OS_WINDOWS)
 
 #if !defined(NGLOG_OS_WINDOWS)
 // Returns the program counter from signal context, nullptr if unknown.
@@ -373,9 +376,7 @@ bool IsFailureSignalHandlerInstalled() {
   memset(&sig_action, 0, sizeof(sig_action));
   sigemptyset(&sig_action.sa_mask);
   sigaction(SIGABRT, nullptr, &sig_action);
-  if (sig_action.sa_sigaction == &FailureSignalHandler) {
-    return true;
-  }
+  return sig_action.sa_sigaction == &FailureSignalHandler;
 #elif defined(NGLOG_OS_WINDOWS)
   return kFailureSignalHandlerInstalled;
 #endif  // HAVE_SIGACTION
@@ -394,7 +395,6 @@ void InstallFailureSignalHandler() {
   for (auto kFailureSignal : kFailureSignals) {
     CHECK_ERR(sigaction(kFailureSignal.number, &sig_action, nullptr));
   }
-  kFailureSignalHandlerInstalled = true;
 #elif defined(NGLOG_OS_WINDOWS)
   for (size_t i = 0; i < ARRAYSIZE(kFailureSignals); ++i) {
     CHECK_NE(signal(kFailureSignals[i].number, &FailureSignalHandler), SIG_ERR);
