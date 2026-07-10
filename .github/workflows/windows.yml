@@ -35,7 +35,7 @@ jobs:
             generator: 'Visual Studio 18 2026'
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
@@ -44,7 +44,7 @@ jobs:
 
       - name: Cache GTest
         id: cache-gtest
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: gtest/
           key: ${{matrix.msvc}}-gtest-1.14-C++${{matrix.std}}-${{matrix.lib}}-${{matrix.arch}}-${{matrix.build_type}}
@@ -72,7 +72,7 @@ jobs:
 
       - name: Cache gflags
         id: cache-gflags
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: gflags/
           key: ${{matrix.msvc}}-gflags-2.2.2-C++${{matrix.std}}-${{matrix.lib}}-${{matrix.arch}}-${{matrix.build_type}}
@@ -172,7 +172,7 @@ jobs:
            env: x86_64
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
@@ -241,7 +241,7 @@ jobs:
 
       - name: Upload Coverage to Codecov
         if: matrix.build_type == 'Debug'
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: build_${{matrix.build_type}}/coverage.xml

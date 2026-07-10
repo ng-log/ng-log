@@ -296,12 +296,17 @@ void MaybeAppendWithLength(State* state, const char* const str,
         state->out_cur[-1] == '<') {
       Append(state, " ", 1);
     }
-    // Remember the last identifier name for ctors/dtors.
-    if (IsAlpha(str[0]) || str[0] == '_') {
-      state->prev_name = state->out_cur;
+    char* const out_cur_before_append = state->out_cur;
+    Append(state, str, length);
+    // Remember the last identifier name for ctors/dtors, but only once we
+    // know it was fully written to the output buffer. Otherwise
+    // "prev_name" would point at output buffer bytes that were never
+    // initialized by the demangler, which get read back later when
+    // reconstructing constructor/destructor names.
+    if (!state->overflowed && (IsAlpha(str[0]) || str[0] == '_')) {
+      state->prev_name = out_cur_before_append;
       state->prev_name_length = length;
     }
-    Append(state, str, length);
   }
 }
 

@@ -121,6 +121,25 @@ TEST(Demangle, Clones) {
   EXPECT_FALSE(Demangle("_ZL3Foov.isra.2.constprop.", tmp, sizeof(tmp)));
 }
 
+// Reconstructing a truncated constructor or destructor name must not read
+// back output buffer bytes that were never written, since callers are not
+// required to zero-initialize the output buffer before calling Demangle().
+TEST(Demangle, CtorDtorTruncation) {
+  // Deliberately left uninitialized so that tools such as Valgrind or
+  // MemorySanitizer can catch reads of never-written bytes.
+  char tmp[5];
+  EXPECT_FALSE(Demangle("_ZN3Foo3BarC1Ev", tmp, sizeof(tmp)));
+  EXPECT_FALSE(Demangle("_ZN3Foo3BarD1Ev", tmp, sizeof(tmp)));
+
+  // Fuzzer-discovered input exercising the same truncation path through a
+  // deeper nesting of prefixes.
+  char tmp2[16];
+  const char* const fuzzed =
+      "_ZN7ppppppppppsppppppppppppppppppppppppppppppppppppppI00000E0SiD22L_"
+      "ZTVZleA2_ZZ\x7f";
+  EXPECT_FALSE(Demangle(fuzzed, tmp2, sizeof(tmp2)));
+}
+
 TEST(Demangle, FromFile) {
   string test_file = FLAGS_test_srcdir + "/src/demangle_unittest.txt";
   ifstream f(test_file.c_str());  // The file should exist.

@@ -591,29 +591,48 @@ void (*g_new_hook)() = nullptr;
 
 }  // namespace nglog
 
-void* operator new(size_t size, const std::nothrow_t&) noexcept {
+// noinline prevents a -Wmismatched-new-delete false positive: GCC loses
+// track of the malloc/free pairing across inlined operator new/delete.
+// See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=103993
+[[gnu::noinline]] void* operator new(size_t size,
+                                      const std::nothrow_t&) noexcept {
   if (nglog::g_new_hook) {
     nglog::g_new_hook();
   }
   return malloc(size);
 }
 
-void* operator new(size_t size) NGLOG_GLOG_THROW_BAD_ALLOC {
-  void* p = ::operator new(size, std::nothrow);
+[[gnu::noinline]] void* operator new(size_t size) NGLOG_GLOG_THROW_BAD_ALLOC {
+  if (nglog::g_new_hook) {
+    nglog::g_new_hook();
+  }
+  void* p = malloc(size);
   if (p == nullptr) {
     throw std::bad_alloc{};
   }
   return p;
 }
 
-void* operator new[](size_t size) NGLOG_GLOG_THROW_BAD_ALLOC {
-  return ::operator new(size);
+[[gnu::noinline]] void* operator new[](size_t size)
+    NGLOG_GLOG_THROW_BAD_ALLOC {
+  if (nglog::g_new_hook) {
+    nglog::g_new_hook();
+  }
+  void* p = malloc(size);
+  if (p == nullptr) {
+    throw std::bad_alloc{};
+  }
+  return p;
 }
 
-void operator delete(void* p) noexcept { free(p); }
+[[gnu::noinline]] void operator delete(void* p) noexcept { free(p); }
 
-void operator delete(void* p, size_t) noexcept { ::operator delete(p); }
+[[gnu::noinline]] void operator delete(void* p, size_t) noexcept {
+  free(p);
+}
 
-void operator delete[](void* p) noexcept { ::operator delete(p); }
+[[gnu::noinline]] void operator delete[](void* p) noexcept { free(p); }
 
-void operator delete[](void* p, size_t) noexcept { ::operator delete(p); }
+[[gnu::noinline]] void operator delete[](void* p, size_t) noexcept {
+  free(p);
+}
