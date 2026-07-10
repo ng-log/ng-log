@@ -1223,17 +1223,22 @@ void LogFileObject::Write(
         file_header_stream << "Application fingerprint: "
                            << g_application_fingerprint << '\n';
       }
-      const char* const date_time_format = FLAGS_log_year_in_prefix
-                                               ? "yyyymmdd hh:mm:ss.uuuuuu"
-                                               : "mmdd hh:mm:ss.uuuuuu";
       file_header_stream
           << "Running duration (h:mm:ss): "
           << PrettyDuration(
                  std::chrono::duration_cast<std::chrono::duration<int>>(
                      timestamp - start_time_))
-          << '\n'
-          << "Log line format: [IWEF]" << date_time_format << " "
-          << "threadid file:line] msg" << '\n';
+          << '\n';
+      // The hardcoded format line only describes the default prefix; with a
+      // user-installed prefix formatter the actual line format is unknown
+      // here, so advertising the default one would be wrong.
+      if (g_prefix_formatter == nullptr) {
+        const char* const date_time_format = FLAGS_log_year_in_prefix
+                                                 ? "yyyymmdd hh:mm:ss.uuuuuu"
+                                                 : "mmdd hh:mm:ss.uuuuuu";
+        file_header_stream << "Log line format: [IWEF]" << date_time_format
+                           << " threadid file:line] msg" << '\n';
+      }
       const string& file_header_string = file_header_stream.str();
 
       const size_t header_len = file_header_string.size();
