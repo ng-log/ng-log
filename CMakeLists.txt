@@ -44,6 +44,27 @@ option (WITH_TLS "Enable Thread Local Storage (TLS) support" ON)
 set (WITH_UNWIND libunwind CACHE STRING "unwind driver")
 set_property (CACHE WITH_UNWIND PROPERTY STRINGS none unwind libunwind)
 
+# Before 0.7.1, WITH_UNWIND was a boolean option. Map legacy boolean values
+# onto the none/unwind/libunwind enumeration so that build scripts written
+# for older versions keep working: false disables unwind support entirely,
+# true selects the default driver.
+string (TOLOWER "${WITH_UNWIND}" _WITH_UNWIND_LOWER)
+if (_WITH_UNWIND_LOWER MATCHES "^(none|unwind|libunwind)$")
+  # Accept any capitalization of the documented values.
+  set (WITH_UNWIND ${_WITH_UNWIND_LOWER})
+elseif (WITH_UNWIND)
+  message (DEPRECATION "boolean WITH_UNWIND value '${WITH_UNWIND}' is "
+    "deprecated; assuming WITH_UNWIND=libunwind. Use one of none, unwind, "
+    "or libunwind instead.")
+  set (WITH_UNWIND libunwind)
+else ()
+  message (DEPRECATION "boolean WITH_UNWIND value '${WITH_UNWIND}' is "
+    "deprecated; assuming WITH_UNWIND=none. Use one of none, unwind, or "
+    "libunwind instead.")
+  set (WITH_UNWIND none)
+endif ()
+unset (_WITH_UNWIND_LOWER)
+
 cmake_dependent_option (WITH_GMOCK "Use Google Mock" ON WITH_GTEST OFF)
 
 set (WITH_FUZZING none CACHE STRING "Fuzzing engine")
