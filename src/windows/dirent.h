@@ -931,92 +931,71 @@ static int versionsort(const struct dirent** a, const struct dirent** b) {
   return alphasort(a, b);
 }
 
-/* Convert multi-byte string to wide character string */
+/*
+ * Convert multi-byte string to wide character string.
+ *
+ * The conversion deliberately uses the Windows ANSI code page (CP_ACP)
+ * instead of the locale-dependent mbstowcs: the multi-byte paths handled
+ * here are produced and consumed by the ANSI variants of the CRT and Win32
+ * file functions, which always use the ANSI code page regardless of the C
+ * locale. Under the default "C" locale, mbstowcs mangles any non-ASCII
+ * character, which made opendir() fail on such paths (see
+ * https://github.com/google/glog/issues/786).
+ */
 static int dirent_mbstowcs_s(size_t* pReturnValue, wchar_t* wcstr,
                              size_t sizeInWords, const char* mbstr,
                              size_t count) {
-  int error;
-
-#if defined(_MSC_VER) && _MSC_VER >= 1400
-
-  /* Microsoft Visual Studio 2005 or later */
-  error = mbstowcs_s(pReturnValue, wcstr, sizeInWords, mbstr, count);
-
-#else
-
-  /* Older Visual Studio or non-Microsoft compiler */
-  size_t n;
-
-  /* Convert to wide-character string (or count characters) */
-  n = mbstowcs(wcstr, mbstr, sizeInWords);
-  if (!wcstr || n < count) {
-    /* Zero-terminate output buffer */
-    if (wcstr && sizeInWords) {
-      if (n >= sizeInWords) {
-        n = sizeInWords - 1;
-      }
-      wcstr[n] = 0;
-    }
-
-    /* Length of resulting multi-byte string WITH zero terminator */
-    if (pReturnValue) {
-      *pReturnValue = n + 1;
-    }
-
-    /* Success */
-    error = 0;
-
-  } else {
+  /* Convert to wide-character string (or only compute the required size if
+   * the output buffer is nullptr).  A non-positive result indicates an
+   * invalid multi-byte sequence or an insufficient output buffer.
+   */
+  int n = MultiByteToWideChar(CP_ACP, MB_ERR_INVALID_CHARS, mbstr, -1, wcstr,
+                              wcstr ? static_cast<int>(sizeInWords) : 0);
+  if (n <= 0) {
     /* Could not convert string */
-    error = 1;
+    return 1;
   }
 
-#endif
-  return error;
+  /* Length of resulting wide-character string WITH zero terminator */
+  if (pReturnValue) {
+    *pReturnValue = static_cast<size_t>(n);
+  }
+
+  static_cast<void>(count);
+  return 0;
 }
 
-/* Convert wide-character string to multi-byte string */
+/*
+ * Convert wide-character string to multi-byte string.
+ *
+ * Uses the Windows ANSI code page for the same reason as
+ * dirent_mbstowcs_s() above.  The conversion fails for file names that
+ * cannot be represented in the ANSI code page (instead of silently picking
+ * a replacement character) so that callers can fall back to the 8.3 short
+ * name.
+ */
 static int dirent_wcstombs_s(size_t* pReturnValue, char* mbstr,
                              size_t sizeInBytes, /* max size of mbstr */
                              const wchar_t* wcstr, size_t count) {
-  int error;
-
-#if defined(_MSC_VER) && _MSC_VER >= 1400
-
-  /* Microsoft Visual Studio 2005 or later */
-  error = wcstombs_s(pReturnValue, mbstr, sizeInBytes, wcstr, count);
-
-#else
-
-  /* Older Visual Studio or non-Microsoft compiler */
-  size_t n;
-
-  /* Convert to multi-byte string (or count the number of bytes needed) */
-  n = wcstombs(mbstr, wcstr, sizeInBytes);
-  if (!mbstr || n < count) {
-    /* Zero-terminate output buffer */
-    if (mbstr && sizeInBytes) {
-      if (n >= sizeInBytes) {
-        n = sizeInBytes - 1;
-      }
-      mbstr[n] = '\0';
-    }
-
-    /* Length of resulting multi-bytes string WITH zero-terminator */
-    if (pReturnValue) {
-      *pReturnValue = n + 1;
-    }
-
-    /* Success */
-    error = 0;
-
-  } else {
+  /* Convert to multi-byte string (or only compute the required size if the
+   * output buffer is nullptr).
+   */
+  BOOL used_default_char = FALSE;
+  int n = WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, wcstr, -1, mbstr,
+                              mbstr ? static_cast<int>(sizeInBytes) : 0,
+                              nullptr, &used_default_char);
+  if (n <= 0 || used_default_char) {
     /* Cannot convert string */
-    error = 1;
+    return 1;
   }
 
-#endif
-  return error;
+  /* Length of resulting multi-byte string WITH zero terminator */
+  if (pReturnValue) {
+    *pReturnValue = static_cast<size_t>(n);
+  }
+
+  static_cast<void>(count);
+  return 0;
 }
 
 /* Set errno variable */
