@@ -11,3 +11,6 @@ ignore:
   - "src/testing_utilities.h"
   - "src/testing_utilities.cc"
   - "src/mock-log.h"
+  - "src/subprocess_test_helper.cc"
+  - "src/addr2line_fake_hang.cc"
+  - "src/addr2line_fake_empty.cc"

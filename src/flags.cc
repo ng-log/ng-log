@@ -158,3 +158,12 @@ NGLOG_DEFINE_string(
 
 NGLOG_DEFINE_bool(symbolize_stacktrace, true,
                   "Symbolize the stack trace in the tombstone");
+
+NGLOG_DEFINE_bool(symbolize_line_info, true,
+                  "Resolve file names and line numbers for symbolized "
+                  "stack frames using addr2line, if available.");
+
+NGLOG_DEFINE_int32(addr2line_timeout_ms, 2000,
+                   "Upper bound in milliseconds on how long to wait for "
+                   "addr2line to resolve a single address before giving "
+                   "up on it.");

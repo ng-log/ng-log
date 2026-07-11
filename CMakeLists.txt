@@ -43,6 +43,36 @@ option (WITH_TLS "Enable Thread Local Storage (TLS) support" ON)
 set (WITH_UNWIND libunwind CACHE STRING "unwind driver")
 set_property (CACHE WITH_UNWIND PROPERTY STRINGS none unwind libunwind)
 
+# Backend for resolving file names and line numbers in symbolized stack
+# frames. "auto" uses addr2line when available; "addr2line" requires it,
+# failing the configuration otherwise is not done here, only a warning is
+# issued later once availability is known. "none" disables the feature. A
+# CMake boolean false (OFF, FALSE, 0, NO, an empty string, ...) is treated
+# the same as "none", and anything else that is not one of the three names
+# above (including a boolean true such as ON) is treated the same as
+# "auto".
+#
+# When built with MinGW, "addr2line" replaces the DbgHelp-based backend
+# entirely rather than supplementing it: DbgHelp cannot read the DWARF
+# debug info a MinGW build emits by default, so addr2line resolves the
+# symbol name too, not just the file and line. MSVC builds always use
+# DbgHelp, since addr2line requires MinGW.
+set (WITH_LINE_INFO auto CACHE STRING
+  "Backend for resolving file names and line numbers in stack traces")
+set_property (CACHE WITH_LINE_INFO PROPERTY STRINGS none auto addr2line)
+
+if (NOT WITH_LINE_INFO)
+  set (WITH_LINE_INFO none)
+elseif (NOT WITH_LINE_INFO MATCHES "^(none|auto|addr2line)$")
+  set (WITH_LINE_INFO auto)
+endif (NOT WITH_LINE_INFO)
+
+if (WITH_LINE_INFO STREQUAL auto OR WITH_LINE_INFO STREQUAL addr2line)
+  set (_ng-log_try_addr2line ON)
+else (WITH_LINE_INFO STREQUAL auto OR WITH_LINE_INFO STREQUAL addr2line)
+  set (_ng-log_try_addr2line OFF)
+endif (WITH_LINE_INFO STREQUAL auto OR WITH_LINE_INFO STREQUAL addr2line)
+
 set (WITH_FUZZING none CACHE STRING "Fuzzing engine")
 set_property (CACHE WITH_FUZZING PROPERTY STRINGS none libfuzzer ossfuzz)
 
@@ -136,20 +166,27 @@ check_include_file_cxx (unistd.h HAVE_UNISTD_H)
 check_type_size (mode_t HAVE_MODE_T LANGUAGE CXX)
 check_type_size (ssize_t HAVE_SSIZE_T LANGUAGE CXX)
 
+check_cxx_symbol_exists (_chsize_s io.h HAVE__CHSIZE_S)
+check_cxx_symbol_exists (backtrace execinfo.h HAVE_EXECINFO_BACKTRACE)
+check_cxx_symbol_exists (backtrace_symbols execinfo.h
+  HAVE_EXECINFO_BACKTRACE_SYMBOLS)
 check_cxx_symbol_exists (dladdr dlfcn.h HAVE_DLADDR)
+check_cxx_symbol_exists (execve unistd.h HAVE_EXECVE)
 check_cxx_symbol_exists (fcntl fcntl.h HAVE_FCNTL)
+check_cxx_symbol_exists (fork unistd.h HAVE_FORK)
+check_cxx_symbol_exists (pipe unistd.h HAVE_PIPE)
+check_cxx_symbol_exists (poll poll.h HAVE_POLL)
 check_cxx_symbol_exists (posix_fadvise fcntl.h HAVE_POSIX_FADVISE)
+check_cxx_symbol_exists (posix_spawn spawn.h HAVE_POSIX_SPAWN)
+check_cxx_symbol_exists (posix_spawn_file_actions_addopen spawn.h
+  HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDOPEN)
 check_cxx_symbol_exists (pread unistd.h HAVE_PREAD)
 check_cxx_symbol_exists (pwrite unistd.h HAVE_PWRITE)
 check_cxx_symbol_exists (sigaction csignal HAVE_SIGACTION)
 check_cxx_symbol_exists (sigaltstack csignal HAVE_SIGALTSTACK)
 check_cxx_symbol_exists (sched_yield sched.h HAVE_SCHED_YIELD)
 check_cxx_symbol_exists (nanosleep ctime HAVE_NANOSLEEP)
-
-check_cxx_symbol_exists (backtrace execinfo.h HAVE_EXECINFO_BACKTRACE)
-check_cxx_symbol_exists (backtrace_symbols execinfo.h
-  HAVE_EXECINFO_BACKTRACE_SYMBOLS)
-check_cxx_symbol_exists (_chsize_s io.h HAVE__CHSIZE_S)
+check_cxx_symbol_exists (waitpid sys/wait.h HAVE_WAITPID)
 
 cmake_push_check_state (RESET)
 set (CMAKE_REQUIRED_LIBRARIES dbghelp)
@@ -236,42 +273,69 @@ if (HAVE_EXECINFO_BACKTRACE AND HAVE_EXECINFO_BACKTRACE_SYMBOLS)
   set (HAVE_STACKTRACE 1)
 endif (HAVE_EXECINFO_BACKTRACE AND HAVE_EXECINFO_BACKTRACE_SYMBOLS)
 
+# Excluded on Emscripten: it has no real process model, so neither
+# posix_spawn() nor fork()+exec() can actually run a subprocess there,
+# regardless of what the symbol checks below report. CreateProcess() is
+# always available on Windows, unlike posix_spawn()/fork(), which are each
+# optional individually.
+if (NOT EMSCRIPTEN AND
+    (WIN32 OR
+     (
+       (
+         (HAVE_POSIX_SPAWN AND HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDOPEN) OR
+         (HAVE_FORK AND HAVE_EXECVE)
+       ) AND HAVE_PIPE AND HAVE_WAITPID AND HAVE_POLL
+     )
+    ))
+  set (HAVE_SUBPROCESS 1)
+endif ()
+
 if (WITH_SYMBOLIZE)
   if (WIN32 OR CYGWIN)
-    cmake_push_check_state (RESET)
-    set (CMAKE_REQUIRED_LIBRARIES DbgHelp)
+    if (MINGW AND _ng-log_try_addr2line AND HAVE_SUBPROCESS)
+      # addr2line resolves both the symbol name and the file/line from
+      # DWARF debug info (what MinGW emits by default) on its own,
+      # without going through DbgHelp at all, so this does not need the
+      # DbgHelp probe below. MSVC builds keep using DbgHelp: they emit
+      # CodeView, not DWARF, and addr2line does not read that format.
+      set (HAVE_SYMBOLIZE 1)
+      set (HAVE_ADDR2LINE 1)
+    else (MINGW AND _ng-log_try_addr2line AND HAVE_SUBPROCESS)
+      cmake_push_check_state (RESET)
+      set (CMAKE_REQUIRED_LIBRARIES DbgHelp)
 
-    check_cxx_source_runs ([=[
-    #include <windows.h>
-    #include <dbghelp.h>
-    #include <cstdlib>
+      check_cxx_source_runs ([=[
+      #include <windows.h>
+      #include <dbghelp.h>
+      #include <cstdlib>
 
-    void foobar() { }
+      void foobar() { }
 
-    int main()
-    {
-        HANDLE process = GetCurrentProcess();
+      int main()
+      {
+          HANDLE process = GetCurrentProcess();
 
-        if (!SymInitialize(process, NULL, TRUE))
-            return EXIT_FAILURE;
+          if (!SymInitialize(process, NULL, TRUE))
+              return EXIT_FAILURE;
 
-        char buf[sizeof(SYMBOL_INFO) + MAX_SYM_NAME];
-        SYMBOL_INFO *symbol = reinterpret_cast<SYMBOL_INFO *>(buf);
-        symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
-        symbol->MaxNameLen = MAX_SYM_NAME;
+          char buf[sizeof(SYMBOL_INFO) + MAX_SYM_NAME];
+          SYMBOL_INFO *symbol = reinterpret_cast<SYMBOL_INFO *>(buf);
+          symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+          symbol->MaxNameLen = MAX_SYM_NAME;
 
-        void* const pc = reinterpret_cast<void*>(&foobar);
-        BOOL ret = SymFromAddr(process, reinterpret_cast<DWORD64>(pc), 0, symbol);
+          void* const pc = reinterpret_cast<void*>(&foobar);
+          BOOL ret = SymFromAddr(process, reinterpret_cast<DWORD64>(pc), 0, symbol);
 
-        return ret ? EXIT_SUCCESS : EXIT_FAILURE;
-    }
-    ]=] HAVE_SYMBOLIZE)
+          return ret ? EXIT_SUCCESS : EXIT_FAILURE;
+      }
+      ]=] HAVE_SYMBOLIZE)
 
-    cmake_pop_check_state ()
+      cmake_pop_check_state ()
 
-    if (HAVE_SYMBOLIZE)
-      set (HAVE_STACKTRACE 1)
-    endif (HAVE_SYMBOLIZE)
+      if (HAVE_SYMBOLIZE)
+        set (HAVE_STACKTRACE 1)
+      endif (HAVE_SYMBOLIZE)
+    endif (MINGW AND _ng-log_try_addr2line AND HAVE_SUBPROCESS)
   elseif (APPLE AND HAVE_DLADDR)
     set (HAVE_SYMBOLIZE 1)
   elseif (UNIX)
@@ -280,6 +344,18 @@ if (WITH_SYMBOLIZE)
     endif (HAVE_ELF_H OR HAVE_SYS_EXEC_ELF_H)
   endif (WIN32 OR CYGWIN)
 endif (WITH_SYMBOLIZE)
+
+if (_ng-log_try_addr2line AND HAVE_SYMBOLIZE AND HAVE_SUBPROCESS AND UNIX AND
+    (HAVE_ELF_H OR HAVE_SYS_EXEC_ELF_H) AND HAVE_SIGACTION)
+  set (HAVE_ADDR2LINE 1)
+endif ()
+
+if (WITH_LINE_INFO STREQUAL addr2line AND NOT HAVE_ADDR2LINE)
+  message (WARNING "WITH_LINE_INFO is 'addr2line' but addr2line support "
+    "is not available. This setting has no effect in this configuration.")
+endif (WITH_LINE_INFO STREQUAL addr2line AND NOT HAVE_ADDR2LINE)
+
+unset (_ng-log_try_addr2line)
 
 # CMake manages symbolize availability. The definition is necessary only when
 # building the library.
@@ -355,6 +431,8 @@ set (NGLOG_PUBLIC_H
 
 set (NGLOG_SRCS
   ${NGLOG_PUBLIC_H}
+  src/addr2line.cc
+  src/addr2line.h
   src/base/commandlineflags.h
   src/demangle.cc
   src/demangle.h
@@ -365,6 +443,8 @@ set (NGLOG_SRCS
   src/signalhandler.cc
   src/stacktrace.cc
   src/stacktrace.h
+  src/subprocess.cc
+  src/subprocess.h
   src/symbolize.cc
   src/symbolize.h
   src/utilities.cc
@@ -579,6 +659,60 @@ if (BUILD_TESTING AND GTest_FOUND)
     target_link_libraries (symbolize_unittest PRIVATE ng-log_test)
   endif (HAVE_SYMBOLIZE)
 
+  if (HAVE_ADDR2LINE)
+    # Stand-ins for a fake "addr2line" on PATH exercising specific
+    # behaviors (hanging, producing no output): a real executable is
+    # needed rather than a POSIX shell script wherever CreateProcess()
+    # is used to spawn it.
+    add_executable (addr2line_fake_hang
+      src/addr2line_fake_hang.cc
+    )
+
+    add_executable (addr2line_fake_empty
+      src/addr2line_fake_empty.cc
+    )
+
+    add_executable (addr2line_unittest
+      src/addr2line_unittest.cc
+    )
+
+    target_link_libraries (addr2line_unittest PRIVATE ng-log_test)
+    add_dependencies (addr2line_unittest addr2line_fake_hang addr2line_fake_empty)
+    target_compile_definitions (addr2line_unittest PRIVATE
+      ADDR2LINE_FAKE_HANG_PATH="$<TARGET_FILE:addr2line_fake_hang>"
+      ADDR2LINE_FAKE_EMPTY_PATH="$<TARGET_FILE:addr2line_fake_empty>")
+
+    if (WIN32)
+      # Statically linked so the runtime DLLs of whichever toolchain
+      # built it (libwinpthread, libstdc++, ...) do not need to be on
+      # PATH wherever this gets spawned as a child process.
+      target_link_options (addr2line_fake_hang PRIVATE
+        -static -static-libgcc -static-libstdc++)
+      target_link_options (addr2line_fake_empty PRIVATE
+        -static -static-libgcc -static-libstdc++)
+    endif (WIN32)
+  endif (HAVE_ADDR2LINE)
+
+  if (HAVE_SUBPROCESS)
+    add_executable (subprocess_test_helper
+      src/subprocess_test_helper.cc
+    )
+
+    add_executable (subprocess_unittest
+      src/subprocess_unittest.cc
+    )
+
+    target_link_libraries (subprocess_unittest PRIVATE ng-log_test)
+    add_dependencies (subprocess_unittest subprocess_test_helper)
+    target_compile_definitions (subprocess_unittest PRIVATE
+      SUBPROCESS_HELPER_PATH="$<TARGET_FILE:subprocess_test_helper>")
+
+    if (MINGW)
+      target_link_options (subprocess_test_helper PRIVATE
+        -static -static-libgcc -static-libstdc++)
+    endif (MINGW)
+  endif (HAVE_SUBPROCESS)
+
   add_executable (demangle_unittest
     src/demangle_unittest.cc
   )
@@ -692,6 +826,22 @@ if (BUILD_TESTING AND GTest_FOUND)
         [=[Check failed: streq\("nonstatic_func"\, TrySymbolize\(\(void \*\)\(&nonstatic_func\)\)\)]=]
     )
   endif (TARGET symbolize_unittest)
+
+  if (TARGET addr2line_unittest)
+    gtest_discover_tests (addr2line_unittest
+      TEST_PREFIX addr2line.
+      DISCOVERY_TIMEOUT 30
+      DISCOVERY_MODE PRE_TEST
+    )
+  endif (TARGET addr2line_unittest)
+
+  if (TARGET subprocess_unittest)
+    gtest_discover_tests (subprocess_unittest
+      TEST_PREFIX subprocess.
+      DISCOVERY_TIMEOUT 30
+      DISCOVERY_MODE PRE_TEST
+    )
+  endif (TARGET subprocess_unittest)
 
   add_executable (mock-log_unittest
     src/mock-log_unittest.cc

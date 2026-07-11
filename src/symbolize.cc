@@ -83,12 +83,17 @@ SymbolizeOpenObjectFileCallback g_symbolize_open_object_file_callback = nullptr;
 // where the input symbol is demangled in-place.
 // To keep stack consumption low, we would like this function to not
 // get inlined.
+//
+// Unused on the Windows addr2line backend below: addr2line.cc does its
+// own demangling via ResolveFunctionAndLine(), so guard the definition
+// itself rather than leave it to trip -Wunused-function there.
+#  if !(defined(NGLOG_OS_WINDOWS) && defined(HAVE_ADDR2LINE))
 ATTRIBUTE_NOINLINE
 void DemangleInplace(char* out, size_t out_size) {
   char demangled[256];  // Big enough for sane demangled symbols.
   if (Demangle(out, demangled, sizeof(demangled))) {
     // Demangling succeeded. Copy to out if the space allows. The scan is
-    // bounded (std::memchr() rather than strlen(); strnlen() is POSIX,
+    // bounded (std::memchr() rather than strlen(). strnlen() is POSIX,
     // not standard C++) so that a Demangle() implementation which breaks
     // its contract (reporting success without '\0'-terminating the
     // output) trips the assertion below instead of the scan reading past
@@ -103,6 +108,7 @@ void DemangleInplace(char* out, size_t out_size) {
     }
   }
 }
+#  endif  // !(defined(NGLOG_OS_WINDOWS) && defined(HAVE_ADDR2LINE))
 
 }  // namespace
 
@@ -747,7 +753,8 @@ static void SafeAppendHexNumber(uint64_t value, char* dest, size_t dest_size) {
 // To keep stack consumption low, we would like this function to not
 // get inlined.
 static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(
-    void* pc, char* out, size_t out_size, SymbolizeOptions /*options*/) {
+    void* pc, char* out, size_t out_size, SymbolizeOptions options,
+    SymbolizedFrame* frame) {
   auto pc0 = reinterpret_cast<uintptr_t>(pc);
   uint64_t start_address = 0;
   uint64_t base_address = 0;
@@ -791,14 +798,29 @@ static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(
   if (elf_type == -1) {
     return false;
   }
-  if (g_symbolize_callback) {
+  if (g_symbolize_callback && (options & SymbolizeOptions::kNoLineNumbers) !=
+                                  SymbolizeOptions::kNoLineNumbers) {
     // Run the call back if it's installed.
-    // Note: relocation (and much of the rest of this code) will be
-    // wrong for prelinked shared libraries and PIE executables.
-    uint64_t relocation = (elf_type == ET_DYN) ? start_address : 0;
+    // Note: relocation (and much of the rest of this code) may be wrong
+    // for prelinked shared libraries. base_address (rather than
+    // start_address, which is only the start of whichever /proc/self/maps
+    // segment happens to contain "pc") is the same load bias
+    // GetSymbolFromObjectFile() below uses to resolve "pc" against the
+    // object's own symbol table, so it is what correctly maps "pc" back to
+    // a file-relative address for PIE executables and shared libraries.
+    uint64_t relocation = (elf_type == ET_DYN) ? base_address : 0;
     int num_bytes_written =
         g_symbolize_callback(object_fd.get(), pc, out, out_size, relocation);
     if (num_bytes_written > 0) {
+      if (frame != nullptr) {
+        // The callback overwrites "out" from the start with "<file>:<line>
+        // " (see FormatAddr2LineOutput()), discarding the "(" appended
+        // above. Trim the trailing space so the span covers exactly
+        // "<file>:<line>".
+        const auto written = static_cast<size_t>(num_bytes_written);
+        frame->file_line_offset = 0;
+        frame->file_line_length = written > 1 ? written - 1 : 0;
+      }
       out += static_cast<size_t>(num_bytes_written);
       out_size -= static_cast<size_t>(num_bytes_written);
     }
@@ -837,7 +859,8 @@ namespace nglog {
 inline namespace tools {
 
 static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(
-    void* pc, char* out, size_t out_size, SymbolizeOptions /*options*/) {
+    void* pc, char* out, size_t out_size, SymbolizeOptions /*options*/,
+    SymbolizedFrame* /*frame*/) {
   Dl_info info;
   if (dladdr(pc, &info)) {
     if (info.dli_sname) {
@@ -855,10 +878,84 @@ static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(
 }  // namespace tools
 }  // namespace nglog
 
+#  elif defined(NGLOG_OS_WINDOWS) && defined(HAVE_ADDR2LINE)
+
+// Resolves both the symbol name and the file/line via addr2line, since
+// DbgHelp cannot read the DWARF debug info a MinGW build emits by
+// default. Known MinGW/binutils linker quirk, observed with
+// x86_64-w64-mingw32-ld 2.46: when the address being
+// resolved falls in the same translation unit as main(), the linker
+// appears to mis-merge .debug_ranges across compilation units, and
+// addr2line reports "??" with an unrelated file. Addresses in other
+// translation units resolve correctly. This is a toolchain limitation,
+// not addressed here.
+
+#    include <windows.h>
+
+#    include "addr2line.h"
+
+namespace nglog {
+inline namespace tools {
+
+namespace {
+// Room for the worst-case UTF-8 expansion of a MAX_PATH UTF-16 string.
+constexpr int kMaxObjectPathUtf8Length = MAX_PATH * 3;
+}  // namespace
+
+static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(
+    void* pc, char* out, size_t out_size, SymbolizeOptions /*options*/,
+    SymbolizedFrame* frame) {
+  HMODULE module = nullptr;
+
+  if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                              GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                          reinterpret_cast<LPCWSTR>(pc), &module)) {
+    return false;
+  }
+
+  wchar_t wide_path[MAX_PATH];
+  const DWORD wide_len = GetModuleFileNameW(module, wide_path, MAX_PATH);
+
+  if (wide_len == 0 || wide_len >= MAX_PATH) {
+    return false;
+  }
+
+  char object_path[kMaxObjectPathUtf8Length];
+  const int narrow_len =
+      WideCharToMultiByte(CP_UTF8, 0, wide_path, -1, object_path,
+                          sizeof(object_path), nullptr, nullptr);
+
+  if (narrow_len <= 0) {
+    return false;
+  }
+
+  // addr2line resolves addresses against the file's own coordinate
+  // system, i.e. relative to the PE's declared ImageBase, not the
+  // (possibly ASLR-relocated) address the module actually loaded at. A
+  // module's HMODULE is its runtime load base, and that same base
+  // address is where the loaded image's own PE header sits in memory,
+  // making its declared ImageBase readable directly from the running
+  // process without any extra API calls.
+  const auto runtime_base = reinterpret_cast<uintptr_t>(module);
+  const auto* dos_header = reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
+  const auto* nt_headers = reinterpret_cast<const IMAGE_NT_HEADERS*>(
+      reinterpret_cast<const std::uint8_t*>(module) + dos_header->e_lfanew);
+  const auto image_base =
+      static_cast<uintptr_t>(nt_headers->OptionalHeader.ImageBase);
+  const auto relocation = runtime_base - image_base;
+  return ResolveFunctionAndLine(object_path, pc, relocation, out, out_size,
+                                frame);
+}
+
+}  // namespace tools
+}  // namespace nglog
+
 #  elif defined(NGLOG_OS_WINDOWS) || defined(NGLOG_OS_CYGWIN)
 
+// clang-format off
+#    include <windows.h>  // Must come before <dbghelp.h>
 #    include <dbghelp.h>
-#    include <windows.h>
+// clang-format on
 
 namespace nglog {
 inline namespace tools {
@@ -895,7 +992,8 @@ class SymInitializer final {
 
 static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(void* pc, char* out,
                                                     size_t out_size,
-                                                    SymbolizeOptions options) {
+                                                    SymbolizeOptions options,
+                                                    SymbolizedFrame* frame) {
   const static SymInitializer symInitializer;
   if (!symInitializer.ready) {
     return false;
@@ -943,14 +1041,22 @@ static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(void* pc, char* out,
       const std::size_t suffixlen = fnlen + extralen + fnlen + digits;
 
       if (suffixlen < out_size) {
-        // snprintf() returns a negative value on encoding error; only a
-        // non-negative count of the (possibly truncated) characters written
-        // is meaningful to subtract from out_size.
+        // Written as " (<file>:<line>)". The span reported via "frame"
+        // excludes the leading " (" and trailing ")" so it covers just
+        // "<file>:<line>", matching the other backends.
+        constexpr std::size_t kLeadingDecorationLen = 2;   // " ("
+        constexpr std::size_t kTrailingDecorationLen = 1;  // ")"
         const int written = std::snprintf(out + namelen, out_size, " (%s:%lu)",
                                           line.FileName, line.LineNumber);
-        if (written > 0) {
-          out_size -= static_cast<std::size_t>(written);
+        if (frame != nullptr &&
+            written > static_cast<int>(kLeadingDecorationLen +
+                                       kTrailingDecorationLen)) {
+          frame->file_line_offset = namelen + kLeadingDecorationLen;
+          frame->file_line_length = static_cast<size_t>(written) -
+                                    kLeadingDecorationLen -
+                                    kTrailingDecorationLen;
         }
+        out_size -= static_cast<size_t>(written);
       }
     }
 
@@ -969,8 +1075,12 @@ static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(void* pc, char* out,
 namespace nglog {
 inline namespace tools {
 
-bool Symbolize(void* pc, char* out, size_t out_size, SymbolizeOptions options) {
-  return SymbolizeAndDemangle(pc, out, out_size, options);
+bool Symbolize(void* pc, char* out, size_t out_size, SymbolizeOptions options,
+               SymbolizedFrame* frame) {
+  if (frame != nullptr) {
+    *frame = SymbolizedFrame{};
+  }
+  return SymbolizeAndDemangle(pc, out, out_size, options, frame);
 }
 
 }  // namespace tools

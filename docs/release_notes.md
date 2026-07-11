@@ -4,6 +4,8 @@
 
 ### 0.9.0 <small>TBD</small> { id="0.9.0" }
 
+- Resolve source file names and line numbers in stack traces via
+  [addr2line](failures.md#resolving-file-names-and-line-numbers)
 - Remove the glog compatibility layer
 - Remove Bazel build support
 - Prevent concurrent log writers from blocking during memory-drop maintenance

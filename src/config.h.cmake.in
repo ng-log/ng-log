@@ -28,6 +28,25 @@
 /* Define if you have the 'posix_fadvise' function in <fcntl.h> */
 #cmakedefine HAVE_POSIX_FADVISE
 
+/* Define if you have the 'posix_spawn' function in <spawn.h> */
+#cmakedefine HAVE_POSIX_SPAWN
+
+/* Define if you have the 'posix_spawn_file_actions_addopen' function in
+   <spawn.h> */
+#cmakedefine HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDOPEN
+
+/* Define if you have the 'fork' function in <unistd.h> */
+#cmakedefine HAVE_FORK
+
+/* Define if you have the 'execve' function in <unistd.h> */
+#cmakedefine HAVE_EXECVE
+
+/* Define if you have the 'pipe' function in <unistd.h> */
+#cmakedefine HAVE_PIPE
+
+/* Define if you have the 'poll' function in <poll.h> */
+#cmakedefine HAVE_POLL
+
 /* Define to 1 if you have the <pwd.h> header file. */
 #cmakedefine HAVE_PWD_H
 
@@ -93,6 +112,13 @@
 
 /* define if symbolize support is available */
 #cmakedefine HAVE_SYMBOLIZE
+
+/* define if addr2line-based file/line resolution is available */
+#cmakedefine HAVE_ADDR2LINE
+
+/* define if Subprocess (src/subprocess.h) can spawn and communicate with an
+   external program on this platform */
+#cmakedefine HAVE_SUBPROCESS
 
 /* define if localtime_r is available in time.h */
 #cmakedefine HAVE_LOCALTIME_R

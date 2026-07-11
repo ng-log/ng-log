@@ -71,3 +71,25 @@ supported[^1] by ng-log.
     * `libunwind`,
     * and the Debug Help Library (`dbghelp`) on Windows.
 
+## Resolving File Names and Line Numbers
+
+When built with `WITH_LINE_INFO` set to `auto` (the default) or
+`addr2line`, ng-log resolves the source file and line number of each
+stack frame by invoking the `addr2line` command-line tool, in addition to
+the symbol name. This applies to both the failure signal handler and
+`LOG(FATAL)`/unsatisfied `CHECK` traces. The tool is invoked as an
+external process with a bounded timeout, so a missing or unresponsive
+`addr2line` only suppresses the file and line information rather than
+affecting the rest of the crash report.
+
+When built with MinGW, `addr2line` also replaces `dbghelp` as the symbol
+resolver entirely rather than supplementing it, since `dbghelp` cannot
+read the DWARF debug information a MinGW build emits by default. MSVC
+builds always use `dbghelp`, since `addr2line` requires MinGW.
+
+Resolution can be disabled at runtime without recompiling by setting
+`#!cpp FLAGS_symbolize_line_info` to `false`, or `--symbolize_line_info=false`
+on the command line. The `#!cpp FLAGS_addr2line_timeout_ms` flag controls
+how long, in milliseconds, ng-log waits for `addr2line` to resolve a
+single address before giving up on it.
+

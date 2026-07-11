@@ -176,6 +176,14 @@ DECLARE_string(logmailer);
 
 DECLARE_bool(symbolize_stacktrace);
 
+// Resolve file names and line numbers for symbolized stack frames using
+// addr2line, if available.
+DECLARE_bool(symbolize_line_info);
+
+// Upper bound in milliseconds on how long to wait for addr2line to resolve
+// a single address before giving up on it.
+DECLARE_int32(addr2line_timeout_ms);
+
 #pragma pop_macro("DECLARE_VARIABLE")
 #pragma pop_macro("DECLARE_bool")
 #pragma pop_macro("DECLARE_string")

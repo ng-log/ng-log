@@ -1,4 +1,5 @@
 // Copyright (c) 2024, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -39,6 +40,7 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "addr2line.h"
 #include "config.h"
 #include "initializer.h"
 #include "ng-log/flags.h"
@@ -301,6 +303,11 @@ void InitializeLoggingUtilities(const char* argv0) {
 
 #ifdef HAVE_STACKTRACE
   InstallFailureFunction(&DumpStackTraceAndExit);
+#endif
+#ifdef HAVE_ADDR2LINE
+  if (FLAGS_symbolize_line_info) {
+    InstallAddr2LineSymbolizeCallback();
+  }
 #endif
 }
 
