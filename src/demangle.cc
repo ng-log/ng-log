@@ -50,7 +50,10 @@
 #endif
 
 #if defined(NGLOG_OS_WINDOWS)
+// clang-format off
+#  include <windows.h>  // Must come before <dbghelp.h>
 #  include <dbghelp.h>
+// clang-format on
 #endif
 
 namespace nglog {
