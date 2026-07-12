@@ -46,6 +46,12 @@
 /* Define if you have the `sigaltstack' function */
 #cmakedefine HAVE_SIGALTSTACK
 
+/* Define if you have the `sched_yield' function */
+#cmakedefine HAVE_SCHED_YIELD
+
+/* Define if you have the `nanosleep' function */
+#cmakedefine HAVE_NANOSLEEP
+
 /* Define to 1 if you have the <syscall.h> header file. */
 #cmakedefine HAVE_SYSCALL_H
 

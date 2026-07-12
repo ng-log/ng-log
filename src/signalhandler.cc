@@ -33,10 +33,10 @@
 // Implementation of InstallFailureSignalHandler().
 
 #include <algorithm>
+#include <atomic>
 #include <csignal>
 #include <cstring>
 #include <ctime>
-#include <mutex>
 #include <sstream>
 #include <thread>
 
@@ -60,6 +60,14 @@
 #  include <sys/syscall.h>
 #  include <sys/types.h>
 #endif
+#ifdef NGLOG_OS_WINDOWS
+#  include <windows.h>
+#else  // !defined(NGLOG_OS_WINDOWS)
+#  include <pthread.h>
+#  ifdef HAVE_SCHED_YIELD
+#    include <sched.h>
+#  endif  // defined(HAVE_SCHED_YIELD)
+#endif    // defined(NGLOG_OS_WINDOWS)
 
 namespace nglog {
 
@@ -288,11 +296,83 @@ void InvokeDefaultSignalHandler(int signal_number) {
 #endif
 }
 
-// This variable is used for protecting FailureSignalHandler() from dumping
-// stuff while another thread is doing it.  Our policy is to let the first
-// thread dump stuff and let other threads do nothing.
-// See also comments in FailureSignalHandler().
-static std::once_flag signaled;
+// Identifies a thread for the reentrancy guard below. Kept default-
+// constructible and otherwise trivial, unlike a typical factory-built
+// value type, so the thread_local instance below needs no signal-unsafe
+// dynamic initialization. Current() is the only way to obtain a value
+// that actually identifies a thread.
+class FailureSignalThreadId {
+ public:
+  static FailureSignalThreadId Current() noexcept {
+    FailureSignalThreadId id;
+#ifdef NGLOG_OS_WINDOWS
+    id.id_ = GetCurrentThreadId();
+#else   // !defined(NGLOG_OS_WINDOWS)
+    id.id_ = pthread_self();
+#endif  // defined(NGLOG_OS_WINDOWS)
+    return id;
+  }
+
+  friend bool operator==(const FailureSignalThreadId& lhs,
+                         const FailureSignalThreadId& rhs) noexcept {
+#ifdef NGLOG_OS_WINDOWS
+    return lhs.id_ == rhs.id_;
+#else   // !defined(NGLOG_OS_WINDOWS)
+    return pthread_equal(lhs.id_, rhs.id_) != 0;
+#endif  // defined(NGLOG_OS_WINDOWS)
+  }
+
+ private:
+#ifdef NGLOG_OS_WINDOWS
+  DWORD id_;
+#else   // !defined(NGLOG_OS_WINDOWS)
+  pthread_t id_;
+#endif  // defined(NGLOG_OS_WINDOWS)
+};
+
+// One instance per thread, alive for that thread's whole lifetime. A
+// pointer to it stays valid to dereference even after the publishing
+// call to FailureSignalHandler() has returned. See g_entered_thread_id
+// below.
+thread_local FailureSignalThreadId t_failure_signal_thread_id;
+
+// Gives up the rest of the current scheduling quantum. Used only by
+// threads spinning to be killed, so promptness doesn't matter. Only
+// sleep() is on the POSIX async-signal-safe list, but the others used
+// here are thin, state-free syscalls on every platform ng-log targets.
+void RelinquishTimeSlice() {
+#ifdef NGLOG_OS_WINDOWS
+  SwitchToThread();
+#elif defined(HAVE_SCHED_YIELD)  // !defined(NGLOG_OS_WINDOWS)
+  sched_yield();
+#elif defined(HAVE_NANOSLEEP)    // !defined(HAVE_SCHED_YIELD)
+  const struct timespec zero_duration = {};
+  nanosleep(&zero_duration, nullptr);
+#else                            // !defined(HAVE_NANOSLEEP)
+  sleep(1);
+#endif                           // defined(NGLOG_OS_WINDOWS)
+}
+
+// Id of the thread currently dumping, or nullptr. The first thread in
+// dumps. Later entrants, on any thread, wait to die. Deliberately not a
+// std::call_once() or std::once_flag. Those are not async-signal-safe,
+// and a thread reentering one while already holding it would deadlock
+// instead of dying. See also FailureSignalHandler() below.
+static std::atomic<FailureSignalThreadId*> g_entered_thread_id{nullptr};
+// is_always_lock_free needs C++17, so ATOMIC_POINTER_LOCK_FREE == 2, its
+// standard-mandated "always lock-free" equivalent, covers this ng-log
+// target's C++14 floor.
+#if defined(__cpp_lib_atomic_is_always_lock_free)
+constexpr bool kEnteredThreadIdIsLockFree =
+    decltype(g_entered_thread_id)::is_always_lock_free;
+#else   // !defined(__cpp_lib_atomic_is_always_lock_free)
+constexpr bool kEnteredThreadIdIsLockFree = ATOMIC_POINTER_LOCK_FREE == 2;
+#endif  // defined(__cpp_lib_atomic_is_always_lock_free)
+// A lock-based atomic could take a lock already held by the very thread
+// its own signal interrupted, deadlocking instead of dying.
+static_assert(kEnteredThreadIdIsLockFree,
+              "g_entered_thread_id must be lock-free to be "
+              "async-signal-safe");
 
 static void HandleSignal(int signal_number
 #if !defined(NGLOG_OS_WINDOWS)
@@ -346,7 +426,10 @@ static void HandleSignal(int signal_number
   // causes problems.
   FlushLogFilesUnsafe(NGLOG_INFO);
 
-  // Kill ourself by the default signal handler.
+  // Kill ourself by the default signal handler. Must return afterwards.
+  // signal_number stays blocked on this thread until we do, since we
+  // have no SA_NODEFER, so spinning here would keep the just-reraised
+  // signal pending forever instead of letting it kill the process.
   InvokeDefaultSignalHandler(signal_number);
 }
 
@@ -359,10 +442,34 @@ void FailureSignalHandler(int signal_number, siginfo_t* signal_info,
                           void* ucontext)
 #endif
 {
-  std::call_once(signaled, &HandleSignal, signal_number
+  t_failure_signal_thread_id = FailureSignalThreadId::Current();
+  FailureSignalThreadId* other_thread_id = nullptr;
+  // Release ordering on success publishes this thread's id to whichever
+  // thread later reads it back with acquire ordering on the failure path
+  // below, possibly on another thread.
+  if (!g_entered_thread_id.compare_exchange_strong(
+          other_thread_id, &t_failure_signal_thread_id,
+          std::memory_order_release, std::memory_order_acquire)) {
+    if (*other_thread_id == t_failure_signal_thread_id) {
+      // Reentered on this thread, likely because dumping raised another
+      // signal. Don't retry, just die. Must return, not spin, afterwards
+      // for the same reason as in HandleSignal() above. signal_number is
+      // still blocked here until we do.
+      InvokeDefaultSignalHandler(signal_number);
+      return;
+    }
+    // Another thread is dumping and will terminate the process. Spin
+    // rather than return, so this thread doesn't resume possibly
+    // corrupted execution in the meantime.
+    while (true) {
+      RelinquishTimeSlice();
+    }
+  }
+
+  HandleSignal(signal_number
 #if !defined(NGLOG_OS_WINDOWS)
-                 ,
-                 signal_info, ucontext
+               ,
+               signal_info, ucontext
 #endif
   );
 }
