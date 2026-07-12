@@ -68,10 +68,18 @@ NGLOG_DEFINE_bool(logtostderr, BoolFromEnv("NGLOG_LOGTOSTDERR", false),
                   "log messages go to stderr instead of logfiles");
 NGLOG_DEFINE_bool(alsologtostderr, BoolFromEnv("NGLOG_ALSOLOGTOSTDERR", false),
                   "log messages go to stderr in addition to logfiles");
-NGLOG_DEFINE_bool(colorlogtostderr, false,
-                  "color messages logged to stderr (if supported by terminal)");
-NGLOG_DEFINE_bool(colorlogtostdout, false,
-                  "color messages logged to stdout (if supported by terminal)");
+NGLOG_DEFINE_bool(
+    colorlogtostderr, true,
+    "color messages logged to stderr; only takes effect if the terminal "
+    "is actually able to display colors safely, which is auto-detected "
+    "(a real terminal, not a pipe or file, and no NO_COLOR/TERM=dumb "
+    "opt-out)");
+NGLOG_DEFINE_bool(
+    colorlogtostdout, true,
+    "color messages logged to stdout; only takes effect if the terminal "
+    "is actually able to display colors safely, which is auto-detected "
+    "(a real terminal, not a pipe or file, and no NO_COLOR/TERM=dumb "
+    "opt-out)");
 NGLOG_DEFINE_bool(logtostdout, BoolFromEnv("NGLOG_LOGTOSTDOUT", false),
                   "log messages go to stdout instead of logfiles");
 #ifdef NGLOG_OS_LINUX
@@ -163,6 +171,42 @@ NGLOG_DEFINE_bool(symbolize_line_info, true,
                   "Resolve file names and line numbers for symbolized "
                   "stack frames using addr2line or libbacktrace, if "
                   "available.");
+
+NGLOG_DEFINE_bool(
+    symbolize_hyperlinks, true,
+    "Wrap file:line references in a colorized stack trace with OSC 8 "
+    "terminal hyperlinks. Automatically has no effect unless the terminal "
+    "is detected as one of a known set of OSC 8-capable terminal "
+    "emulators; set to false to disable unconditionally.");
+
+namespace {
+
+#ifdef NGLOG_USE_GFLAGS
+constexpr char kSymbolizeFileBasePathHelp[] =
+    "Base path used to resolve relative source file paths recorded in "
+    "debug info (e.g. the build directory) when generating OSC 8 "
+    "hyperlinks for a colorized stack trace. Absolute paths are used "
+    "as-is and never joined with this path. Relative paths are not "
+    "hyperlinked unless this is set to an absolute path.";
+#endif  // NGLOG_USE_GFLAGS
+std::string g_symbolize_file_base_path;
+std::string g_symbolize_file_base_path_default;
+
+#ifdef NGLOG_USE_GFLAGS
+const GFLAGS_NAMESPACE::FlagRegisterer g_symbolize_file_base_path_registerer(
+    "symbolize_file_base_path", kSymbolizeFileBasePathHelp, __FILE__,
+    &g_symbolize_file_base_path, &g_symbolize_file_base_path_default);
+#endif  // NGLOG_USE_GFLAGS
+
+}  // namespace
+
+namespace fLS {
+NGLOG_EXPORT std::string& FLAGS_symbolize_file_base_path =
+    g_symbolize_file_base_path;
+char FLAGS_nosymbolize_file_base_path;
+}  // namespace fLS
+
+using fLS::FLAGS_symbolize_file_base_path;
 
 NGLOG_DEFINE_int32(addr2line_timeout_ms, 2000,
                    "Upper bound in milliseconds on how long to wait for "

@@ -111,7 +111,9 @@ DECLARE_bool(timestamp_in_logfile_name);
 // Set whether log messages go to stdout instead of logfiles
 DECLARE_bool(logtostdout);
 
-// Set color messages logged to stdout (if supported by terminal).
+// Set color messages logged to stdout. Defaults to true. It automatically
+// has no effect unless the terminal is safely detected to support color
+// (see StreamSupportsColor() in color.h).
 DECLARE_bool(colorlogtostdout);
 
 // Set whether log messages go to stderr instead of logfiles
@@ -120,7 +122,9 @@ DECLARE_bool(logtostderr);
 // Set whether log messages go to stderr in addition to logfiles.
 DECLARE_bool(alsologtostderr);
 
-// Set color messages logged to stderr (if supported by terminal).
+// Set color messages logged to stderr. Defaults to true. It automatically
+// has no effect unless the terminal is safely detected to support color
+// (see StreamSupportsColor() in color.h).
 DECLARE_bool(colorlogtostderr);
 
 // Log messages at a level >= this flag are automatically sent to
@@ -179,6 +183,14 @@ DECLARE_bool(symbolize_stacktrace);
 // Resolve file names and line numbers for symbolized stack frames using
 // addr2line or libbacktrace, if available.
 DECLARE_bool(symbolize_line_info);
+
+// Wrap file:line references in a colorized stack trace with OSC 8
+// terminal hyperlinks. Set to false to disable unconditionally.
+DECLARE_bool(symbolize_hyperlinks);
+
+// Base path used to resolve relative source file paths recorded in debug
+// info when generating OSC 8 hyperlinks for a colorized stack trace.
+DECLARE_string(symbolize_file_base_path);
 
 // Upper bound in milliseconds on how long to wait for addr2line to resolve
 // a single address before giving up on it.

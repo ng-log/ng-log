@@ -55,6 +55,7 @@
 
 #include "ng-log/export.h"
 #include "ng-log/flags.h"
+#include "ng-log/internal/styled_value.h"
 #include "ng-log/platform.h"
 #include "ng-log/types.h"
 
@@ -1146,6 +1147,7 @@ class NGLOG_EXPORT LogStreamBuf : public std::streambuf {
 
 namespace internal {
 struct NGLOG_NO_EXPORT LogMessageData;
+class NGLOG_NO_EXPORT StyleRecorder;
 }  // namespace internal
 
 //
@@ -1184,7 +1186,11 @@ class NGLOG_EXPORT LogMessage {
     // discarding it.
     NGLOG_USED
     LogStream(char* buf, int len, int64 ctr)
-        : std::ostream(nullptr), streambuf_(buf, len), ctr_(ctr), self_(this) {
+        : std::ostream(nullptr),
+          streambuf_(buf, len),
+          ctr_(ctr),
+          self_(this),
+          style_recorder_(nullptr) {
       rdbuf(&streambuf_);
     }
 
@@ -1192,13 +1198,15 @@ class NGLOG_EXPORT LogMessage {
         : std::ostream(nullptr),
           streambuf_(std::move(other.streambuf_)),
           ctr_(std::exchange(other.ctr_, 0)),
-          self_(this) {
+          self_(this),
+          style_recorder_(std::exchange(other.style_recorder_, nullptr)) {
       rdbuf(&streambuf_);
     }
 
     LogStream& operator=(LogStream&& other) noexcept {
       streambuf_ = std::move(other.streambuf_);
       ctr_ = std::exchange(other.ctr_, 0);
+      style_recorder_ = std::exchange(other.style_recorder_, nullptr);
       rdbuf(&streambuf_);
       return *this;
     }
@@ -1206,6 +1214,10 @@ class NGLOG_EXPORT LogMessage {
     int64 ctr() const { return ctr_; }
     void set_ctr(int64 ctr) { ctr_ = ctr; }
     LogStream* self() const { return self_; }
+
+    void SetStyleRecorder(internal::StyleRecorder* recorder);
+    void PushStyle(const internal::TextAttributes& attributes);
+    void PopStyle();
 
     // Legacy std::streambuf methods.
     size_t pcount() const { return streambuf_.pcount(); }
@@ -1219,6 +1231,7 @@ class NGLOG_EXPORT LogMessage {
     base_logging::LogStreamBuf streambuf_;
     int64 ctr_;        // Counter hack (for the LOG_EVERY_X() macro)
     LogStream* self_;  // Consistency check hack
+    internal::StyleRecorder* style_recorder_;
   };
 
  public:
@@ -1287,6 +1300,10 @@ class NGLOG_EXPORT LogMessage {
 
   std::ostream& stream();
 
+  // Appends text and its attributes independently of stream insertion.
+  void AppendText(const char* text, std::size_t length,
+                  internal::TextAttributes attributes = {});
+
   int preserved_errno() const;
 
   // Must be called without the log_mutex held.  (L < log_mutex)
@@ -1329,6 +1346,40 @@ class NGLOG_EXPORT LogMessage {
 
   friend class LogDestination;
 };
+
+inline std::ostream& operator<<(std::ostream& os,
+                                const internal::StylePush& push) {
+  auto* const log_stream = dynamic_cast<LogMessage::LogStream*>(&os);
+  if (log_stream != nullptr) {
+    log_stream->PushStyle(push.attributes);
+  }
+  return os;
+}
+
+inline std::ostream& operator<<(std::ostream& os, const internal::StylePop&) {
+  auto* const log_stream = dynamic_cast<LogMessage::LogStream*>(&os);
+  if (log_stream != nullptr) {
+    log_stream->PopStyle();
+  }
+  return os;
+}
+
+template <typename T>
+inline std::ostream& operator<<(std::ostream& os,
+                                const internal::StyledValue<T>& styled_value) {
+  auto* const log_stream = dynamic_cast<LogMessage::LogStream*>(&os);
+  if (log_stream == nullptr) {
+    return os << styled_value.value;
+  }
+
+  log_stream->PushStyle(styled_value.attributes);
+  struct StyleGuard {
+    LogMessage::LogStream* stream;
+    ~StyleGuard() { stream->PopStyle(); }
+  } guard{log_stream};
+  os << styled_value.value;
+  return os;
+}
 
 // This class happens to be thread-hostile because all instances share
 // a single data buffer, but since it can only be created just before

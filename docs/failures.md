@@ -5,22 +5,28 @@
 The library provides a convenient signal handler that will dump useful
 information when the program crashes on certain signals such as `SIGSEGV`. The
 signal handler can be installed by `#!cpp
-nglog::InstallFailureSignalHandler()`. The following is an example of output
-from the signal handler.
+nglog::InstallFailureSignalHandler()`.
 
-    *** Aborted at 1225095260 (unix time) try "date -d @1225095260" if you are using GNU date ***
-    *** SIGSEGV (@0x0) received by PID 17711 (TID 0x7f893090a6f0) from PID 0; stack trace: ***
-    PC: @           0x412eb1 TestWaitingLogSink::send()
-        @     0x7f892fb417d0 (unknown)
-        @           0x412eb1 TestWaitingLogSink::send()
-        @     0x7f89304f7f06 nglog::LogMessage::SendToLog()
-        @     0x7f89304f35af nglog::LogMessage::Flush()
-        @     0x7f89304f3739 nglog::LogMessage::~LogMessage()
-        @           0x408cf4 TestLogSinkWaitTillSent()
-        @           0x4115de main
-        @     0x7f892f7ef1c4 (unknown)
-        @           0x4046f9 (unknown)
+<!--
+The transcript below was captured from a terminal and converted to HTML with
+ansi2html using these commands:
 
+env -u NO_COLOR TERM=xterm-256color script -q -c 'build-debug/color_stacktrace_example' /tmp/ng-log-color-stacktrace.typescript
+perl -0pe 's/\r//g; s/\AScript started.*?\n//s; s/\nScript done.*\z//s; s/\e\]8;;[^\e]*\e\\//g; s/\A.*?(?=\*\*\* Aborted)//s' /tmp/ng-log-color-stacktrace.typescript | ansi2html -i -W -s xterm | perl -pe 's{<span style="color: #00cdcd">((src|examples)/([^:<]+):([0-9]+))</span>}{<a href="https://github.com/ng-log/ng-log/blob/master/$2/$3#L$4" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">$1</span></a>}g' > docs/failure-stacktrace.html
+-->
+
+The example intentionally aborts, so a nonzero exit status is expected. The
+time, addresses, process identifiers, thread identifiers, and source lines
+vary between runs.
+
+<pre style="overflow-x: auto">
+--8<-- "docs/failure-stacktrace.html"
+</pre>
+
+When writing to a terminal, this output is
+[colorized](flags.md#colorizing-output): the address, `file:line`, and
+function name of each frame are colored separately, and `file:line`
+references become clickable hyperlinks back to the source.
 
 ## Customizing Handler Output
 
@@ -106,4 +112,3 @@ FLAGS_symbolize_line_info` to `false`, or `--symbolize_line_info=false` on the
 command line. The `#!cpp FLAGS_addr2line_timeout_ms` flag controls how long, in
 milliseconds, ng-log waits for `addr2line` to resolve a single address before
 giving up on it. It has no effect when `libbacktrace` is the active backend.
-

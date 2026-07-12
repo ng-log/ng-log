@@ -50,6 +50,11 @@
 #include <utility>
 
 #include "config.h"
+#include "internal/source_location.h"
+#include "internal/style_recorder.h"
+#include "internal/styled_output.h"
+#include "internal/terminal_capabilities.h"
+#include "internal/theme.h"
 #include "ng-log/platform.h"
 #include "ng-log/raw_logging.h"
 #include "stacktrace.h"
@@ -114,6 +119,7 @@ using std::fclose;
 using std::fflush;
 using std::FILE;
 using std::fprintf;
+using std::fputs;
 using std::fwrite;
 using std::perror;
 
@@ -173,28 +179,6 @@ static void GetHostName(string* hostname) {
 #endif
 }
 
-// Returns true iff terminal supports using colors in output.
-static bool TerminalSupportsColor() {
-  bool term_supports_color = false;
-#ifdef NGLOG_OS_WINDOWS
-  // on Windows TERM variable is usually not set, but the console does
-  // support colors.
-  term_supports_color = true;
-#else
-  // On non-Windows platforms, we rely on the TERM variable.
-  const char* const term = getenv("TERM");
-  if (term != nullptr && term[0] != '\0') {
-    term_supports_color =
-        !strcmp(term, "xterm") || !strcmp(term, "xterm-color") ||
-        !strcmp(term, "xterm-256color") || !strcmp(term, "screen-256color") ||
-        !strcmp(term, "konsole") || !strcmp(term, "konsole-16color") ||
-        !strcmp(term, "konsole-256color") || !strcmp(term, "screen") ||
-        !strcmp(term, "linux") || !strcmp(term, "cygwin");
-  }
-#endif
-  return term_supports_color;
-}
-
 #if defined(__cpp_lib_unreachable) && (__cpp_lib_unreachable >= 202202L)
 #  define NGLOG_UNREACHABLE std::unreachable()
 #elif !defined(NDEBUG)
@@ -217,61 +201,28 @@ static bool TerminalSupportsColor() {
 
 namespace nglog {
 
+using namespace internal;
+
 NGLOG_NO_EXPORT
 std::string StrError(int err);
 
-enum GLogColor { COLOR_DEFAULT, COLOR_RED, COLOR_GREEN, COLOR_YELLOW };
-
-static GLogColor SeverityToColor(LogSeverity severity) {
+// Maps a log severity to the Role used to colorize it (see color.h).
+// DefaultTheme() leaves Role::kLogInfo at Color::kDefault, i.e. uncolored.
+static Role SeverityToRole(LogSeverity severity) {
   switch (severity) {
     case NGLOG_INFO:
-      return COLOR_DEFAULT;
+      return Role::kLogInfo;
     case NGLOG_WARNING:
-      return COLOR_YELLOW;
+      return Role::kLogWarning;
     case NGLOG_ERROR:
+      return Role::kLogError;
     case NGLOG_FATAL:
-      return COLOR_RED;
+      return Role::kLogFatal;
   }
 
   // should never get here.
   NGLOG_UNREACHABLE;
 }
-
-#ifdef NGLOG_OS_WINDOWS
-
-// Returns the character attribute for the given color.
-static WORD GetColorAttribute(GLogColor color) {
-  switch (color) {
-    case COLOR_RED:
-      return FOREGROUND_RED;
-    case COLOR_GREEN:
-      return FOREGROUND_GREEN;
-    case COLOR_YELLOW:
-      return FOREGROUND_RED | FOREGROUND_GREEN;
-    case COLOR_DEFAULT:
-      break;
-  }
-  return 0;
-}
-
-#else
-
-// Returns the ANSI color code for the given color.
-static const char* GetAnsiColorCode(GLogColor color) {
-  switch (color) {
-    case COLOR_RED:
-      return "1";
-    case COLOR_GREEN:
-      return "2";
-    case COLOR_YELLOW:
-      return "3";
-    case COLOR_DEFAULT:
-      return "";
-  };
-  return nullptr;  // stop warning about return type.
-}
-
-#endif  // NGLOG_OS_WINDOWS
 
 // Safely get max_log_size. A value of 0 is overridden to the 1 MB minimum.
 // Values large enough to overflow the "MaxLogSize() << 20" byte computation
@@ -298,6 +249,7 @@ struct LogMessageData {
   // Buffer space; contains complete message text.
   char message_text_[LogMessage::kMaxLogMessageLen + 1];
   LogMessage::LogStream stream_;
+  StyleRecorder styles_;
   LogSeverity severity_;  // What level is this LogMessage logged at?
   int line_;              // line number where logging call is.
   void (LogMessage::*send_method_)();  // Call this in destructor to send
@@ -315,6 +267,25 @@ struct LogMessageData {
   bool has_been_flushed_;       // false => data has not been flushed
   bool first_fatal_;            // true => this was first fatal msg
   std::thread::id thread_id_;
+
+  // Byte lengths of the individual fields making up the default log
+  // prefix ("Eyyyymmdd hh:mm:ss.uuuuuu tid file:line] "), with no
+  // separator between the severity character and the timestamp, and a
+  // single space separating every other field: the severity character
+  // starts at offset 0, the timestamp follows at prefix_severity_len_,
+  // the thread id follows at prefix_severity_len_ + prefix_timestamp_len_
+  // + 1, and "file:line" follows that at prefix_severity_len_ +
+  // prefix_timestamp_len_ + 1 + prefix_threadid_len_ + 1. Lets
+  // ColoredWriteToStderrOrStdout() colorize each field on its own,
+  // without having to reparse the composed prefix text. Only meaningful
+  // when has_default_prefix_ is true: a caller-supplied prefix formatter
+  // (see InstallPrefixFormatter()) has no known sub-structure to color
+  // this way.
+  size_t prefix_severity_len_;
+  size_t prefix_timestamp_len_;
+  size_t prefix_threadid_len_;
+  size_t prefix_fileline_len_;
+  bool has_default_prefix_;
 
   LogMessageData(const LogMessageData&) = delete;
   LogMessageData& operator=(const LogMessageData&) = delete;
@@ -505,9 +476,6 @@ class LogDestination {
   static const int kNetworkBytes = 1400;
 
   static const string& hostname();
-  static const bool& terminal_supports_color() {
-    return terminal_supports_color_;
-  }
 
   static void DeleteLogDestinations();
   LogDestination(LogSeverity severity, const char* base_filename);
@@ -529,8 +497,7 @@ class LogDestination {
 
   // Take a log message of a particular severity and log it to stderr
   // iff it's of a high enough severity to deserve it.
-  static void MaybeLogToStderr(LogSeverity severity, const char* message,
-                               size_t message_len, size_t prefix_len);
+  static void MaybeLogToStderr(const internal::LogMessageData& data);
 
   // Take a log message of a particular severity and log it to email
   // iff it's of a high enough severity to deserve it.
@@ -573,7 +540,6 @@ class LogDestination {
   static std::underlying_type_t<LogSeverity> email_logging_severity_;
   static string addresses_;
   static string hostname_;
-  static bool terminal_supports_color_;
 
   // arbitrary global logging destinations.
   static std::unique_ptr<vector<LogSink*>> sinks_;
@@ -596,7 +562,6 @@ string LogDestination::hostname_;
 
 std::unique_ptr<vector<LogSink*>> LogDestination::sinks_;
 LogDestination::SinkMutex LogDestination::sink_mutex_;
-bool LogDestination::terminal_supports_color_ = TerminalSupportsColor();
 
 /* static */
 const string& LogDestination::hostname() {
@@ -725,45 +690,129 @@ inline void LogDestination::SetEmailLogging(LogSeverity min_severity,
   LogDestination::addresses_ = addresses;
 }
 
-static void ColoredWriteToStderrOrStdout(FILE* output, LogSeverity severity,
-                                         const char* message, size_t len) {
-  bool is_stdout = (output == stdout);
-  const GLogColor color = (LogDestination::terminal_supports_color() &&
-                           ((!is_stdout && FLAGS_colorlogtostderr) ||
-                            (is_stdout && FLAGS_colorlogtostdout)))
-                              ? SeverityToColor(severity)
-                              : COLOR_DEFAULT;
+// A minimal adapter satisfying color.h's "Formatter" concept
+// (AppendString(const char*)), so WithColor()/Hyperlink::Wrap() can be used
+// against a plain FILE* stream. Only used to emit the small, fixed
+// escape/hyperlink sequences themselves: the colored content is always
+// written straight to "output" via fwrite() inside the body lambda they
+// wrap, not through this adapter.
+namespace {
+struct FileFormatter {
+  FILE* output;
+  void AppendString(const char* s) { fputs(s, output); }
+};
+}  // namespace
 
-  // Avoid using cerr from this module since we may get called during
-  // exit code, and cerr may be partially or fully destroyed by then.
-  if (COLOR_DEFAULT == color) {
-    fwrite(message, len, 1, output);
+// Writes a single field of "len" bytes starting at "text", bracketed with
+// the color for "spec" according to "mode" (see WriteColoredField() in
+// color.h for the analogous, but stderr-only and pluggable-writer-safe,
+// helper the crash path uses). Unlike that one, this may target either
+// stdout or stderr, and writes straight to "output": logging.cc's regular
+// output path has no pluggable, content-only sink to keep clean of escape
+// sequences the way signalhandler.cc's g_failure_writer does.
+static void WriteTerminalField(FILE* output, FileFormatter& formatter,
+                               ColorMode mode, ColorSpec spec, const char* text,
+                               size_t len) {
+  if (len == 0) {
+    return;
+  }
+  if (mode == ColorMode::kAnsi) {
+    WithColor(formatter, spec, true,
+              [text, len, output] { fwrite(text, len, 1, output); });
     return;
   }
 #ifdef NGLOG_OS_WINDOWS
-  const HANDLE output_handle =
-      GetStdHandle(is_stdout ? STD_OUTPUT_HANDLE : STD_ERROR_HANDLE);
-
-  // Gets the current text color.
-  CONSOLE_SCREEN_BUFFER_INFO buffer_info;
-  GetConsoleScreenBufferInfo(output_handle, &buffer_info);
-  const WORD old_color_attrs = buffer_info.wAttributes;
-
-  // We need to flush the stream buffers into the console before each
-  // SetConsoleTextAttribute call lest it affect the text that is already
-  // printed but has not yet reached the console.
-  fflush(output);
-  SetConsoleTextAttribute(output_handle,
-                          GetColorAttribute(color) | FOREGROUND_INTENSITY);
-  fwrite(message, len, 1, output);
-  fflush(output);
-  // Restores the text color.
-  SetConsoleTextAttribute(output_handle, old_color_attrs);
-#else
-  fprintf(output, "\033[0;3%sm", GetAnsiColorCode(color));
-  fwrite(message, len, 1, output);
-  fprintf(output, "\033[m");  // Resets the terminal to default.
+  if (mode == ColorMode::kLegacyConsole) {
+    WithLegacyConsoleAttribute(
+        output, spec, [text, len, output] { fwrite(text, len, 1, output); });
+    return;
+  }
 #endif  // NGLOG_OS_WINDOWS
+  fwrite(text, len, 1, output);
+}
+
+static void WriteStyledLogField(FILE* output, FileFormatter& formatter,
+                                ColorMode mode,
+                                const TextAttributes& attributes,
+                                bool hyperlinks_enabled, const char* text,
+                                size_t len) {
+  const auto write_field = [&formatter, output, mode, &attributes, text, len] {
+    WriteTerminalField(output, formatter, mode, attributes.color, text, len);
+  };
+  if (hyperlinks_enabled && attributes.hyperlink.uri() != nullptr) {
+    attributes.hyperlink.Wrap(formatter, write_field);
+    return;
+  }
+  write_field();
+}
+
+static void WriteStyledLogBody(FILE* output, FileFormatter& formatter,
+                               ColorMode mode,
+                               const internal::StyleRecorder& styles,
+                               const ColorSpec& base_attributes,
+                               bool hyperlinks_enabled, const char* message,
+                               size_t begin, size_t end) {
+  size_t cursor = begin;
+  for (std::size_t index = 0; index < styles.size(); ++index) {
+    const internal::StyleRecorder::Span& span = styles.span(index);
+    if (span.end <= begin) {
+      continue;
+    }
+    if (span.begin >= end) {
+      break;
+    }
+
+    const size_t span_begin = std::max(span.begin, begin);
+    const size_t span_end = std::min(span.end, end);
+    if (span_begin > cursor) {
+      WriteStyledLogField(
+          output, formatter, mode, TextAttributes{base_attributes, Hyperlink()},
+          hyperlinks_enabled, message + cursor, span_begin - cursor);
+    }
+    if (span_end > span_begin) {
+      WriteStyledLogField(output, formatter, mode, span.attributes,
+                          hyperlinks_enabled, message + span_begin,
+                          span_end - span_begin);
+      cursor = span_end;
+    }
+  }
+  if (cursor < end) {
+    WriteStyledLogField(output, formatter, mode,
+                        TextAttributes{base_attributes, Hyperlink()},
+                        hyperlinks_enabled, message + cursor, end - cursor);
+  }
+}
+
+// Writes "message"/"len" to "output", colored as a single block by
+// "severity" (the whole-line coloring logging.cc used before per-field
+// prefix coloring was added). Used whenever a caller doesn't have a
+// LogMessageData to color the individual prefix fields from: a custom
+// prefix formatter may be installed (see InstallPrefixFormatter()), whose
+// output has no structure logging.cc knows about, or there may be no
+// LogMessage backing the call at all (e.g. LogToAllLogfiles() replaying a
+// previously stored FATAL message).
+static void ColoredWriteToStderrOrStdout(FILE* output, LogSeverity severity,
+                                         const char* message, size_t len) {
+  const bool is_stdout = (output == stdout);
+  const bool want_color = (!is_stdout && FLAGS_colorlogtostderr) ||
+                          (is_stdout && FLAGS_colorlogtostdout);
+  const ColorMode mode =
+      want_color ? StreamColorMode(output) : ColorMode::kNone;
+  if (mode == ColorMode::kNone) {
+    fwrite(message, len, 1, output);
+    return;
+  }
+  const ColorSpec spec = DefaultTheme().Get(SeverityToRole(severity));
+  const bool colored = spec.foreground != Color::kDefault ||
+                       spec.background != Color::kDefault ||
+                       spec.style != TextStyle::kNone;
+  if (!colored) {
+    fwrite(message, len, 1, output);
+    return;
+  }
+  FileFormatter formatter{output};
+  WriteStyledLogField(output, formatter, mode,
+                      TextAttributes{spec, Hyperlink()}, false, message, len);
 }
 
 static void ColoredWriteToStdout(LogSeverity severity, const char* message,
@@ -782,20 +831,167 @@ static void ColoredWriteToStderr(LogSeverity severity, const char* message,
   ColoredWriteToStderrOrStdout(stderr, severity, message, len);
 }
 
+// As ColoredWriteToStderrOrStdout(FILE*, LogSeverity, const char*,
+// size_t) above, but colors the severity/timestamp, thread id, and
+// file:line fields of "data"'s prefix separately, matching how the
+// crash handler colors the analogous fields of a stack trace, rather
+// than as part of one whole-line block. The message body keeps the
+// existing whole-block, severity-based coloring. This is usable only when
+// a LogMessageData with an already-composed default prefix is available.
+// See ColoredWriteToStderrOrStdout() above for the fallback used
+// otherwise.
+static void ColoredWriteToStderrOrStdoutWithFields(
+    FILE* output, const internal::LogMessageData& data) {
+  if (!data.has_default_prefix_) {
+    const bool is_stdout = (output == stdout);
+    const bool want_color = (!is_stdout && FLAGS_colorlogtostderr) ||
+                            (is_stdout && FLAGS_colorlogtostdout);
+    const ColorMode mode =
+        want_color ? StreamColorMode(output) : ColorMode::kNone;
+    if (mode == ColorMode::kNone) {
+      fwrite(data.message_text_, data.num_chars_to_log_, 1, output);
+      return;
+    }
+
+    const Theme& theme = DefaultTheme();
+    const ColorSpec text_spec = theme.Get(SeverityToRole(data.severity_));
+    FileFormatter formatter{output};
+    const bool hyperlinks_enabled = mode == ColorMode::kAnsi &&
+                                    FLAGS_symbolize_hyperlinks &&
+                                    StreamSupportsHyperlinks(output);
+    if (data.styles_.size() == 0) {
+      WriteStyledLogField(output, formatter, mode,
+                          TextAttributes{text_spec, Hyperlink()}, false,
+                          data.message_text_, data.num_chars_to_log_);
+    } else {
+      WriteStyledLogBody(output, formatter, mode, data.styles_, text_spec,
+                         hyperlinks_enabled, data.message_text_, 0,
+                         data.num_chars_to_log_);
+    }
+    return;
+  }
+
+  const bool is_stdout = (output == stdout);
+  const bool want_color = (!is_stdout && FLAGS_colorlogtostderr) ||
+                          (is_stdout && FLAGS_colorlogtostdout);
+  const char* const message = data.message_text_;
+  const size_t len = data.num_chars_to_log_;
+  const ColorMode mode =
+      want_color ? StreamColorMode(output) : ColorMode::kNone;
+
+  // Avoid using cerr from this module since we may get called during
+  // exit code, and cerr may be partially or fully destroyed by then.
+  if (mode == ColorMode::kNone) {
+    fwrite(message, len, 1, output);
+    return;
+  }
+
+  const Theme& theme = DefaultTheme();
+  const ColorSpec text_spec = theme.Get(SeverityToRole(data.severity_));
+  const bool text_colored = text_spec.foreground != Color::kDefault ||
+                            text_spec.background != Color::kDefault ||
+                            text_spec.style != TextStyle::kNone;
+  FileFormatter formatter{output};
+
+  // The severity character, timestamp, thread id, file:line, and closing
+  // "]" fields of the prefix are each colored separately. The message
+  // body keeps the existing whole-block, severity-based coloring. The
+  // severity character shares the message body's severity-based color,
+  // and the timestamp shares the crash banner's "date -d" command color.
+  size_t pos = 0;
+  WriteStyledLogField(output, formatter, mode,
+                      TextAttributes{text_spec, Hyperlink()}, false,
+                      message + pos, data.prefix_severity_len_);
+  pos += data.prefix_severity_len_;
+
+  WriteStyledLogField(
+      output, formatter, mode,
+      TextAttributes{theme.Get(Role::kShellCommand), Hyperlink()}, false,
+      message + pos, data.prefix_timestamp_len_);
+  pos += data.prefix_timestamp_len_;
+  fwrite(message + pos, 1, 1, output);  // The space before the thread id.
+  pos += 1;
+
+  WriteStyledLogField(
+      output, formatter, mode,
+      TextAttributes{theme.Get(Role::kLogThreadId), Hyperlink()}, false,
+      message + pos, data.prefix_threadid_len_);
+  pos += data.prefix_threadid_len_;
+  fwrite(message + pos, 1, 1, output);  // The space before "file:line".
+  pos += 1;
+
+  char uri[1024];
+  const char* uri_pointer = nullptr;
+
+  if (mode == ColorMode::kAnsi && FLAGS_symbolize_hyperlinks &&
+      StreamSupportsHyperlinks(output)) {
+    char span[600];
+    const int span_len =
+        std::snprintf(span, sizeof(span), "%s:%d", data.fullname_, data.line_);
+    if (span_len > 0 && static_cast<size_t>(span_len) < sizeof(span)) {
+      if (BuildFileUri(span, static_cast<size_t>(span_len),
+                       FLAGS_symbolize_file_base_path.c_str(),
+                       CachedHostname().c_str(), uri, sizeof(uri))) {
+        uri_pointer = uri;
+      }
+    }
+  }
+  const ColorSpec file_line_spec = theme.Get(Role::kLogFileLine);
+  const char* const file_line_text = message + pos;
+  const size_t file_line_len = data.prefix_fileline_len_;
+
+  WriteStyledLogField(output, formatter, mode,
+                      TextAttributes{file_line_spec, Hyperlink(uri_pointer)},
+                      true, file_line_text, file_line_len);
+  pos += data.prefix_fileline_len_;
+
+  WriteStyledLogField(output, formatter, mode,
+                      TextAttributes{theme.Get(Role::kLogBracket), Hyperlink()},
+                      false, message + pos, 1);  // The "]" closing the prefix.
+  pos += 1;
+  fwrite(message + pos, 1, 1, output);  // The space after "]".
+  pos += 1;
+
+  if (!text_colored && data.styles_.size() == 0) {
+    fwrite(message + pos, len - pos, 1, output);
+    return;
+  }
+
+  const bool hyperlinks_enabled = mode == ColorMode::kAnsi &&
+                                  FLAGS_symbolize_hyperlinks &&
+                                  StreamSupportsHyperlinks(output);
+  WriteStyledLogBody(output, formatter, mode, data.styles_, text_spec,
+                     hyperlinks_enabled, message, pos, len);
+}
+
+static void ColoredWriteToStdoutWithFields(
+    const internal::LogMessageData& data) {
+  FILE* output = stdout;
+  // We also need to send logs to the stderr when the severity is
+  // higher or equal to the stderr threshold.
+  if (data.severity_ >= FLAGS_stderrthreshold) {
+    output = stderr;
+  }
+  ColoredWriteToStderrOrStdoutWithFields(output, data);
+}
+
+static void ColoredWriteToStderrWithFields(
+    const internal::LogMessageData& data) {
+  ColoredWriteToStderrOrStdoutWithFields(stderr, data);
+}
+
 static void WriteToStderr(const char* message, size_t len) {
   // Avoid using cerr from this module since we may get called during
   // exit code, and cerr may be partially or fully destroyed by then.
   fwrite(message, len, 1, stderr);
 }
 
-inline void LogDestination::MaybeLogToStderr(LogSeverity severity,
-                                             const char* message,
-                                             size_t message_len,
-                                             size_t prefix_len) {
-  if ((severity >= FLAGS_stderrthreshold) || FLAGS_alsologtostderr) {
-    ColoredWriteToStderr(severity, message, message_len);
-    AlsoErrorWrite(severity, tools::ProgramInvocationShortName(),
-                   message + prefix_len);
+inline void LogDestination::MaybeLogToStderr(
+    const internal::LogMessageData& data) {
+  if ((data.severity_ >= FLAGS_stderrthreshold) || FLAGS_alsologtostderr) {
+    ColoredWriteToStderrWithFields(data);
+    AlsoErrorWrite(data.severity_, tools::ProgramInvocationShortName(),
+                   data.message_text_ + data.num_prefix_chars_);
   }
 }
 
@@ -1565,7 +1761,7 @@ static thread_local std::aligned_storage<
 #endif    // defined(NGLOG_THREAD_LOCAL_STORAGE)
 
 internal::LogMessageData::LogMessageData()
-    : stream_(message_text_, LogMessage::kMaxLogMessageLen, 0) {}
+    : stream_(message_text_, LogMessage::kMaxLogMessageLen, 0), styles_() {}
 
 LogMessage::LogMessage(const char* file, int line, LogSeverity severity,
                        int64 ctr, void (LogMessage::*send_method)())
@@ -1655,10 +1851,14 @@ void LogMessage::Init(const char* file, int line, LogSeverity severity,
 
   data_->num_chars_to_log_ = 0;
   data_->num_chars_to_syslog_ = 0;
+  data_->styles_.Reset();
+  data_->stream_.SetStyleRecorder(&data_->styles_);
   data_->basename_ = const_basename(file);
   data_->fullname_ = file;
   data_->has_been_flushed_ = false;
   data_->thread_id_ = std::this_thread::get_id();
+
+  data_->has_default_prefix_ = false;
 
   // If specified, prepend a prefix to each line.  For example:
   //    I20201018 160715 f5d4fbb0 logging.cc:1153]
@@ -1670,15 +1870,32 @@ void LogMessage::Init(const char* file, int line, LogSeverity severity,
     stream().fill('0');
     if (g_prefix_formatter == nullptr) {
       stream() << LogSeverityNames[severity][0];
+      // Split into several statements, rather than one long chain of
+      // "<<", to snapshot pcount() between fields below: doing so lets
+      // ColoredWriteToStderrOrStdout() colorize the severity character,
+      // timestamp, thread id, and file:line fields of the prefix
+      // independently, without having to reparse the composed text.
+      data_->prefix_severity_len_ = data_->stream_.pcount();
       if (FLAGS_log_year_in_prefix) {
         stream() << setw(4) << 1900 + time_.year();
       }
       stream() << setw(2) << 1 + time_.month() << setw(2) << time_.day() << ' '
                << setw(2) << time_.hour() << ':' << setw(2) << time_.min()
                << ':' << setw(2) << time_.sec() << "." << setw(6)
-               << time_.usec() << ' ' << setfill(' ') << setw(5)
-               << data_->thread_id_ << setfill('0') << ' ' << data_->basename_
-               << ':' << data_->line_ << "] ";
+               << time_.usec();
+      data_->prefix_timestamp_len_ =
+          data_->stream_.pcount() - data_->prefix_severity_len_;
+      stream() << ' ' << setfill(' ') << setw(5) << data_->thread_id_
+               << setfill('0');
+      data_->prefix_threadid_len_ = data_->stream_.pcount() -
+                                    data_->prefix_severity_len_ -
+                                    data_->prefix_timestamp_len_ - 1;
+      stream() << ' ' << data_->basename_ << ':' << data_->line_;
+      data_->prefix_fileline_len_ =
+          data_->stream_.pcount() - data_->prefix_severity_len_ -
+          data_->prefix_timestamp_len_ - 1 - data_->prefix_threadid_len_ - 1;
+      stream() << "] ";
+      data_->has_default_prefix_ = true;
     } else {
       (*g_prefix_formatter)(stream(), *this);
       stream() << " ";
@@ -1687,16 +1904,19 @@ void LogMessage::Init(const char* file, int line, LogSeverity severity,
   }
   data_->num_prefix_chars_ = data_->stream_.pcount();
 
+#ifdef HAVE_STACKTRACE
   if (!FLAGS_log_backtrace_at.empty()) {
     char fileline[128];
-    std::snprintf(fileline, sizeof(fileline), "%s:%d", data_->basename_, line);
-#ifdef HAVE_STACKTRACE
-    if (FLAGS_log_backtrace_at == fileline) {
+    const int fileline_len = std::snprintf(fileline, sizeof(fileline), "%s:%d",
+                                           data_->basename_, line);
+    if (fileline_len >= 0 &&
+        static_cast<std::size_t>(fileline_len) < sizeof(fileline) &&
+        FLAGS_log_backtrace_at == fileline) {
       string stacktrace = GetStackTrace();
       stream() << " (stacktrace:\n" << stacktrace << ") ";
     }
-#endif
   }
+#endif
 }
 
 LogSeverity LogMessage::severity() const noexcept { return data_->severity_; }
@@ -1746,6 +1966,33 @@ int LogMessage::preserved_errno() const { return data_->preserved_errno_; }
 
 ostream& LogMessage::stream() { return data_->stream_; }
 
+void LogMessage::LogStream::SetStyleRecorder(
+    internal::StyleRecorder* recorder) {
+  style_recorder_ = recorder;
+}
+
+void LogMessage::LogStream::PushStyle(const TextAttributes& attributes) {
+  if (style_recorder_ != nullptr) {
+    style_recorder_->Push(pcount(), attributes);
+  }
+}
+
+void LogMessage::LogStream::PopStyle() {
+  if (style_recorder_ != nullptr) {
+    style_recorder_->Pop(pcount());
+  }
+}
+
+void LogMessage::AppendText(const char* text, std::size_t length,
+                            TextAttributes attributes) {
+  if (text == nullptr || length == 0) {
+    return;
+  }
+  data_->stream_.PushStyle(attributes);
+  data_->stream_.write(text, static_cast<std::streamsize>(length));
+  data_->stream_.PopStyle();
+}
+
 // Flush buffered message, called by the destructor, or any other function
 // that needs to synchronize the log.
 void LogMessage::Flush() {
@@ -1756,6 +2003,7 @@ void LogMessage::Flush() {
   data_->num_chars_to_log_ = data_->stream_.pcount();
   data_->num_chars_to_syslog_ =
       data_->num_chars_to_log_ - data_->num_prefix_chars_;
+  data_->styles_.Close(data_->num_chars_to_log_);
 
   // Do we need to add a \n to the end of this message?
   bool append_newline =
@@ -1842,11 +2090,9 @@ void LogMessage::SendToLog() EXCLUSIVE_LOCKS_REQUIRED(log_mutex) {
   // program name.
   if (FLAGS_logtostderr || FLAGS_logtostdout || !IsLoggingInitialized()) {
     if (FLAGS_logtostdout) {
-      ColoredWriteToStdout(data_->severity_, data_->message_text_,
-                           data_->num_chars_to_log_);
+      ColoredWriteToStdoutWithFields(*data_);
     } else {
-      ColoredWriteToStderr(data_->severity_, data_->message_text_,
-                           data_->num_chars_to_log_);
+      ColoredWriteToStderrWithFields(*data_);
     }
 
     // this could be protected by a flag if necessary.
@@ -1860,9 +2106,7 @@ void LogMessage::SendToLog() EXCLUSIVE_LOCKS_REQUIRED(log_mutex) {
                                      data_->message_text_,
                                      data_->num_chars_to_log_);
 
-    LogDestination::MaybeLogToStderr(data_->severity_, data_->message_text_,
-                                     data_->num_chars_to_log_,
-                                     data_->num_prefix_chars_);
+    LogDestination::MaybeLogToStderr(*data_);
     LogDestination::MaybeLogToEmail(data_->severity_, data_->message_text_,
                                     data_->num_chars_to_log_);
     LogDestination::LogToSinks(
@@ -2044,8 +2288,11 @@ ErrnoLogMessage::ErrnoLogMessage(const char* file, int line,
 ErrnoLogMessage::~ErrnoLogMessage() {
   // Don't access errno directly because it may have been altered
   // while streaming the message.
-  stream() << ": " << StrError(preserved_errno()) << " [" << preserved_errno()
-           << "]";
+  const Theme& theme = DefaultTheme();
+  stream() << PushStyle(theme.Get(Role::kErrnoMessage)) << ": "
+           << StrError(preserved_errno()) << PopStyle()
+           << PushStyle(theme.Get(Role::kErrnoCode)) << " ["
+           << preserved_errno() << "]" << PopStyle();
 }
 
 void FlushLogFiles(LogSeverity min_severity) {
@@ -2579,7 +2826,10 @@ string StrError(int err) {
   char buf[100];
   int rc = posix_strerror_r(err, buf, sizeof(buf));
   if ((rc < 0) || (buf[0] == '\000')) {
-    std::snprintf(buf, sizeof(buf), "Error number %d", err);
+    const int written = std::snprintf(buf, sizeof(buf), "Error number %d", err);
+    if (written < 0 || static_cast<std::size_t>(written) >= sizeof(buf)) {
+      buf[0] = '\0';
+    }
   }
   return buf;
 }

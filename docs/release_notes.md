@@ -6,6 +6,8 @@
 
 - Resolve source file names and line numbers in stack traces via
   [`addr2line` or `libbacktrace`](failures.md#resolving-file-names-and-line-numbers)
+- [Colorize](flags.md#colorizing-output) log output and crash stack traces on
+  a terminal by default, with hyperlinked `file:line` references
 - Remove the glog compatibility layer
 - Remove Bazel build support
 - Prevent concurrent log writers from blocking during memory-drop maintenance

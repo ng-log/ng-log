@@ -486,6 +486,13 @@ set (NGLOG_SRCS
   src/addr2line.cc
   src/addr2line.h
   src/base/commandlineflags.h
+  src/internal/color_format.cc
+  src/internal/hyperlink.cc
+  src/internal/source_location.cc
+  src/internal/style_recorder.cc
+  src/internal/styled_output.cc
+  src/internal/terminal_capabilities.cc
+  src/internal/theme.cc
   src/demangle.cc
   src/demangle.h
   src/flags.cc
@@ -497,6 +504,18 @@ set (NGLOG_SRCS
   src/signalhandler.cc
   src/stacktrace.cc
   src/stacktrace.h
+  src/ng-log/internal/color.h
+  src/ng-log/internal/color_spec.h
+  src/ng-log/internal/hyperlink.h
+  src/ng-log/internal/style_markers.h
+  src/ng-log/internal/styled_value.h
+  src/ng-log/internal/text_attributes.h
+  src/ng-log/internal/text_style.h
+  src/internal/source_location.h
+  src/internal/style_recorder.h
+  src/internal/styled_output.h
+  src/internal/terminal_capabilities.h
+  src/internal/theme.h
   src/subprocess.cc
   src/subprocess.h
   src/symbolize.cc
@@ -705,6 +724,12 @@ if (BUILD_TESTING AND GTest_FOUND)
 
   target_link_libraries (logging_unittest PRIVATE ng-log_test)
 
+  add_executable (color_attributes_unittest
+    src/color_attributes_unittest.cc
+  )
+
+  target_link_libraries (color_attributes_unittest PRIVATE ng-log_test)
+
   add_executable (stl_logging_unittest
     src/stl_logging_unittest.cc
   )
@@ -809,6 +834,18 @@ if (BUILD_TESTING AND GTest_FOUND)
 
   target_link_libraries (demangle_unittest PRIVATE ng-log_test)
 
+  add_executable (color_unittest
+    src/color_unittest.cc
+  )
+
+  target_link_libraries (color_unittest PRIVATE ng-log_test)
+
+  gtest_discover_tests (color_unittest
+    TEST_PREFIX color.
+    DISCOVERY_TIMEOUT 30
+    DISCOVERY_MODE PRE_TEST
+  )
+
   if (HAVE___CXA_DEMANGLE)
     # Demangle tests use a different (reduced) representation of symbols
     gtest_discover_tests (demangle_unittest
@@ -877,6 +914,11 @@ if (BUILD_TESTING AND GTest_FOUND)
       # fixed path under TestTmpDir(), so tests using them must not run
       # concurrently with each other or with the cleanup_* tests below.
       RESOURCE_LOCK captured_stream
+  )
+
+  gtest_discover_tests (color_attributes_unittest
+    TEST_PREFIX color_attributes.
+    DISCOVERY_TIMEOUT 30
   )
 
   if (TARGET signalhandler_unittest)
@@ -1289,6 +1331,9 @@ endif (benchmark_FOUND)
 if (BUILD_EXAMPLES)
   add_executable (custom_sink_example examples/custom_sink.cc)
   target_link_libraries (custom_sink_example PRIVATE ng-log::ng-log)
+
+  add_executable (color_stacktrace_example examples/color_stacktrace.cc)
+  target_link_libraries (color_stacktrace_example PRIVATE ng-log::ng-log)
 endif (BUILD_EXAMPLES)
 
 install (TARGETS ng-log
@@ -1297,6 +1342,17 @@ install (TARGETS ng-log
   PUBLIC_HEADER DESTINATION ${_ng-log_CMake_INCLUDE_DIR}/ng-log
   LIBRARY DESTINATION ${_ng-log_CMake_LIBDIR}
   ARCHIVE DESTINATION ${_ng-log_CMake_LIBDIR})
+
+install (FILES
+  src/ng-log/internal/color.h
+  src/ng-log/internal/color_spec.h
+  src/ng-log/internal/hyperlink.h
+  src/ng-log/internal/style_markers.h
+  src/ng-log/internal/styled_value.h
+  src/ng-log/internal/text_attributes.h
+  src/ng-log/internal/text_style.h
+  DESTINATION ${_ng-log_CMake_INCLUDE_DIR}/ng-log/internal
+  COMPONENT Development)
 
 if (WITH_PKGCONFIG)
   install (

@@ -33,14 +33,17 @@
 // This is a helper binary for testing signalhandler.cc.  Scenarios that
 // terminate the process are invoked through command-line arguments.
 
+#include <fcntl.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <initializer_list>
 #include <sstream>
 #include <string>
@@ -230,6 +233,90 @@ static bool ExpectChildExitsSuccessfully(const char* self_path,
   return false;
 }
 #  endif  // defined(NGLOG_OS_LINUX)
+
+#  if defined(NGLOG_OS_LINUX)
+struct ColorlogtostderrResult {
+  bool completed = false;
+  int status = 0;
+  std::string output;
+  std::string error;
+};
+
+static ColorlogtostderrResult RunColorlogtostderrChild(const char* self_path) {
+  constexpr int kChildExecFailure = 127;
+  constexpr size_t kOutputBufferSize = 256;
+  ColorlogtostderrResult result;
+  const int master = posix_openpt(O_RDWR | O_NOCTTY);
+  if (master < 0 || grantpt(master) != 0 || unlockpt(master) != 0) {
+    result.error = "could not create a pseudo-terminal: ";
+    result.error += strerror(errno);
+    if (master >= 0) {
+      close(master);
+    }
+    return result;
+  }
+
+  const char* const slave_name = ptsname(master);
+  const int slave =
+      slave_name == nullptr ? -1 : open(slave_name, O_RDWR | O_NOCTTY);
+  if (slave < 0) {
+    result.error = "could not open the pseudo-terminal slave: ";
+    result.error += strerror(errno);
+    close(master);
+    return result;
+  }
+
+  const pid_t pid = fork();
+  if (pid == 0) {
+    if (dup2(slave, fileno(stderr)) < 0) {
+      _exit(kChildExecFailure);
+    }
+    close(master);
+    close(slave);
+    unsetenv("NO_COLOR");
+    setenv("TERM", "xterm", 1);
+    execl(self_path, self_path, "colorlogtostderr_off",
+          static_cast<char*>(nullptr));
+    _exit(kChildExecFailure);
+  }
+  close(slave);
+
+  if (pid < 0) {
+    close(master);
+    result.error = "fork failed: ";
+    result.error += strerror(errno);
+    return result;
+  }
+
+  if (waitpid(pid, &result.status, 0) != pid) {
+    close(master);
+    result.error = "waitpid failed: ";
+    result.error += strerror(errno);
+    return result;
+  }
+
+  char buffer[kOutputBufferSize];
+  for (;;) {
+    const ssize_t bytes_read = read(master, buffer, sizeof(buffer));
+    if (bytes_read > 0) {
+      result.output.append(buffer, static_cast<size_t>(bytes_read));
+      continue;
+    }
+    if (bytes_read < 0 && errno == EINTR) {
+      continue;
+    }
+    if (bytes_read < 0 && errno != EIO) {
+      result.error = "read failed: ";
+      result.error += strerror(errno);
+    }
+    break;
+  }
+  close(master);
+
+  result.completed = result.error.empty();
+  return result;
+}
+#  endif  // defined(NGLOG_OS_LINUX)
 #endif  // !defined(NGLOG_OS_WINDOWS)
 
 #if defined(HAVE_STACKTRACE) && defined(HAVE_SYMBOLIZE)
@@ -245,9 +332,26 @@ TEST(SignalHandler, FailureDumpOrder) {
                "PC: ");
 }
 #  endif  // defined(HAVE_SIGACTION) && !defined(NGLOG_OS_WINDOWS)
+
+#  if defined(NGLOG_OS_WINDOWS) && !defined(HAVE_ADDR2LINE)
+TEST(SignalHandler, SourceLocationPrecedesFunctionName) {
+  ASSERT_DEATH(abort(), "signalhandler_unittest\\.cc:.*TestBody");
+}
+#  endif  // defined(NGLOG_OS_WINDOWS) && !defined(HAVE_ADDR2LINE)
 #endif  // defined(HAVE_STACKTRACE) && defined(HAVE_SYMBOLIZE)
 
 #if defined(NGLOG_OS_LINUX)
+static const char* g_self_path = nullptr;
+
+TEST(SignalHandler, ColorlogtostderrDisablesAnsi) {
+  ASSERT_NE(g_self_path, nullptr);
+  const ColorlogtostderrResult result = RunColorlogtostderrChild(g_self_path);
+  ASSERT_TRUE(result.completed) << result.error;
+  ASSERT_TRUE(WIFSIGNALED(result.status)) << "child status: " << result.status;
+  EXPECT_EQ(WTERMSIG(result.status), SIGABRT);
+  EXPECT_THAT(result.output, testing::Not(testing::HasSubstr("\033[")));
+}
+
 TEST(SignalHandler, ThreadNameInFailureDump) {
   constexpr char kThreadName[] = "named-crash";
   ASSERT_EQ(pthread_setname_np(pthread_self(), kThreadName), 0);
@@ -257,14 +361,23 @@ TEST(SignalHandler, ThreadNameInFailureDump) {
 
 int main(int argc, char** argv) {
 #if defined(HAVE_STACKTRACE) && defined(HAVE_SYMBOLIZE)
+#  if defined(NGLOG_OS_LINUX)
+  g_self_path = argv[0];
+#  endif  // defined(NGLOG_OS_LINUX)
   InitializeLogging(argv[0]);
   testing::InitGoogleTest(&argc, argv);
   testing::InitGoogleMock(&argc, argv);
 #  ifdef NGLOG_USE_GFLAGS
   ParseCommandLineFlags(&argc, &argv, true);
 #  endif
-  InstallFailureSignalHandler();
   const std::string command = argc > 1 ? argv[1] : "none";
+  if (command == "colorlogtostderr_off") {
+    FLAGS_colorlogtostderr = false;
+    InstallFailureSignalHandler();
+    abort();
+  }
+
+  InstallFailureSignalHandler();
   if (command == "segv") {
     // We'll check if this is outputted.
     LOG(INFO) << "create the log file";
