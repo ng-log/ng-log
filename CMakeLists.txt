@@ -1,6 +1,6 @@
 cmake_minimum_required (VERSION 3.22)
 project (ng-log
-  VERSION 0.8.3
+  VERSION 0.8.4
   DESCRIPTION "C++ logging module"
   HOMEPAGE_URL https://github.com/ng-log/ng-log
   LANGUAGES CXX
