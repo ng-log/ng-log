@@ -177,7 +177,7 @@ DECLARE_string(logmailer);
 DECLARE_bool(symbolize_stacktrace);
 
 // Resolve file names and line numbers for symbolized stack frames using
-// addr2line, if available.
+// addr2line or libbacktrace, if available.
 DECLARE_bool(symbolize_line_info);
 
 // Upper bound in milliseconds on how long to wait for addr2line to resolve
