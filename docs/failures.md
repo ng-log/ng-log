@@ -73,23 +73,38 @@ supported[^1] by ng-log.
 
 ## Resolving File Names and Line Numbers
 
-When built with `WITH_LINE_INFO` set to `auto` (the default) or
-`addr2line`, ng-log resolves the source file and line number of each
-stack frame by invoking the `addr2line` command-line tool, in addition to
-the symbol name. This applies to both the failure signal handler and
-`LOG(FATAL)`/unsatisfied `CHECK` traces. The tool is invoked as an
-external process with a bounded timeout, so a missing or unresponsive
-`addr2line` only suppresses the file and line information rather than
-affecting the rest of the crash report.
+When built with `WITH_LINE_INFO` set to `auto` (the default), `addr2line`,
+or `libbacktrace`, ng-log resolves the source file and line number of
+each stack frame, in addition to the symbol name. This applies to both
+the failure signal handler and `LOG(FATAL)`/unsatisfied `CHECK` traces.
+`WITH_LINE_INFO=none` disables the feature.
 
-When built with MinGW, `addr2line` also replaces `dbghelp` as the symbol
-resolver entirely rather than supplementing it, since `dbghelp` cannot
-read the DWARF debug information a MinGW build emits by default. MSVC
-builds always use `dbghelp`, since `addr2line` requires MinGW.
+Two backends provide this:
+
+* `addr2line` invokes the `addr2line` command-line tool as an external
+  process with a bounded timeout, so a missing or unresponsive
+  `addr2line` only suppresses the file and line information rather than
+  affecting the rest of the crash report.
+* `libbacktrace` resolves the symbol name and the file and line number
+  in-process, directly from the DWARF debug information, without
+  spawning a subprocess per frame. It requires the
+  [libbacktrace](https://github.com/ianlancetaylor/libbacktrace) library
+  to be available at build time.
+
+`auto` prefers `libbacktrace` when it is available and falls back to
+`addr2line` otherwise. Forcing one backend with `WITH_LINE_INFO` means
+the other is never even probed.
+
+When built with MinGW, `addr2line` or `libbacktrace` also replace
+`dbghelp` as the symbol resolver entirely rather than supplementing it,
+since `dbghelp` cannot read the DWARF debug information a MinGW build
+emits by default. MSVC builds always use `dbghelp`, since neither
+backend understands MSVC's mangled names or debug information.
 
 Resolution can be disabled at runtime without recompiling by setting
 `#!cpp FLAGS_symbolize_line_info` to `false`, or `--symbolize_line_info=false`
 on the command line. The `#!cpp FLAGS_addr2line_timeout_ms` flag controls
 how long, in milliseconds, ng-log waits for `addr2line` to resolve a
-single address before giving up on it.
+single address before giving up on it; it has no effect when
+`libbacktrace` is the active backend.
 

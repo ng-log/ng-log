@@ -161,7 +161,8 @@ NGLOG_DEFINE_bool(symbolize_stacktrace, true,
 
 NGLOG_DEFINE_bool(symbolize_line_info, true,
                   "Resolve file names and line numbers for symbolized "
-                  "stack frames using addr2line, if available.");
+                  "stack frames using addr2line or libbacktrace, if "
+                  "available.");
 
 NGLOG_DEFINE_int32(addr2line_timeout_ms, 2000,
                    "Upper bound in milliseconds on how long to wait for "

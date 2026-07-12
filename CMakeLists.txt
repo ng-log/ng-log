@@ -44,14 +44,13 @@ set (WITH_UNWIND libunwind CACHE STRING "unwind driver")
 set_property (CACHE WITH_UNWIND PROPERTY STRINGS none unwind libunwind)
 
 # Backend for resolving file names and line numbers in symbolized stack
-# frames. "auto" uses addr2line when available; "addr2line" requires it,
-# failing the configuration otherwise is not done here, only a warning is
-# issued later once availability is known. "none" disables the feature. A
-# CMake boolean false (OFF, FALSE, 0, NO, an empty string, ...) is treated
-# the same as "none", and anything else that is not one of the three names
-# above (including a boolean true such as ON) is treated the same as
-# "auto".
-#
+# frames. "auto" uses libbacktrace when available, since it resolves
+# in-process without spawning a subprocess per frame, and falls back to
+# addr2line otherwise. "addr2line" and "libbacktrace" force one specific
+# backend. "none" disables both. A CMake boolean false (OFF, FALSE, 0, NO,
+# an empty string, ...) is treated the same as "none", and anything else
+# that is not one of the four names above (including a boolean true such
+# as ON) is treated the same as "auto".
 # When built with MinGW, "addr2line" replaces the DbgHelp-based backend
 # entirely rather than supplementing it: DbgHelp cannot read the DWARF
 # debug info a MinGW build emits by default, so addr2line resolves the
@@ -59,19 +58,13 @@ set_property (CACHE WITH_UNWIND PROPERTY STRINGS none unwind libunwind)
 # DbgHelp, since addr2line requires MinGW.
 set (WITH_LINE_INFO auto CACHE STRING
   "Backend for resolving file names and line numbers in stack traces")
-set_property (CACHE WITH_LINE_INFO PROPERTY STRINGS none auto addr2line)
+set_property (CACHE WITH_LINE_INFO PROPERTY STRINGS none auto addr2line libbacktrace)
 
 if (NOT WITH_LINE_INFO)
   set (WITH_LINE_INFO none)
-elseif (NOT WITH_LINE_INFO MATCHES "^(none|auto|addr2line)$")
+elseif (NOT WITH_LINE_INFO MATCHES "^(none|auto|addr2line|libbacktrace)$")
   set (WITH_LINE_INFO auto)
 endif (NOT WITH_LINE_INFO)
-
-if (WITH_LINE_INFO STREQUAL auto OR WITH_LINE_INFO STREQUAL addr2line)
-  set (_ng-log_try_addr2line ON)
-else (WITH_LINE_INFO STREQUAL auto OR WITH_LINE_INFO STREQUAL addr2line)
-  set (_ng-log_try_addr2line OFF)
-endif (WITH_LINE_INFO STREQUAL auto OR WITH_LINE_INFO STREQUAL addr2line)
 
 set (WITH_FUZZING none CACHE STRING "Fuzzing engine")
 set_property (CACHE WITH_FUZZING PROPERTY STRINGS none libfuzzer ossfuzz)
@@ -79,6 +72,21 @@ set_property (CACHE WITH_FUZZING PROPERTY STRINGS none libfuzzer ossfuzz)
 if (NOT WITH_UNWIND OR WITH_UNWIND STREQUAL none)
   set (CMAKE_DISABLE_FIND_PACKAGE_Unwind ON)
 endif (NOT WITH_UNWIND OR WITH_UNWIND STREQUAL none)
+
+set (_ng-log_try_addr2line OFF)
+set (_ng-log_try_libbacktrace OFF)
+
+if (WITH_LINE_INFO STREQUAL auto OR WITH_LINE_INFO STREQUAL addr2line)
+  set (_ng-log_try_addr2line ON)
+endif (WITH_LINE_INFO STREQUAL auto OR WITH_LINE_INFO STREQUAL addr2line)
+
+if (WITH_LINE_INFO STREQUAL auto OR WITH_LINE_INFO STREQUAL libbacktrace)
+  set (_ng-log_try_libbacktrace ON)
+endif (WITH_LINE_INFO STREQUAL auto OR WITH_LINE_INFO STREQUAL libbacktrace)
+
+if (NOT _ng-log_try_libbacktrace)
+  set (CMAKE_DISABLE_FIND_PACKAGE_Libbacktrace ON)
+endif (NOT _ng-log_try_libbacktrace)
 
 set (CMAKE_C_VISIBILITY_PRESET hidden)
 set (CMAKE_CXX_VISIBILITY_PRESET hidden)
@@ -107,6 +115,7 @@ endif (WITH_GFLAGS)
 
 find_package (Threads REQUIRED)
 find_package (Unwind)
+find_package (Libbacktrace)
 
 if (Unwind_FOUND)
   cmake_push_check_state (RESET)
@@ -301,6 +310,11 @@ if (WITH_SYMBOLIZE)
       set (HAVE_SYMBOLIZE 1)
       set (HAVE_ADDR2LINE 1)
       set (HAVE_STACKTRACE 1)
+    elseif (WIN32 AND _ng-log_try_libbacktrace AND TARGET libbacktrace::libbacktrace)
+      # Likewise, libbacktrace resolves both the symbol name and the
+      # file/line from DWARF debug info (what MinGW emits by default) via
+      # its own PE/COFF and DWARF readers, without going through DbgHelp.
+      set (HAVE_SYMBOLIZE 1)
     else (MINGW AND _ng-log_try_addr2line AND HAVE_SUBPROCESS)
       cmake_push_check_state (RESET)
       set (CMAKE_REQUIRED_LIBRARIES DbgHelp)
@@ -346,17 +360,39 @@ if (WITH_SYMBOLIZE)
   endif (WIN32 OR CYGWIN)
 endif (WITH_SYMBOLIZE)
 
-if (_ng-log_try_addr2line AND HAVE_SYMBOLIZE AND HAVE_SUBPROCESS AND UNIX AND
+# Excluded on Emscripten: it has no real process model, so neither
+# posix_spawn() nor fork()+exec() can actually run an addr2line subprocess
+# there, regardless of what the symbol checks below report.
+if (_ng-log_try_addr2line AND HAVE_SYMBOLIZE AND UNIX AND NOT EMSCRIPTEN AND
     (HAVE_ELF_H OR HAVE_SYS_EXEC_ELF_H) AND HAVE_SIGACTION)
   set (HAVE_ADDR2LINE 1)
 endif ()
 
+if (_ng-log_try_libbacktrace AND HAVE_SYMBOLIZE AND TARGET libbacktrace::libbacktrace)
+  set (HAVE_LIBBACKTRACE 1)
+endif (_ng-log_try_libbacktrace AND HAVE_SYMBOLIZE AND TARGET libbacktrace::libbacktrace)
+
 if (WITH_LINE_INFO STREQUAL addr2line AND NOT HAVE_ADDR2LINE)
   message (WARNING "WITH_LINE_INFO is 'addr2line' but addr2line support "
     "is not available. This setting has no effect in this configuration.")
+elseif (WITH_LINE_INFO STREQUAL libbacktrace AND NOT HAVE_LIBBACKTRACE)
+  message (WARNING "WITH_LINE_INFO is 'libbacktrace' but libbacktrace "
+    "support is not available. This setting has no effect in this "
+    "configuration.")
 endif (WITH_LINE_INFO STREQUAL addr2line AND NOT HAVE_ADDR2LINE)
 
 unset (_ng-log_try_addr2line)
+unset (_ng-log_try_libbacktrace)
+
+# Both can only end up available at once when WITH_LINE_INFO is "auto" (any
+# other setting only ever tries one backend). HAVE_ADDR2LINE and
+# HAVE_LIBBACKTRACE are otherwise mutually exclusive, so utilities.cc and
+# symbolize.cc never need to reconcile the two backends themselves. Prefer
+# libbacktrace: it resolves in-process, without spawning a subprocess per
+# frame.
+if (HAVE_ADDR2LINE AND HAVE_LIBBACKTRACE)
+  unset (HAVE_ADDR2LINE)
+endif (HAVE_ADDR2LINE AND HAVE_LIBBACKTRACE)
 
 # CMake manages symbolize availability. The definition is necessary only when
 # building the library.
@@ -397,6 +433,11 @@ if (Unwind_FOUND)
   # Copy the module only if libunwind is actually used.
   list (APPEND _ng-log_CMake_MODULES ${ng-log_SOURCE_DIR}/cmake/FindUnwind.cmake)
 endif (Unwind_FOUND)
+
+if (HAVE_LIBBACKTRACE)
+  # Copy the module only if libbacktrace is actually used.
+  list (APPEND _ng-log_CMake_MODULES ${ng-log_SOURCE_DIR}/cmake/FindLibbacktrace.cmake)
+endif (HAVE_LIBBACKTRACE)
 
 # Generate file name for each module in the binary directory
 foreach (_file ${_ng-log_CMake_MODULES})
@@ -439,6 +480,8 @@ set (NGLOG_SRCS
   src/demangle.h
   src/flags.cc
   src/initializer.h
+  src/libbacktrace.cc
+  src/libbacktrace.h
   src/logging.cc
   src/raw_logging.cc
   src/signalhandler.cc
@@ -510,6 +553,12 @@ if (Unwind_FOUND)
   set (ng-log_libraries_options_for_static_linking "${ng-log_libraries_options_for_static_linking} -lunwind")
   set (Unwind_DEPENDENCY "find_dependency (Unwind ${Unwind_VERSION})")
 endif (Unwind_FOUND)
+
+if (HAVE_LIBBACKTRACE)
+  target_link_libraries (ng-log PRIVATE libbacktrace::libbacktrace)
+  set (ng-log_libraries_options_for_static_linking "${ng-log_libraries_options_for_static_linking} -lbacktrace")
+  set (Libbacktrace_DEPENDENCY "find_dependency (Libbacktrace)")
+endif (HAVE_LIBBACKTRACE)
 
 if (HAVE_DBGHELP)
   target_link_libraries (ng-log PRIVATE dbghelp)
@@ -736,6 +785,14 @@ if (BUILD_TESTING AND GTest_FOUND)
     endif (MINGW)
   endif (HAVE_SUBPROCESS)
 
+  if (HAVE_LIBBACKTRACE)
+    add_executable (libbacktrace_unittest
+      src/libbacktrace_unittest.cc
+    )
+
+    target_link_libraries (libbacktrace_unittest PRIVATE ng-log_test)
+  endif (HAVE_LIBBACKTRACE)
+
   add_executable (demangle_unittest
     src/demangle_unittest.cc
   )
@@ -865,6 +922,14 @@ if (BUILD_TESTING AND GTest_FOUND)
       DISCOVERY_MODE PRE_TEST
     )
   endif (TARGET subprocess_unittest)
+
+  if (TARGET libbacktrace_unittest)
+    gtest_discover_tests (libbacktrace_unittest
+      TEST_PREFIX libbacktrace.
+      DISCOVERY_TIMEOUT 30
+      DISCOVERY_MODE PRE_TEST
+    )
+  endif (TARGET libbacktrace_unittest)
 
   add_executable (mock-log_unittest
     src/mock-log_unittest.cc

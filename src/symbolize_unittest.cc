@@ -441,8 +441,17 @@ TEST(Symbolize, SymbolizeWithDemangling) {
   }
 #    endif  // defined(HAVE_ADDR2LINE)
 
-#    if defined(HAVE_DBGHELP) && !defined(HAVE_ADDR2LINE) && !defined(NDEBUG)
+  // Which demangled form to expect depends on the compiler's name-mangling
+  // ABI, not merely on HAVE_DBGHELP being available: MinGW and Clang on
+  // Windows mangle (and demangle) with the Itanium ABI, like on Linux or
+  // macOS, even though DbgHelp itself is present. Only MSVC produces the
+  // decorated form below.
+#    if defined(_MSC_VER)
+#      if !defined(NDEBUG)
   EXPECT_STREQ("public: static void __cdecl Foo::func(int)", ret);
+#      endif
+#    elif !defined(NDEBUG)
+  EXPECT_STREQ("Foo::func(int)", ret);
 #    endif
 }
 
@@ -494,7 +503,17 @@ int main(int argc, char** argv) {
   TestWithReturnAddress();
   return RUN_ALL_TESTS();
 #  elif defined(NGLOG_OS_WINDOWS) || defined(NGLOG_OS_CYGWIN)
+  // Run first, while whatever callback InitializeLogging() may have
+  // installed (e.g. for libbacktrace) is still active: it passes
+  // kNoLineNumbers itself, so it also exercises that a caller-requested
+  // "no line numbers" is honored even with a callback installed.
   TestWithReturnAddress();
+
+  // The tests below want bare, undecorated names, so make sure they are
+  // not affected by whatever callback InitializeLogging() may have
+  // installed.
+  InstallSymbolizeCallback(nullptr);
+
   return RUN_ALL_TESTS();
 #  else   // NGLOG_OS_WINDOWS
   printf("PASS (no symbolize_unittest support)\n");

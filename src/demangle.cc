@@ -1322,7 +1322,40 @@ bool ParseTopLevelMangledName(State* state) {
 
 // The demangler entry point.
 bool Demangle(const char* mangled, char* out, size_t out_size) {
-#if defined(NGLOG_OS_WINDOWS)
+  // Checked ahead of NGLOG_OS_WINDOWS: which demangler understands "mangled"
+  // depends on the compiler's name-mangling ABI, not the target OS. MinGW
+  // and Clang on Windows use the Itanium ABI (abi::__cxa_demangle()) just
+  // like on Linux or macOS; only MSVC uses the ABI UnDecorateSymbolName()
+  // below understands.
+#if defined(HAVE___CXA_DEMANGLE)
+  int status = -1;
+  std::size_t n = 0;
+  std::unique_ptr<char, decltype(&std::free)> unmangled{
+      abi::__cxa_demangle(mangled, nullptr, &n, &status), &std::free};
+
+  if (!unmangled || status != 0) {
+    return false;
+  }
+
+  // n is the size of the buffer __cxa_demangle() allocated, not the length of
+  // the demangled name. A name that does not fit is a failure, not a success
+  // with the name silently cut off.
+  const auto* end =
+      static_cast<const char*>(std::memchr(unmangled.get(), '\0', n));
+
+  if (end == nullptr) {
+    return false;
+  }
+
+  const std::ptrdiff_t length = end - unmangled.get() + 1;
+
+  if (static_cast<std::size_t>(length) > out_size) {
+    return false;
+  }
+
+  std::copy_n(unmangled.get(), length, out);
+  return true;
+#elif defined(NGLOG_OS_WINDOWS)
 #  if defined(HAVE_DBGHELP)
   // When built with incremental linking, the Windows debugger
   // library provides a more complicated `Symbol->Name` with the
@@ -1351,34 +1384,6 @@ bool Demangle(const char* mangled, char* out, size_t out_size) {
   (void)out_size;
   return false;
 #  endif
-#elif defined(HAVE___CXA_DEMANGLE)
-  int status = -1;
-  std::size_t n = 0;
-  std::unique_ptr<char, decltype(&std::free)> unmangled{
-      abi::__cxa_demangle(mangled, nullptr, &n, &status), &std::free};
-
-  if (!unmangled || status != 0) {
-    return false;
-  }
-
-  // n is the size of the buffer __cxa_demangle() allocated, not the length of
-  // the demangled name. A name that does not fit is a failure, not a success
-  // with the name silently cut off.
-  const auto* end =
-      static_cast<const char*>(std::memchr(unmangled.get(), '\0', n));
-
-  if (end == nullptr) {
-    return false;
-  }
-
-  const std::ptrdiff_t length = end - unmangled.get() + 1;
-
-  if (static_cast<std::size_t>(length) > out_size) {
-    return false;
-  }
-
-  std::copy_n(unmangled.get(), length, out);
-  return true;
 #else
   State state;
   InitState(&state, mangled, out, out_size);

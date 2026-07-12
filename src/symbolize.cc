@@ -124,7 +124,101 @@ void InstallSymbolizeOpenObjectFileCallback(
 }  // namespace tools
 }  // namespace nglog
 
-#  if defined(HAVE_LINK_H)
+#  if defined(HAVE_LIBBACKTRACE)
+
+#    include <backtrace.h>
+
+#    include <cstdint>
+
+#    include "libbacktrace.h"
+
+namespace nglog {
+inline namespace tools {
+
+namespace {
+
+struct SymInfoContext {
+  char* out;
+  size_t out_size;
+  bool found;
+};
+
+void SymInfoCallback(void* data, uintptr_t /*pc*/, const char* symname,
+                     uintptr_t /*symval*/, uintptr_t /*symsize*/) {
+  auto* ctx = static_cast<SymInfoContext*>(data);
+  if (symname == nullptr || ctx->out_size == 0) {
+    return;
+  }
+  strncpy(ctx->out, symname, ctx->out_size);
+  ctx->out[ctx->out_size - 1] = '\0';  // Always NUL-terminate.
+  ctx->found = true;
+}
+
+// Only reached via libbacktrace's own error path (e.g. a module with no
+// symbol table at all), not the ordinary "nothing found" one, so nothing
+// here exercises it: the test binaries always carry a symbol table.
+// LCOV_EXCL_START
+void ErrorCallback(void* /*data*/, const char* /*msg*/, int /*errnum*/) {}
+// LCOV_EXCL_STOP
+
+}  // namespace
+
+// Uses libbacktrace's symbol table reader (backtrace_syminfo()) in place of
+// the hand-rolled ELF reader below, and libbacktrace's DWARF reader
+// (backtrace_pcinfo(), via the callback InstallLibbacktraceSymbolizeCallback()
+// installs) in place of addr2line for file name and line number
+// information. Unlike the branches below, module discovery for a given
+// "pc" is handled entirely inside libbacktrace, so neither
+// OpenObjectFileContainingPcAndGetStartAddress() nor
+// g_symbolize_open_object_file_callback is consulted here.
+static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(void* pc, char* out,
+                                                    size_t out_size,
+                                                    SymbolizeOptions options,
+                                                    SymbolizedFrame* frame) {
+  if (out_size < 1) {
+    return false;
+  }
+  out[0] = '\0';
+
+  if (g_symbolize_callback && (options & SymbolizeOptions::kNoLineNumbers) !=
+                                  SymbolizeOptions::kNoLineNumbers) {
+    // Run the file/line callback first, exactly as the ELF reader below
+    // does, so its output ends up as a prefix before the symbol name. "fd"
+    // and "relocation" are unused by LibbacktraceSymbolizeCallback():
+    // libbacktrace resolves the containing module and applies the load
+    // bias internally, from the raw runtime "pc".
+    int num_bytes_written = g_symbolize_callback(-1, pc, out, out_size, 0);
+    if (num_bytes_written > 0) {
+      if (frame != nullptr) {
+        // The callback writes "<file>:<line> " (see
+        // FormatLibbacktraceLocation()). Trim the trailing space so the
+        // span covers exactly "<file>:<line>".
+        const auto written = static_cast<size_t>(num_bytes_written);
+        frame->file_line_offset = 0;
+        frame->file_line_length = written > 1 ? written - 1 : 0;
+      }
+      out += static_cast<size_t>(num_bytes_written);
+      out_size -= static_cast<size_t>(num_bytes_written);
+    }
+  }
+
+  SymInfoContext ctx{out, out_size, false};
+  backtrace_syminfo(GetBacktraceState(), reinterpret_cast<uintptr_t>(pc),
+                    &SymInfoCallback, &ErrorCallback, &ctx);
+
+  if (!ctx.found) {
+    return false;
+  }
+
+  // Symbolization succeeded.  Now we try to demangle the symbol.
+  DemangleInplace(out, out_size);
+  return true;
+}
+
+}  // namespace tools
+}  // namespace nglog
+
+#  elif defined(HAVE_LINK_H)
 
 #    if defined(HAVE_DLFCN_H)
 #      include <dlfcn.h>
@@ -752,9 +846,10 @@ static void SafeAppendHexNumber(uint64_t value, char* dest, size_t dest_size) {
 // and "out" is used as its output.
 // To keep stack consumption low, we would like this function to not
 // get inlined.
-static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(
-    void* pc, char* out, size_t out_size, SymbolizeOptions options,
-    SymbolizedFrame* frame) {
+static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(void* pc, char* out,
+                                                    size_t out_size,
+                                                    SymbolizeOptions options,
+                                                    SymbolizedFrame* frame) {
   auto pc0 = reinterpret_cast<uintptr_t>(pc);
   uint64_t start_address = 0;
   uint64_t base_address = 0;

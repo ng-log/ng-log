@@ -72,7 +72,7 @@ std::size_t FormatAddr2LineOutput(const char* input, std::size_t input_len,
   // number for addresses associated with multiple DWARF line-table
   // discriminators, e.g. multiple basic blocks mapping to the same source
   // line, which commonly happens right at a CHECK/LOG(FATAL) call site. The
-  // line number itself is always the leading run of digits; anything after
+  // line number itself is always the leading run of digits. Anything after
   // that (the annotation, if present) is ignored.
   const char* const digits_end = std::find_if(
       line_field, line_field + line_field_span_len,

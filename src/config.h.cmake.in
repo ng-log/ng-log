@@ -113,12 +113,21 @@
 /* define if symbolize support is available */
 #cmakedefine HAVE_SYMBOLIZE
 
-/* define if addr2line-based file/line resolution is available */
+/* define if addr2line-based file/line resolution is available. Cannot be
+   combined with HAVE_LIBBACKTRACE. */
 #cmakedefine HAVE_ADDR2LINE
 
 /* define if Subprocess (src/subprocess.h) can spawn and communicate with an
    external program on this platform */
 #cmakedefine HAVE_SUBPROCESS
+
+/* define if libbacktrace-based symbolization is available. Cannot be
+   combined with HAVE_ADDR2LINE. */
+#cmakedefine HAVE_LIBBACKTRACE
+
+#if defined(HAVE_ADDR2LINE) && defined(HAVE_LIBBACKTRACE)
+#  error "HAVE_ADDR2LINE and HAVE_LIBBACKTRACE cannot both be defined"
+#endif
 
 /* define if localtime_r is available in time.h */
 #cmakedefine HAVE_LOCALTIME_R

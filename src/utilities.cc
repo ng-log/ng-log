@@ -43,6 +43,7 @@
 #include "addr2line.h"
 #include "config.h"
 #include "initializer.h"
+#include "libbacktrace.h"
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "stacktrace.h"
@@ -304,7 +305,11 @@ void InitializeLoggingUtilities(const char* argv0) {
 #ifdef HAVE_STACKTRACE
   InstallFailureFunction(&DumpStackTraceAndExit);
 #endif
-#ifdef HAVE_ADDR2LINE
+#ifdef HAVE_LIBBACKTRACE
+  if (FLAGS_symbolize_line_info) {
+    InstallLibbacktraceSymbolizeCallback();
+  }
+#elif defined(HAVE_ADDR2LINE)
   if (FLAGS_symbolize_line_info) {
     InstallAddr2LineSymbolizeCallback();
   }
