@@ -1103,7 +1103,7 @@ bool LogFileObject::CreateLogfile(const string& time_pid_string) {
 void LogFileObject::Write(
     bool force_flush, const std::chrono::system_clock::time_point& timestamp,
     const char* message, size_t message_len) {
-  std::lock_guard<std::mutex> l{mutex_};
+  std::unique_lock<std::mutex> l{mutex_};
 
   // We don't log if the base_name_ is "" (which means "don't write")
   if (base_filename_selected_ && base_filename_.empty()) {
@@ -1283,11 +1283,37 @@ void LogFileObject::Write(
       if (this_drop_length >= (2U << 20U)) {
         // Only advise when >= 2MiB to drop
 #  if defined(HAVE_POSIX_FADVISE)
-        posix_fadvise(
-            fileno(file_.get()), static_cast<off_t>(dropped_mem_length_),
-            static_cast<off_t>(this_drop_length), POSIX_FADV_DONTNEED);
-#  endif
+        const off_t offset = static_cast<off_t>(dropped_mem_length_);
+        const off_t length = static_cast<off_t>(this_drop_length);
+
+        // Advance the bookkeeping before releasing the lock so that
+        // concurrent writers do not recompute overlapping drop ranges and
+        // a rollover while the lock is released keeps its freshly reset
+        // accounting.
         dropped_mem_length_ = total_drop_length;
+
+        // posix_fadvise() can block for a substantial amount of time (e.g.,
+        // due to kernel-internal LRU draining or writeback under I/O
+        // pressure). Duplicate the descriptor and release mutex_ while the
+        // syscall runs so that other threads logging to this file are not
+        // serialized behind it. The duplicate keeps the underlying open
+        // file description alive even if this file gets rolled over while
+        // the lock is released and preserves the close-on-exec flag set on
+        // the original descriptor.
+        FileDescriptor fd{fcntl(fileno(file_.get()), F_DUPFD_CLOEXEC, 0)};
+        if (fd) {
+          l.unlock();
+          posix_fadvise(fd.get(), offset, length, POSIX_FADV_DONTNEED);
+          l.lock();
+        } else {
+          // Duplicating the descriptor failed. Fall back to advising while
+          // holding the lock.
+          posix_fadvise(fileno(file_.get()), offset, length,
+                        POSIX_FADV_DONTNEED);
+        }
+#  else
+        dropped_mem_length_ = total_drop_length;
+#  endif
       }
     }
 #endif
