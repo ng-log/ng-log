@@ -119,5 +119,6 @@ nav:
       - System-specific Considerations:
           - Usage on Windows: windows.md
           - Linux Unwinder: unwinder.md
+  - Release Notes: release_notes.md
   - Contributing: contribute.md
   - License: license.md

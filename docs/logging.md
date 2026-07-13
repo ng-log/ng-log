@@ -400,7 +400,7 @@ synchronization code. Please check
 [src/ng-log/raw_logging.h](https://github.com/ng-log/ng-log/blob/master/src/ng-log/raw_logging.h)
 for detail.
 
-## Google Style `perror()`
+## Library Style `perror()`
 
 `PLOG()` and `PLOG_IF()` and `PCHECK()` behave exactly like their `LOG*` and
 `CHECK` equivalents with the addition that they append a description of the
