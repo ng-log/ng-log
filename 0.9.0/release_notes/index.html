@@ -1,0 +1,1429 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://ng-log.github.io/ng-log/0.9.0/release_notes/">
+      
+      
+        <link rel="prev" href="../unwinder/">
+      
+      
+        <link rel="next" href="../contribute/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="zensical-0.0.50">
+    
+    
+      
+        <title>Release Notes - ng-log</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../assets/stylesheets/modern/main.62c9b9cc.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../assets/stylesheets/modern/palette.dfe2e883.min.css">
+      
+      
+
+  
+  
+  
+  
+  <style>:root{--md-annotation-icon:url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20d%3D%22M22%2012a10%2010%200%200%201-10%2010A10%2010%200%200%201%202%2012%2010%2010%200%200%201%2012%202a10%2010%200%200%201%2010%2010m-12%206%206-6-6-6-1.4%201.4%204.6%204.6-4.6%204.6z%22/%3E%3C/svg%3E');}</style>
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#release-notes" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+          <aside class="md-banner md-banner--warning">
+            <div class="md-banner__inner md-grid md-typeset">
+              
+  You're not viewing the latest version.
+  <a href="../..">
+    <strong>Click here to go to latest.</strong>
+  </a>
+
+            </div>
+            <script>var el=document.querySelector("[data-md-component=outdated]"),base=new URL(".."),outdated=__md_get("__outdated",sessionStorage,base);!0===outdated&&el&&(el.hidden=!1)</script>
+          </aside>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="./.." title="ng-log" class="md-header__button md-logo" aria-label="ng-log" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-book-open" viewBox="0 0 24 24"><path d="M12 7v14M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ng-log
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Release Notes
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="green"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/ng-log/ng-log" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ng-log/ng-log
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="./.." title="ng-log" class="md-nav__button md-logo" aria-label="ng-log" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-book-open" viewBox="0 0 24 24"><path d="M12 7v14M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>
+
+    </a>
+    ng-log
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ng-log/ng-log" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ng-log/ng-log
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    <li class="md-nav__item md-nav__item--pruned md-nav__item--nested">
+      
+        
+  
+  
+  
+    <a href="./.." class="md-nav__link">
+      
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      
+        <span class="md-nav__icon md-icon"></span>
+      
+    </a>
+  
+
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    <li class="md-nav__item md-nav__item--pruned md-nav__item--nested">
+      
+        
+  
+  
+  
+    <a href="../logging/" class="md-nav__link">
+      
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  User Guide
+
+    
+  </span>
+  
+  
+
+      
+        <span class="md-nav__icon md-icon"></span>
+      
+    </a>
+  
+
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Release Notes
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Release Notes
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#ng-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        ng-log
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ng-log">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#0.8.3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.8.3 <small>July 10, 2026</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.8.2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.8.2 <small>August 16, 2025</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.8.1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.8.1 <small>June 15, 2025</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.8.0" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.8.0 <small>May 1, 2025</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pre-migration-history" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Pre-migration history
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Pre-migration history">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#0.7.1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.7.1 <small>June 8, 2024</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.7.0" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.7.0 <small>February 17, 2024</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.6.0" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.6.0 <small>April 5, 2022</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.5.0" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.5.0 <small>May 8, 2021</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.4.0" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.4.0 <small>January 22, 2019</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.3.5" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.3.5 <small>May 9, 2017</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.3.4" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.3.4 <small>March 9, 2015</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.3.3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.3.3 <small>February 1, 2013</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.3.2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.3.2 <small>January 12, 2012</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.3.1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.3.1 <small>June 15, 2010</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.3.0" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.3.0 <small>July 30, 2009</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.2.1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.2.1 <small>April 10, 2009</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.2 <small>January 23, 2009</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.1.2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.1.2 <small>November 18, 2008</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.1.1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.1.1 <small>October 15, 2008</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.1 <small>October 7, 2008</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contribute/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Contributing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../license/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  License
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#ng-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        ng-log
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ng-log">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#0.8.3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.8.3 <small>July 10, 2026</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.8.2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.8.2 <small>August 16, 2025</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.8.1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.8.1 <small>June 15, 2025</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.8.0" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.8.0 <small>May 1, 2025</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pre-migration-history" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Pre-migration history
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Pre-migration history">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#0.7.1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.7.1 <small>June 8, 2024</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.7.0" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.7.0 <small>February 17, 2024</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.6.0" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.6.0 <small>April 5, 2022</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.5.0" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.5.0 <small>May 8, 2021</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.4.0" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.4.0 <small>January 22, 2019</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.3.5" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.3.5 <small>May 9, 2017</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.3.4" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.3.4 <small>March 9, 2015</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.3.3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.3.3 <small>February 1, 2013</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.3.2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.3.2 <small>January 12, 2012</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.3.1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.3.1 <small>June 15, 2010</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.3.0" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.3.0 <small>July 30, 2009</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.2.1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.2.1 <small>April 10, 2009</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.2 <small>January 23, 2009</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.1.2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.1.2 <small>November 18, 2008</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.1.1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.1.1 <small>October 15, 2008</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.1 <small>October 7, 2008</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+  
+    <a href="https://github.com/ng-log/ng-log/edit/master/docs/release_notes.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20.71 7.04c.39-.39.39-1.04 0-1.41l-2.34-2.34c-.37-.39-1.02-.39-1.41 0l-1.84 1.83 3.75 3.75M3 17.25V21h3.75L17.81 9.93l-3.75-3.75z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="release-notes">Release Notes<a class="headerlink" href="#release-notes" title="Permanent link">&para;</a></h1>
+<h2 id="ng-log">ng-log<a class="headerlink" href="#ng-log" title="Permanent link">&para;</a></h2>
+<h3 id="0.8.3">0.8.3 <small>July 10, 2026</small><a class="headerlink" href="#0.8.3" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Mapped the CMake option value <code>none</code> to a proper CMake boolean string</li>
+<li>Fixed reading uninitialized output when a demangled name is truncated</li>
+</ul>
+<h3 id="0.8.2">0.8.2 <small>August 16, 2025</small><a class="headerlink" href="#0.8.2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Propagated the configured language standard to the unit tests</li>
+</ul>
+<h3 id="0.8.1">0.8.1 <small>June 15, 2025</small><a class="headerlink" href="#0.8.1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Fixed <code>LogCleaner</code> deleting only <code>INFO</code> level logs when enabled for all
+  severities</li>
+<li>Fixed a regression in thread-local storage support</li>
+<li>Deprecated the <code>glog</code> CMake import target in favor of <code>ng-log</code></li>
+<li>Added support for compiling without RTTI</li>
+</ul>
+<h3 id="0.8.0">0.8.0 <small>May 1, 2025</small><a class="headerlink" href="#0.8.0" title="Permanent link">&para;</a></h3>
+<p>First public release under the new name.</p>
+<div class="admonition info">
+<p class="admonition-title">Compatibility</p>
+<p>A full compatibility layer is provided so that existing code can keep
+including the legacy headers and using the legacy API up to version
+0.9.0.</p>
+</div>
+<h2 id="pre-migration-history">Pre-migration history<a class="headerlink" href="#pre-migration-history" title="Permanent link">&para;</a></h2>
+<p>The releases below predate the rename and are kept here for historical
+reference.</p>
+<h3 id="0.7.1">0.7.1 <small>June 8, 2024</small><a class="headerlink" href="#0.7.1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Fixed Android detection</li>
+<li>Fixed formatting of unknown stack frames</li>
+</ul>
+<h3 id="0.7.0">0.7.0 <small>February 17, 2024</small><a class="headerlink" href="#0.7.0" title="Permanent link">&para;</a></h3>
+<p>Major overhaul to take advantage of C++14 language and library features,
+including using <code>chrono</code> types in the public API.</p>
+<div class="admonition warning">
+<p class="admonition-title">ABI incompatible changes</p>
+<p>Source compatibility with the previous release was maintained where
+possible, but downstream clients need to recompile due to ABI
+incompatible changes.</p>
+</div>
+<p><strong>Changes</strong>:</p>
+<ul>
+<li>Added C++14 as the primary language standard</li>
+<li>Added <a href="https://emscripten.org/">Emscripten</a> support</li>
+<li>Changed <code>LogSeverity</code> to an unscoped enum, which can surface previously
+  silent implicit conversions between <code>int</code> and <code>LogSeverity</code></li>
+<li>Changed CMake to no longer generate pkg-config files by default (opt in
+  via <code>WITH_PKGCONFIG</code>)</li>
+<li>Deprecated <code>LogMessage::getMessageTime</code> in favor of <code>LogMessage::time</code></li>
+<li>Deprecated <code>LogMessageTime::timestamp</code> in favor of <code>LogMessageTime::when</code></li>
+<li>Deprecated <code>LogMessageTime::gmtoff</code> in favor of
+  <code>LogMessageTime::gmtoffset</code></li>
+<li>Deprecated <code>EnableLogCleaner(unsigned)</code> in favor of
+  <code>EnableLogCleaner(std::chrono::minutes)</code></li>
+<li>Deprecated the <code>LogSink::send</code> overload accepting <code>std::tm</code> in favor of
+  one accepting <code>LogMessageTime</code></li>
+<li>
+<p>Deprecated <code>LogMessageInfo</code> and its prefix callback in favor of
+  <code>LogMessage</code> and <code>InstallPrefixFormatter</code></p>
+<p>All deprecated methods were removed in 0.8.0.</p>
+</li>
+</ul>
+<h3 id="0.6.0">0.6.0 <small>April 5, 2022</small><a class="headerlink" href="#0.6.0" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added time-based periodic logging (<code>LOG_EVERY_T</code>)</li>
+<li>Added <code>LogMessageTime::gmtoff()</code> to obtain the GMT offset</li>
+<li>Added support for stack unwinding on Android</li>
+<li>Added <code>FLAGS_log_year_in_prefix</code> to control whether the year is included
+  in the log prefix</li>
+<li>Added <code>logtostdout</code> and <code>colorlogtostdout</code> flags to support logging to
+  stdout</li>
+<li>Exposed <code>IsGoogleLoggingInitialized()</code> in the public API</li>
+<li>Changed <code>LogCleaner</code> to support relative paths</li>
+<li>Changed <code>--max_log_size</code> to use <code>uint32</code> and prevented it from
+  overflowing</li>
+<li>Renamed the <code>GOOGLE_GLOG_DLL_DECL</code> export macro to <code>GLOG_EXPORT</code></li>
+<li>Enabled the custom prefix option by default</li>
+<li>Deprecated the <code>LogSink::send</code> overload accepting <code>std::tm</code> in favor of
+  one accepting <code>LogMessageTime</code>, while keeping a backward-compatible
+  overload</li>
+<li>Raised the minimum required CMake version to 3.16 and gflags to 2.2.2</li>
+<li>Fixed CMake configuration on Cygwin and various compiler warnings across
+  toolchains</li>
+</ul>
+<h3 id="0.5.0">0.5.0 <small>May 8, 2021</small><a class="headerlink" href="#0.5.0" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added support for customizing the log line prefix
+  (<code>InstallPrefixFormatter</code>)</li>
+<li>Added automatic removal of old log files (<code>EnableLogCleaner</code>)</li>
+<li>Added a <code>FLAGS_log_utc_time</code> option to write timestamps in UTC</li>
+<li>Added the year to the default log line prefix</li>
+<li>Added support for outputting log messages to Android's logcat</li>
+<li>Added pkg-config support and vcpkg installation instructions</li>
+<li>Added support for using libunwind as an imported CMake target</li>
+<li>Changed the build to require a C++11 compiler; a C compiler and
+  Windows-specific or legacy C headers are no longer needed</li>
+<li>Changed CMake to build shared libraries by default</li>
+<li>Removed the autoconf-based build in favor of CMake only</li>
+<li>Fixed race conditions in <code>LOG_EVERY_N</code> and related macros</li>
+<li>Fixed handling of <code>--max_log_size</code> overflow</li>
+<li>Fixed various Windows linker warnings</li>
+</ul>
+<h3 id="0.4.0">0.4.0 <small>January 22, 2019</small><a class="headerlink" href="#0.4.0" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added support for building with Bazel</li>
+<li>Added Cygwin support</li>
+<li>Added stack tracing support on Windows</li>
+<li>Renamed the CMake project from <code>google-glog</code> to <code>glog</code></li>
+<li>Reduced heap allocations on the logging fast path</li>
+<li>Fixed username lookup when the <code>USER</code> environment variable is missing</li>
+<li>Fixed mingw cross compilation and redefinition warnings from <code>config.h</code></li>
+<li>Fixed a number of missing symbol exports on Windows</li>
+<li>Added support for colored output on the konsole terminal family</li>
+</ul>
+<h3 id="0.3.5">0.3.5 <small>May 9, 2017</small><a class="headerlink" href="#0.3.5" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added CMake build support</li>
+<li>Added <code>DCHECK_ALWAYS_ON</code> to keep <code>D*</code> macros enabled under <code>NDEBUG</code></li>
+<li>Added <code>logfile_mode</code> to control the permissions of created log files</li>
+<li>Added support for PowerPC and color output for tmux terminals</li>
+<li>Changed <code>CHECK_NOTNULL</code> to work with smart pointers when compiled as
+  C++11</li>
+<li>Changed <code>Symbolize</code> to calculate a module's base address from its
+  program headers</li>
+<li>Fixed an <code>AddLogSink</code> memory leak</li>
+<li>Fixed a double-free in a Windows unit test</li>
+<li>Fixed a dangling sink pointer after removal</li>
+<li>Fixed memory allocation from the signal handler</li>
+<li>Various MinGW and Windows build fixes</li>
+</ul>
+<h3 id="0.3.4">0.3.4 <small>March 9, 2015</small><a class="headerlink" href="#0.3.4" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Moved the repository to GitHub</li>
+<li>Added libc++ support</li>
+<li>Added a callback for <code>OpenObjectFileContainingPcAndGetStartAddress</code></li>
+<li>Added <code>StrError</code> and replaced the <code>posix_strerror_r</code> call</li>
+<li>Added support for <code>unordered_map</code>/<code>unordered_set</code> in STL logging</li>
+<li>Reduced dynamic allocation from three to one allocation per log message</li>
+<li>Fixed a build issue in <code>demangle.cc</code></li>
+<li>Fixed missing <code>GOOGLE_GLOG_DLL_DECL</code> for the latest Visual Studio</li>
+</ul>
+<h3 id="0.3.3">0.3.3 <small>February 1, 2013</small><a class="headerlink" href="#0.3.3" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added a <code>--disable-rtti</code> configure option</li>
+<li>Added color output support via <code>GLOG_colorlogtostderr</code></li>
+<li>Allowed re-initializing the library after <code>ShutdownGoogleLogging</code></li>
+<li>Changed the ABI around flags to be compatible with gflags</li>
+<li>Fixed <code>LOG_SYSRESULT</code></li>
+<li>Fixed Visual Studio, QNX, and FreeBSD builds</li>
+</ul>
+<h3 id="0.3.2">0.3.2 <small>January 12, 2012</small><a class="headerlink" href="#0.3.2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added Clang support</li>
+<li>Improved the demangler and stack trace support for newer GCC versions</li>
+<li>Fixed <code>fork(2)</code> corrupting log files</li>
+<li>Fixed <code>ERROR</code> being defined by <code>windows.h</code></li>
+</ul>
+<h3 id="0.3.1">0.3.1 <small>June 15, 2010</small><a class="headerlink" href="#0.3.1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added <code>DCHECK_NOTNULL</code></li>
+<li>Added <code>ShutdownGoogleLogging</code> to close syslog</li>
+<li>Added support for building and testing out of tree</li>
+<li>Fixed <code>GLOG_*</code> environment variables being ignored when gflags is
+  installed</li>
+<li>Fixed the <code>--enable-frame-pointers</code> option and libunwind detection</li>
+</ul>
+<h3 id="0.3.0">0.3.0 <small>July 30, 2009</small><a class="headerlink" href="#0.3.0" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added NetBSD and OpenBSD support</li>
+<li>Fixed a deadlock triggered when using a recent version of gflags</li>
+<li>Fixed hostname and username detection on Windows</li>
+</ul>
+<h3 id="0.2.1">0.2.1 <small>April 10, 2009</small><a class="headerlink" href="#0.2.1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added pkg-config support</li>
+<li>Added a <code>--with-gflags</code> configure option</li>
+<li>Fixed timestamps produced by the VC++ build</li>
+<li>Fixed building with gtest</li>
+</ul>
+<h3 id="0.2">0.2 <small>January 23, 2009</small><a class="headerlink" href="#0.2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added initial Windows VC++ support</li>
+<li>Added the <code>LOG_TO_STRING</code>, <code>LOG_AT_LEVEL</code>, <code>DVLOG</code>, and
+  <code>LOG_TO_SINK_ONLY</code> macros</li>
+<li>Added the <code>--log_backtrace_at</code> option</li>
+<li>Added microsecond precision to logged timestamps</li>
+<li>Added automatic linking of the pthread library</li>
+</ul>
+<h3 id="0.1.2">0.1.2 <small>November 18, 2008</small><a class="headerlink" href="#0.1.2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added <code>InstallFailureSignalHandler()</code></li>
+<li>Changed how stack traces are produced</li>
+<li>Removed the unnecessary <code>DISALLOW_EVIL_CONSTRUCTORS</code> macro</li>
+</ul>
+<h3 id="0.1.1">0.1.1 <small>October 15, 2008</small><a class="headerlink" href="#0.1.1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Added symbolization support on macOS 10.5</li>
+<li>Fixed <code>--vmodule</code> not working together with gflags</li>
+<li>Fixed <code>symbolize_unittest</code> with GCC 4.3</li>
+</ul>
+<h3 id="0.1">0.1 <small>October 7, 2008</small><a class="headerlink" href="#0.1" title="Permanent link">&para;</a></h3>
+<p>Initial release: a library implementing application-level logging, with
+logging APIs based on C++-style streams and various helper macros.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2026 The ng-log contributors - <a href="#__consent">Change cookie settings</a>
+    </div>
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+      <div class="md-consent" data-md-component="consent" id="__consent" hidden>
+        <div class="md-consent__overlay"></div>
+        <aside class="md-consent__inner">
+          <form class="md-consent__form md-grid md-typeset" name="consent">
+            
+
+
+
+<h4>Cookie consent</h4>
+<p>We use cookies to recognize your repeated visits and preferences, as well as to measure the effectiveness of our documentation and whether users find what they're searching for. With your consent, you're helping us to make our documentation better.</p>
+<input class="md-toggle" type="checkbox" id="__settings" >
+<div class="md-consent__settings">
+  <ul class="task-list">
+    
+    
+      
+    
+    
+      
+        
+  
+  
+    
+    
+  
+  <li class="task-list-item">
+    <label class="task-list-control">
+      <input type="checkbox" name="github" checked>
+      <span class="task-list-indicator"></span>
+      GitHub
+    </label>
+  </li>
+
+      
+    
+    
+  </ul>
+</div>
+<div class="md-consent__controls">
+  
+    
+    
+    
+      <label class="md-button" for="__settings">Manage settings</label>
+    
+  
+    
+      <button class="md-button md-button--primary">Accept</button>
+    
+    
+    
+  
+    
+    
+      <button type="reset" class="md-button md-button--primary">Reject</button>
+    
+    
+  
+</div>
+          </form>
+        </aside>
+      </div>
+      <script>var consent=__md_get("__consent");if(consent)for(var input of document.forms.consent.elements)input.name&&(input.checked=consent[input.name]||!1);else"file:"!==location.protocol&&setTimeout((function(){document.querySelector("[data-md-component=consent]").hidden=!1}),250);var form=document.forms.consent;for(var action of["submit","reset"])form.addEventListener(action,(function(e){if(e.preventDefault(),"reset"===e.type)for(var n of document.forms.consent.elements)n.name&&(n.checked=!1);__md_set("__consent",Object.fromEntries(Array.from(new FormData(form).keys()).map((function(e){return[e,!0]})))),location.hash="",location.reload()}))</script>
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["content.action.edit","content.code.annotate","content.code.copy","content.code.select","header.autohide","navigation.expand","navigation.instant.preview","navigation.instant.progress","navigation.prune","navigation.indexes","toc.follow","navigation.top","navigation.path","navigation.tracking","search.highlight","search.share","search.suggest"],"search":"../assets/javascripts/workers/search.b6b7e04f.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"default":["dev","stable"],"provider":"mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7f30b55.min.js"></script>
+      
+    
+  </body>
+</html>
