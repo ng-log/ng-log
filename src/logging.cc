@@ -2685,55 +2685,62 @@ template <class T>
 struct has_member_tm_gmtoff<T, void_t<decltype(&T::tm_gmtoff)>>
     : std::true_type {};
 
-template <class T = std::tm>
-auto Breakdown(const std::chrono::system_clock::time_point& now)
-    -> std::enable_if_t<!has_member_tm_gmtoff<T>::value,
-                        std::tuple<std::tm, std::time_t, std::chrono::hours>> {
-  std::time_t timestamp = std::chrono::system_clock::to_time_t(now);
-  std::tm tm_local;
-  std::tm tm_utc;
-  int isdst = 0;
+template <class T, bool = has_member_tm_gmtoff<T>::value>
+struct BreakdownImpl {
+  static std::tuple<std::tm, std::time_t, std::chrono::hours> Get(
+      const std::chrono::system_clock::time_point& now) {
+    std::time_t timestamp = std::chrono::system_clock::to_time_t(now);
+    std::tm tm_local;
+    std::tm tm_utc;
+    int isdst = 0;
 
-  if (FLAGS_log_utc_time) {
-    gmtime_r(&timestamp, &tm_local);
-    localtime_r(&timestamp, &tm_utc);
-    isdst = tm_utc.tm_isdst;
-    tm_utc = tm_local;
-  } else {
-    localtime_r(&timestamp, &tm_local);
-    isdst = tm_local.tm_isdst;
-    gmtime_r(&timestamp, &tm_utc);
+    if (FLAGS_log_utc_time) {
+      gmtime_r(&timestamp, &tm_local);
+      localtime_r(&timestamp, &tm_utc);
+      isdst = tm_utc.tm_isdst;
+      tm_utc = tm_local;
+    } else {
+      localtime_r(&timestamp, &tm_local);
+      isdst = tm_local.tm_isdst;
+      gmtime_r(&timestamp, &tm_utc);
+    }
+
+    std::time_t gmt_sec = std::mktime(&tm_utc);
+
+    // If the Daylight Saving Time(isDst) is active subtract an hour from the
+    // current timestamp.
+    using namespace std::chrono_literals;
+    const auto gmtoffset = std::chrono::duration_cast<std::chrono::hours>(
+        now - std::chrono::system_clock::from_time_t(gmt_sec) +
+        (isdst ? 1h : 0h));
+
+    return std::make_tuple(tm_local, timestamp, gmtoffset);
   }
+};
 
-  std::time_t gmt_sec = std::mktime(&tm_utc);
+template <class T>
+struct BreakdownImpl<T, true> {
+  static std::tuple<std::tm, std::time_t, std::chrono::hours> Get(
+      const std::chrono::system_clock::time_point& now) {
+    std::time_t timestamp = std::chrono::system_clock::to_time_t(now);
+    T tm;
 
-  // If the Daylight Saving Time(isDst) is active subtract an hour from the
-  // current timestamp.
-  using namespace std::chrono_literals;
-  const auto gmtoffset = std::chrono::duration_cast<std::chrono::hours>(
-      now - std::chrono::system_clock::from_time_t(gmt_sec) +
-      (isdst ? 1h : 0h));
+    if (FLAGS_log_utc_time) {
+      gmtime_r(&timestamp, &tm);
+    } else {
+      localtime_r(&timestamp, &tm);
+    }
 
-  return std::make_tuple(tm_local, timestamp, gmtoffset);
-}
+    const auto gmtoffset = std::chrono::duration_cast<std::chrono::hours>(
+        std::chrono::seconds{tm.tm_gmtoff});
 
-template <class T = std::tm>
-auto Breakdown(const std::chrono::system_clock::time_point& now)
-    -> std::enable_if_t<has_member_tm_gmtoff<T>::value,
-                        std::tuple<std::tm, std::time_t, std::chrono::hours>> {
-  std::time_t timestamp = std::chrono::system_clock::to_time_t(now);
-  T tm;
-
-  if (FLAGS_log_utc_time) {
-    gmtime_r(&timestamp, &tm);
-  } else {
-    localtime_r(&timestamp, &tm);
+    return std::make_tuple(tm, timestamp, gmtoffset);
   }
+};
 
-  const auto gmtoffset = std::chrono::duration_cast<std::chrono::hours>(
-      std::chrono::seconds{tm.tm_gmtoff});
-
-  return std::make_tuple(tm, timestamp, gmtoffset);
+auto Breakdown(const std::chrono::system_clock::time_point& now)
+    -> std::tuple<std::tm, std::time_t, std::chrono::hours> {
+  return BreakdownImpl<std::tm>::Get(now);
 }
 
 }  // namespace
