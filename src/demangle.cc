@@ -1,4 +1,5 @@
 // Copyright (c) 2024, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -37,7 +38,9 @@
 #include "demangle.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 
 #include "utilities.h"
@@ -1351,12 +1354,28 @@ bool Demangle(const char* mangled, char* out, size_t out_size) {
   std::unique_ptr<char, decltype(&std::free)> unmangled{
       abi::__cxa_demangle(mangled, nullptr, &n, &status), &std::free};
 
-  if (!unmangled) {
+  if (!unmangled || status != 0) {
     return false;
   }
 
-  std::copy_n(unmangled.get(), std::min(n, out_size), out);
-  return status == 0;
+  // n is the size of the buffer __cxa_demangle() allocated, not the length of
+  // the demangled name. A name that does not fit is a failure, not a success
+  // with the name silently cut off.
+  const auto* end =
+      static_cast<const char*>(std::memchr(unmangled.get(), '\0', n));
+
+  if (end == nullptr) {
+    return false;
+  }
+
+  const std::ptrdiff_t length = end - unmangled.get() + 1;
+
+  if (static_cast<std::size_t>(length) > out_size) {
+    return false;
+  }
+
+  std::copy_n(unmangled.get(), length, out);
+  return true;
 #else
   State state;
   InitState(&state, mangled, out, out_size);

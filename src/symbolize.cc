@@ -86,10 +86,18 @@ ATTRIBUTE_NOINLINE
 void DemangleInplace(char* out, size_t out_size) {
   char demangled[256];  // Big enough for sane demangled symbols.
   if (Demangle(out, demangled, sizeof(demangled))) {
-    // Demangling succeeded. Copy to out if the space allows.
-    size_t len = strlen(demangled);
+    // Demangling succeeded. Copy to out if the space allows. The scan is
+    // bounded (std::memchr() rather than strlen(); strnlen() is POSIX,
+    // not standard C++) so that a Demangle() implementation which breaks
+    // its contract (reporting success without '\0'-terminating the
+    // output) trips the assertion below instead of the scan reading past
+    // the buffer.
+    const void* const terminator =
+        std::memchr(demangled, '\0', sizeof(demangled));
+    NGLOG_SAFE_ASSERT(terminator != nullptr);
+    const size_t len =
+        static_cast<size_t>(static_cast<const char*>(terminator) - demangled);
     if (len + 1 <= out_size) {  // +1 for '\0'.
-      NGLOG_SAFE_ASSERT(len < sizeof(demangled));
       memmove(out, demangled, len + 1);
     }
   }
