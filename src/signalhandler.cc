@@ -63,7 +63,6 @@
 #ifdef NGLOG_OS_WINDOWS
 #  include <windows.h>
 #else  // !defined(NGLOG_OS_WINDOWS)
-#  include <pthread.h>
 #  ifdef HAVE_SCHED_YIELD
 #    include <sched.h>
 #  endif  // defined(HAVE_SCHED_YIELD)
@@ -296,45 +295,10 @@ void InvokeDefaultSignalHandler(int signal_number) {
 #endif
 }
 
-// Identifies a thread for the reentrancy guard below. Kept default-
-// constructible and otherwise trivial, unlike a typical factory-built
-// value type, so the thread_local instance below needs no signal-unsafe
-// dynamic initialization. Current() is the only way to obtain a value
-// that actually identifies a thread.
-class FailureSignalThreadId {
- public:
-  static FailureSignalThreadId Current() noexcept {
-    FailureSignalThreadId id;
-#ifdef NGLOG_OS_WINDOWS
-    id.id_ = GetCurrentThreadId();
-#else   // !defined(NGLOG_OS_WINDOWS)
-    id.id_ = pthread_self();
-#endif  // defined(NGLOG_OS_WINDOWS)
-    return id;
-  }
-
-  friend bool operator==(const FailureSignalThreadId& lhs,
-                         const FailureSignalThreadId& rhs) noexcept {
-#ifdef NGLOG_OS_WINDOWS
-    return lhs.id_ == rhs.id_;
-#else   // !defined(NGLOG_OS_WINDOWS)
-    return pthread_equal(lhs.id_, rhs.id_) != 0;
-#endif  // defined(NGLOG_OS_WINDOWS)
-  }
-
- private:
-#ifdef NGLOG_OS_WINDOWS
-  DWORD id_;
-#else   // !defined(NGLOG_OS_WINDOWS)
-  pthread_t id_;
-#endif  // defined(NGLOG_OS_WINDOWS)
-};
-
-// One instance per thread, alive for that thread's whole lifetime. A
-// pointer to it stays valid to dereference even after the publishing
-// call to FailureSignalHandler() has returned. See g_entered_thread_id
-// below.
-thread_local FailureSignalThreadId t_failure_signal_thread_id;
+// Set while this thread is executing the failure handler. sig_atomic_t is used
+// because another signal can interrupt the handler between any two
+// instructions. No other thread accesses this object.
+thread_local volatile sig_atomic_t t_failure_signal_handler_entered = 0;
 
 // Gives up the rest of the current scheduling quantum. Used only by
 // threads spinning to be killed, so promptness doesn't matter. Only
@@ -353,25 +317,26 @@ void RelinquishTimeSlice() {
 #endif                           // defined(NGLOG_OS_WINDOWS)
 }
 
-// Id of the thread currently dumping, or nullptr. The first thread in
-// dumps. Later entrants, on any thread, wait to die. Deliberately not a
-// std::call_once() or std::once_flag. Those are not async-signal-safe,
-// and a thread reentering one while already holding it would deadlock
-// instead of dying. See also FailureSignalHandler() below.
-static std::atomic<FailureSignalThreadId*> g_entered_thread_id{nullptr};
-// is_always_lock_free needs C++17, so ATOMIC_POINTER_LOCK_FREE == 2, its
-// standard-mandated "always lock-free" equivalent, covers this ng-log
-// target's C++14 floor.
+// True while one thread owns failure-dump generation. Other threads wait for
+// that handler to terminate the process. If termination does not occur (for
+// example, because a default signal disposition is ignored by PID 1), the
+// owner releases the flag and a waiting thread can take over. Deliberately not
+// a std::call_once() or std::once_flag: those are not async-signal-safe and a
+// reentrant thread could deadlock instead of dying.
+static std::atomic<bool> g_failure_signal_handler_entered{false};
+// is_always_lock_free needs C++17, so ATOMIC_BOOL_LOCK_FREE == 2, its
+// standard-mandated "always lock-free" equivalent, covers the C++14 floor.
 #if defined(__cpp_lib_atomic_is_always_lock_free)
-constexpr bool kEnteredThreadIdIsLockFree =
-    decltype(g_entered_thread_id)::is_always_lock_free;
+constexpr bool kFailureSignalHandlerEnteredIsLockFree =
+    decltype(g_failure_signal_handler_entered)::is_always_lock_free;
 #else   // !defined(__cpp_lib_atomic_is_always_lock_free)
-constexpr bool kEnteredThreadIdIsLockFree = ATOMIC_POINTER_LOCK_FREE == 2;
+constexpr bool kFailureSignalHandlerEnteredIsLockFree =
+    ATOMIC_BOOL_LOCK_FREE == 2;
 #endif  // defined(__cpp_lib_atomic_is_always_lock_free)
 // A lock-based atomic could take a lock already held by the very thread
 // its own signal interrupted, deadlocking instead of dying.
-static_assert(kEnteredThreadIdIsLockFree,
-              "g_entered_thread_id must be lock-free to be "
+static_assert(kFailureSignalHandlerEnteredIsLockFree,
+              "g_failure_signal_handler_entered must be lock-free to be "
               "async-signal-safe");
 
 static void HandleSignal(int signal_number
@@ -442,28 +407,25 @@ void FailureSignalHandler(int signal_number, siginfo_t* signal_info,
                           void* ucontext)
 #endif
 {
-  t_failure_signal_thread_id = FailureSignalThreadId::Current();
-  FailureSignalThreadId* other_thread_id = nullptr;
-  // Release ordering on success publishes this thread's id to whichever
-  // thread later reads it back with acquire ordering on the failure path
-  // below, possibly on another thread.
-  if (!g_entered_thread_id.compare_exchange_strong(
-          other_thread_id, &t_failure_signal_thread_id,
-          std::memory_order_release, std::memory_order_acquire)) {
-    if (*other_thread_id == t_failure_signal_thread_id) {
-      // Reentered on this thread, likely because dumping raised another
-      // signal. Don't retry, just die. Must return, not spin, afterwards
-      // for the same reason as in HandleSignal() above. signal_number is
-      // still blocked here until we do.
-      InvokeDefaultSignalHandler(signal_number);
-      return;
-    }
-    // Another thread is dumping and will terminate the process. Spin
-    // rather than return, so this thread doesn't resume possibly
-    // corrupted execution in the meantime.
-    while (true) {
+  if (t_failure_signal_handler_entered != 0) {
+    // Reentered on this thread, likely because dumping raised another signal.
+    // Don't retry, just die. Must return, not spin, afterwards for the same
+    // reason as in HandleSignal() above. signal_number is still blocked here
+    // until we do.
+    InvokeDefaultSignalHandler(signal_number);
+    return;
+  }
+  t_failure_signal_handler_entered = 1;
+
+  bool expected = false;
+  // Retry until this thread owns failure-dump generation.
+  while (!g_failure_signal_handler_entered.compare_exchange_weak(
+      expected, true, std::memory_order_acquire, std::memory_order_relaxed)) {
+    // Wait with loads to avoid repeated read-modify-write operations.
+    while (g_failure_signal_handler_entered.load(std::memory_order_acquire)) {
       RelinquishTimeSlice();
     }
+    expected = false;
   }
 
   HandleSignal(signal_number
@@ -472,6 +434,14 @@ void FailureSignalHandler(int signal_number, siginfo_t* signal_info,
                signal_info, ucontext
 #endif
   );
+
+  // Normally the re-raised signal terminates the process after this handler
+  // returns. Release ownership anyway because some default dispositions can be
+  // ignored, most notably SIGTERM for PID 1. No pointer to thread-local storage
+  // is published, so a thread that exits after returning cannot leave dangling
+  // shared state.
+  g_failure_signal_handler_entered.store(false, std::memory_order_release);
+  t_failure_signal_handler_entered = 0;
 }
 
 }  // namespace
