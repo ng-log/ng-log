@@ -80,7 +80,7 @@ plugins:
   - git-revision-date-localized:
       enable_creation_date: true
   - git-committers:
-      repository: google/glog
+      repository: ng-log/ng-log
       branch: master
   - privacy
   - search
