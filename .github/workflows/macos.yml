@@ -46,7 +46,7 @@ jobs:
                 -DCMAKE_CXX_STANDARD=${{matrix.std}} \
                 -DCMAKE_CXX_STANDARD_REQUIRED=ON \
                 -G "${{matrix.generator}}" \
-                -Werror
+                -Werror=author
 
       - name: Build
         run: |
