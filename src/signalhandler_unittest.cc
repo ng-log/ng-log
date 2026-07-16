@@ -52,6 +52,9 @@
 #if defined(HAVE_UNISTD_H)
 #  include <unistd.h>
 #endif
+#if defined(NGLOG_OS_LINUX)
+#  include <sys/syscall.h>
+#endif  // defined(NGLOG_OS_LINUX)
 #if !defined(NGLOG_OS_WINDOWS)
 #  include <sys/wait.h>
 #endif
@@ -64,6 +67,20 @@ using namespace GFLAGS_NAMESPACE;
 #endif
 
 using namespace nglog;
+
+#if defined(NGLOG_OS_LINUX)
+static volatile sig_atomic_t g_suppress_default_sigterm = 0;
+
+// Let a failure handler return after it restores SIGTERM's default disposition.
+// This models environments where the default action is ignored, such as PID 1.
+extern "C" int kill(pid_t pid, int signal_number) noexcept {
+  if (g_suppress_default_sigterm != 0 && pid == getpid() &&
+      signal_number == SIGTERM) {
+    return 0;
+  }
+  return static_cast<int>(syscall(SYS_kill, pid, signal_number));
+}
+#endif  // defined(NGLOG_OS_LINUX)
 
 static void DieInThread(int* a) {
   std::ostringstream oss;
@@ -96,6 +113,16 @@ static void CrashInThread() {
   volatile int* ptr = nullptr;
   *ptr = 0;
 }
+
+#if defined(NGLOG_OS_LINUX)
+static void DiscardFailureDump(const char*, size_t) {}
+
+static void ReturnFromFailureHandler() {
+  g_suppress_default_sigterm = 1;
+  raise(SIGTERM);
+  g_suppress_default_sigterm = 0;
+}
+#endif  // defined(NGLOG_OS_LINUX)
 
 #if !defined(NGLOG_OS_WINDOWS)
 // Runs self_path with child_command as its only argument and checks
@@ -159,6 +186,46 @@ static bool ExpectChildDiesBySignal(
   }
   return false;
 }
+
+#  if defined(NGLOG_OS_LINUX)
+static bool ExpectChildExitsSuccessfully(const char* self_path,
+                                         const char* child_command,
+                                         int timeout_seconds) {
+  pid_t pid = fork();
+  if (pid == 0) {
+    execl(self_path, self_path, child_command, static_cast<char*>(nullptr));
+    _exit(127);
+  }
+  if (pid < 0) {
+    fprintf(stderr, "%s: fork failed\n", child_command);
+    return false;
+  }
+
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(timeout_seconds);
+  int status = 0;
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (waitpid(pid, &status, WNOHANG) == pid) {
+      if (WIFEXITED(status) && WEXITSTATUS(status) == 0) return true;
+      if (WIFSIGNALED(status)) {
+        fprintf(stderr, "%s: died by signal %d\n", child_command,
+                WTERMSIG(status));
+      } else if (WIFEXITED(status)) {
+        fprintf(stderr, "%s: exited with code %d\n", child_command,
+                WEXITSTATUS(status));
+      }
+      return false;
+    }
+    usleep(20000);
+  }
+
+  fprintf(stderr, "%s: timed out after %d seconds\n", child_command,
+          timeout_seconds);
+  kill(pid, SIGKILL);
+  waitpid(pid, &status, 0);
+  return false;
+}
+#  endif  // defined(NGLOG_OS_LINUX)
 #endif  // !defined(NGLOG_OS_WINDOWS)
 
 int main(int argc, char** argv) {
@@ -200,14 +267,27 @@ int main(int argc, char** argv) {
     t2.join();
     t3.join();
     t4.join();
+#  if defined(NGLOG_OS_LINUX)
+  } else if (command == "handler_returns") {
+    InstallFailureWriter(&DiscardFailureDump);
+    std::thread first{&ReturnFromFailureHandler};
+    first.join();
+
+    // The first handler restored the default disposition. Install it again and
+    // verify that ownership was released before the first thread exited.
+    InstallFailureSignalHandler();
+    ReturnFromFailureHandler();
+#  endif  // defined(NGLOG_OS_LINUX)
 #  if !defined(NGLOG_OS_WINDOWS)
   } else if (command == "self_test") {
     const bool ok =
         ExpectChildDiesBySignal(argv[0], "segv", {SIGSEGV}, 10) &&
-        ExpectChildDiesBySignal(argv[0], "reentrant", {SIGTERM, SIGABRT},
-                                10) &&
-        ExpectChildDiesBySignal(argv[0], "multithread", {SIGSEGV, SIGABRT},
-                                10);
+        ExpectChildDiesBySignal(argv[0], "reentrant", {SIGTERM, SIGABRT}, 10) &&
+        ExpectChildDiesBySignal(argv[0], "multithread", {SIGSEGV, SIGABRT}, 10)
+#    if defined(NGLOG_OS_LINUX)
+        && ExpectChildExitsSuccessfully(argv[0], "handler_returns", 10)
+#    endif  // defined(NGLOG_OS_LINUX)
+        ;
     puts(ok ? "OK" : "FAIL");
     return ok ? 0 : 1;
 #  endif  // !defined(NGLOG_OS_WINDOWS)
