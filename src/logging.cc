@@ -472,6 +472,12 @@ class LogCleaner {
   // right before exiting.
   void ThreadMain();
 
+  // Stops and joins the cleaner thread. Discards the registered patterns
+  // when requested so that no further scan is started (used during
+  // destruction, when objects with static storage duration needed by a scan
+  // may already be gone).
+  void Stop(bool discard_patterns);
+
   static void CleanOverdueLogs(
       const std::chrono::system_clock::time_point& current_time,
       const std::chrono::minutes& overdue, bool base_filename_selected,
@@ -1359,16 +1365,17 @@ void LogFileObject::Write(
   }
 }
 
-LogCleaner::~LogCleaner() {
+LogCleaner::~LogCleaner() { Stop(/*discard_patterns=*/true); }
+
+void LogCleaner::Stop(bool discard_patterns) {
   std::thread cleaner;
   {
     std::lock_guard<std::mutex> l{mutex_};
     enabled_ = false;
     stop_ = true;
-    // Do not let the thread start another scan: objects with static storage
-    // duration used during a scan may already have been destroyed by the
-    // time this destructor runs.
-    patterns_.clear();
+    if (discard_patterns) {
+      patterns_.clear();
+    }
     cleaner.swap(thread_);
     cond_.notify_all();
   }
@@ -1394,20 +1401,7 @@ void LogCleaner::Enable(const std::chrono::minutes& overdue) {
   cond_.notify_all();
 }
 
-void LogCleaner::Disable() {
-  std::thread cleaner;
-  {
-    std::lock_guard<std::mutex> l{mutex_};
-    if (!enabled_) {
-      return;
-    }
-    enabled_ = false;
-    stop_ = true;
-    cleaner.swap(thread_);
-    cond_.notify_all();
-  }
-  cleaner.join();
-}
+void LogCleaner::Disable() { Stop(/*discard_patterns=*/false); }
 
 void LogCleaner::AddLogFilePattern(bool base_filename_selected,
                                    const string& base_filename,
