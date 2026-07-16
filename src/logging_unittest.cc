@@ -113,6 +113,7 @@ static void TestSTREQ();
 static void TestMaxLogSizeWhenNoTimestamp();
 static void TestBasename();
 static void TestBasenameAppendWhenNoTimestamp();
+static void TestHeaderFormatLineWithCustomPrefixFormatter();
 static void TestTwoProcessesWrite();
 static void TestSymlink();
 static void TestExtension();
@@ -293,6 +294,7 @@ int main(int argc, char** argv) {
   TestMaxLogSizeWhenNoTimestamp();
   TestBasename();
   TestBasenameAppendWhenNoTimestamp();
+  TestHeaderFormatLineWithCustomPrefixFormatter();
   TestTwoProcessesWrite();
   TestSymlink();
   TestExtension();
@@ -810,6 +812,19 @@ static void CheckFile(const string& name, const string& expected_string,
              << expected_string << " in " << files[0];
 }
 
+// Check that a string is not contained anywhere in a file
+static void CheckNotInFile(const string& name, const string& unexpected) {
+  vector<string> files;
+  GetFiles(name + "*", &files);
+  CHECK_EQ(files.size(), 1UL);
+
+  std::unique_ptr<std::FILE> file{fopen(files[0].c_str(), "r")};
+  CHECK(file != nullptr) << ": could not open " << files[0];
+  const string content = ReadEntireFile(file.get());
+  CHECK(content.find(unexpected) == string::npos)
+      << ": found " << unexpected << " in " << files[0];
+}
+
 static void TestMaxLogSizeWhenNoTimestamp() {
   fprintf(stderr, "==== Test setting max log size without timestamp\n");
   const string dest = FLAGS_test_tmpdir + "/logging_test_max_log_size";
@@ -890,6 +905,46 @@ static void TestBasenameAppendWhenNoTimestamp() {
   // if the logging overwrites the file instead of appending it will fail.
   CheckFile(dest, "test preexisting content");
   CheckFile(dest, "message to new base, appending to preexisting file");
+
+  // Release file handle for the destination file to unlock the file in Windows.
+  LogToStderr();
+  DeleteFiles(dest + "*");
+}
+
+static void TestHeaderFormatLineWithCustomPrefixFormatter() {
+  fprintf(stderr, "==== Test log file header format line\n");
+  const string dest = FLAGS_test_tmpdir + "/logging_test_header_format_line";
+  DeleteFiles(dest + "*");
+
+  const bool saved_timestamp_in_logfile_name = FLAGS_timestamp_in_logfile_name;
+  FLAGS_timestamp_in_logfile_name = false;
+
+  // A custom prefix formatter is installed (see main). It determines the
+  // actual log line format, so the header must not advertise the default
+  // format.
+  SetLogDestination(NGLOG_INFO, dest.c_str());
+  LOG(INFO) << "header with custom prefix formatter";
+  FlushLogFiles(NGLOG_INFO);
+  CheckFile(dest, "Running duration (h:mm:ss):");  // the header was written
+  CheckNotInFile(dest, "Log line format: ");
+
+  // Release file handle for the destination file to unlock the file in Windows.
+  LogToStderr();
+  DeleteFiles(dest + "*");
+
+  // Without a custom prefix formatter the header advertises the default
+  // format.
+  InstallPrefixFormatter(nullptr);
+  SetLogDestination(NGLOG_INFO, dest.c_str());
+  LOG(INFO) << "header with default prefix";
+  FlushLogFiles(NGLOG_INFO);
+  CheckFile(dest, "Log line format: [IWEF]");
+
+  // Restore the prefix formatter installed by main.
+  static string prefix_attacher_data = "good data";
+  InstallPrefixFormatter(&PrefixAttacher, &prefix_attacher_data);
+
+  FLAGS_timestamp_in_logfile_name = saved_timestamp_in_logfile_name;
 
   // Release file handle for the destination file to unlock the file in Windows.
   LogToStderr();
