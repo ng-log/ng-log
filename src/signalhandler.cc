@@ -33,10 +33,10 @@
 // Implementation of InstallFailureSignalHandler().
 
 #include <algorithm>
+#include <atomic>
 #include <csignal>
 #include <cstring>
 #include <ctime>
-#include <mutex>
 #include <sstream>
 #include <thread>
 
@@ -60,6 +60,13 @@
 #  include <sys/syscall.h>
 #  include <sys/types.h>
 #endif
+#ifdef NGLOG_OS_WINDOWS
+#  include <windows.h>
+#else  // !defined(NGLOG_OS_WINDOWS)
+#  ifdef HAVE_SCHED_YIELD
+#    include <sched.h>
+#  endif  // defined(HAVE_SCHED_YIELD)
+#endif    // defined(NGLOG_OS_WINDOWS)
 
 namespace nglog {
 
@@ -288,11 +295,49 @@ void InvokeDefaultSignalHandler(int signal_number) {
 #endif
 }
 
-// This variable is used for protecting FailureSignalHandler() from dumping
-// stuff while another thread is doing it.  Our policy is to let the first
-// thread dump stuff and let other threads do nothing.
-// See also comments in FailureSignalHandler().
-static std::once_flag signaled;
+// Set while this thread is executing the failure handler. sig_atomic_t is used
+// because another signal can interrupt the handler between any two
+// instructions. No other thread accesses this object.
+thread_local volatile sig_atomic_t t_failure_signal_handler_entered = 0;
+
+// Gives up the rest of the current scheduling quantum. Used only by
+// threads spinning to be killed, so promptness doesn't matter. Only
+// sleep() is on the POSIX async-signal-safe list, but the others used
+// here are thin, state-free syscalls on every platform ng-log targets.
+void RelinquishTimeSlice() {
+#ifdef NGLOG_OS_WINDOWS
+  SwitchToThread();
+#elif defined(HAVE_SCHED_YIELD)  // !defined(NGLOG_OS_WINDOWS)
+  sched_yield();
+#elif defined(HAVE_NANOSLEEP)    // !defined(HAVE_SCHED_YIELD)
+  const struct timespec zero_duration = {};
+  nanosleep(&zero_duration, nullptr);
+#else                            // !defined(HAVE_NANOSLEEP)
+  sleep(1);
+#endif                           // defined(NGLOG_OS_WINDOWS)
+}
+
+// True while one thread owns failure-dump generation. Other threads wait for
+// that handler to terminate the process. If termination does not occur (for
+// example, because a default signal disposition is ignored by PID 1), the
+// owner releases the flag and a waiting thread can take over. Deliberately not
+// a std::call_once() or std::once_flag: those are not async-signal-safe and a
+// reentrant thread could deadlock instead of dying.
+static std::atomic<bool> g_failure_signal_handler_entered{false};
+// is_always_lock_free needs C++17, so ATOMIC_BOOL_LOCK_FREE == 2, its
+// standard-mandated "always lock-free" equivalent, covers the C++14 floor.
+#if defined(__cpp_lib_atomic_is_always_lock_free)
+constexpr bool kFailureSignalHandlerEnteredIsLockFree =
+    decltype(g_failure_signal_handler_entered)::is_always_lock_free;
+#else   // !defined(__cpp_lib_atomic_is_always_lock_free)
+constexpr bool kFailureSignalHandlerEnteredIsLockFree =
+    ATOMIC_BOOL_LOCK_FREE == 2;
+#endif  // defined(__cpp_lib_atomic_is_always_lock_free)
+// A lock-based atomic could take a lock already held by the very thread
+// its own signal interrupted, deadlocking instead of dying.
+static_assert(kFailureSignalHandlerEnteredIsLockFree,
+              "g_failure_signal_handler_entered must be lock-free to be "
+              "async-signal-safe");
 
 static void HandleSignal(int signal_number
 #if !defined(NGLOG_OS_WINDOWS)
@@ -346,7 +391,10 @@ static void HandleSignal(int signal_number
   // causes problems.
   FlushLogFilesUnsafe(NGLOG_INFO);
 
-  // Kill ourself by the default signal handler.
+  // Kill ourself by the default signal handler. Must return afterwards.
+  // signal_number stays blocked on this thread until we do, since we
+  // have no SA_NODEFER, so spinning here would keep the just-reraised
+  // signal pending forever instead of letting it kill the process.
   InvokeDefaultSignalHandler(signal_number);
 }
 
@@ -359,12 +407,41 @@ void FailureSignalHandler(int signal_number, siginfo_t* signal_info,
                           void* ucontext)
 #endif
 {
-  std::call_once(signaled, &HandleSignal, signal_number
+  if (t_failure_signal_handler_entered != 0) {
+    // Reentered on this thread, likely because dumping raised another signal.
+    // Don't retry, just die. Must return, not spin, afterwards for the same
+    // reason as in HandleSignal() above. signal_number is still blocked here
+    // until we do.
+    InvokeDefaultSignalHandler(signal_number);
+    return;
+  }
+  t_failure_signal_handler_entered = 1;
+
+  bool expected = false;
+  // Retry until this thread owns failure-dump generation.
+  while (!g_failure_signal_handler_entered.compare_exchange_weak(
+      expected, true, std::memory_order_acquire, std::memory_order_relaxed)) {
+    // Wait with loads to avoid repeated read-modify-write operations.
+    while (g_failure_signal_handler_entered.load(std::memory_order_acquire)) {
+      RelinquishTimeSlice();
+    }
+    expected = false;
+  }
+
+  HandleSignal(signal_number
 #if !defined(NGLOG_OS_WINDOWS)
-                 ,
-                 signal_info, ucontext
+               ,
+               signal_info, ucontext
 #endif
   );
+
+  // Normally the re-raised signal terminates the process after this handler
+  // returns. Release ownership anyway because some default dispositions can be
+  // ignored, most notably SIGTERM for PID 1. No pointer to thread-local storage
+  // is published, so a thread that exits after returning cannot leave dangling
+  // shared state.
+  g_failure_signal_handler_entered.store(false, std::memory_order_release);
+  t_failure_signal_handler_entered = 0;
 }
 
 }  // namespace

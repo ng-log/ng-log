@@ -1,4 +1,5 @@
 // Copyright (c) 2006, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -138,6 +139,41 @@ TEST(Demangle, CtorDtorTruncation) {
       "_ZN7ppppppppppsppppppppppppppppppppppppppppppppppppppI00000E0SiD22L_"
       "ZTVZleA2_ZZ\x7f";
   EXPECT_FALSE(Demangle(fuzzed, tmp2, sizeof(tmp2)));
+}
+
+// A name whose demangled form does not fit the output buffer must be
+// reported as a failure, not as a success with the output silently cut
+// off, and in particular must never leave the output unterminated: the
+// crash handler demangles the frames of a dumped stack trace into a
+// fixed-size buffer, and an unterminated "success" previously made it
+// abort (and then hang) in the middle of dumping. The symbol below is
+// std::call_once()'s execution machinery, which is part of every such
+// stack trace, and demangles to well over 256 characters.
+TEST(Demangle, LongNameTruncation) {
+  const char* const mangled =
+      "_ZZNSt9once_flag18_Prepare_executionC1IZSt9call_onceIPFviP9siginfo_t"
+      "PvEJRiRS4_RS5_EEvRS_OT_DpOT0_EUlvE_EERSC_ENKUlvE_clEv";
+
+  // Large enough for any implementation to succeed, in which case the
+  // result must be '\0'-terminated.
+  char big[4096];
+  if (Demangle(mangled, big, sizeof(big))) {
+    EXPECT_LT(strnlen(big, sizeof(big)), sizeof(big));
+  }
+
+  char small_buf[256];
+#  if defined(HAVE___CXA_DEMANGLE)
+  // abi::__cxa_demangle() produces the full name, including template
+  // arguments, which cannot fit: this must fail rather than truncate.
+  EXPECT_FALSE(Demangle(mangled, small_buf, sizeof(small_buf)));
+#  else   // !defined(HAVE___CXA_DEMANGLE)
+  // Other implementations may abbreviate (e.g. the fallback demangler
+  // omits template arguments) and legitimately fit, but a reported
+  // success must still be '\0'-terminated.
+  if (Demangle(mangled, small_buf, sizeof(small_buf))) {
+    EXPECT_LT(strnlen(small_buf, sizeof(small_buf)), sizeof(small_buf));
+  }
+#  endif  // defined(HAVE___CXA_DEMANGLE)
 }
 
 TEST(Demangle, FromFile) {

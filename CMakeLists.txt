@@ -151,6 +151,8 @@ check_cxx_symbol_exists (pread unistd.h HAVE_PREAD)
 check_cxx_symbol_exists (pwrite unistd.h HAVE_PWRITE)
 check_cxx_symbol_exists (sigaction csignal HAVE_SIGACTION)
 check_cxx_symbol_exists (sigaltstack csignal HAVE_SIGALTSTACK)
+check_cxx_symbol_exists (sched_yield sched.h HAVE_SCHED_YIELD)
+check_cxx_symbol_exists (nanosleep ctime HAVE_NANOSLEEP)
 
 check_cxx_symbol_exists (backtrace execinfo.h HAVE_EXECINFO_BACKTRACE)
 check_cxx_symbol_exists (backtrace_symbols execinfo.h
@@ -636,6 +638,16 @@ if (BUILD_TESTING)
 
   if (TARGET signalhandler_unittest)
     add_test (NAME signalhandler COMMAND signalhandler_unittest)
+
+    if (HAVE_SIGACTION)
+      # Forks off the segv, reentrant, and multithread scenarios below
+      # and checks each is killed by the expected signal within a
+      # timeout, catching the reentrancy guard hanging the process
+      # instead of letting it die.
+      add_test (NAME signalhandler_self_test
+        COMMAND signalhandler_unittest self_test)
+      set_tests_properties (signalhandler_self_test PROPERTIES TIMEOUT 60)
+    endif (HAVE_SIGACTION)
   endif (TARGET signalhandler_unittest)
 
   if (TARGET stacktrace_unittest)
