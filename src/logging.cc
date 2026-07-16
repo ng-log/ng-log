@@ -1377,7 +1377,7 @@ void LogCleaner::Stop(bool discard_patterns) {
       patterns_.clear();
     }
     cleaner.swap(thread_);
-    cond_.notify_all();
+    cond_.notify_one();
   }
   if (cleaner.joinable()) {
     cleaner.join();
@@ -1398,7 +1398,7 @@ void LogCleaner::Enable(const std::chrono::minutes& overdue) {
     thread_ = std::thread(&LogCleaner::ThreadMain, this);
   }
   // Wake up the cleaner thread: the overdue window may have changed.
-  cond_.notify_all();
+  cond_.notify_one();
 }
 
 void LogCleaner::Disable() { Stop(/*discard_patterns=*/false); }
@@ -1414,7 +1414,7 @@ void LogCleaner::AddLogFilePattern(bool base_filename_selected,
   pattern.filename_extension = filename_extension;
   // A log file was just created: scan for overdue logs right away.
   pattern.next_cleanup_time = {};
-  cond_.notify_all();
+  cond_.notify_one();
 }
 
 void LogCleaner::ThreadMain() {
