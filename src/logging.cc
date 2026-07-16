@@ -461,7 +461,9 @@ class LogCleaner {
   struct LogFilePattern {
     bool base_filename_selected{false};
     string filename_extension;
-    std::chrono::system_clock::time_point next_cleanup_time;
+    // Scans happen at fixed intervals, so schedule them on the steady clock
+    // to stay unaffected by wall-clock adjustments (NTP, daylight saving).
+    std::chrono::steady_clock::time_point next_cleanup_time;
   };
 
   // Body of the cleaner thread: sleeps until the earliest cleanup deadline
@@ -1421,17 +1423,20 @@ void LogCleaner::ThreadMain() {
   std::unique_lock<std::mutex> l{mutex_};
 
   for (;;) {
+    // Scans are scheduled on the steady clock; the wall-clock time is only
+    // used to decide how old a log file is.
+    const auto now = std::chrono::steady_clock::now();
     const auto current_time = std::chrono::system_clock::now();
 
     // Collect the patterns which are due for a scan and schedule their next
     // one.
     vector<std::pair<string, LogFilePattern>> due;
     for (auto& pattern : patterns_) {
-      if (pattern.second.next_cleanup_time <= current_time) {
+      if (pattern.second.next_cleanup_time <= now) {
         due.emplace_back(pattern.first, pattern.second);
         pattern.second.next_cleanup_time =
-            current_time +
-            std::chrono::duration_cast<std::chrono::system_clock::duration>(
+            now +
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                 std::chrono::duration<int32>{FLAGS_logcleansecs});
       }
     }
