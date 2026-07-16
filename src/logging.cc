@@ -1457,7 +1457,7 @@ void LogCleaner::ThreadMain() {
     }
 
     if (patterns_.empty()) {
-      cond_.wait(l);
+      cond_.wait(l, [this] { return stop_ || !patterns_.empty(); });
     } else {
       auto next_deadline = patterns_.begin()->second.next_cleanup_time;
       for (const auto& pattern : patterns_) {
