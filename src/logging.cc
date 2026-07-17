@@ -988,7 +988,7 @@ bool LogFileObject::CreateLogfile(const string& time_pid_string) {
   }
   string_filename += filename_extension_;
   const char* filename = string_filename.c_str();
-  // only write to files, create if non-existant.
+  // only write to files, create if non-existent.
   int flags = O_WRONLY | O_CREAT;
   if (FLAGS_timestamp_in_logfile_name) {
     // demand that the file is unique for our timestamp (fail if it exists).
