@@ -1,7 +1,7 @@
 # Using ng-log in a CMake Project
 
-Assuming that ng-log was previously [built using CMake](build.md#cmake) or
-installed using a package manager, you can use the CMake command `#!cmake
+Assuming that ng-log was previously [built using CMake](build.md) or installed
+using a package manager, you can use the CMake command `#!cmake
 find_package` to build against ng-log in your CMake project as follows:
 
 ``` cmake title="CMakeLists.txt"
