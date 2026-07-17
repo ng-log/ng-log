@@ -259,7 +259,7 @@ bool InitializeVLOG3(SiteFlag* site_flag, int32* level_default,
     // If VLOG flag has been cached to the default site pointer,
     // we want to add to the cached list in order to invalidate in case
     // SetVModule is called afterwards with new modules.
-    // The performance penalty here is neglible, because InitializeVLOG3 is
+    // The performance penalty here is negligible, because InitializeVLOG3 is
     // called once per site.
     if (site_flag_value == level_default && !site_flag->base_name) {
       site_flag->base_name = base;

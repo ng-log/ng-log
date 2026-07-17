@@ -10,7 +10,7 @@ the build system will automatically detect and use it, allowing you to
 pass flags on the command line.
 
 !!! example "Activate `--logtostderr` in an application from the command line"
-    A binary `you_application` that uses ng-log can be started using
+    A binary `your_application` that uses ng-log can be started using
     ``` bash
     ./your_application --logtostderr=1
     ```
