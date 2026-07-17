@@ -152,7 +152,7 @@ void RawLog(LogSeverity severity, const char* file, int line,
     return;  // this stderr log message is suppressed
   }
 
-  // We do not have any any option other that string streams to obtain the
+  // We do not have any option other than string streams to obtain the
   // thread identifier as the corresponding value is not convertible to an
   // integer. Use a statically allocated buffer to avoid dynamic memory
   // allocations.

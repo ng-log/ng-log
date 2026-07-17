@@ -166,7 +166,7 @@ TEST(Symbolize, SymbolizeWithDemangling) {
 // and after the signal handler returns, look at the alternate stack
 // buffer to see what portion has been touched.
 //
-// This trick gives us the the stack footprint of the signal handler.
+// This trick gives us the stack footprint of the signal handler.
 // But the signal handler, even before the call to Symbolize, consumes
 // some stack already. We however only want the stack usage of the
 // Symbolize function. To measure this accurately, we install two signal
