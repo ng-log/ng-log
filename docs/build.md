@@ -1,42 +1,5 @@
 # Building from Source
 
-## Bazel
-
-To use ng-log within a project which uses the [Bazel](https://bazel.build/) build
-tool, add the following lines to your `MODULE.bazel` file:
-
-``` bazel title="MODULE.bazel"
-bazel_dep(name = "gflags", version = "2.2.2")
-bazel_dep(name = "ng-log", version = "0.9.0")
-```
-
-You can then add `@ng-log//:ng-log` to
-the deps section of a `cc_binary` or
-`cc_library` rule, and `#!cpp #include <ng-log/logging.h>` to
-include it in your source code.
-
-!!! example "Using ng-log in a Bazel project"
-    ``` bazel
-    cc_binary(
-        name = "main",
-        srcs = ["main.cc"],
-        deps = ["@ng-log//:ng-log"],
-    )
-    ```
-
-### Migrating from google/glog
-
-The Bazel target doesn't include the glog compatibility layer, so you'll need to
-adjust your code as follows:
-
--   replace `<glog/logging.h>` with `<ng-log/logging.h>` and similarly for other heads (flags, log_severity, stl_logging, etc)
--   replace the `google::` namespace with `nglog::`
--   replace `InitGoogleLogging` with `InitializeLogging`
--   replace `IsGoogleLoggingInitialized` with `IsLoggingInitialized`
--   replace `ShutdownGoogleLogging` with `ShutdownLogging`
-
-## CMake
-
 ng-log can be compiled using [CMake](http://www.cmake.org) on a wide range of
 platforms. The typical workflow for building ng-log on a Unix-like system with GNU
 Make as build tool is as follows:

@@ -26,5 +26,5 @@ compiled [from source](build.md). For a detailed overview of ng-log features and
 their usage, please refer to the [user guide](logging.md).
 
 !!! warning
-    The above example requires further [Bazel](build.md#bazel) or
-    [CMake](usage.md) setup for use in own projects.
+    The above example requires further [CMake](usage.md) setup for use in your
+    own projects.

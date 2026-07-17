@@ -109,6 +109,7 @@ nav:
       - Usage in CMake Projects: usage.md
       - Building from Source: build.md
       - Installation using Package Managers: packages.md
+      - Migration from glog: migration-from-glog.md
   - User Guide:
       - Logging: logging.md
       - Adjusting Output: flags.md
