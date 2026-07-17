@@ -230,7 +230,7 @@ void DumpSignalInfo(int signal_number, siginfo_t* siginfo) {
   std::ostringstream oss;
   oss << std::showbase << std::hex << std::this_thread::get_id();
   formatter.AppendString(oss.str().c_str());
-#  if defined(GLOG_OS_LINUX) && defined(HAVE_SYS_SYSCALL_H) && \
+#  if defined(NGLOG_OS_LINUX) && defined(HAVE_SYS_SYSCALL_H) && \
       defined(HAVE_SYS_TYPES_H)
   pid_t tid = syscall(SYS_gettid);
   formatter.AppendString(" LWP ");
