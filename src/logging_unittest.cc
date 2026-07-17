@@ -1653,6 +1653,34 @@ TEST(LogMsgTime, gmtoff) {
   EXPECT_TRUE((gmtoff >= utc_min_offset) && (gmtoff <= utc_max_offset));
 }
 
+#ifndef NGLOG_OS_WINDOWS
+TEST(LogMsgTime, gmtoffSubHour) {
+  // The gmtoffset() API is documented to return seconds, so time zones whose
+  // offset is not a whole number of hours (e.g. India at UTC+05:30) must be
+  // reported without truncating the minutes.
+  using namespace std::chrono_literals;
+  const char* saved_tz = std::getenv("TZ");
+  const std::string saved_tz_value = saved_tz ? saved_tz : std::string{};
+
+  // POSIX TZ format: the offset is the value added to local time to obtain
+  // UTC, so "IST-5:30" describes a fixed zone 5 h 30 min east of UTC.
+  setenv("TZ", "IST-5:30", 1);
+  tzset();
+
+  const std::chrono::seconds gmtoff =
+      nglog::LogMessage(__FILE__, __LINE__).time().gmtoffset();
+
+  if (saved_tz) {
+    setenv("TZ", saved_tz_value.c_str(), 1);
+  } else {
+    unsetenv("TZ");
+  }
+  tzset();
+
+  EXPECT_EQ(gmtoff, 5h + 30min);
+}
+#endif  // NGLOG_OS_WINDOWS
+
 TEST(EmailLogging, ValidAddress) {
   FlagSaver saver;
   FLAGS_logmailer = "/usr/bin/true";
