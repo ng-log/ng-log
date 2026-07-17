@@ -751,6 +751,11 @@ if (BUILD_TESTING)
 
   target_link_libraries (cleanup_with_relative_prefix_unittest PRIVATE ng-log_test)
 
+  add_executable (cleanup_with_non_ascii_prefix_unittest
+    src/cleanup_with_non_ascii_prefix_unittest.cc)
+
+  target_link_libraries (cleanup_with_non_ascii_prefix_unittest PRIVATE ng-log_test)
+
   set (CLEANUP_LOG_DIR ${ng-log_BINARY_DIR}/cleanup_tests)
 
   add_test (NAME cleanup_init COMMAND
@@ -777,6 +782,12 @@ if (BUILD_TESTING)
     -DTEST_SUBDIR=test_subdir/
     -P ${ng-log_SOURCE_DIR}/cmake/RunCleanerTest3.cmake
     WORKING_DIRECTORY ${ng-log_BINARY_DIR})
+  add_test (NAME cleanup_with_non_ascii_prefix COMMAND
+    ${CMAKE_COMMAND}
+    -DLOGCLEANUP=$<TARGET_FILE:cleanup_with_non_ascii_prefix_unittest>
+    -DTEST_DIR=${ng-log_BINARY_DIR}/
+    -P ${ng-log_SOURCE_DIR}/cmake/RunCleanerTest4.cmake
+    WORKING_DIRECTORY ${ng-log_BINARY_DIR})
 
   # Fixtures setup
   set_tests_properties (cleanup_init PROPERTIES FIXTURES_SETUP logcleanuptest)
@@ -786,6 +797,7 @@ if (BUILD_TESTING)
   set_tests_properties (cleanup_immediately PROPERTIES FIXTURES_REQUIRED logcleanuptest)
   set_tests_properties (cleanup_with_absolute_prefix PROPERTIES FIXTURES_REQUIRED logcleanuptest)
   set_tests_properties (cleanup_with_relative_prefix PROPERTIES FIXTURES_REQUIRED logcleanuptest)
+  set_tests_properties (cleanup_with_non_ascii_prefix PROPERTIES FIXTURES_REQUIRED logcleanuptest)
 
   add_executable (striplog0_unittest
     src/striplog_unittest.cc
