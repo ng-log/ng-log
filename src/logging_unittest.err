@@ -284,25 +284,25 @@ IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] RAW: Buffering
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] RAW: Buffered
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] RAW: Waiting
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] RAW: Sink got a messages
-IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] RAW: Waited
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Sink is sending out a message: IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Message 1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Have 0 left
+IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] RAW: Waited
 EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Message 2
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] RAW: Buffering
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] RAW: Buffered
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] RAW: Waiting
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] RAW: Sink got a messages
-IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] RAW: Waited
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Sink is sending out a message: EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Message 2
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Have 0 left
+IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] RAW: Waited
 WYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Message 3
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] RAW: Buffering
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] RAW: Buffered
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] RAW: Waiting
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] RAW: Sink got a messages
-IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] RAW: Waited
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Sink is sending out a message: WYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Message 3
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Have 0 left
+IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] RAW: Waited
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Sink capture: IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Message 1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Sink capture: EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Message 2
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Sink capture: WYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Message 3

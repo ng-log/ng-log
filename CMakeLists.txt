@@ -37,15 +37,12 @@ option (BUILD_EXAMPLES "Build examples" ON)
 option (PRINT_UNSYMBOLIZED_STACK_TRACES
   "Print file offsets in traces instead of symbolizing" OFF)
 option (WITH_GFLAGS "Use gflags" ON)
-option (WITH_GTEST "Use Google Test" ON)
 option (WITH_PKGCONFIG "Enable pkg-config support" OFF)
 option (WITH_SYMBOLIZE "Enable symbolize module" ON)
 option (WITH_TLS "Enable Thread Local Storage (TLS) support" ON)
 
 set (WITH_UNWIND libunwind CACHE STRING "unwind driver")
 set_property (CACHE WITH_UNWIND PROPERTY STRINGS none unwind libunwind)
-
-cmake_dependent_option (WITH_GMOCK "Use Google Mock" ON WITH_GTEST OFF)
 
 set (WITH_FUZZING none CACHE STRING "Fuzzing engine")
 set_property (CACHE WITH_FUZZING PROPERTY STRINGS none libfuzzer ossfuzz)
@@ -54,10 +51,6 @@ if (NOT WITH_UNWIND OR WITH_UNWIND STREQUAL none)
   set (CMAKE_DISABLE_FIND_PACKAGE_Unwind ON)
 endif (NOT WITH_UNWIND OR WITH_UNWIND STREQUAL none)
 
-if (NOT WITH_GTEST)
-  set (CMAKE_DISABLE_FIND_PACKAGE_GTest ON)
-endif (NOT WITH_GTEST)
-
 set (CMAKE_C_VISIBILITY_PRESET hidden)
 set (CMAKE_CXX_VISIBILITY_PRESET hidden)
 set (CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -65,15 +58,14 @@ set (CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
 set (CMAKE_DEBUG_POSTFIX d)
 
-find_package (GTest 1.11 COMPONENTS GTest OPTIONAL_COMPONENTS GMock NO_MODULE)
+# Tests always use the system-provided GTest/GMock. When unavailable, the
+# unit test section below is skipped entirely rather than falling back to a
+# bundled reimplementation.
+find_package (GTest 1.11 COMPONENTS GTest GMock NO_MODULE)
 
-if (GTest_FOUND)
-  set (HAVE_LIB_GTEST 1)
-endif (GTest_FOUND)
-
-if (WITH_GMOCK AND TARGET GTest::gmock)
-  set (HAVE_LIB_GMOCK 1)
-endif (WITH_GMOCK AND TARGET GTest::gmock)
+# Benchmarks are optional and are skipped when Google Benchmark is not
+# available.
+find_package (benchmark 1.6 NO_MODULE)
 
 if (WITH_GFLAGS)
   find_package (gflags 2.2.2)
@@ -631,23 +623,29 @@ if (WITH_FUZZING AND NOT WITH_FUZZING STREQUAL none)
   endif (WITH_FUZZING STREQUAL "ossfuzz")
 endif (WITH_FUZZING AND NOT WITH_FUZZING STREQUAL none)
 
-if (BUILD_TESTING)
+if (BUILD_TESTING AND GTest_FOUND)
+  include (GoogleTest)
+
+  add_library (ng-log_testing_utilities OBJECT
+    src/testing_utilities.cc
+  )
+
+  target_compile_definitions (ng-log_testing_utilities PRIVATE NGLOG_STATIC_DEFINE
+    $<TARGET_PROPERTY:ng-log,COMPILE_DEFINITIONS>)
+  target_compile_features (ng-log_testing_utilities PRIVATE
+    $<TARGET_PROPERTY:ng-log,COMPILE_FEATURES>)
+  target_include_directories (ng-log_testing_utilities PRIVATE
+    $<TARGET_PROPERTY:ng-log,INCLUDE_DIRECTORIES>)
+
   add_library (ng-log_test INTERFACE)
   target_link_libraries (ng-log_test INTERFACE $<TARGET_OBJECTS:ng-log_internal>
-    $<TARGET_PROPERTY:ng-log,LINK_LIBRARIES>)
+    $<TARGET_OBJECTS:ng-log_testing_utilities>
+    $<TARGET_PROPERTY:ng-log,LINK_LIBRARIES> GTest::gtest GTest::gmock)
   target_compile_definitions (ng-log_test INTERFACE NGLOG_STATIC_DEFINE
     $<TARGET_PROPERTY:ng-log,COMPILE_DEFINITIONS>)
   target_compile_features (ng-log_test INTERFACE
     $<TARGET_PROPERTY:ng-log,COMPILE_FEATURES>)
   target_include_directories (ng-log_test INTERFACE $<TARGET_PROPERTY:ng-log,INCLUDE_DIRECTORIES>)
-
-  if (HAVE_LIB_GTEST)
-    target_link_libraries (ng-log_test INTERFACE GTest::gtest)
-  endif (HAVE_LIB_GTEST)
-
-  if (HAVE_LIB_GMOCK)
-    target_link_libraries (ng-log_test INTERFACE GTest::gmock)
-  endif (HAVE_LIB_GMOCK)
 
   add_executable (logging_unittest
     src/logging_unittest.cc
@@ -675,11 +673,20 @@ if (BUILD_TESTING)
 
   target_link_libraries (demangle_unittest PRIVATE ng-log_test)
 
-  add_test (NAME demangle COMMAND demangle_unittest)
-
   if (HAVE___CXA_DEMANGLE)
     # Demangle tests use a different (reduced) representation of symbols
-    set_tests_properties (demangle PROPERTIES DISABLED ON)
+    gtest_discover_tests (demangle_unittest
+      TEST_PREFIX demangle.
+      DISCOVERY_TIMEOUT 30
+      DISCOVERY_MODE PRE_TEST
+      PROPERTIES DISABLED ON
+    )
+  else (HAVE___CXA_DEMANGLE)
+    gtest_discover_tests (demangle_unittest
+      TEST_PREFIX demangle.
+      DISCOVERY_TIMEOUT 30
+      DISCOVERY_MODE PRE_TEST
+    )
   endif (HAVE___CXA_DEMANGLE)
 
   if (HAVE_STACKTRACE)
@@ -696,6 +703,12 @@ if (BUILD_TESTING)
 
   target_link_libraries (utilities_unittest PRIVATE ng-log_test)
 
+  gtest_discover_tests (utilities_unittest
+    TEST_PREFIX utilities.
+    DISCOVERY_TIMEOUT 30
+    DISCOVERY_MODE PRE_TEST
+  )
+
   if (HAVE_STACKTRACE AND HAVE_SYMBOLIZE)
     add_executable (signalhandler_unittest
       src/signalhandler_unittest.cc
@@ -704,22 +717,31 @@ if (BUILD_TESTING)
     target_link_libraries (signalhandler_unittest PRIVATE ng-log_test)
   endif (HAVE_STACKTRACE AND HAVE_SYMBOLIZE)
 
-  add_test (NAME logging COMMAND logging_unittest)
-
-  set_tests_properties (logging PROPERTIES TIMEOUT 30)
-  # MacOS diff is not deterministic: use the output to determine whether the
-  # test passed.
-  set_tests_properties (logging PROPERTIES PASS_REGULAR_EXPRESSION ".*\nPASS\n.*")
-
-  # FIXME: Skip flaky test
-  set_tests_properties (logging PROPERTIES SKIP_REGULAR_EXPRESSION
-    "Check failed: time_ns within LogTimes::LOG_PERIOD_TOL_NS of LogTimes::LOG_PERIOD_NS")
+  # FIXME: Skip flaky test. EXPECT_NEAR's own message, not a CHECK_xx one.
+  set (logging_unittest_SKIP_REGULAR_EXPRESSION
+    [=[The difference between time_ns and LogTimes::LOG_PERIOD_NS is [0-9]+, which exceeds LogTimes::LOG_PERIOD_TOL_NS]=])
 
   if (APPLE)
     # FIXME: Skip flaky test
-    set_property (TEST logging APPEND PROPERTY SKIP_REGULAR_EXPRESSION
+    list (APPEND logging_unittest_SKIP_REGULAR_EXPRESSION
       "unexpected new.*PASS\nTest with golden file failed. We'll try to show the diff:")
   endif (APPLE)
+
+  gtest_discover_tests (logging_unittest
+    TEST_PREFIX logging.
+    DISCOVERY_TIMEOUT 30
+    DISCOVERY_MODE PRE_TEST
+    PROPERTIES
+      TIMEOUT 30
+      # MacOS diff is not deterministic: use the output to determine
+      # whether the test passed.
+      PASS_REGULAR_EXPRESSION ".*\nPASS\n.*"
+      SKIP_REGULAR_EXPRESSION "${logging_unittest_SKIP_REGULAR_EXPRESSION}"
+      # CaptureTestStdout()/CaptureTestStderr() always write to the same
+      # fixed path under TestTmpDir(), so tests using them must not run
+      # concurrently with each other or with the cleanup_* tests below.
+      RESOURCE_LOCK captured_stream
+  )
 
   if (TARGET signalhandler_unittest)
     add_test (NAME signalhandler COMMAND signalhandler_unittest)
@@ -749,23 +771,28 @@ if (BUILD_TESTING)
   add_test (NAME stl_logging COMMAND stl_logging_unittest)
 
   if (TARGET symbolize_unittest)
-    add_test (NAME symbolize COMMAND symbolize_unittest)
-
     # FIXME: Skip flaky test when compiled in C++20 mode
-    set_tests_properties (symbolize PROPERTIES SKIP_REGULAR_EXPRESSION
-      [=[Check failed: streq\("nonstatic_func"\, TrySymbolize\(\(void \*\)\(&nonstatic_func\)\)\)]=])
+    gtest_discover_tests (symbolize_unittest
+      TEST_PREFIX symbolize.
+      DISCOVERY_TIMEOUT 30
+      DISCOVERY_MODE PRE_TEST
+      PROPERTIES SKIP_REGULAR_EXPRESSION
+        [=[Check failed: streq\("nonstatic_func"\, TrySymbolize\(\(void \*\)\(&nonstatic_func\)\)\)]=]
+    )
   endif (TARGET symbolize_unittest)
 
-  if (HAVE_LIB_GMOCK)
-    add_executable (mock-log_unittest
-      src/mock-log_unittest.cc
-      src/mock-log.h
-    )
+  add_executable (mock-log_unittest
+    src/mock-log_unittest.cc
+    src/mock-log.h
+  )
 
-    target_link_libraries (mock-log_unittest PRIVATE ng-log_test)
+  target_link_libraries (mock-log_unittest PRIVATE ng-log_test)
 
-    add_test (NAME mock-log COMMAND mock-log_unittest)
-  endif (HAVE_LIB_GMOCK)
+  gtest_discover_tests (mock-log_unittest
+    TEST_PREFIX mock-log.
+    DISCOVERY_TIMEOUT 30
+    DISCOVERY_MODE PRE_TEST
+  )
 
   # Generate an initial cache
 
@@ -871,6 +898,12 @@ if (BUILD_TESTING)
   set_tests_properties (cleanup_immediately PROPERTIES FIXTURES_REQUIRED logcleanuptest)
   set_tests_properties (cleanup_with_absolute_prefix PROPERTIES FIXTURES_REQUIRED logcleanuptest)
   set_tests_properties (cleanup_with_relative_prefix PROPERTIES FIXTURES_REQUIRED logcleanuptest)
+
+  # These use CaptureTestStderr(), which always writes to the same fixed
+  # path under TestTmpDir(): they must not run concurrently with each
+  # other or with the logging_unittest tests above.
+  set_tests_properties (cleanup_immediately cleanup_with_absolute_prefix
+    cleanup_with_relative_prefix PROPERTIES RESOURCE_LOCK captured_stream)
 
   add_executable (striplog0_unittest
     src/striplog_unittest.cc
@@ -1066,7 +1099,15 @@ if (BUILD_TESTING)
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:ng-log>"
     PASS_REGULAR_EXPRESSION ""
   )
-endif (BUILD_TESTING)
+endif (BUILD_TESTING AND GTest_FOUND)
+
+if (benchmark_FOUND)
+  add_executable (logging_benchmark
+    src/logging_benchmark.cc
+  )
+
+  target_link_libraries (logging_benchmark PRIVATE ng-log benchmark::benchmark)
+endif (benchmark_FOUND)
 
 if (BUILD_EXAMPLES)
   add_executable (custom_sink_example examples/custom_sink.cc)

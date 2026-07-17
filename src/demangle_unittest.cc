@@ -34,13 +34,16 @@
 
 #include "demangle.h"
 
+#include <gtest/gtest.h>
+
 #include <fstream>
 #include <iostream>
 #include <string>
 
+#include "base/commandlineflags.h"
 #include "config.h"
-#include "googletest.h"
 #include "ng-log/logging.h"
+#include "testing_utilities.h"
 #include "utilities.h"
 
 #ifdef NGLOG_USE_GFLAGS
@@ -177,7 +180,7 @@ TEST(Demangle, LongNameTruncation) {
 }
 
 TEST(Demangle, FromFile) {
-  string test_file = FLAGS_test_srcdir + "/src/demangle_unittest.txt";
+  string test_file = TestSrcDir() + "/src/demangle_unittest.txt";
   ifstream f(test_file.c_str());  // The file should exist.
   EXPECT_FALSE(f.fail());
 
@@ -200,7 +203,7 @@ TEST(Demangle, FromFile) {
 #endif
 
 int main(int argc, char** argv) {
-  InitGoogleTest(&argc, argv);
+  testing::InitGoogleTest(&argc, argv);
 #ifdef NGLOG_USE_GFLAGS
   ParseCommandLineFlags(&argc, &argv, true);
 #endif

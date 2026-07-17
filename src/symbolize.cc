@@ -1,4 +1,5 @@
 // Copyright (c) 2024, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -915,7 +916,8 @@ static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(void* pc, char* out,
     out[namelen] = '\0';
 
     DWORD displacement;
-    IMAGEHLP_LINE64 line{sizeof(IMAGEHLP_LINE64)};
+    IMAGEHLP_LINE64 line = {};
+    line.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
 
     BOOL found = FALSE;
 
@@ -941,8 +943,14 @@ static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(void* pc, char* out,
       const std::size_t suffixlen = fnlen + extralen + fnlen + digits;
 
       if (suffixlen < out_size) {
-        out_size -= std::snprintf(out + namelen, out_size, " (%s:%lu)",
-                                  line.FileName, line.LineNumber);
+        // snprintf() returns a negative value on encoding error; only a
+        // non-negative count of the (possibly truncated) characters written
+        // is meaningful to subtract from out_size.
+        const int written = std::snprintf(out + namelen, out_size, " (%s:%lu)",
+                                          line.FileName, line.LineNumber);
+        if (written > 0) {
+          out_size -= static_cast<std::size_t>(written);
+        }
       }
     }
 

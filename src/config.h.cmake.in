@@ -19,12 +19,6 @@
 /* Define to 1 if you have the <glob.h> header file. */
 #cmakedefine HAVE_GLOB_H
 
-/* define if you have google gmock library */
-#cmakedefine HAVE_LIB_GMOCK
-
-/* define if you have google gtest library */
-#cmakedefine HAVE_LIB_GTEST
-
 /* define if you have dbghelp library */
 #cmakedefine HAVE_DBGHELP
 
