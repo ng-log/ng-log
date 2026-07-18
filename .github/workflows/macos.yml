@@ -23,7 +23,7 @@ jobs:
 
       - name: Setup Dependencies
         run: |
-          brew install ninja
+          brew install google-benchmark googletest ninja
 
       - name: Setup Coverage Dependencies
         if: matrix.build_type == 'Debug'

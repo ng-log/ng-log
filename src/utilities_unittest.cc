@@ -1,4 +1,5 @@
 // Copyright (c) 2008, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -30,8 +31,10 @@
 // Author: Shinichiro Hamaji
 #include "utilities.h"
 
-#include "googletest.h"
+#include <gtest/gtest.h>
+
 #include "ng-log/logging.h"
+#include "testing_utilities.h"
 
 #ifdef NGLOG_USE_GFLAGS
 #  include <gflags/gflags.h>
@@ -46,7 +49,7 @@ TEST(utilities, InitializeLoggingDeathTest) {
 
 int main(int argc, char** argv) {
   InitializeLogging(argv[0]);
-  InitGoogleTest(&argc, argv);
+  testing::InitGoogleTest(&argc, argv);
 
   CHECK_EQ(RUN_ALL_TESTS(), 0);
 }

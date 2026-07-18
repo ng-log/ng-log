@@ -1,4 +1,5 @@
 // Copyright (c) 2024, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -33,11 +34,12 @@
 
 #include "symbolize.h"
 
+#include <gtest/gtest.h>
+
 #include <csignal>
 #include <iostream>
 
 #include "config.h"
-#include "googletest.h"
 #include "ng-log/logging.h"
 #include "stacktrace.h"
 #include "utilities.h"
@@ -456,7 +458,7 @@ __declspec(noinline) void TestWithReturnAddress() {
 int main(int argc, char** argv) {
   FLAGS_logtostderr = true;
   InitializeLogging(argv[0]);
-  InitGoogleTest(&argc, argv);
+  testing::InitGoogleTest(&argc, argv);
 #if defined(HAVE_SYMBOLIZE) && defined(HAVE_STACKTRACE)
 #  if defined(HAVE_ELF_H) || defined(HAVE_SYS_EXEC_ELF_H)
   // We don't want to get affected by the callback interface, that may be

@@ -1,10 +1,8 @@
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog -1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog 0
-IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog 1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log info
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog_if -1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog_if 0
-IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog_if 1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log_if info
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog_if 0 expr
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log_if info expr
@@ -12,12 +10,10 @@ IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log_if info every 1 expr
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog_if 0 every 1 expr
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog -1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog 0
-IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog 1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log info
 WYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log warning
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog_if -1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog_if 0
-IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog_if 1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log_if info
 WYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log_if warning
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog_if 0 expr
@@ -26,13 +22,11 @@ IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log_if info every 1 expr
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog_if 0 every 1 expr
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog -1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog 0
-IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog 1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log info
 WYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log warning
 EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log error
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog_if -1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog_if 0
-IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog_if 1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log_if info
 WYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log_if warning
 EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log_if error
@@ -44,13 +38,11 @@ EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log_if error every 1 expr
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog_if 0 every 1 expr
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog -1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog 0
-IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog 1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log info
 WYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log warning
 EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log error
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog_if -1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog_if 0
-IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog_if 1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log_if info
 WYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log_if warning
 EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log_if error
@@ -62,13 +54,11 @@ EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log_if error every 1 expr
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog_if 0 every 1 expr
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog -1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog 0
-IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog 1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log info
 WYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log warning
 EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log error
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog_if -1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog_if 0
-IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog_if 1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log_if info
 WYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log_if warning
 EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log_if error

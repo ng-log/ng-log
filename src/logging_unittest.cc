@@ -1,4 +1,5 @@
 // Copyright (c) 2024, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -44,6 +45,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "config.h"
@@ -58,11 +60,15 @@
 #  include <sys/wait.h>
 #endif
 
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+
 #include "base/commandlineflags.h"
-#include "googletest.h"
+#include "mock-log.h"
 #include "ng-log/logging.h"
 #include "ng-log/raw_logging.h"
 #include "stacktrace.h"
+#include "testing_utilities.h"
 #include "utilities.h"
 
 #ifdef NGLOG_USE_GFLAGS
@@ -70,10 +76,6 @@
 using namespace GFLAGS_NAMESPACE;
 #endif
 
-#ifdef HAVE_LIB_GMOCK
-#  include <gmock/gmock.h>
-
-#  include "mock-log.h"
 // Introduce several symbols from gmock.
 using nglog::nglog_testing::ScopedMockLog;
 using testing::_;
@@ -83,7 +85,6 @@ using testing::HasSubstr;
 using testing::InitGoogleMock;
 using testing::StrictMock;
 using testing::StrNe;
-#endif
 
 using namespace std;
 using namespace nglog;
@@ -110,84 +111,6 @@ static void TestLogSinkWaitTillSent();
 static void TestCHECK();
 static void TestDCHECK();
 static void TestSTREQ();
-static void TestMaxLogSizeWhenNoTimestamp();
-static void TestMaxLogSizeAboveCapNotFlooredToMinimum();
-static void TestBasename();
-static void TestBasenameAppendWhenNoTimestamp();
-static void TestTwoProcessesWrite();
-static void TestSymlink();
-static void TestExtension();
-static void TestWrapper();
-static void TestErrno();
-static void TestTruncate();
-static void TestCustomLoggerDeletionOnShutdown();
-static void TestLogPeriodically();
-static void TestDropLogMemoryConcurrentWriters();
-
-static int x = -1;
-static void BM_Check1(int n) {
-  while (n-- > 0) {
-    CHECK_GE(n, x);
-    CHECK_GE(n, x);
-    CHECK_GE(n, x);
-    CHECK_GE(n, x);
-    CHECK_GE(n, x);
-    CHECK_GE(n, x);
-    CHECK_GE(n, x);
-    CHECK_GE(n, x);
-  }
-}
-BENCHMARK(BM_Check1)
-
-static void CheckFailure(int a, int b, const char* file, int line,
-                         const char* msg);
-static void BM_Check3(int n) {
-  while (n-- > 0) {
-    if (n < x) CheckFailure(n, x, __FILE__, __LINE__, "n < x");
-    if (n < x) CheckFailure(n, x, __FILE__, __LINE__, "n < x");
-    if (n < x) CheckFailure(n, x, __FILE__, __LINE__, "n < x");
-    if (n < x) CheckFailure(n, x, __FILE__, __LINE__, "n < x");
-    if (n < x) CheckFailure(n, x, __FILE__, __LINE__, "n < x");
-    if (n < x) CheckFailure(n, x, __FILE__, __LINE__, "n < x");
-    if (n < x) CheckFailure(n, x, __FILE__, __LINE__, "n < x");
-    if (n < x) CheckFailure(n, x, __FILE__, __LINE__, "n < x");
-  }
-}
-BENCHMARK(BM_Check3)
-
-static void BM_Check2(int n) {
-  if (n == 17) {
-    x = 5;
-  }
-  while (n-- > 0) {
-    CHECK(n >= x);
-    CHECK(n >= x);
-    CHECK(n >= x);
-    CHECK(n >= x);
-    CHECK(n >= x);
-    CHECK(n >= x);
-    CHECK(n >= x);
-    CHECK(n >= x);
-  }
-}
-BENCHMARK(BM_Check2)
-
-static void CheckFailure(int, int, const char* /* file */, int /* line */,
-                         const char* /* msg */) {}
-
-static void BM_logspeed(int n) {
-  while (n-- > 0) {
-    LOG(INFO) << "test message";
-  }
-}
-BENCHMARK(BM_logspeed)
-
-static void BM_vlog(int n) {
-  while (n-- > 0) {
-    VLOG(1) << "test message";
-  }
-}
-BENCHMARK(BM_vlog)
 
 namespace {
 
@@ -208,9 +131,20 @@ void PrefixAttacher(std::ostream& s, const LogMessage& m, void* data) {
     << m.basename() << ':' << m.line() << "]";
 }
 
+// Captured pre-init, re-emitted by LoggingGoldenFile.Stderr.
+std::string early_stderr;
+
+// argv[0] and the prefix formatter context, kept so
+// Logging.CustomLoggerDeletionOnShutdown can restore both after its own
+// ShutdownLogging() call.
+const char* g_argv0 = nullptr;
+std::string g_prefix_attacher_data;
+
 }  // namespace
 
 int main(int argc, char** argv) {
+  g_argv0 = argv[0];
+
   FLAGS_colorlogtostderr = false;
   FLAGS_timestamp_in_logfile_name = true;
 
@@ -223,87 +157,36 @@ int main(int argc, char** argv) {
   LogWithLevels(FLAGS_v, FLAGS_stderrthreshold, FLAGS_logtostderr,
                 FLAGS_alsologtostderr);
   LogWithLevels(0, 0, false, false);  // simulate "before global c-tors"
-  const string early_stderr = GetCapturedTestStderr();
+  early_stderr = GetCapturedTestStderr();
 
   EXPECT_FALSE(IsLoggingInitialized());
 
   // Setting a custom prefix generator (it will use the default format so that
   // the golden outputs can be reused):
-  string prefix_attacher_data = "good data";
+  g_prefix_attacher_data = "good data";
   InitializeLogging(argv[0]);
-  InstallPrefixFormatter(&PrefixAttacher, &prefix_attacher_data);
+  InstallPrefixFormatter(&PrefixAttacher, &g_prefix_attacher_data);
 
   EXPECT_TRUE(IsLoggingInitialized());
 
-  RunSpecifiedBenchmarks();
-
   FLAGS_logtostderr = true;
 
-  InitGoogleTest(&argc, argv);
-#ifdef HAVE_LIB_GMOCK
+  testing::InitGoogleTest(&argc, argv);
   InitGoogleMock(&argc, argv);
-#endif
 
 #ifdef NGLOG_USE_GFLAGS
   ParseCommandLineFlags(&argc, &argv, true);
 #endif
 
   // so that death tests run before we use threads
-  CHECK_EQ(RUN_ALL_TESTS(), 0);
-
-  CaptureTestStderr();
-
-  // re-emit early_stderr
-  LogMessage("dummy", LogMessage::kNoLogPrefix, NGLOG_INFO).stream()
-      << early_stderr;
-
-  TestLogging(true);
-  TestRawLogging();
-  TestLoggingLevels();
-  TestVLogModule();
-  TestLogString();
-  TestLogSink();
-  TestLogToString();
-  TestLogSinkWaitTillSent();
-  TestCHECK();
-  TestDCHECK();
-  TestSTREQ();
-
-  // TODO: The golden test portion of this test is very flakey.
-  EXPECT_TRUE(
-      MungeAndDiffTestStderr(FLAGS_test_srcdir + "/src/logging_unittest.err"));
-
-  FLAGS_logtostderr = false;
-
-  FLAGS_logtostdout = true;
-  FLAGS_stderrthreshold = NUM_SEVERITIES;
-  CaptureTestStdout();
-  TestRawLogging();
-  TestLoggingLevels();
-  TestLogString();
-  TestLogSink();
-  TestLogToString();
-  TestLogSinkWaitTillSent();
-  TestCHECK();
-  TestDCHECK();
-  TestSTREQ();
-  EXPECT_TRUE(
-      MungeAndDiffTestStdout(FLAGS_test_srcdir + "/src/logging_unittest.out"));
-  FLAGS_logtostdout = false;
-
-  TestMaxLogSizeWhenNoTimestamp();
-  TestMaxLogSizeAboveCapNotFlooredToMinimum();
-  TestBasename();
-  TestBasenameAppendWhenNoTimestamp();
-  TestTwoProcessesWrite();
-  TestSymlink();
-  TestExtension();
-  TestWrapper();
-  TestErrno();
-  TestTruncate();
-  TestDropLogMemoryConcurrentWriters();
-  TestCustomLoggerDeletionOnShutdown();
-  TestLogPeriodically();
+  const int result = RUN_ALL_TESTS();
+  if (result != 0) {
+    // Return the failure normally rather than CHECK_EQ-aborting: ctest's
+    // SKIP_REGULAR_EXPRESSION/PASS_REGULAR_EXPRESSION test properties only
+    // consider a test's output when the process exits normally, not when
+    // it dies from a signal.
+    return result;
+  }
 
   fprintf(stdout, "PASS\n");
   return 0;
@@ -316,8 +199,7 @@ void TestLogging(bool check_counts) {
 
   LOG(INFO) << string("foo ") << "bar " << 10 << ' ' << 3.4;
   for (int i = 0; i < 10; ++i) {
-    int old_errno = errno;
-    errno = i;
+    int old_errno = std::exchange(errno, i);
     PLOG_EVERY_N(ERROR, 2) << "Plog every 2, iteration " << COUNTER;
     errno = old_errno;
 
@@ -354,9 +236,18 @@ void TestLogging(bool check_counts) {
       << "no prefix";
 
   if (check_counts) {
+    // INFO/WARNING totals are exact: their EVERY_N periods either always
+    // fire (period 1) or evenly divide the 10 iterations (period 5), so
+    // they're independent of the per-call-site counters' starting phase.
     CHECK_EQ(base_num_infos + 15, LogMessage::num_messages(NGLOG_INFO));
     CHECK_EQ(base_num_warning + 3, LogMessage::num_messages(NGLOG_WARNING));
-    CHECK_EQ(base_num_errors + 17, LogMessage::num_messages(NGLOG_ERROR));
+    // ERROR is a range, not an exact count: its EVERY_N periods (3, 4, 2)
+    // don't evenly divide their iteration counts, so how many fire depends
+    // on the counters' phase, which carries over from any earlier call to
+    // this function elsewhere in the process.
+    const int64 actual_errors = LogMessage::num_messages(NGLOG_ERROR);
+    CHECK_GE(actual_errors, base_num_errors + 14);
+    CHECK_LE(actual_errors, base_num_errors + 17);
   }
 }
 
@@ -368,7 +259,11 @@ struct NewHook {
 };
 
 namespace {
-int* allocInt() { return new int; }
+// noinline: since C++14 permits eliding calls to the replaceable global
+// operator new when the result goes unused, an inlined new-expression here
+// would let the compiler optimize away the call (and the NewHook it's
+// meant to exercise) entirely.
+[[gnu::noinline]] int* allocInt() { return new int; }
 }  // namespace
 
 TEST(DeathNoAllocNewHook, logging) {
@@ -396,7 +291,7 @@ void TestRawLogging() {
   RAW_LOG(WARNING, "%s", s);
   const char const_s[] = "const array";
   RAW_LOG(INFO, "%s", const_s);
-  void* p = reinterpret_cast<void*>(PTR_TEST_VALUE);
+  void* p = reinterpret_cast<void*>(kPtrTestValue);
   RAW_LOG(INFO, "ptr %p", p);
   p = nullptr;
   RAW_LOG(INFO, "ptr %p", p);
@@ -812,16 +707,19 @@ static void CheckFile(const string& name, const string& expected_string,
              << expected_string << " in " << files[0];
 }
 
-static void TestMaxLogSizeWhenNoTimestamp() {
+TEST(Logging, MaxLogSizeWhenNoTimestamp) {
+  // SetLogDestination() is a no-op while FLAGS_logtostderr is true.
+  FlagSaver saver;
+  FLAGS_logtostderr = false;
+
   fprintf(stderr, "==== Test setting max log size without timestamp\n");
-  const string dest = FLAGS_test_tmpdir + "/logging_test_max_log_size";
+  const string dest = TestTmpDir() + "/logging_test_max_log_size";
   DeleteFiles(dest + "*");
 
-  auto original_max_log_size = FLAGS_max_log_size;
-  auto original_timestamp_in_logfile_name = FLAGS_timestamp_in_logfile_name;
-
-  FLAGS_max_log_size = 1;  // Set max log size to 1MB
-  FLAGS_timestamp_in_logfile_name = false;
+  // Set max log size to 1MB.
+  auto original_max_log_size = std::exchange(FLAGS_max_log_size, 1);
+  auto original_timestamp_in_logfile_name =
+      std::exchange(FLAGS_timestamp_in_logfile_name, false);
 
   // Set log destination
   SetLogDestination(NGLOG_INFO, dest.c_str());
@@ -836,9 +734,15 @@ static void TestMaxLogSizeWhenNoTimestamp() {
   }
   FlushLogFiles(NGLOG_INFO);
 
+  // Close the destination file before checking its size: on Windows, a
+  // stat() of a file that still has an open write handle in this same
+  // process can report a stale (pre-flush) size, even after fflush().
+  LogToStderr();
+
   // Check log file size
   struct stat statbuf;
-  stat(dest.c_str(), &statbuf);
+  CHECK_ERR(stat(dest.c_str(), &statbuf))
+      << ": failed to determine size of log file " << dest;
 
   // Verify file size is less than the max log size limit
   CHECK_LT(static_cast<unsigned int>(statbuf.st_size),
@@ -848,15 +752,19 @@ static void TestMaxLogSizeWhenNoTimestamp() {
   FLAGS_max_log_size = original_max_log_size;
   FLAGS_timestamp_in_logfile_name = original_timestamp_in_logfile_name;
 
-  // Release file handle for the destination file to unlock the file in Windows.
-  LogToStderr();
   DeleteFiles(dest + "*");
 }
 
-static void TestMaxLogSizeAboveCapNotFlooredToMinimum() {
+TEST(Logging, MaxLogSizeAboveCapNotFlooredToMinimum) {
+  // SetLogDestination() is a no-op while FLAGS_logtostderr is true.
+  FlagSaver saver;
+  FLAGS_logtostderr = false;
+
   fprintf(stderr, "==== Test max log size above the cap is not floored to 1MB\n");
-  const string dest =
-      FLAGS_test_tmpdir + "/logging_test_max_log_size_above_cap";
+  // Deliberately not a "logging_test_max_log_size*"-prefixed name: that
+  // wildcard is also DeleteFiles()'s cleanup pattern in
+  // MaxLogSizeWhenNoTimestamp above, and would match this test's file too.
+  const string dest = TestTmpDir() + "/logging_test_uncapped_max_log_size";
   DeleteFiles(dest + "*");
 
   auto original_max_log_size = FLAGS_max_log_size;
@@ -879,8 +787,14 @@ static void TestMaxLogSizeAboveCapNotFlooredToMinimum() {
   }
   FlushLogFiles(NGLOG_INFO);
 
+  // Close the destination file before checking its size: on Windows, a
+  // stat() of a file that still has an open write handle in this same
+  // process can report a stale (pre-flush) size, even after fflush().
+  LogToStderr();
+
   struct stat statbuf;
-  stat(dest.c_str(), &statbuf);
+  CHECK_ERR(stat(dest.c_str(), &statbuf))
+      << ": failed to determine size of log file " << dest;
 
   // No rotation at 1MB should have happened, so the file exceeds 1MB.
   CHECK_GT(static_cast<unsigned int>(statbuf.st_size), 1U << 20U);
@@ -888,14 +802,15 @@ static void TestMaxLogSizeAboveCapNotFlooredToMinimum() {
   FLAGS_max_log_size = original_max_log_size;
   FLAGS_timestamp_in_logfile_name = original_timestamp_in_logfile_name;
 
-  // Release file handle for the destination file to unlock the file in Windows.
-  LogToStderr();
   DeleteFiles(dest + "*");
 }
 
-static void TestBasename() {
+TEST(Logging, Basename) {
+  FlagSaver saver;
+  FLAGS_logtostderr = false;
+
   fprintf(stderr, "==== Test setting log file basename\n");
-  const string dest = FLAGS_test_tmpdir + "/logging_test_basename";
+  const string dest = TestTmpDir() + "/logging_test_basename";
   DeleteFiles(dest + "*");
 
   SetLogDestination(NGLOG_INFO, dest.c_str());
@@ -909,12 +824,15 @@ static void TestBasename() {
   DeleteFiles(dest + "*");
 }
 
-static void TestBasenameAppendWhenNoTimestamp() {
+TEST(Logging, BasenameAppendWhenNoTimestamp) {
+  FlagSaver saver;
+  FLAGS_logtostderr = false;
+
   fprintf(stderr,
           "==== Test setting log file basename without timestamp and appending "
           "properly\n");
   const string dest =
-      FLAGS_test_tmpdir + "/logging_test_basename_append_when_no_timestamp";
+      TestTmpDir() + "/logging_test_basename_append_when_no_timestamp";
   DeleteFiles(dest + "*");
 
   ofstream out(dest.c_str());
@@ -938,15 +856,18 @@ static void TestBasenameAppendWhenNoTimestamp() {
   DeleteFiles(dest + "*");
 }
 
-static void TestTwoProcessesWrite() {
+TEST(Logging, TwoProcessesWrite) {
 // test only implemented for platforms with fork & wait; the actual
 // implementation relies on flock
 #if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && defined(HAVE_FCNTL)
+  FlagSaver saver;
+  FLAGS_logtostderr = false;
+
   fprintf(stderr,
           "==== Test setting log file basename and two processes writing - "
           "second should fail\n");
   const string dest =
-      FLAGS_test_tmpdir + "/logging_test_basename_two_processes_writing";
+      TestTmpDir() + "/logging_test_basename_two_processes_writing";
   DeleteFiles(dest + "*");
 
   // make both processes write into the same file (easier test)
@@ -979,11 +900,14 @@ static void TestTwoProcessesWrite() {
 #endif
 }
 
-static void TestSymlink() {
+TEST(Logging, Symlink) {
 #ifndef NGLOG_OS_WINDOWS
+  FlagSaver saver;
+  FLAGS_logtostderr = false;
+
   fprintf(stderr, "==== Test setting log file symlink\n");
-  string dest = FLAGS_test_tmpdir + "/logging_test_symlink";
-  string sym = FLAGS_test_tmpdir + "/symlinkbase";
+  string dest = TestTmpDir() + "/logging_test_symlink";
+  string sym = TestTmpDir() + "/symlinkbase";
   DeleteFiles(dest + "*");
   DeleteFiles(sym + "*");
 
@@ -993,14 +917,19 @@ static void TestSymlink() {
   FlushLogFiles(NGLOG_INFO);
   CheckFile(sym, "message to new symlink");
 
+  // Release file handle for the destination file to unlock the file in Windows.
+  LogToStderr();
   DeleteFiles(dest + "*");
   DeleteFiles(sym + "*");
 #endif
 }
 
-static void TestExtension() {
+TEST(Logging, Extension) {
+  FlagSaver saver;
+  FLAGS_logtostderr = false;
+
   fprintf(stderr, "==== Test setting log file extension\n");
-  string dest = FLAGS_test_tmpdir + "/logging_test_extension";
+  string dest = TestTmpDir() + "/logging_test_extension";
   DeleteFiles(dest + "*");
 
   SetLogDestination(NGLOG_INFO, dest.c_str());
@@ -1042,7 +971,11 @@ struct MyLogger : public base::Logger {
   bool* set_on_destruction_;
 };
 
-static void TestWrapper() {
+TEST(Logging, Wrapper) {
+  // The configured logger is bypassed while FLAGS_logtostderr is true.
+  FlagSaver saver;
+  FLAGS_logtostderr = false;
+
   fprintf(stderr, "==== Test log wrapper\n");
 
   bool custom_logger_deleted = false;
@@ -1058,11 +991,14 @@ static void TestWrapper() {
   EXPECT_TRUE(custom_logger_deleted);
 }
 
-static void TestErrno() {
+TEST(Logging, Errno) {
+  // Plain LOG(), not the shared TestLogging(): that helper's LOG_EVERY_N
+  // counters never reset, so sharing it would couple this test's run order
+  // to TestLogging(true)'s expected counts elsewhere.
   fprintf(stderr, "==== Test errno preservation\n");
 
   errno = ENOENT;
-  TestLogging(false);
+  LOG(INFO) << "foo";
   CHECK_EQ(errno, ENOENT);
 }
 
@@ -1110,10 +1046,10 @@ static void TestOneTruncate(const char* path, uint64 limit, uint64 keep,
   }
 }
 
-static void TestTruncate() {
+TEST(Logging, Truncate) {
 #ifdef HAVE_UNISTD_H
   fprintf(stderr, "==== Test log truncation\n");
-  string path = FLAGS_test_tmpdir + "/truncatefile";
+  string path = TestTmpDir() + "/truncatefile";
 
   // Test on a small file
   TestOneTruncate(path.c_str(), 10, 10, 10, 10, 10);
@@ -1152,21 +1088,22 @@ static void TestTruncate() {
 #endif
 }
 
-static void TestDropLogMemoryConcurrentWriters() {
+TEST(Logging, DropLogMemoryConcurrentWriters) {
 #if defined(NGLOG_OS_LINUX) && defined(HAVE_POSIX_FADVISE)
+  FlagSaver saver;
+  FLAGS_logtostderr = false;
+
   fprintf(stderr,
           "==== Test concurrent writers while drop_log_memory triggers "
           "posix_fadvise\n");
-  const std::string dest = FLAGS_test_tmpdir + "/logging_test_drop_log_memory";
+  const std::string dest = TestTmpDir() + "/logging_test_drop_log_memory";
   DeleteFiles(dest + "*");
 
-  const bool old_drop_log_memory = FLAGS_drop_log_memory;
-  const int32 old_logbufsecs = FLAGS_logbufsecs;
   // Force every write to flush and re-evaluate the drop_log_memory
   // threshold, so that posix_fadvise() is exercised multiple times while
   // other threads are concurrently appending to the same log file.
-  FLAGS_drop_log_memory = true;
-  FLAGS_logbufsecs = 0;
+  const bool old_drop_log_memory = std::exchange(FLAGS_drop_log_memory, true);
+  const int32 old_logbufsecs = std::exchange(FLAGS_logbufsecs, 0);
 
   SetLogDestination(NGLOG_INFO, dest.c_str());
 
@@ -1237,7 +1174,7 @@ struct RecordDeletionLogger : public base::Logger {
   base::Logger* wrapped_logger_;
 };
 
-static void TestCustomLoggerDeletionOnShutdown() {
+TEST(Logging, CustomLoggerDeletionOnShutdown) {
   bool custom_logger_deleted = false;
   base::SetLogger(NGLOG_INFO,
                   new RecordDeletionLogger(&custom_logger_deleted,
@@ -1246,6 +1183,12 @@ static void TestCustomLoggerDeletionOnShutdown() {
   ShutdownLogging();
   EXPECT_TRUE(custom_logger_deleted);
   EXPECT_FALSE(IsLoggingInitialized());
+
+  // Re-initialize: other tests assume logging stays initialized and the
+  // custom prefix formatter stays installed.
+  InitializeLogging(g_argv0);
+  InstallPrefixFormatter(&PrefixAttacher, &g_prefix_attacher_data);
+  EXPECT_TRUE(IsLoggingInitialized());
 }
 
 namespace LogTimes {
@@ -1282,7 +1225,7 @@ int64 elapsedTime_ns(const std::chrono::steady_clock::time_point& begin,
       .count();
 }
 
-static void TestLogPeriodically() {
+TEST(Logging, LogPeriodically) {
   fprintf(stderr, "==== Test log periodically\n");
 
   LogTimeRecorder timeLogger;
@@ -1411,12 +1354,11 @@ class TestLogSinkWriter {
       // Same for the other sleep below.
       std::this_thread::sleep_for(20ms);
       RAW_LOG(INFO, "Sink got a messages");  // only RAW_LOG under mutex_ here
-      string message = messages_.front();
-      messages_.pop();
+      const string message = messages_.front();
       // Normally this would be some more real/involved logging logic
       // where LOG() usage can't be eliminated,
       // e.g. pushing the message over with an RPC:
-      size_t messages_left = messages_.size();
+      const size_t messages_left = messages_.size() - 1;
       mutex_.unlock();
       std::this_thread::sleep_for(20ms);
       // May not use LOG while holding mutex_, because Buffer()
@@ -1426,6 +1368,12 @@ class TestLogSinkWriter {
       LOG(INFO) << "Sink is sending out a message: " << message;
       LOG(INFO) << "Have " << messages_left << " left";
       global_messages.push_back(message);
+
+      // Pop only now: Wait() (and thus WaitTillSent()) treats an empty
+      // queue as "message sent", so popping earlier would let it return
+      // before the lines above are actually printed.
+      std::lock_guard<std::mutex> l(mutex_);
+      messages_.pop();
     }
   }
 
@@ -1484,16 +1432,13 @@ static void TestLogSinkWaitTillSent() {
   // reentered
   global_messages.clear();
   {
-    using namespace std::chrono_literals;
     TestWaitingLogSink sink;
-    // Sleeps give the sink threads time to do all their work,
-    // so that we get a reliable log capture to compare to the golden file.
+    // LogMessage already calls WaitTillSent() on every registered sink
+    // after each LOG statement, so no explicit synchronization is needed
+    // here between messages.
     LOG(INFO) << "Message 1";
-    std::this_thread::sleep_for(60ms);
     LOG(ERROR) << "Message 2";
-    std::this_thread::sleep_for(60ms);
     LOG(WARNING) << "Message 3";
-    std::this_thread::sleep_for(60ms);
   }
   for (auto& global_message : global_messages) {
     LOG(INFO) << "Sink capture: " << global_message;
@@ -1535,17 +1480,16 @@ static void MyCheck(bool a, bool b) {
   CHECK_EQ(a, b);
 }
 */
-#ifdef HAVE_LIB_GMOCK
 
 TEST(DVLog, Basic) {
   ScopedMockLog log;
 
-#  if defined(NDEBUG)
+#if defined(NDEBUG)
   // We are expecting that nothing is logged.
   EXPECT_CALL(log, Log(_, _, _)).Times(0);
-#  else
+#else
   EXPECT_CALL(log, Log(NGLOG_INFO, __FILE__, "debug log"));
-#  endif
+#endif
 
   FLAGS_v = 1;
   DVLOG(1) << "debug log";
@@ -1591,11 +1535,11 @@ TEST(TestExitOnDFatal, ToBeOrNotToBe) {
     //  LOG(DFATAL) has severity FATAL if debugging, but is
     //  downgraded to ERROR if not debugging.
     const LogSeverity severity =
-#  if defined(NDEBUG)
+#if defined(NDEBUG)
         NGLOG_ERROR;
-#  else
+#else
         NGLOG_FATAL;
-#  endif
+#endif
     EXPECT_CALL(log, Log(severity, __FILE__, "This should not be fatal"));
     LOG(DFATAL) << "This should not be fatal";
   }
@@ -1604,15 +1548,15 @@ TEST(TestExitOnDFatal, ToBeOrNotToBe) {
   base::internal::SetExitOnDFatal(true);
   EXPECT_TRUE(base::internal::GetExitOnDFatal());
 
-#  ifdef GTEST_HAS_DEATH_TEST
+#ifdef GTEST_HAS_DEATH_TEST
   // Death comes on little cats' feet.
   EXPECT_DEBUG_DEATH(
       { LOG(DFATAL) << "This should be fatal in debug mode"; },
       "This should be fatal in debug mode");
-#  endif
+#endif
 }
 
-#  ifdef HAVE_STACKTRACE
+#ifdef HAVE_STACKTRACE
 
 static void BacktraceAtHelper() {
   LOG(INFO) << "Not me";
@@ -1620,7 +1564,9 @@ static void BacktraceAtHelper() {
   // The vertical spacing of the next 3 lines is significant.
   LOG(INFO) << "Backtrace me";
 }
-static int kBacktraceAtLine = __LINE__ - 2;  // The line of the LOG(INFO) above
+#  ifdef HAVE_SYMBOLIZE
+static int kBacktraceAtLine = __LINE__ - 3;  // The line of the LOG(INFO) above
+#  endif                                     // HAVE_SYMBOLIZE
 
 TEST(LogBacktraceAt, DoesNotBacktraceWhenDisabled) {
   StrictMock<ScopedMockLog> log;
@@ -1633,6 +1579,11 @@ TEST(LogBacktraceAt, DoesNotBacktraceWhenDisabled) {
   BacktraceAtHelper();
 }
 
+// Requires HAVE_SYMBOLIZE, not just HAVE_STACKTRACE: it checks that the
+// captured backtrace contains actual function names, which needs a working
+// symbolizer (e.g. unavailable on MinGW, whose GCC emits debug info the
+// Windows dbghelp API can't read).
+#  ifdef HAVE_SYMBOLIZE
 TEST(LogBacktraceAt, DoesBacktraceAtRightLineWhenEnabled) {
   StrictMock<ScopedMockLog> log;
 
@@ -1654,10 +1605,9 @@ TEST(LogBacktraceAt, DoesBacktraceAtRightLineWhenEnabled) {
 
   BacktraceAtHelper();
 }
+#  endif  // HAVE_SYMBOLIZE
 
-#  endif  // HAVE_STACKTRACE
-
-#endif  // HAVE_LIB_GMOCK
+#endif  // HAVE_STACKTRACE
 
 struct UserDefinedClass {
   bool operator==(const UserDefinedClass&) const { return true; }
@@ -1766,4 +1716,59 @@ TEST(Logging, FatalThrow) {
   auto restore_fail = [fail_func] { InstallFailureFunction(fail_func); };
   ScopedExit<decltype(restore_fail)> restore{restore_fail};
   EXPECT_THROW({ LOG(FATAL) << "must throw to fail"; }, std::logic_error);
+}
+
+// Own suite, not "Logging": gtest schedules suites by first-registered
+// case, so sharing "Logging" would run these wherever its first case is
+// declared instead of last, where they need to be to capture a clean
+// stderr/stdout diff.
+
+TEST(LoggingGoldenFile, Stderr) {
+  CaptureTestStderr();
+
+  // re-emit early_stderr
+  LogMessage("dummy", LogMessage::kNoLogPrefix, NGLOG_INFO).stream()
+      << early_stderr;
+
+  TestLogging(true);
+  TestRawLogging();
+  TestLoggingLevels();
+  TestVLogModule();
+  TestLogString();
+  TestLogSink();
+  TestLogToString();
+  TestLogSinkWaitTillSent();
+  TestCHECK();
+  TestDCHECK();
+  TestSTREQ();
+
+  // TODO: The golden test portion of this test is very flakey.
+  EXPECT_TRUE(
+      MungeAndDiffTestStderr(TestSrcDir() + "/src/logging_unittest.err"));
+
+  FLAGS_logtostderr = false;
+}
+
+TEST(LoggingGoldenFile, Stdout) {
+  FLAGS_logtostdout = true;
+  FLAGS_stderrthreshold = NUM_SEVERITIES;
+  CaptureTestStdout();
+  TestRawLogging();
+  TestLoggingLevels();
+  // Same relative position as LoggingGoldenFile.Stderr: VLOG_IS_ON's
+  // per-call-site module-level override (set here) only takes effect on
+  // GCC; MSVC's VLOG_IS_ON ignores it and always reads FLAGS_v directly.
+  // Calling this after TestLoggingLevels() keeps the golden file's expected
+  // output free of that override, and thus platform-independent.
+  TestVLogModule();
+  TestLogString();
+  TestLogSink();
+  TestLogToString();
+  TestLogSinkWaitTillSent();
+  TestCHECK();
+  TestDCHECK();
+  TestSTREQ();
+  EXPECT_TRUE(
+      MungeAndDiffTestStdout(TestSrcDir() + "/src/logging_unittest.out"));
+  FLAGS_logtostdout = false;
 }

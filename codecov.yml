@@ -7,5 +7,7 @@ comment:
 ignore:
   - "**/*_unittest.cc"
   - "src/*_unittest/**"
-  - "src/googletest.h"
+  - "src/logging_benchmark.cc"
+  - "src/testing_utilities.h"
+  - "src/testing_utilities.cc"
   - "src/mock-log.h"

@@ -1,4 +1,5 @@
 // Copyright (c) 2024, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -27,20 +28,20 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+
 #include "base/commandlineflags.h"
-#include "googletest.h"
+#include "mock-log.h"
 #include "ng-log/logging.h"
 #include "ng-log/raw_logging.h"
+#include "testing_utilities.h"
 
 #ifdef NGLOG_USE_GFLAGS
 #  include <gflags/gflags.h>
 using namespace GFLAGS_NAMESPACE;
 #endif
 
-#ifdef HAVE_LIB_GMOCK
-#  include <gmock/gmock.h>
-
-#  include "mock-log.h"
 // Introduce several symbols from gmock.
 using nglog::nglog_testing::ScopedMockLog;
 using testing::_;
@@ -50,7 +51,6 @@ using testing::HasSubstr;
 using testing::InitGoogleMock;
 using testing::StrictMock;
 using testing::StrNe;
-#endif
 
 using namespace nglog;
 
@@ -80,7 +80,7 @@ int main(int argc, char** argv) {
 
   // Test some basics before InitializeLogging:
   CaptureTestStderr();
-  const string early_stderr = GetCapturedTestStderr();
+  const std::string early_stderr = GetCapturedTestStderr();
 
   EXPECT_FALSE(IsLoggingInitialized());
 
@@ -88,10 +88,8 @@ int main(int argc, char** argv) {
 
   EXPECT_TRUE(IsLoggingInitialized());
 
-  InitGoogleTest(&argc, argv);
-#ifdef HAVE_LIB_GMOCK
+  testing::InitGoogleTest(&argc, argv);
   InitGoogleMock(&argc, argv);
-#endif
 
   // so that death tests run before we use threads
   CHECK_EQ(RUN_ALL_TESTS(), 0);

@@ -1,4 +1,5 @@
 // Copyright (c) 2003, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -29,6 +30,8 @@
 
 #include "ng-log/stl_logging.h"
 
+#include <gtest/gtest.h>
+
 #include <functional>
 #include <iostream>
 #include <map>
@@ -37,7 +40,6 @@
 #include <vector>
 
 #include "config.h"
-#include "googletest.h"
 #include "ng-log/logging.h"
 
 using namespace std;

@@ -1,4 +1,5 @@
 // Copyright (c) 2024, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -211,7 +212,14 @@ class NGLOG_NO_EXPORT FileDescriptor final {
 
   constexpr int get() const noexcept { return fd_; }
 
-  int release() noexcept { return std::exchange(fd_, InvalidHandle); }
+  int release() noexcept {
+    // +InvalidHandle rather than InvalidHandle: std::exchange's second
+    // parameter is a forwarding reference, so passing the static
+    // constexpr member directly would bind a reference to it, an
+    // odr-use that requires an out-of-class definition. Unary plus
+    // turns it into a prvalue copy instead.
+    return std::exchange(fd_, +InvalidHandle);
+  }
   void reset(std::nullptr_t) noexcept { safe_close(); }
   void reset() noexcept { reset(nullptr); }
   void reset(int fd) noexcept {
