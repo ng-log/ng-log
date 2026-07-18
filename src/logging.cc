@@ -2687,7 +2687,7 @@ struct has_member_tm_gmtoff<T, void_t<decltype(&T::tm_gmtoff)>>
 
 template <class T, bool = has_member_tm_gmtoff<T>::value>
 struct BreakdownImpl {
-  static std::tuple<std::tm, std::time_t, std::chrono::hours> Get(
+  static std::tuple<std::tm, std::time_t, std::chrono::minutes> Get(
       const std::chrono::system_clock::time_point& now) {
     std::time_t timestamp = std::chrono::system_clock::to_time_t(now);
     std::tm tm_local;
@@ -2710,9 +2710,9 @@ struct BreakdownImpl {
     // If the Daylight Saving Time(isDst) is active subtract an hour from the
     // current timestamp.
     using namespace std::chrono_literals;
-    const auto gmtoffset = std::chrono::duration_cast<std::chrono::hours>(
-        now - std::chrono::system_clock::from_time_t(gmt_sec) +
-        (isdst ? 1h : 0h));
+    const auto gmtoffset = std::chrono::duration_cast<std::chrono::minutes>(
+        std::chrono::system_clock::from_time_t(timestamp) -
+        std::chrono::system_clock::from_time_t(gmt_sec) + (isdst ? 1h : 0h));
 
     return std::make_tuple(tm_local, timestamp, gmtoffset);
   }
@@ -2720,7 +2720,7 @@ struct BreakdownImpl {
 
 template <class T>
 struct BreakdownImpl<T, true> {
-  static std::tuple<std::tm, std::time_t, std::chrono::hours> Get(
+  static std::tuple<std::tm, std::time_t, std::chrono::minutes> Get(
       const std::chrono::system_clock::time_point& now) {
     std::time_t timestamp = std::chrono::system_clock::to_time_t(now);
     T tm;
@@ -2731,7 +2731,7 @@ struct BreakdownImpl<T, true> {
       localtime_r(&timestamp, &tm);
     }
 
-    const auto gmtoffset = std::chrono::duration_cast<std::chrono::hours>(
+    const auto gmtoffset = std::chrono::duration_cast<std::chrono::minutes>(
         std::chrono::seconds{tm.tm_gmtoff});
 
     return std::make_tuple(tm, timestamp, gmtoffset);
@@ -2739,7 +2739,7 @@ struct BreakdownImpl<T, true> {
 };
 
 auto Breakdown(const std::chrono::system_clock::time_point& now)
-    -> std::tuple<std::tm, std::time_t, std::chrono::hours> {
+    -> std::tuple<std::tm, std::time_t, std::chrono::minutes> {
   return BreakdownImpl<std::tm>::Get(now);
 }
 
