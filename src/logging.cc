@@ -272,11 +272,16 @@ static const char* GetAnsiColorCode(GLogColor color) {
 
 #endif  // NGLOG_OS_WINDOWS
 
-// Safely get max_log_size, overriding to 1 if it somehow gets defined as 0
+// Safely get max_log_size. A value of 0 is overridden to the 1 MB minimum.
+// Values large enough to overflow the "MaxLogSize() << 20" byte computation
+// are capped to the 4095 MB maximum instead of being silently reduced to the
+// minimum, which would produce surprisingly tiny log files.
 static uint32 MaxLogSize() {
-  return (FLAGS_max_log_size > 0 && FLAGS_max_log_size < 4096
-              ? FLAGS_max_log_size
-              : 1);
+  constexpr uint32 max_megabytes = 4095;  // 4095 << 20 fits in a uint32.
+  if (FLAGS_max_log_size == 0) {
+    return 1;
+  }
+  return FLAGS_max_log_size < max_megabytes ? FLAGS_max_log_size : max_megabytes;
 }
 
 // An arbitrary limit on the length of a single log message.  This

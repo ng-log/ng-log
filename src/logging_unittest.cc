@@ -111,6 +111,7 @@ static void TestCHECK();
 static void TestDCHECK();
 static void TestSTREQ();
 static void TestMaxLogSizeWhenNoTimestamp();
+static void TestMaxLogSizeAboveCapNotFlooredToMinimum();
 static void TestBasename();
 static void TestBasenameAppendWhenNoTimestamp();
 static void TestTwoProcessesWrite();
@@ -291,6 +292,7 @@ int main(int argc, char** argv) {
   FLAGS_logtostdout = false;
 
   TestMaxLogSizeWhenNoTimestamp();
+  TestMaxLogSizeAboveCapNotFlooredToMinimum();
   TestBasename();
   TestBasenameAppendWhenNoTimestamp();
   TestTwoProcessesWrite();
@@ -843,6 +845,46 @@ static void TestMaxLogSizeWhenNoTimestamp() {
            FLAGS_max_log_size << 20U);
 
   // Reset flag values to their original values
+  FLAGS_max_log_size = original_max_log_size;
+  FLAGS_timestamp_in_logfile_name = original_timestamp_in_logfile_name;
+
+  // Release file handle for the destination file to unlock the file in Windows.
+  LogToStderr();
+  DeleteFiles(dest + "*");
+}
+
+static void TestMaxLogSizeAboveCapNotFlooredToMinimum() {
+  fprintf(stderr, "==== Test max log size above the cap is not floored to 1MB\n");
+  const string dest =
+      FLAGS_test_tmpdir + "/logging_test_max_log_size_above_cap";
+  DeleteFiles(dest + "*");
+
+  auto original_max_log_size = FLAGS_max_log_size;
+  auto original_timestamp_in_logfile_name = FLAGS_timestamp_in_logfile_name;
+
+  // A value larger than the 4095MB cap used to be clamped to the 1MB minimum,
+  // which would rotate the file after ~1MB. It must instead be capped to the
+  // maximum, so the file is allowed to grow past 1MB without rotating.
+  FLAGS_max_log_size = 8000;
+  FLAGS_timestamp_in_logfile_name = false;
+
+  SetLogDestination(NGLOG_INFO, dest.c_str());
+
+  // 20000 info logs -> around 1.5MB, i.e. comfortably above 1MB. If the
+  // oversized limit were (incorrectly) floored to 1MB, earlier logs would be
+  // truncated and the resulting file would stay below 1MB.
+  constexpr int num_logs = 20'000;
+  for (int i = 0; i < num_logs; i++) {
+    LOG(INFO) << "Hello world";
+  }
+  FlushLogFiles(NGLOG_INFO);
+
+  struct stat statbuf;
+  stat(dest.c_str(), &statbuf);
+
+  // No rotation at 1MB should have happened, so the file exceeds 1MB.
+  CHECK_GT(static_cast<unsigned int>(statbuf.st_size), 1U << 20U);
+
   FLAGS_max_log_size = original_max_log_size;
   FLAGS_timestamp_in_logfile_name = original_timestamp_in_logfile_name;
 

@@ -132,7 +132,8 @@ NGLOG_DEFINE_string(log_link, "",
 
 NGLOG_DEFINE_uint32(max_log_size, 1800,
                     "approx. maximum log file size (in MB). A value of 0 will "
-                    "be silently overridden to 1.");
+                    "be silently overridden to 1. Values above 4095 are capped "
+                    "to 4095.");
 
 NGLOG_DEFINE_bool(stop_logging_if_full_disk, false,
                   "Stop attempting to log to disk if the disk is full.");
