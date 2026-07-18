@@ -232,7 +232,7 @@ void DumpSignalInfo(int signal_number, siginfo_t* siginfo) {
   formatter.AppendString(oss.str().c_str());
 #  if defined(NGLOG_OS_LINUX) && defined(HAVE_SYS_SYSCALL_H) && \
       defined(HAVE_SYS_TYPES_H)
-  pid_t tid = syscall(SYS_gettid);
+  long tid = syscall(SYS_gettid);
   formatter.AppendString(" LWP ");
   formatter.AppendUint64(static_cast<uint64>(tid), 10);
 #  endif
