@@ -31,13 +31,7 @@
 #ifndef NGLOG_LOG_SEVERITY_H
 #define NGLOG_LOG_SEVERITY_H
 
-#if defined(NGLOG_USE_EXPORT)
-#  include "ng-log/export.h"
-#endif
-
-#if !defined(NGLOG_EXPORT)
-#  error <ng-log/log_severity.h> was not included correctly. See the documentation for how to consume the library.
-#endif
+#include "ng-log/export.h"
 
 namespace nglog {
 

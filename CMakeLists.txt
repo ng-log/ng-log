@@ -407,9 +407,6 @@ add_library (ng-log::ng-log ALIAS ng-log)
 
 set (ng-log_libraries_options_for_static_linking)
 
-# CMake always uses the generated export header
-target_compile_definitions (ng-log PUBLIC NGLOG_USE_EXPORT)
-
 if (_ng-log_USE_WINDOWS_PORT)
   target_compile_definitions (ng-log PRIVATE NGLOG_USE_WINDOWS_PORT)
 endif (_ng-log_USE_WINDOWS_PORT)

@@ -1,4 +1,5 @@
 // Copyright (c) 2024, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -63,14 +64,7 @@
 
 #include <cstddef>
 
-#if defined(NGLOG_USE_EXPORT)
-#  include "ng-log/export.h"
-#endif
-
-#if !defined(NGLOG_EXPORT)
-#  error <ng-log/vlog_is_on.h> was not included correctly. See the documentation for how to consume the library.
-#endif
-
+#include "ng-log/export.h"
 #include "ng-log/flags.h"
 #include "ng-log/types.h"
 

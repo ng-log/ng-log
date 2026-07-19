@@ -1,4 +1,5 @@
 // Copyright (c) 2024, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -33,17 +34,9 @@
 #ifndef NGLOG_INTERNAL_STACKTRACE_H
 #define NGLOG_INTERNAL_STACKTRACE_H
 
-#include "ng-log/platform.h"
-
-#if defined(NGLOG_USE_EXPORT)
-#  include "ng-log/export.h"
-#endif
-
-#if !defined(NGLOG_NO_EXPORT)
-#  error "stacktrace.h" was not included correctly.
-#endif
-
 #include "config.h"
+#include "ng-log/export.h"
+#include "ng-log/platform.h"
 #if defined(HAVE_LIBUNWIND)
 #  define STACKTRACE_H "stacktrace_libunwind-inl.h"
 #elif defined(HAVE_UNWIND)

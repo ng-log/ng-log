@@ -1,4 +1,5 @@
 // Copyright (c) 2024, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -69,13 +70,7 @@
 #  include <sys/exec_elf.h>
 #endif
 
-#if defined(NGLOG_USE_EXPORT)
-#  include "ng-log/export.h"
-#endif
-
-#if !defined(NGLOG_NO_EXPORT)
-#  error "symbolize.h" was not included correctly.
-#endif
+#include "ng-log/export.h"
 
 // We prefer to let the build system detect the availability of certain features
 // such as symbolization support. HAVE_SYMBOLIZE should therefore be defined by

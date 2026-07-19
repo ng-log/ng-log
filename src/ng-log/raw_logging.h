@@ -1,4 +1,5 @@
 // Copyright (c) 2024, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -36,14 +37,7 @@
 #ifndef NGLOG_RAW_LOGGING_H
 #define NGLOG_RAW_LOGGING_H
 
-#if defined(NGLOG_USE_EXPORT)
-#  include "ng-log/export.h"
-#endif
-
-#if !defined(NGLOG_EXPORT)
-#  error <ng-log/raw_logging.h> was not included correctly. See the documentation for how to consume the library.
-#endif
-
+#include "ng-log/export.h"
 #include "ng-log/log_severity.h"
 #include "ng-log/vlog_is_on.h"
 

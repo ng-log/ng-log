@@ -1,4 +1,5 @@
 /* Copyright (c) 2023, Google Inc.
+ * Copyright (c) 2026, The ng-log contributors
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -42,14 +43,7 @@
 #define CTEMPLATE_WINDOWS_PORT_H_
 
 #include "config.h"
-
-#if defined(NGLOG_USE_EXPORT)
-#  include "ng-log/export.h"
-#endif
-
-#if !defined(NGLOG_EXPORT)
-#  error "port.h" was not included correctly.
-#endif
+#include "ng-log/export.h"
 
 #ifdef _WIN32
 

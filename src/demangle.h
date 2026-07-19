@@ -1,4 +1,5 @@
 // Copyright (c) 2006, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -72,13 +73,7 @@
 
 #include <cstddef>
 
-#if defined(NGLOG_USE_EXPORT)
-#  include "ng-log/export.h"
-#endif
-
-#if !defined(NGLOG_NO_EXPORT)
-#  error "demangle.h" was not included correctly.
-#endif
+#include "ng-log/export.h"
 
 namespace nglog {
 inline namespace tools {
