@@ -8,13 +8,13 @@
       
       
       
-        <link rel="canonical" href="https://ng-log.github.io/ng-log/0.9.0/contribute/">
+        <link rel="canonical" href="https://ng-log.github.io/ng-log/0.9.0/migration-from-glog/">
       
       
-        <link rel="prev" href="../release_notes/">
+        <link rel="prev" href="../packages/">
       
       
-        <link rel="next" href="../license/">
+        <link rel="next" href="../logging/">
       
       
         
@@ -25,7 +25,7 @@
     
     
       
-        <title>How to Contribute - ng-log</title>
+        <title>Migrating from glog - ng-log</title>
       
     
     
@@ -87,7 +87,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#how-to-contribute" class="md-skip">
+        <a href="#migrating-from-glog" class="md-skip">
           Skip to content
         </a>
       
@@ -139,7 +139,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              How to Contribute
+              Migrating from glog
             
           </span>
         </div>
@@ -265,6 +265,8 @@
       
   
   
+    
+  
   
   
     
@@ -287,36 +289,170 @@
     
     
       
-        
-        
-      
     
-    <li class="md-nav__item md-nav__item--pruned md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
-  
-  
-  
-    <a href="./.." class="md-nav__link">
-      
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="./.." class="md-nav__link ">
+              
   
   
   <span class="md-ellipsis">
     
   
-  Overview
+  Getting Started
 
     
   </span>
   
   
 
-      
-        <span class="md-nav__icon md-icon"></span>
-      
-    </a>
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Getting Started
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Usage in CMake Projects
+
+    
+  </span>
+  
   
 
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../build/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Building from Source
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../packages/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Installation using Package Managers
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Migration from glog
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
       
     </li>
   
@@ -415,36 +551,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-  Contributing
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="././" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../contribute/" class="md-nav__link">
         
   
   
@@ -459,38 +569,6 @@
   
 
       </a>
-      
-        
-
-
-<nav class="md-nav md-nav--secondary" aria-label="On this page">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#submitting-a-patch" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Submitting a Patch
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -538,11 +616,6 @@
                       
                     
                     
-                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-                      <div class="md-sidebar-button__wrapper">
-                        <label class="md-sidebar-button" for="__toc"></label>
-                      </div>
-                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -554,25 +627,6 @@
   
     
   
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#submitting-a-patch" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Submitting a Patch
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
   
 </nav>
                   </div>
@@ -593,7 +647,7 @@
                 
                   
   
-    <a href="https://github.com/ng-log/ng-log/edit/master/docs/contribute.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+    <a href="https://github.com/ng-log/ng-log/edit/master/docs/migration-from-glog.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20.71 7.04c.39-.39.39-1.04 0-1.41l-2.34-2.34c-.37-.39-1.02-.39-1.41 0l-1.84 1.83 3.75 3.75M3 17.25V21h3.75L17.81 9.93l-3.75-3.75z"/></svg>
     </a>
@@ -601,29 +655,15 @@
   
 
 
-<h1 id="how-to-contribute">How to Contribute<a class="headerlink" href="#how-to-contribute" title="Permanent link">&para;</a></h1>
-<p>We'd love to accept your patches and contributions to this project.
-There are a just a few small guidelines you need to follow.</p>
-<h2 id="submitting-a-patch">Submitting a Patch<a class="headerlink" href="#submitting-a-patch" title="Permanent link">&para;</a></h2>
-<ol>
-<li>It's generally best to start by opening a new issue describing the
-    bug or feature you're intending to fix. Even if you think it's
-    relatively minor, it's helpful to know what people are working on.
-    Mention in the initial issue that you are planning to work on that
-    bug or feature so that it can be assigned to you.</li>
-<li>Follow the normal process of
-    <a href="https://help.github.com/articles/fork-a-repo">forking</a> the project,
-    and setup a new branch to work in. It's important that each group of
-    changes be done in separate branches in order to ensure that a pull
-    request only includes the commits related to that bug or feature.</li>
-<li>Do your best to have <a href="http://tbaggery.com/2008/04/19/a-note-about-git-commit-messages.html">well-formed commit
-    messages</a>
-    for each change. This provides consistency throughout the project,
-    and ensures that commit messages are able to be formatted properly
-    by various git tools.</li>
-<li>Finally, push the commits to your fork and submit a <a href="https://help.github.com/articles/creating-a-pull-request">pull
-    request</a>.</li>
-</ol>
+<h1 id="migrating-from-glog">Migrating from glog<a class="headerlink" href="#migrating-from-glog" title="Permanent link">&para;</a></h1>
+<p>To migrate from glog to ng-log, you'll need to adjust your code as follows:</p>
+<ul>
+<li>replace <code>&lt;glog/logging.h&gt;</code> with <code>&lt;ng-log/logging.h&gt;</code> and similarly for other heads (flags, log_severity, stl_logging, etc)</li>
+<li>replace the <code>google::</code> namespace with <code>nglog::</code></li>
+<li>replace <code>InitGoogleLogging</code> with <code>InitializeLogging</code></li>
+<li>replace <code>IsGoogleLoggingInitialized</code> with <code>IsLoggingInitialized</code></li>
+<li>replace <code>ShutdownGoogleLogging</code> with <code>ShutdownLogging</code></li>
+</ul>
 
 
 

@@ -280,6 +280,8 @@
       
         
       
+        
+      
     
     
     
@@ -459,6 +461,28 @@
   
     <nav class="md-nav" aria-label="ng-log">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#0.9.0" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.9.0 <small>TBD</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.8.4" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.8.4 <small>TBD</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#0.8.3" class="md-nav__link">
@@ -815,6 +839,28 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#0.9.0" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.9.0 <small>TBD</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0.8.4" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        0.8.4 <small>TBD</small>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#0.8.3" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1087,6 +1133,29 @@
 
 <h1 id="release-notes">Release Notes<a class="headerlink" href="#release-notes" title="Permanent link">&para;</a></h1>
 <h2 id="ng-log">ng-log<a class="headerlink" href="#ng-log" title="Permanent link">&para;</a></h2>
+<h3 id="0.9.0">0.9.0 <small>TBD</small><a class="headerlink" href="#0.9.0" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Remove the glog compatibility layer</li>
+<li>Remove Bazel build support</li>
+<li>Prevent concurrent log writers from blocking during memory-drop maintenance</li>
+<li>Make log cleanup work with non-ASCII Windows directories</li>
+<li>Omit the default header format when a custom prefix formatter is installed</li>
+</ul>
+<div class="admonition warning">
+<p class="admonition-title">Compatibility</p>
+<p>If your application depends on glog compatibility, use the 0.8.x series.
+It will receive updates until 0.10.0 is released.</p>
+</div>
+<h3 id="0.8.4">0.8.4 <small>TBD</small><a class="headerlink" href="#0.8.4" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Prevent <code>drop_log_memory</code> from blocking concurrent log writers</li>
+<li>Prevent failure-signal handling from deadlocking when reentered</li>
+<li>Make crash-trace demangling safe when symbol names exceed the output buffer</li>
+<li>Use the ng-log version in CMake package compatibility errors</li>
+<li>Restore Linux LWP identifiers in crash signal reports</li>
+<li>Report sub-hour UTC offsets through <code>LogMessageTime::gmtoffset</code></li>
+<li>Cap oversized <code>max_log_size</code> values instead of using the 1 MB minimum</li>
+</ul>
 <h3 id="0.8.3">0.8.3 <small>July 10, 2026</small><a class="headerlink" href="#0.8.3" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Mapped the CMake option value <code>none</code> to a proper CMake boolean string</li>
