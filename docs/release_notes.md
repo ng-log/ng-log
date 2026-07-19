@@ -2,6 +2,18 @@
 
 ## ng-log
 
+### 0.9.0 <small>TBD</small> { id="0.9.0" }
+
+- Remove the glog compatibility layer
+- Remove Bazel build support
+- Prevent concurrent log writers from blocking during memory-drop maintenance
+- Make log cleanup work with non-ASCII Windows directories
+- Omit the default header format when a custom prefix formatter is installed
+
+!!! warning "Compatibility"
+    If your application depends on glog compatibility, use the 0.8.x series.
+    It will receive updates until 0.10.0 is released.
+
 ### 0.8.4 <small>TBD</small> { id="0.8.4" }
 
 - Prevent `drop_log_memory` from blocking concurrent log writers
