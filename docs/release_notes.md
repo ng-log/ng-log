@@ -2,6 +2,16 @@
 
 ## ng-log
 
+### 0.8.4 <small>TBD</small> { id="0.8.4" }
+
+- Prevent `drop_log_memory` from blocking concurrent log writers
+- Prevent failure-signal handling from deadlocking when reentered
+- Make crash-trace demangling safe when symbol names exceed the output buffer
+- Use the ng-log version in CMake package compatibility errors
+- Restore Linux LWP identifiers in crash signal reports
+- Report sub-hour UTC offsets through `LogMessageTime::gmtoffset`
+- Cap oversized `max_log_size` values instead of using the 1 MB minimum
+
 ### 0.8.3 <small>July 10, 2026</small> { id="0.8.3" }
 
 - Mapped the CMake option value `none` to a proper CMake boolean string
