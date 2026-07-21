@@ -734,10 +734,20 @@ static void ColoredWriteToStderrOrStdout(FILE* output, LogSeverity severity,
                               ? SeverityToColor(severity)
                               : COLOR_DEFAULT;
 
+  // Unlike stderr, stdout is typically buffered by the C runtime, so honor
+  // FLAGS_logbuflevel the same way file logging does; otherwise messages can
+  // be held back indefinitely even with buffering disabled (--logbuflevel=-1).
+  const auto maybe_flush_stdout = [is_stdout, severity, output] {
+    if (is_stdout && severity > FLAGS_logbuflevel) {
+      fflush(output);
+    }
+  };
+
   // Avoid using cerr from this module since we may get called during
   // exit code, and cerr may be partially or fully destroyed by then.
   if (COLOR_DEFAULT == color) {
     fwrite(message, len, 1, output);
+    maybe_flush_stdout();
     return;
   }
 #ifdef NGLOG_OS_WINDOWS
@@ -764,6 +774,7 @@ static void ColoredWriteToStderrOrStdout(FILE* output, LogSeverity severity,
   fwrite(message, len, 1, output);
   fprintf(output, "\033[m");  // Resets the terminal to default.
 #endif  // NGLOG_OS_WINDOWS
+  maybe_flush_stdout();
 }
 
 static void ColoredWriteToStdout(LogSeverity severity, const char* message,
