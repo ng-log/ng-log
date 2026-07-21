@@ -223,9 +223,14 @@ bool IsLoggingPrefix(const std::string& s) {
   if (s.size() != kLoggingPrefixLength) {
     return false;
   }
-  if (!strchr("IWEF", s[0])) return false;
+  if (s[0] == '\0' || !strchr("IWEF", s[0])) return false;
   for (size_t i = 1; i <= 8; ++i) {
-    if (!isdigit(s[i]) && s[i] != "YEARDATE"[i - 1]) return false;
+    // Cast to unsigned char: passing a negative char (e.g. from non-ASCII
+    // log content) to isdigit() is undefined behavior.
+    if (!isdigit(static_cast<unsigned char>(s[i])) &&
+        s[i] != "YEARDATE"[i - 1]) {
+      return false;
+    }
   }
   return true;
 }
