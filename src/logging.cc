@@ -507,7 +507,6 @@ class LogCleaner {
   std::condition_variable cond_;
   std::thread thread_;  // joinable while enabled_ is true
   bool enabled_{false};
-  bool stop_{false};
   std::chrono::minutes overdue_{
       std::chrono::duration<int, std::ratio<kSecondsInWeek>>{1}};
   // Maintain a separate cleanup deadline for each base_filename.
@@ -1374,30 +1373,30 @@ void LogCleaner::Stop(bool discard_patterns) {
   {
     std::lock_guard<std::mutex> l{mutex_};
     enabled_ = false;
-    stop_ = true;
     if (discard_patterns) {
       patterns_.clear();
     }
     cleaner.swap(thread_);
-    cond_.notify_one();
   }
+  cond_.notify_one();
   if (cleaner.joinable()) {
     cleaner.join();
   }
 }
 
 void LogCleaner::Enable(const std::chrono::minutes& overdue) {
-  std::lock_guard<std::mutex> l{mutex_};
-  overdue_ = overdue;
-  if (!enabled_) {
-    enabled_ = true;
-    stop_ = false;
-    // Logs may have become overdue while the cleaner was disabled: make all
-    // known patterns due for an immediate scan.
-    for (auto& pattern : patterns_) {
-      pattern.second.next_cleanup_time = {};
+  {
+    std::lock_guard<std::mutex> l{mutex_};
+    overdue_ = overdue;
+    if (!enabled_) {
+      enabled_ = true;
+      // Logs may have become overdue while the cleaner was disabled: make all
+      // known patterns due for an immediate scan.
+      for (auto& pattern : patterns_) {
+        pattern.second.next_cleanup_time = {};
+      }
+      thread_ = std::thread(&LogCleaner::ThreadMain, this);
     }
-    thread_ = std::thread(&LogCleaner::ThreadMain, this);
   }
   // Wake up the cleaner thread: the overdue window may have changed.
   cond_.notify_one();
@@ -1410,12 +1409,14 @@ void LogCleaner::AddLogFilePattern(bool base_filename_selected,
                                    const string& filename_extension) {
   assert(!base_filename_selected || !base_filename.empty());
 
-  std::lock_guard<std::mutex> l{mutex_};
-  LogFilePattern& pattern = patterns_[base_filename];
-  pattern.base_filename_selected = base_filename_selected;
-  pattern.filename_extension = filename_extension;
-  // A log file was just created: scan for overdue logs right away.
-  pattern.next_cleanup_time = {};
+  {
+    std::lock_guard<std::mutex> l{mutex_};
+    LogFilePattern& pattern = patterns_[base_filename];
+    pattern.base_filename_selected = base_filename_selected;
+    pattern.filename_extension = filename_extension;
+    // A log file was just created: scan for overdue logs right away.
+    pattern.next_cleanup_time = {};
+  }
   cond_.notify_one();
 }
 
@@ -1430,7 +1431,8 @@ void LogCleaner::ThreadMain() {
 
     // Collect the patterns which are due for a scan and schedule their next
     // one.
-    vector<std::pair<string, LogFilePattern>> due;
+    std::vector<std::pair<std::string, LogFilePattern>> due;
+    due.reserve(patterns_.size());
     for (auto& pattern : patterns_) {
       if (pattern.second.next_cleanup_time <= now) {
         due.emplace_back(pattern.first, pattern.second);
@@ -1457,12 +1459,12 @@ void LogCleaner::ThreadMain() {
       continue;
     }
 
-    if (stop_) {
+    if (!enabled_) {
       break;
     }
 
     if (patterns_.empty()) {
-      cond_.wait(l, [this] { return stop_ || !patterns_.empty(); });
+      cond_.wait(l, [this] { return !enabled_ || !patterns_.empty(); });
     } else {
       auto next_deadline = patterns_.begin()->second.next_cleanup_time;
       for (const auto& pattern : patterns_) {
