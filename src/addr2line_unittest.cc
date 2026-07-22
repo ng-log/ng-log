@@ -17,6 +17,7 @@
 #  include <unistd.h>
 #endif  // NGLOG_OS_WINDOWS
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -450,6 +451,38 @@ TEST(Addr2LineSymbolizeCallback, DoesNotHangOnAnUnresponsiveAddr2Line) {
   }
   EXPECT_EQ(nullptr, std::strstr(symbol, "addr2line_unittest.cc:"));
   EXPECT_NE(nullptr, std::strstr(symbol, "FunctionSymbolizedForAddr2LineTest"));
+}
+
+TEST(Addr2LineSymbolizeCallback, UsesOneTimeoutForSlowOutput) {
+  const std::string dir = MakeScratchDirectory();
+  const std::string fake_executable = MakeFakeAddr2Line(
+      dir,
+      "#!/bin/sh\n"
+      "printf s; sleep 0.02; printf l; sleep 0.02; printf o; sleep 0.02; "
+      "printf w; sleep 0.02; printf '\\n'; sleep 0.02; printf '?'; "
+      "sleep 0.02; printf '?'; sleep 0.02; printf ':'; sleep 0.02; "
+      "printf '0\\n';",
+      ADDR2LINE_FAKE_SLOW_PATH);
+
+  {
+    ScopedPathOverride scoped_path(dir.c_str());
+    const nglog::int32 previous_timeout_ms = FLAGS_addr2line_timeout_ms;
+    FLAGS_addr2line_timeout_ms = 40;
+
+    char symbol[4096];
+    const auto start = std::chrono::steady_clock::now();
+    const bool resolved = ResolveFunctionAndLine(
+        "missing.exe", reinterpret_cast<void*>(1), 0, symbol, sizeof(symbol),
+        SymbolizeOptions::kNone, nullptr);
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+
+    FLAGS_addr2line_timeout_ms = previous_timeout_ms;
+    EXPECT_FALSE(resolved);
+    EXPECT_LT(elapsed, std::chrono::milliseconds{160});
+  }
+
+  RemoveFakeAddr2Line(fake_executable);
+  RemoveScratchDirectory(dir);
 }
 
 TEST(Addr2LineSymbolizeCallback, SkipsGracefullyWhenAddr2LineProducesNoOutput) {

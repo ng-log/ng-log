@@ -8,6 +8,7 @@
 
 #  include <algorithm>
 #  include <cerrno>
+#  include <limits>
 #  include <thread>
 #  include <utility>
 
@@ -499,6 +500,15 @@ bool SetCloseOnExec(int fd) {
   return flags != -1 && ::fcntl(fd, F_SETFD, flags | FD_CLOEXEC) != -1;
 }
 
+int ClampPollTimeout(std::chrono::milliseconds timeout) {
+  using Milliseconds = std::chrono::milliseconds;
+  constexpr Milliseconds::rep kMaximum =
+      static_cast<Milliseconds::rep>(std::numeric_limits<int>::max());
+  const Milliseconds::rep count = std::max<Milliseconds::rep>(
+      0, std::min<Milliseconds::rep>(timeout.count(), kMaximum));
+  return static_cast<int>(count);
+}
+
 #    ifdef HAVE_POSIX_SPAWN
 
 // Preferred over fork()+execvp() where available: posix_spawn() lets the
@@ -512,7 +522,7 @@ bool SetCloseOnExec(int fd) {
 // PATH for argv[0] the same way a shell would, so no separate lookup step
 // is needed here.
 pid_t SpawnProcess(char* const argv[], char* const envp[], int stdin_fd,
-                   int stdout_fd) {
+                   int stdout_fd, int /*exec_error_fd*/) {
   posix_spawn_file_actions_t file_actions;
 
   if (posix_spawn_file_actions_init(&file_actions) != 0) {
@@ -540,7 +550,7 @@ pid_t SpawnProcess(char* const argv[], char* const envp[], int stdin_fd,
 // minimal environment (see addr2line.cc) do not get that hardening on
 // this fallback path.
 pid_t SpawnProcess(char* const argv[], char* const /*envp*/[], int stdin_fd,
-                   int stdout_fd) {
+                   int stdout_fd, int exec_error_fd) {
   const pid_t pid = fork();
 
   if (pid < 0) {
@@ -550,6 +560,10 @@ pid_t SpawnProcess(char* const argv[], char* const /*envp*/[], int stdin_fd,
   if (pid == 0) {
     if (dup2(stdin_fd, STDIN_FILENO) < 0 ||
         dup2(stdout_fd, STDOUT_FILENO) < 0) {
+      const int error = errno;
+      FailureRetry([exec_error_fd, error] {
+        return ::write(exec_error_fd, &error, sizeof(error));
+      });
       _exit(127);
     }
 
@@ -560,6 +574,10 @@ pid_t SpawnProcess(char* const argv[], char* const /*envp*/[], int stdin_fd,
     }
 
     execvp(argv[0], argv);
+    const int error = errno;
+    FailureRetry([exec_error_fd, error] {
+      return ::write(exec_error_fd, &error, sizeof(error));
+    });
     _exit(127);  // Shell convention for "command not found".
   }
 
@@ -630,16 +648,60 @@ bool Subprocess::Spawn(char* const argv[], char* const envp[]) {
     return false;
   }
 
-  const pid_t pid = SpawnProcess(argv, envp, stdin_fds[0], stdout_fds[1]);
-
-  ::close(stdin_fds[0]);
-  ::close(stdout_fds[1]);
-
-  if (pid < 0) {
+#    ifndef HAVE_POSIX_SPAWN
+  int exec_error_fds[2] = {-1, -1};
+  if (::pipe(exec_error_fds) != 0 || !SetCloseOnExec(exec_error_fds[0]) ||
+      !SetCloseOnExec(exec_error_fds[1])) {
+    if (exec_error_fds[0] >= 0) {
+      ::close(exec_error_fds[0]);
+    }
+    if (exec_error_fds[1] >= 0) {
+      ::close(exec_error_fds[1]);
+    }
     ::close(stdin_fds[1]);
     ::close(stdout_fds[0]);
     return false;
   }
+  const int exec_error_fd = exec_error_fds[1];
+#    else
+  constexpr int exec_error_fd = -1;
+#    endif
+
+  const pid_t pid =
+      SpawnProcess(argv, envp, stdin_fds[0], stdout_fds[1], exec_error_fd);
+
+  ::close(stdin_fds[0]);
+  ::close(stdout_fds[1]);
+
+#    ifndef HAVE_POSIX_SPAWN
+  ::close(exec_error_fds[1]);
+#    endif
+
+  if (pid < 0) {
+    ::close(stdin_fds[1]);
+    ::close(stdout_fds[0]);
+#    ifndef HAVE_POSIX_SPAWN
+    ::close(exec_error_fds[0]);
+#    endif
+    return false;
+  }
+
+#    ifndef HAVE_POSIX_SPAWN
+  int exec_error = 0;
+  const ssize_t exec_error_bytes = FailureRetry([&exec_error, &exec_error_fds] {
+    return ::read(exec_error_fds[0], &exec_error, sizeof(exec_error));
+  });
+  ::close(exec_error_fds[0]);
+
+  if (exec_error_bytes != 0) {
+    ::kill(pid, SIGKILL);
+    int status = 0;
+    FailureRetry([pid, &status] { return ::waitpid(pid, &status, 0); });
+    ::close(stdin_fds[1]);
+    ::close(stdout_fds[0]);
+    return false;
+  }
+#    endif
 
   pid_ = pid;
   stdin_write_ = stdin_fds[1];
@@ -659,9 +721,8 @@ std::size_t Subprocess::WriteStdin(const char* data, std::size_t size,
   pfd.fd = stdin_write_;
   pfd.events = POLLOUT;
 
-  const int poll_result = FailureRetry([&pfd, timeout] {
-    return ::poll(&pfd, 1, static_cast<int>(timeout.count()));
-  });
+  const int poll_result = FailureRetry(
+      [&pfd, timeout] { return ::poll(&pfd, 1, ClampPollTimeout(timeout)); });
 
   if (poll_result <= 0) {
     return 0;
@@ -691,9 +752,8 @@ std::size_t Subprocess::ReadStdout(char* out, std::size_t out_size,
   pfd.fd = stdout_read_;
   pfd.events = POLLIN;
 
-  const int poll_result = FailureRetry([&pfd, timeout] {
-    return ::poll(&pfd, 1, static_cast<int>(timeout.count()));
-  });
+  const int poll_result = FailureRetry(
+      [&pfd, timeout] { return ::poll(&pfd, 1, ClampPollTimeout(timeout)); });
 
   if (poll_result <= 0) {
     return 0;

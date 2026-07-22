@@ -73,7 +73,8 @@ bool SplitAddr2LineFunctionsOutput(const char* input, std::size_t input_len,
 NGLOG_NO_EXPORT
 bool ResolveFunctionAndLine(const char* object_path, void* pc,
                             uint64_t relocation, char* out,
-                            std::size_t out_size, SymbolizedFrame* frame);
+                            std::size_t out_size, SymbolizeOptions options,
+                            SymbolizedFrame* frame);
 
 }  // namespace tools
 }  // namespace nglog

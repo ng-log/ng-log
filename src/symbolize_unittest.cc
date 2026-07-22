@@ -441,7 +441,7 @@ TEST(Symbolize, SymbolizeWithDemangling) {
   }
 #    endif  // defined(HAVE_ADDR2LINE)
 
-#    if defined(HAVE_DBGHELP) && !defined(NDEBUG)
+#    if defined(HAVE_DBGHELP) && !defined(HAVE_ADDR2LINE) && !defined(NDEBUG)
   EXPECT_STREQ("public: static void __cdecl Foo::func(int)", ret);
 #    endif
 }

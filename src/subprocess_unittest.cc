@@ -123,6 +123,20 @@ TEST(Subprocess, WriteStdinReturnsZeroOnceAfterCloseStdin) {
   process.Wait(100ms);
 }
 
+TEST(Subprocess, NegativeTimeoutDoesNotWaitIndefinitely) {
+  char* argv[] = {helper_path, hang_flag, nullptr};
+  char* envp[] = {nullptr};
+
+  Subprocess process;
+  ASSERT_TRUE(process.Spawn(argv, envp));
+  process.CloseStdin();
+
+  char out[kOutputBufferSize];
+  EXPECT_EQ(0U, process.ReadStdout(out, sizeof(out), -1ms));
+
+  process.Wait(100ms);
+}
+
 TEST(Subprocess, MoveConstructionTransfersOwnership) {
   char* argv[] = {helper_path, nullptr};
   char* envp[] = {nullptr};

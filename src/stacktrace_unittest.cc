@@ -120,6 +120,9 @@ static void CheckRetAddrIsInFunction(void* ret_addr,
 #  if defined(__clang__)
 #    pragma clang diagnostic push
 #    pragma clang diagnostic ignored "-Wgnu-label-as-value"
+#  elif defined(__MINGW32__)
+#    pragma GCC diagnostic push
+#    pragma GCC diagnostic ignored "-Wpedantic"
 #  endif
 
 void ATTRIBUTE_NOINLINE CheckStackTrace(int);
@@ -224,6 +227,8 @@ static
 
 #  if defined(__clang__)
 #    pragma clang diagnostic pop
+#  elif defined(__MINGW32__)
+#    pragma GCC diagnostic pop
 #  endif
 
 namespace {

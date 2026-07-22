@@ -150,11 +150,23 @@ std::size_t RunAddr2Line(char* const argv[], char* out, std::size_t out_size) {
   process.CloseStdin();
 
   const std::chrono::milliseconds timeout{FLAGS_addr2line_timeout_ms};
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
   std::size_t total_read = 0;
 
   while (total_read < out_size) {
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= deadline) {
+      break;
+    }
+
+    const auto remaining =
+        std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+    if (remaining <= std::chrono::milliseconds::zero()) {
+      break;
+    }
+
     const std::size_t bytes_read =
-        process.ReadStdout(out + total_read, out_size - total_read, timeout);
+        process.ReadStdout(out + total_read, out_size - total_read, remaining);
 
     if (bytes_read == 0) {
       break;  // EOF, error, or addr2line took too long to answer.
@@ -163,7 +175,13 @@ std::size_t RunAddr2Line(char* const argv[], char* out, std::size_t out_size) {
     total_read += bytes_read;
   }
 
-  process.Wait(timeout);
+  const auto now = std::chrono::steady_clock::now();
+  std::chrono::milliseconds remaining = std::chrono::milliseconds::zero();
+  if (now < deadline) {
+    remaining =
+        std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+  }
+  process.Wait(remaining);
   return total_read;
 }
 
@@ -283,7 +301,8 @@ bool SplitAddr2LineFunctionsOutput(const char* input, std::size_t input_len,
 
 bool ResolveFunctionAndLine(const char* object_path, void* pc,
                             uint64_t relocation, char* out,
-                            std::size_t out_size, SymbolizedFrame* frame) {
+                            std::size_t out_size, SymbolizeOptions options,
+                            SymbolizedFrame* frame) {
   char object_path_buf[kMaxObjectPathLength];
   std::snprintf(object_path_buf, sizeof(object_path_buf), "%s", object_path);
 
@@ -315,11 +334,13 @@ bool ResolveFunctionAndLine(const char* object_path, void* pc,
 
   char* cursor = out;
   std::size_t remaining = out_size;
-  // FLAGS_symbolize_line_info only promises to gate file/line info, not
-  // symbol names, so the name below is always resolved regardless of
-  // its value.
+  // The flag and the per-call option both gate file/line information, not
+  // symbol names, so the name below is always resolved regardless of their
+  // values.
   const std::size_t prefix_len =
-      FLAGS_symbolize_line_info
+      FLAGS_symbolize_line_info &&
+              (options & SymbolizeOptions::kNoLineNumbers) ==
+                  SymbolizeOptions::kNone
           ? FormatAddr2LineOutput(result.file_line, result.file_line_len,
                                   cursor, remaining)
           : 0;

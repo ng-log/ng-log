@@ -902,9 +902,10 @@ namespace {
 constexpr int kMaxObjectPathUtf8Length = MAX_PATH * 3;
 }  // namespace
 
-static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(
-    void* pc, char* out, size_t out_size, SymbolizeOptions /*options*/,
-    SymbolizedFrame* frame) {
+static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(void* pc, char* out,
+                                                    size_t out_size,
+                                                    SymbolizeOptions options,
+                                                    SymbolizedFrame* frame) {
   HMODULE module = nullptr;
 
   if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
@@ -944,7 +945,7 @@ static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(
       static_cast<uintptr_t>(nt_headers->OptionalHeader.ImageBase);
   const auto relocation = runtime_base - image_base;
   return ResolveFunctionAndLine(object_path, pc, relocation, out, out_size,
-                                frame);
+                                options, frame);
 }
 
 }  // namespace tools

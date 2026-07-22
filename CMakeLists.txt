@@ -300,6 +300,7 @@ if (WITH_SYMBOLIZE)
       # CodeView, not DWARF, and addr2line does not read that format.
       set (HAVE_SYMBOLIZE 1)
       set (HAVE_ADDR2LINE 1)
+      set (HAVE_STACKTRACE 1)
     else (MINGW AND _ng-log_try_addr2line AND HAVE_SUBPROCESS)
       cmake_push_check_state (RESET)
       set (CMAKE_REQUIRED_LIBRARIES DbgHelp)
@@ -672,15 +673,35 @@ if (BUILD_TESTING AND GTest_FOUND)
       src/addr2line_fake_empty.cc
     )
 
+    add_executable (addr2line_fake_slow
+      src/addr2line_fake_slow.cc
+    )
+
+    if (MINGW)
+      add_executable (addr2line_fake_functions
+        src/addr2line_fake_functions.cc
+      )
+      set_target_properties (addr2line_fake_functions PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY
+          "${CMAKE_CURRENT_BINARY_DIR}/addr2line_fake_functions"
+        RUNTIME_OUTPUT_NAME addr2line
+      )
+      add_dependencies (symbolize_unittest addr2line_fake_functions)
+      target_link_options (addr2line_fake_functions PRIVATE
+        -static -static-libgcc -static-libstdc++)
+    endif (MINGW)
+
     add_executable (addr2line_unittest
       src/addr2line_unittest.cc
     )
 
     target_link_libraries (addr2line_unittest PRIVATE ng-log_test)
-    add_dependencies (addr2line_unittest addr2line_fake_hang addr2line_fake_empty)
+    add_dependencies (addr2line_unittest addr2line_fake_hang addr2line_fake_empty
+      addr2line_fake_slow)
     target_compile_definitions (addr2line_unittest PRIVATE
       ADDR2LINE_FAKE_HANG_PATH="$<TARGET_FILE:addr2line_fake_hang>"
-      ADDR2LINE_FAKE_EMPTY_PATH="$<TARGET_FILE:addr2line_fake_empty>")
+      ADDR2LINE_FAKE_EMPTY_PATH="$<TARGET_FILE:addr2line_fake_empty>"
+      ADDR2LINE_FAKE_SLOW_PATH="$<TARGET_FILE:addr2line_fake_slow>")
 
     if (WIN32)
       # Statically linked so the runtime DLLs of whichever toolchain
@@ -689,6 +710,8 @@ if (BUILD_TESTING AND GTest_FOUND)
       target_link_options (addr2line_fake_hang PRIVATE
         -static -static-libgcc -static-libstdc++)
       target_link_options (addr2line_fake_empty PRIVATE
+        -static -static-libgcc -static-libstdc++)
+      target_link_options (addr2line_fake_slow PRIVATE
         -static -static-libgcc -static-libstdc++)
     endif (WIN32)
   endif (HAVE_ADDR2LINE)
