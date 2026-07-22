@@ -149,8 +149,11 @@ void SymInfoCallback(void* data, uintptr_t /*pc*/, const char* symname,
   if (symname == nullptr || ctx->out_size == 0) {
     return;
   }
-  strncpy(ctx->out, symname, ctx->out_size);
-  ctx->out[ctx->out_size - 1] = '\0';  // Always NUL-terminate.
+  const size_t symbol_length = std::strlen(symname);
+  if (symbol_length >= ctx->out_size) {
+    return;
+  }
+  std::memcpy(ctx->out, symname, symbol_length + 1);
   ctx->found = true;
 }
 
@@ -202,9 +205,14 @@ static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(void* pc, char* out,
     }
   }
 
+  backtrace_state* const state = GetBacktraceState();
+  if (state == nullptr) {
+    return false;
+  }
+
   SymInfoContext ctx{out, out_size, false};
-  backtrace_syminfo(GetBacktraceState(), reinterpret_cast<uintptr_t>(pc),
-                    &SymInfoCallback, &ErrorCallback, &ctx);
+  backtrace_syminfo(state, reinterpret_cast<uintptr_t>(pc), &SymInfoCallback,
+                    &ErrorCallback, &ctx);
 
   if (!ctx.found) {
     return false;

@@ -152,6 +152,20 @@ TEST(Symbolize, RejectsZeroSizedOutputBuffer) {
       reinterpret_cast<void*>(&FunctionSymbolizedForLibbacktraceTest), out, 0));
 }
 
+TEST(Symbolize, RejectsTruncatedSymbolName) {
+  constexpr std::size_t kOutputSize = 8;
+  char out[kOutputSize];
+  FLAGS_symbolize_line_info = false;
+  InstallLibbacktraceSymbolizeCallback();
+
+  EXPECT_FALSE(
+      Symbolize(reinterpret_cast<void*>(&FunctionSymbolizedForLibbacktraceTest),
+                out, sizeof(out), SymbolizeOptions::kNoLineNumbers));
+
+  FLAGS_symbolize_line_info = true;
+  InstallSymbolizeCallback(nullptr);
+}
+
 int main(int argc, char** argv) {
   FLAGS_logtostderr = true;
   InitializeLogging(argv[0]);

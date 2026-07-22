@@ -310,7 +310,8 @@ if (WITH_SYMBOLIZE)
       set (HAVE_SYMBOLIZE 1)
       set (HAVE_ADDR2LINE 1)
       set (HAVE_STACKTRACE 1)
-    elseif (WIN32 AND _ng-log_try_libbacktrace AND TARGET libbacktrace::libbacktrace)
+    elseif (MINGW AND _ng-log_try_libbacktrace AND
+            TARGET libbacktrace::libbacktrace)
       # Likewise, libbacktrace resolves both the symbol name and the
       # file/line from DWARF debug info (what MinGW emits by default) via
       # its own PE/COFF and DWARF readers, without going through DbgHelp.
@@ -364,13 +365,16 @@ endif (WITH_SYMBOLIZE)
 # posix_spawn() nor fork()+exec() can actually run an addr2line subprocess
 # there, regardless of what the symbol checks below report.
 if (_ng-log_try_addr2line AND HAVE_SYMBOLIZE AND UNIX AND NOT EMSCRIPTEN AND
-    (HAVE_ELF_H OR HAVE_SYS_EXEC_ELF_H) AND HAVE_SIGACTION)
+    (HAVE_ELF_H OR HAVE_SYS_EXEC_ELF_H) AND HAVE_SIGACTION AND
+    HAVE_SUBPROCESS)
   set (HAVE_ADDR2LINE 1)
 endif ()
 
-if (_ng-log_try_libbacktrace AND HAVE_SYMBOLIZE AND TARGET libbacktrace::libbacktrace)
+if (_ng-log_try_libbacktrace AND HAVE_SYMBOLIZE AND TARGET libbacktrace::libbacktrace
+    AND (UNIX OR MINGW))
   set (HAVE_LIBBACKTRACE 1)
-endif (_ng-log_try_libbacktrace AND HAVE_SYMBOLIZE AND TARGET libbacktrace::libbacktrace)
+endif (_ng-log_try_libbacktrace AND HAVE_SYMBOLIZE AND
+       TARGET libbacktrace::libbacktrace AND (UNIX OR MINGW))
 
 if (WITH_LINE_INFO STREQUAL addr2line AND NOT HAVE_ADDR2LINE)
   message (WARNING "WITH_LINE_INFO is 'addr2line' but addr2line support "

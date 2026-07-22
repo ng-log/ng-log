@@ -11,6 +11,7 @@
 #  include <cstdint>
 #  include <cstdio>
 #  include <mutex>
+#  include <string>
 
 #  include "ng-log/flags.h"
 #  include "symbolize.h"
@@ -73,7 +74,7 @@ std::size_t FormatLibbacktraceLocation(const char* filename, int lineno,
 namespace {
 
 struct PcInfoContext {
-  const char* filename = nullptr;
+  std::string filename;
   int lineno = 0;
   bool found = false;
 };
@@ -123,8 +124,8 @@ int LibbacktraceSymbolizeCallback(int /*fd*/, void* pc, char* out,
     return 0;
   }
 
-  return static_cast<int>(
-      FormatLibbacktraceLocation(ctx.filename, ctx.lineno, out, out_size));
+  return static_cast<int>(FormatLibbacktraceLocation(
+      ctx.filename.c_str(), ctx.lineno, out, out_size));
 }
 
 }  // namespace
