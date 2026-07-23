@@ -79,6 +79,8 @@ class ScopedPathOverride {
 
 using UniqueFile = std::unique_ptr<std::FILE, int (*)(std::FILE*)>;
 
+constexpr std::size_t kCopyBufferSize = 4096;
+
 // Creates a fresh, empty scratch directory and returns its path.
 // CHECK-fails on error.
 std::string MakeScratchDirectory() {
@@ -110,27 +112,31 @@ void RemoveScratchDirectory(const std::string& dir) {
 #endif  // NGLOG_OS_WINDOWS
 }
 
-// Materializes a fake "addr2line" executable in |dir| and returns its
-// path. |posix_script| is used verbatim as a POSIX shell script. A raw
-// script cannot run via CreateProcess() on Windows, so
-// |windows_helper_path| (a companion program built alongside this test,
-// already exhibiting the needed behavior) is copied into place instead.
-std::string MakeFakeAddr2Line(const std::string& dir, const char* posix_script,
-                              const char* windows_helper_path) {
+// Materializes a fake "addr2line" executable in |dir| and returns its path.
+// |helper_path| is a companion program built alongside this test that already
+// exhibits the needed behavior.
+std::string MakeFakeAddr2Line(const std::string& dir, const char* helper_path) {
 #ifdef NGLOG_OS_WINDOWS
-  static_cast<void>(posix_script);
   // CreateProcess() appends ".exe" automatically to an extension-less
   // name, matching how the production code spawns "addr2line".
   const std::string path = dir + "\\addr2line.exe";
-  CHECK(CopyFileA(windows_helper_path, path.c_str(), FALSE));
+  CHECK(CopyFileA(helper_path, path.c_str(), FALSE));
   return path;
 #else
-  static_cast<void>(windows_helper_path);
   const std::string path = dir + "/addr2line";
-  UniqueFile f(std::fopen(path.c_str(), "w"), &std::fclose);
-  CHECK(f != nullptr);
-  std::fputs(posix_script, f.get());
-  f.reset();
+  UniqueFile source(std::fopen(helper_path, "rb"), &std::fclose);
+  CHECK(source != nullptr);
+  UniqueFile destination(std::fopen(path.c_str(), "wb"), &std::fclose);
+  CHECK(destination != nullptr);
+
+  char buffer[kCopyBufferSize];
+  std::size_t bytes_read;
+  while ((bytes_read = std::fread(buffer, 1, sizeof(buffer), source.get())) >
+         0) {
+    CHECK_EQ(bytes_read, std::fwrite(buffer, 1, bytes_read, destination.get()));
+  }
+  CHECK_EQ(0, std::ferror(source.get()));
+  destination.reset();
   CHECK_EQ(0, chmod(path.c_str(), 0755));
   return path;
 #endif  // NGLOG_OS_WINDOWS
@@ -418,19 +424,17 @@ TEST(Addr2LineSymbolizeCallback, SkipsGracefullyWhenUnavailable) {
 
 TEST(Addr2LineSymbolizeCallback, DoesNotHangOnAnUnresponsiveAddr2Line) {
   const std::string dir = MakeScratchDirectory();
-  // The POSIX script busy-loops using only the shell's own ":" builtin,
-  // avoiding any dependency on external commands or an open stdin.
-  // Neither this nor its Windows counterpart ever writes anything,
-  // exercising the timeout / forced-termination path in RunAddr2Line().
-  const std::string fake_executable = MakeFakeAddr2Line(
-      dir, "#!/bin/sh\nwhile :; do :; done\n", ADDR2LINE_FAKE_HANG_PATH);
+  // This helper never writes anything, exercising the timeout /
+  // forced-termination path in RunAddr2Line().
+  const std::string fake_executable =
+      MakeFakeAddr2Line(dir, ADDR2LINE_FAKE_HANG_PATH);
 
   const char* symbol = nullptr;
   {
     ScopedPathOverride scoped_path(dir.c_str());
 
-    // Short enough to keep this test fast, while still giving the
-    // busy-loop script above plenty of time to be seen as unresponsive.
+    // Short enough to keep this test fast, while still giving the helper
+    // plenty of time to be seen as unresponsive.
     const nglog::int32 previous_timeout_ms = FLAGS_addr2line_timeout_ms;
     FLAGS_addr2line_timeout_ms = 50;
     FLAGS_symbolize_line_info = true;
@@ -455,14 +459,8 @@ TEST(Addr2LineSymbolizeCallback, DoesNotHangOnAnUnresponsiveAddr2Line) {
 
 TEST(Addr2LineSymbolizeCallback, UsesOneTimeoutForSlowOutput) {
   const std::string dir = MakeScratchDirectory();
-  const std::string fake_executable = MakeFakeAddr2Line(
-      dir,
-      "#!/bin/sh\n"
-      "printf s; sleep 0.02; printf l; sleep 0.02; printf o; sleep 0.02; "
-      "printf w; sleep 0.02; printf '\\n'; sleep 0.02; printf '?'; "
-      "sleep 0.02; printf '?'; sleep 0.02; printf ':'; sleep 0.02; "
-      "printf '0\\n';",
-      ADDR2LINE_FAKE_SLOW_PATH);
+  const std::string fake_executable =
+      MakeFakeAddr2Line(dir, ADDR2LINE_FAKE_SLOW_PATH);
 
   {
     ScopedPathOverride scoped_path(dir.c_str());
@@ -491,7 +489,7 @@ TEST(Addr2LineSymbolizeCallback, SkipsGracefullyWhenAddr2LineProducesNoOutput) {
   // being entirely absent from PATH (no process is ever spawned) and from
   // it hanging (RunAddr2Line() reaches EOF here well within the timeout).
   const std::string fake_executable =
-      MakeFakeAddr2Line(dir, "#!/bin/sh\nexit 0\n", ADDR2LINE_FAKE_EMPTY_PATH);
+      MakeFakeAddr2Line(dir, ADDR2LINE_FAKE_EMPTY_PATH);
 
   const char* symbol = nullptr;
   {
