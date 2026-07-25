@@ -196,7 +196,7 @@ TEST(Demangle, FromFile) {
     EXPECT_NE(string::npos, tab_pos);
     string mangled = line.substr(0, tab_pos);
     string demangled = line.substr(tab_pos + 1);
-    EXPECT_EQ(demangled, DemangleIt(mangled.c_str()));
+    EXPECT_STREQ(demangled.c_str(), DemangleIt(mangled.c_str()));
   }
 }
 

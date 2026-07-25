@@ -29,17 +29,12 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
 // Test helpers that are not provided by GoogleTest itself: golden-file
-// stdout/stderr capture and diffing, a flag saver for non-gflags builds,
-// and a setjmp-based ASSERT_DEATH that replaces GoogleTest's own
-// (fork-based) implementation.
+// stdout/stderr capture and diffing, and a flag saver for non-gflags builds.
 
 #ifndef NGLOG_SRC_TESTING_UTILITIES_H_
 #define NGLOG_SRC_TESTING_UTILITIES_H_
 
-#include <csetjmp>
 #include <cstdint>
-#include <cstdio>
-#include <cstdlib>
 #include <string>
 
 #include "config.h"
@@ -134,45 +129,6 @@ struct FlagSaver {
 // Add hook for operator new to ensure there are no memory allocation.
 extern void (*g_new_hook)();
 
-extern bool g_called_abort;
-extern std::jmp_buf g_jmp_buf;
-void CalledAbort();
-
 }  // namespace nglog
-
-// Replace GoogleTest's own (fork-based) ASSERT_DEATH/ASSERT_DEBUG_DEATH with
-// a setjmp-based implementation.
-#ifdef ASSERT_DEATH
-#  undef ASSERT_DEATH
-#endif
-#ifdef ASSERT_DEBUG_DEATH
-#  undef ASSERT_DEBUG_DEATH
-#endif
-
-#ifdef NGLOG_OS_WINDOWS
-// TODO(hamaji): Death test somehow doesn't work in Windows.
-#  define ASSERT_DEATH(fn, msg)
-#else
-#  define ASSERT_DEATH(fn, msg)                                          \
-    do {                                                                 \
-      nglog::g_called_abort = false;                                     \
-      /* in logging.cc */                                                \
-      void (*original_logging_fail_func)() = nglog::g_logging_fail_func; \
-      nglog::g_logging_fail_func = &nglog::CalledAbort;                  \
-      if (!setjmp(nglog::g_jmp_buf)) fn;                                 \
-      /* set back to their default */                                    \
-      nglog::g_logging_fail_func = original_logging_fail_func;           \
-      if (!nglog::g_called_abort) {                                      \
-        fprintf(stderr, "Function didn't die (%s): %s\n", msg, #fn);     \
-        exit(EXIT_FAILURE);                                              \
-      }                                                                  \
-    } while (0)
-#endif
-
-#ifdef NDEBUG
-#  define ASSERT_DEBUG_DEATH(fn, msg)
-#else
-#  define ASSERT_DEBUG_DEATH(fn, msg) ASSERT_DEATH(fn, msg)
-#endif  // NDEBUG
 
 #endif  // NGLOG_SRC_TESTING_UTILITIES_H_

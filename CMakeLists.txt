@@ -744,7 +744,11 @@ if (BUILD_TESTING AND GTest_FOUND)
   )
 
   if (TARGET signalhandler_unittest)
-    add_test (NAME signalhandler COMMAND signalhandler_unittest)
+    gtest_discover_tests (signalhandler_unittest
+      TEST_PREFIX signalhandler.
+      DISCOVERY_TIMEOUT 30
+      DISCOVERY_MODE PRE_TEST
+    )
 
     if (HAVE_SIGACTION)
       # Forks off the segv, reentrant, and multithread scenarios below

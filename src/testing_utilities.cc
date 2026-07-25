@@ -382,14 +382,6 @@ bool MungeAndDiffTestStderr(const std::string& golden_filename) {
 
 void (*g_new_hook)() = nullptr;
 
-bool g_called_abort;
-std::jmp_buf g_jmp_buf;
-
-void CalledAbort() {
-  g_called_abort = true;
-  longjmp(g_jmp_buf, 1);
-}
-
 }  // namespace nglog
 
 // noinline prevents a -Wmismatched-new-delete false positive: GCC loses
