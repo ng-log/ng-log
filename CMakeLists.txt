@@ -1151,7 +1151,12 @@ if (BUILD_TESTING AND GTest_FOUND)
   add_executable (striplog10_unittest
     src/striplog_unittest.cc
   )
-  target_compile_definitions (striplog10_unittest PRIVATE NGLOG_STRIP_LOG=10)
+  target_compile_definitions (striplog10_unittest PRIVATE
+    ERROR=0
+    NDEBUG
+    NGLOG_NO_ABBREVIATED_SEVERITIES
+    NGLOG_STRIP_LOG=10
+  )
   target_link_libraries (striplog10_unittest PRIVATE ng-log_test)
 
   add_test (NAME striplog10 COMMAND striplog10_unittest)

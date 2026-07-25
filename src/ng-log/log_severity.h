@@ -63,7 +63,7 @@ constexpr int kFatalSeverity = 3;
 // [0, NUM_SEVERITIES-1].  Be careful to preserve this assumption if
 // you ever need to change their values or add a new severity.
 
-enum LogSeverity {
+enum LogSeverity : int {
 #ifndef NGLOG_NO_ABBREVIATED_SEVERITIES
 #  ifdef ERROR
 #  error "ERROR macro is defined. Define NGLOG_NO_ABBREVIATED_SEVERITIES before including logging.h. See https://ng-log.github.io/ng-log/stable/windows/ for details."

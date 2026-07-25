@@ -133,6 +133,10 @@ void PrefixAttacher(std::ostream& s, const LogMessage& m, void* data) {
     << m.basename() << ':' << m.line() << "]";
 }
 
+[[noreturn]] void ThrowFatalLogFailure() {
+  throw std::logic_error{"fatal log"};
+}
+
 // Captured pre-init, re-emitted by LoggingGoldenFile.Stderr.
 std::string early_stderr;
 
@@ -1582,6 +1586,58 @@ TEST(LogAtLevel, Basic) {
   severity = NGLOG_INFO;
   // We can use the macro version as a C++ stream.
   LOG_AT_LEVEL(severity) << "macro" << ' ' << "version";
+}
+
+TEST(Logging, DisabledConditionalLogDoesNotEvaluateArguments) {
+  const int saved_min_log_level = FLAGS_minloglevel;
+  FLAGS_minloglevel = NGLOG_ERROR;
+  testing::MockFunction<int()> disabled_log_argument;
+  EXPECT_CALL(disabled_log_argument, Call()).Times(0);
+
+  LOG_IF(INFO, true) << disabled_log_argument.AsStdFunction()();
+
+  FLAGS_minloglevel = saved_min_log_level;
+}
+
+TEST(Logging, FatalIgnoresMinimumLogLevel) {
+  const int saved_min_log_level = FLAGS_minloglevel;
+  FLAGS_minloglevel = NGLOG_FATAL + 1;
+  auto const fail_func = InstallFailureFunction(&ThrowFatalLogFailure);
+  auto restore = [fail_func, saved_min_log_level] {
+    InstallFailureFunction(fail_func);
+    FLAGS_minloglevel = saved_min_log_level;
+  };
+  ScopedExit<decltype(restore)> restore_state{restore};
+
+  EXPECT_THROW({ LOG(FATAL) << "fatal log"; }, std::logic_error);
+  const auto fatal_check = [] { CHECK(false) << "fatal check"; };
+  EXPECT_THROW(fatal_check(), std::logic_error);
+}
+
+TEST(Logging, DefaultPrefixFormatting) {
+  const bool saved_log_to_stderr = FLAGS_logtostderr;
+  const int saved_stderr_threshold = FLAGS_stderrthreshold;
+  const bool saved_log_prefix = FLAGS_log_prefix;
+  const int saved_min_log_level = FLAGS_minloglevel;
+
+  FLAGS_logtostderr = true;
+  FLAGS_stderrthreshold = NGLOG_INFO;
+  FLAGS_log_prefix = true;
+  FLAGS_minloglevel = NGLOG_INFO;
+  InstallPrefixFormatter(nullptr);
+
+  CaptureTestStderr();
+  LOG(INFO) << "default prefix formatting";
+  const std::string output = GetCapturedTestStderr();
+
+  InstallPrefixFormatter(&PrefixAttacher, &g_prefix_attacher_data);
+  FLAGS_logtostderr = saved_log_to_stderr;
+  FLAGS_stderrthreshold = saved_stderr_threshold;
+  FLAGS_log_prefix = saved_log_prefix;
+  FLAGS_minloglevel = saved_min_log_level;
+
+  EXPECT_THAT(output, HasSubstr("] default prefix formatting\n"));
+  EXPECT_THAT(output, testing::Not(HasSubstr("good data")));
 }
 
 TEST(TestExitOnDFatal, ToBeOrNotToBe) {

@@ -213,6 +213,38 @@ TEST(ColorAttributes, ErrnoThemeUsesDistinctRoles) {
 }
 
 #if !defined(NGLOG_OS_WINDOWS)
+TEST(ColorAttributes, DefaultPrefixRetainsPerFieldColors) {
+  ASSERT_EQ(setenv("CLICOLOR_FORCE", "1", 1), 0);
+  ASSERT_EQ(setenv("TERM", "xterm", 1), 0);
+  unsetenv("NO_COLOR");
+
+  const bool old_logtostderr = FLAGS_logtostderr;
+  const bool old_colorlogtostderr = FLAGS_colorlogtostderr;
+  const bool old_log_prefix = FLAGS_log_prefix;
+  const int old_minloglevel = FLAGS_minloglevel;
+  const bool old_symbolize_hyperlinks = FLAGS_symbolize_hyperlinks;
+  FLAGS_logtostderr = true;
+  FLAGS_colorlogtostderr = true;
+  FLAGS_log_prefix = true;
+  FLAGS_minloglevel = NGLOG_INFO;
+  FLAGS_symbolize_hyperlinks = false;
+
+  CaptureTestStderr();
+  LOG(INFO) << "colored default prefix";
+  const std::string output = GetCapturedTestStderr();
+
+  FLAGS_logtostderr = old_logtostderr;
+  FLAGS_colorlogtostderr = old_colorlogtostderr;
+  FLAGS_log_prefix = old_log_prefix;
+  FLAGS_minloglevel = old_minloglevel;
+  FLAGS_symbolize_hyperlinks = old_symbolize_hyperlinks;
+
+  EXPECT_THAT(output, HasSubstr("\033[34m"));
+  EXPECT_THAT(output, HasSubstr("\033[35m"));
+  EXPECT_THAT(output, HasSubstr("\033[36m"));
+  EXPECT_THAT(output, HasSubstr("\033[90m]"));
+}
+
 TEST(ColorAttributes, RendersStyledSpansAndHyperlinksOnAnsiOutput) {
   ASSERT_EQ(setenv("CLICOLOR_FORCE", "1", 1), 0);
   ASSERT_EQ(setenv("TERM", "xterm", 1), 0);

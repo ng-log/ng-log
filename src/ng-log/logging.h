@@ -442,7 +442,28 @@ struct NGLOG_EXPORT LogMessageTime {
 // impossible to stream something like a string directly to an unnamed
 // ostream. We employ a neat hack by calling the stream() member
 // function of LogMessage which seems to avoid the problem.
-#define LOG(severity) NGLOG_COMPACT_LOG_##severity.stream()
+#define NGLOG_LOG_SEVERITY_INFO NGLOG_INFO
+#define NGLOG_LOG_SEVERITY_WARNING NGLOG_WARNING
+#define NGLOG_LOG_SEVERITY_ERROR NGLOG_ERROR
+#define NGLOG_LOG_SEVERITY_FATAL NGLOG_FATAL
+#define NGLOG_LOG_SEVERITY_DFATAL DFATAL_LEVEL
+#if defined(NGLOG_NO_ABBREVIATED_SEVERITIES)
+#  define NGLOG_LOG_SEVERITY_0 NGLOG_ERROR
+#endif
+#define NGLOG_LOG_SEVERITY(severity) NGLOG_LOG_SEVERITY_##severity
+#define NGLOG_LOG_SEVERITY_ENABLED(severity)      \
+  (NGLOG_LOG_SEVERITY(severity) == NGLOG_FATAL || \
+   FLAGS_minloglevel <= NGLOG_LOG_SEVERITY(severity))
+
+#define NGLOG_LOG_IF(severity, condition) \
+  static_cast<void>(0),                   \
+      !(condition) ? (void)0              \
+                   : nglog::internal::LogMessageVoidify() & LOG(severity)
+
+#define LOG(severity)                          \
+  (NGLOG_LOG_SEVERITY_ENABLED(severity)        \
+       ? NGLOG_COMPACT_LOG_##severity.stream() \
+       : nglog::NullStream().stream())
 #define SYSLOG(severity) SYSLOG_##severity(0).stream()
 
 namespace nglog {
@@ -457,11 +478,7 @@ NGLOG_EXPORT bool IsLoggingInitialized();
 // Shutdown logging.
 NGLOG_EXPORT void ShutdownLogging();
 
-#if defined(__GNUC__)
-typedef void (*logging_fail_func_t)() __attribute__((noreturn));
-#else
 typedef void (*logging_fail_func_t)();
-#endif
 
 class LogMessage;
 
@@ -525,9 +542,7 @@ class LogSink;  // defined below
       .stream()
 
 #define LOG_IF(severity, condition) \
-  static_cast<void>(0),             \
-      !(condition) ? (void)0        \
-                   : nglog::internal::LogMessageVoidify() & LOG(severity)
+  NGLOG_LOG_IF(severity, (condition) && NGLOG_LOG_SEVERITY_ENABLED(severity))
 #define SYSLOG_IF(severity, condition) \
   static_cast<void>(0),                \
       !(condition) ? (void)0           \
@@ -1024,42 +1039,24 @@ constexpr LogSeverity NGLOG_0 = NGLOG_ERROR;
 
 #else  // !DCHECK_IS_ON()
 
-#  define DLOG(severity)  \
-    static_cast<void>(0), \
-        true ? (void)0 : nglog::internal::LogMessageVoidify() & LOG(severity)
+#  define DLOG(severity) NGLOG_LOG_IF(severity, false)
 
-#  define DVLOG(verboselevel)               \
-    static_cast<void>(0),                   \
-        (true || !VLOG_IS_ON(verboselevel)) \
-            ? (void)0                       \
-            : nglog::internal::LogMessageVoidify() & LOG(INFO)
+#  define DVLOG(verboselevel) \
+    NGLOG_LOG_IF(INFO, false && VLOG_IS_ON(verboselevel))
 
 #  define DLOG_IF(severity, condition) \
-    static_cast<void>(0),              \
-        (true || !(condition))         \
-            ? (void)0                  \
-            : nglog::internal::LogMessageVoidify() & LOG(severity)
+    NGLOG_LOG_IF(severity, false && (condition))
 
-#  define DLOG_EVERY_N(severity, n) \
-    static_cast<void>(0),           \
-        true ? (void)0 : nglog::internal::LogMessageVoidify() & LOG(severity)
+#  define DLOG_EVERY_N(severity, n) NGLOG_LOG_IF(severity, false)
 
 #  define DLOG_IF_EVERY_N(severity, condition, n) \
-    static_cast<void>(0),                         \
-        (true || !(condition))                    \
-            ? (void)0                             \
-            : nglog::internal::LogMessageVoidify() & LOG(severity)
+    NGLOG_LOG_IF(severity, false && (condition))
 
-#  define DLOG_FIRST_N(severity, n) \
-    static_cast<void>(0),           \
-        true ? (void)0 : nglog::internal::LogMessageVoidify() & LOG(severity)
+#  define DLOG_FIRST_N(severity, n) NGLOG_LOG_IF(severity, false)
 
-#  define DLOG_EVERY_T(severity, T) \
-    static_cast<void>(0),           \
-        true ? (void)0 : nglog::internal::LogMessageVoidify() & LOG(severity)
+#  define DLOG_EVERY_T(severity, T) NGLOG_LOG_IF(severity, false)
 
-#  define DLOG_ASSERT(condition) \
-    static_cast<void>(0), true ? (void)0 : (LOG_ASSERT(condition))
+#  define DLOG_ASSERT(condition) NGLOG_LOG_IF(FATAL, false && (condition))
 
 // MSVC warning C4127: conditional expression is constant
 #  define DCHECK(condition)               \
@@ -1134,6 +1131,14 @@ class NGLOG_EXPORT LogStreamBuf : public std::streambuf {
  public:
   // REQUIREMENTS: "len" must be >= 2 to account for the '\n' and '\0'.
   LogStreamBuf(char* buf, int len) { setp(buf, buf + len - 2); }
+
+  void append(const char* data, std::size_t length) {
+    std::size_t count = length;
+    const std::size_t available = static_cast<std::size_t>(epptr() - pptr());
+    if (count > available) count = available;
+    std::memcpy(pptr(), data, count);
+    pbump(static_cast<int>(count));
+  }
 
   // This effectively ignores overflow.
   int_type overflow(int_type ch) { return ch; }
@@ -1223,6 +1228,9 @@ class NGLOG_EXPORT LogMessage {
     size_t pcount() const { return streambuf_.pcount(); }
     char* pbase() const { return streambuf_.pbase(); }
     char* str() const { return pbase(); }
+    void append(const char* data, std::size_t length) {
+      streambuf_.append(data, length);
+    }
 
     LogStream(const LogStream&) = delete;
     LogStream& operator=(const LogStream&) = delete;
@@ -1656,7 +1664,12 @@ class NGLOG_EXPORT NullStream : public LogMessage::LogStream {
 // something like (flag ? LOG(INFO) : LOG(ERROR)) << message; when
 // SKIP_LOG=WARNING. In those cases, NullStream will be implicitly
 // converted to LogStream and the message will be computed and then
-// quietly discarded.
+// quietly discarded. The same holds for a severity disabled purely at
+// runtime via FLAGS_minloglevel: LOG(severity) still resolves to a
+// single, statically typed conditional expression, so its result type
+// is fixed at compile time and the message is still computed (only its
+// output is discarded) whenever LOG(severity) is used as anything other
+// than the immediate left-hand side of its own "<<" chain.
 template <class T>
 inline NullStream& operator<<(NullStream& str, const T&) {
   return str;

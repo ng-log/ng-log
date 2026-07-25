@@ -83,5 +83,10 @@ int main(int, char* argv[]) {
   LOG(ERROR) << "TESTMESSAGE ERROR";
   bool flag = true;
   (flag ? LOG(INFO) : LOG(ERROR)) << "TESTMESSAGE COND";
+#if !DCHECK_IS_ON()
+  DLOG(INFO) << "no debug output";
+  DLOG_IF(WARNING, true) << "no conditional debug output";
+  DVLOG(1) << "no verbose debug output";
+#endif
   LOG(FATAL) << "TESTMESSAGE FATAL";
 }

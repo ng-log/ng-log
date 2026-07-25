@@ -33,6 +33,7 @@
 #include "ng-log/logging.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <chrono>
 #include <condition_variable>
@@ -324,6 +325,85 @@ namespace {
 
 constexpr std::intmax_t kSecondsInDay = 60 * 60 * 24;
 constexpr std::intmax_t kSecondsInWeek = kSecondsInDay * 7;
+constexpr std::size_t kPrefixNumberBufferSize = 32;
+constexpr std::size_t kPrefixYearWidth = 4;
+constexpr std::size_t kPrefixMonthWidth = 2;
+constexpr std::size_t kPrefixDayWidth = 2;
+constexpr std::size_t kPrefixHourWidth = 2;
+constexpr std::size_t kPrefixMinuteWidth = 2;
+constexpr std::size_t kPrefixSecondWidth = 2;
+constexpr std::size_t kPrefixMicrosecondWidth = 6;
+constexpr std::size_t kPrefixThreadIdWidth = 5;
+constexpr unsigned int kPrefixDecimalBase = 10;
+
+void AppendPrefixText(LogMessage::LogStream& stream, const char* text) {
+  stream.append(text, std::strlen(text));
+}
+
+template <typename Integer>
+void AppendPrefixNumber(LogMessage::LogStream& stream, Integer value,
+                        std::size_t width = 0) {
+  std::array<char, kPrefixNumberBufferSize> number;
+  using UnsignedInteger = typename std::make_unsigned<Integer>::type;
+  const bool negative = value < 0;
+  UnsignedInteger magnitude =
+      negative ? static_cast<UnsignedInteger>(-(value + 1)) + 1
+               : static_cast<UnsignedInteger>(value);
+  char* end = number.data() + number.size();
+  char* begin = end;
+  do {
+    const unsigned int digit = magnitude % kPrefixDecimalBase;
+    *--begin = static_cast<char>('0' + digit);
+    magnitude /= kPrefixDecimalBase;
+  } while (magnitude != 0);
+  if (negative) *--begin = '-';
+
+  const std::size_t digits = static_cast<std::size_t>(end - begin);
+  if (digits < width) {
+    // number has ample unused space ahead of begin (kPrefixNumberBufferSize
+    // comfortably exceeds any width in use here), so the zero padding can be
+    // written directly in front of the digits already extracted above,
+    // instead of copying them into a second buffer.
+    const std::size_t zeroes = width - digits;
+    begin -= zeroes;
+    std::fill_n(begin, zeroes, '0');
+  }
+  stream.append(begin, std::max(digits, width));
+}
+
+void AppendDefaultPrefix(internal::LogMessageData& data, LogSeverity severity,
+                         const LogMessageTime& time) {
+  LogMessage::LogStream& stream = data.stream_;
+  stream.append(LogSeverityNames[severity], 1);
+  data.prefix_severity_len_ = stream.pcount();
+  if (FLAGS_log_year_in_prefix) {
+    AppendPrefixNumber(stream, 1900 + time.year(), kPrefixYearWidth);
+  }
+  AppendPrefixNumber(stream, 1 + time.month(), kPrefixMonthWidth);
+  AppendPrefixNumber(stream, time.day(), kPrefixDayWidth);
+  AppendPrefixText(stream, " ");
+  AppendPrefixNumber(stream, time.hour(), kPrefixHourWidth);
+  AppendPrefixText(stream, ":");
+  AppendPrefixNumber(stream, time.min(), kPrefixMinuteWidth);
+  AppendPrefixText(stream, ":");
+  AppendPrefixNumber(stream, time.sec(), kPrefixSecondWidth);
+  AppendPrefixText(stream, ".");
+  AppendPrefixNumber(stream, time.usec(), kPrefixMicrosecondWidth);
+  data.prefix_timestamp_len_ = stream.pcount() - data.prefix_severity_len_;
+  AppendPrefixText(stream, " ");
+  stream << std::setw(kPrefixThreadIdWidth) << data.thread_id_;
+  data.prefix_threadid_len_ = stream.pcount() - data.prefix_severity_len_ -
+                              data.prefix_timestamp_len_ - 1;
+  AppendPrefixText(stream, " ");
+  AppendPrefixText(stream, data.basename_);
+  AppendPrefixText(stream, ":");
+  AppendPrefixNumber(stream, data.line_);
+  data.prefix_fileline_len_ = stream.pcount() - data.prefix_severity_len_ -
+                              data.prefix_timestamp_len_ - 1 -
+                              data.prefix_threadid_len_ - 1;
+  AppendPrefixText(stream, "] ");
+  data.has_default_prefix_ = true;
+}
 
 // Optional user-configured callback to print custom prefixes.
 class PrefixFormatter {
@@ -2028,42 +2108,16 @@ void LogMessage::Init(const char* file, int line, LogSeverity severity,
   //    (log level, GMT year, month, date, time, thread_id, file basename, line)
   // We exclude the thread_id for the default thread.
   if (FLAGS_log_prefix && (line != kNoLogPrefix)) {
-    std::ios saved_fmt(nullptr);
-    saved_fmt.copyfmt(stream());
-    stream().fill('0');
     if (g_prefix_formatter == nullptr) {
-      stream() << LogSeverityNames[severity][0];
-      // Split into several statements, rather than one long chain of
-      // "<<", to snapshot pcount() between fields below: doing so lets
-      // ColoredWriteToStderrOrStdout() colorize the severity character,
-      // timestamp, thread id, and file:line fields of the prefix
-      // independently, without having to reparse the composed text.
-      data_->prefix_severity_len_ = data_->stream_.pcount();
-      if (FLAGS_log_year_in_prefix) {
-        stream() << setw(4) << 1900 + time_.year();
-      }
-      stream() << setw(2) << 1 + time_.month() << setw(2) << time_.day() << ' '
-               << setw(2) << time_.hour() << ':' << setw(2) << time_.min()
-               << ':' << setw(2) << time_.sec() << "." << setw(6)
-               << time_.usec();
-      data_->prefix_timestamp_len_ =
-          data_->stream_.pcount() - data_->prefix_severity_len_;
-      stream() << ' ' << setfill(' ') << setw(5) << data_->thread_id_
-               << setfill('0');
-      data_->prefix_threadid_len_ = data_->stream_.pcount() -
-                                    data_->prefix_severity_len_ -
-                                    data_->prefix_timestamp_len_ - 1;
-      stream() << ' ' << data_->basename_ << ':' << data_->line_;
-      data_->prefix_fileline_len_ =
-          data_->stream_.pcount() - data_->prefix_severity_len_ -
-          data_->prefix_timestamp_len_ - 1 - data_->prefix_threadid_len_ - 1;
-      stream() << "] ";
-      data_->has_default_prefix_ = true;
+      AppendDefaultPrefix(*data_, severity, time_);
     } else {
+      std::ios saved_fmt(nullptr);
+      saved_fmt.copyfmt(stream());
+      stream().fill('0');
       (*g_prefix_formatter)(stream(), *this);
       stream() << " ";
+      stream().copyfmt(saved_fmt);
     }
-    stream().copyfmt(saved_fmt);
   }
   data_->num_prefix_chars_ = data_->stream_.pcount();
 
@@ -2342,7 +2396,10 @@ logging_fail_func_t InstallFailureFunction(logging_fail_func_t fail_func) {
   return std::exchange(g_logging_fail_func, fail_func);
 }
 
-void LogMessage::Fail() { g_logging_fail_func(); }
+void LogMessage::Fail() {
+  g_logging_fail_func();
+  std::abort();
+}
 
 // L >= log_mutex (callers must hold the log_mutex).
 void LogMessage::SendToSink() EXCLUSIVE_LOCKS_REQUIRED(log_mutex) {
