@@ -11,6 +11,7 @@ jobs:
     defaults:
       run:
         shell: bash
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
     name: GCC-C++${{matrix.std}}-${{matrix.build_type}}-${{matrix.lib}}
     runs-on: ubuntu-26.04
     permissions:

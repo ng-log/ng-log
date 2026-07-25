@@ -8,6 +8,7 @@ concurrency:
 
 jobs:
   build-android:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
     name: NDK-C++${{matrix.std}}-${{matrix.abi}}-${{matrix.build_type}}
     runs-on: ubuntu-26.04
     permissions:
