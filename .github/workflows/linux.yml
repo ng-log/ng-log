@@ -8,7 +8,7 @@ jobs:
       run:
         shell: bash
     name: GCC-C++${{matrix.std}}-${{matrix.build_type}}-${{matrix.lib}}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-26.04
     permissions:
       actions: read
       contents: read
@@ -57,7 +57,7 @@ jobs:
             -DCMAKE_CXX_STANDARD_REQUIRED=ON \
             -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/install \
             -G Ninja \
-            -Werror
+            -Werror=author
 
       - name: Build
         run: |
