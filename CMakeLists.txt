@@ -404,10 +404,6 @@ if (HAVE_ADDR2LINE AND HAVE_LIBBACKTRACE)
   unset (HAVE_ADDR2LINE)
 endif (HAVE_ADDR2LINE AND HAVE_LIBBACKTRACE)
 
-# CMake manages symbolize availability. The definition is necessary only when
-# building the library.
-add_compile_definitions (NGLOG_NO_SYMBOLIZE_DETECTION)
-
 check_cxx_symbol_exists (gmtime_r "cstdlib;ctime" HAVE_GMTIME_R)
 check_cxx_symbol_exists (localtime_r "cstdlib;ctime" HAVE_LOCALTIME_R)
 

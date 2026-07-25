@@ -72,25 +72,6 @@
 
 #include "ng-log/export.h"
 
-// We prefer to let the build system detect the availability of certain features
-// such as symbolization support. HAVE_SYMBOLIZE should therefore be defined by
-// the build system in general unless there is a good reason to perform the
-// detection using the preprocessor.
-#ifndef NGLOG_NO_SYMBOLIZE_DETECTION
-#  ifndef HAVE_SYMBOLIZE
-// defined by gcc
-#    if defined(HAVE_ELF_H) || defined(HAVE_SYS_EXEC_ELF_H)
-#      define HAVE_SYMBOLIZE
-#    elif defined(NGLOG_OS_MACOSX) && defined(HAVE_DLADDR)
-// Use dladdr to symbolize.
-#      define HAVE_SYMBOLIZE
-#    elif defined(NGLOG_OS_WINDOWS)
-// Use DbgHelp to symbolize
-#      define HAVE_SYMBOLIZE
-#    endif
-#  endif  // !defined(HAVE_SYMBOLIZE)
-#endif    // !defined(NGLOG_NO_SYMBOLIZE_DETECTION)
-
 #ifdef HAVE_SYMBOLIZE
 
 #  if !defined(SIZEOF_VOID_P) && defined(__SIZEOF_POINTER__)
