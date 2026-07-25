@@ -41,6 +41,15 @@
 
 namespace nglog {
 
+namespace internal {
+
+constexpr int kInfoSeverity = 0;
+constexpr int kWarningSeverity = 1;
+constexpr int kErrorSeverity = 2;
+constexpr int kFatalSeverity = 3;
+
+}  // namespace internal
+
 // The recommended semantics of the log levels are as follows:
 //
 // INFO:
@@ -61,18 +70,14 @@ namespace nglog {
 // you ever need to change their values or add a new severity.
 
 enum LogSeverity {
-  NGLOG_INFO = 0,
-  NGLOG_WARNING = 1,
-  NGLOG_ERROR = 2,
-  NGLOG_FATAL = 3,
 #ifndef NGLOG_NO_ABBREVIATED_SEVERITIES
 #  ifdef ERROR
 #  error "ERROR macro is defined. Define NGLOG_NO_ABBREVIATED_SEVERITIES before including logging.h. See https://ng-log.github.io/ng-log/stable/windows/ for details."
 #  endif
-  INFO = NGLOG_INFO,
-  WARNING = NGLOG_WARNING,
-  ERROR = NGLOG_ERROR,
-  FATAL = NGLOG_FATAL
+  INFO = internal::kInfoSeverity,
+  WARNING = internal::kWarningSeverity,
+  ERROR = internal::kErrorSeverity,
+  FATAL = internal::kFatalSeverity
 #endif
 };
 
@@ -91,9 +96,9 @@ constexpr int NUM_SEVERITIES = 4;
 
 // DFATAL is FATAL in debug mode, ERROR in normal mode
 #ifdef NDEBUG
-#  define DFATAL_LEVEL ERROR
+#  define DFATAL_LEVEL NGLOG_ERROR
 #else
-#  define DFATAL_LEVEL FATAL
+#  define DFATAL_LEVEL NGLOG_FATAL
 #endif
 
 // NDEBUG usage helpers related to (RAW_)DCHECK:
@@ -124,9 +129,13 @@ enum { DEBUG_MODE = 1 };
 
 }  // namespace nglog
 
-using nglog::NGLOG_ERROR;
-using nglog::NGLOG_FATAL;
-using nglog::NGLOG_INFO;
-using nglog::NGLOG_WARNING;
+constexpr nglog::LogSeverity NGLOG_INFO =
+    static_cast<nglog::LogSeverity>(nglog::internal::kInfoSeverity);
+constexpr nglog::LogSeverity NGLOG_WARNING =
+    static_cast<nglog::LogSeverity>(nglog::internal::kWarningSeverity);
+constexpr nglog::LogSeverity NGLOG_ERROR =
+    static_cast<nglog::LogSeverity>(nglog::internal::kErrorSeverity);
+constexpr nglog::LogSeverity NGLOG_FATAL =
+    static_cast<nglog::LogSeverity>(nglog::internal::kFatalSeverity);
 
 #endif  // NGLOG_LOG_SEVERITY_H

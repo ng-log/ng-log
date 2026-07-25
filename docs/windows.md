@@ -3,6 +3,9 @@
 ng-log defines the severity level `ERROR`, which is also defined by `windows.h`.
 You can make nglog not define `INFO`, `WARNING`, `ERROR`, and `FATAL` by
 defining `NGLOG_NO_ABBREVIATED_SEVERITIES` before including `nglog/logging.h`.
+The prefixed constants `NGLOG_INFO`, `NGLOG_WARNING`, `NGLOG_ERROR`, and
+`NGLOG_FATAL` are always available in the global namespace.
+
 Even with this macro, you can still use the iostream like logging facilities:
 
 ``` cpp
@@ -30,7 +33,7 @@ functions defined in `nglog/logging.h`.
 // nglog::FlushLogFiles(nglog::ERROR);
 
 // Use this instead.
-nglog::FlushLogFiles(nglog::NGLOG_ERROR);
+nglog::FlushLogFiles(NGLOG_ERROR);
 ```
 
 If you don't need `ERROR` defined by `windows.h`, there are a couple of more

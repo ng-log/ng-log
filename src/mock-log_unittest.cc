@@ -41,9 +41,6 @@
 
 namespace {
 
-using nglog::NGLOG_ERROR;
-using nglog::NGLOG_INFO;
-using nglog::NGLOG_WARNING;
 using nglog::nglog_testing::ScopedMockLog;
 using std::string;
 using testing::_;

@@ -8,3 +8,6 @@ target_link_libraries (ng-log_log_severity_constants PRIVATE ng-log::ng-log)
 
 add_executable (ng-log_log_severity_conversion ng-log_log_severity_conversion.cc)
 target_link_libraries (ng-log_log_severity_conversion PRIVATE ng-log::ng-log)
+
+add_executable (ng-log_log_severity_qualified ng-log_log_severity_qualified.cc)
+target_link_libraries (ng-log_log_severity_qualified PRIVATE ng-log::ng-log)

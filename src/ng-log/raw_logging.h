@@ -63,24 +63,24 @@ namespace nglog {
 // These will print an almost standard log lines like this to stderr only:
 //   E20200821 211317 file.cc:123] RAW: Failed foo with 22: bad_file
 //   I20200821 211317 file.cc:142] RAW: status is 20
-#define RAW_LOG(severity, ...)         \
-  do {                                 \
-    switch (nglog::NGLOG_##severity) { \
-      case 0:                          \
-        RAW_LOG_INFO(__VA_ARGS__);     \
-        break;                         \
-      case 1:                          \
-        RAW_LOG_WARNING(__VA_ARGS__);  \
-        break;                         \
-      case 2:                          \
-        RAW_LOG_ERROR(__VA_ARGS__);    \
-        break;                         \
-      case 3:                          \
-        RAW_LOG_FATAL(__VA_ARGS__);    \
-        break;                         \
-      default:                         \
-        break;                         \
-    }                                  \
+#define RAW_LOG(severity, ...)        \
+  do {                                \
+    switch (NGLOG_##severity) {       \
+      case 0:                         \
+        RAW_LOG_INFO(__VA_ARGS__);    \
+        break;                        \
+      case 1:                         \
+        RAW_LOG_WARNING(__VA_ARGS__); \
+        break;                        \
+      case 2:                         \
+        RAW_LOG_ERROR(__VA_ARGS__);   \
+        break;                        \
+      case 3:                         \
+        RAW_LOG_FATAL(__VA_ARGS__);   \
+        break;                        \
+      default:                        \
+        break;                        \
+    }                                 \
   } while (0)
 
 // The following NGLOG_STRIP_LOG testing is performed in the header file so that
@@ -99,28 +99,28 @@ namespace nglog {
 
 #if !defined(NGLOG_STRIP_LOG) || NGLOG_STRIP_LOG == 0
 #  define RAW_LOG_INFO(...) \
-    nglog::RawLog(nglog::NGLOG_INFO, __FILE__, __LINE__, __VA_ARGS__)
+    nglog::RawLog(NGLOG_INFO, __FILE__, __LINE__, __VA_ARGS__)
 #else
 #  define RAW_LOG_INFO(...) nglog::RawLogStub(0, __VA_ARGS__)
 #endif  // NGLOG_STRIP_LOG == 0
 
 #if !defined(NGLOG_STRIP_LOG) || NGLOG_STRIP_LOG <= 1
 #  define RAW_LOG_WARNING(...) \
-    nglog::RawLog(nglog::NGLOG_WARNING, __FILE__, __LINE__, __VA_ARGS__)
+    nglog::RawLog(NGLOG_WARNING, __FILE__, __LINE__, __VA_ARGS__)
 #else
 #  define RAW_LOG_WARNING(...) nglog::RawLogStub(0, __VA_ARGS__)
 #endif  // NGLOG_STRIP_LOG <= 1
 
 #if !defined(NGLOG_STRIP_LOG) || NGLOG_STRIP_LOG <= 2
 #  define RAW_LOG_ERROR(...) \
-    nglog::RawLog(nglog::NGLOG_ERROR, __FILE__, __LINE__, __VA_ARGS__)
+    nglog::RawLog(NGLOG_ERROR, __FILE__, __LINE__, __VA_ARGS__)
 #else
 #  define RAW_LOG_ERROR(...) nglog::RawLogStub(0, __VA_ARGS__)
 #endif  // NGLOG_STRIP_LOG <= 2
 
 #if !defined(NGLOG_STRIP_LOG) || NGLOG_STRIP_LOG <= 3
 #  define RAW_LOG_FATAL(...) \
-    nglog::RawLog(nglog::NGLOG_FATAL, __FILE__, __LINE__, __VA_ARGS__)
+    nglog::RawLog(NGLOG_FATAL, __FILE__, __LINE__, __VA_ARGS__)
 #else
 #  define RAW_LOG_FATAL(...)             \
     do {                                 \
