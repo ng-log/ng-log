@@ -2,6 +2,10 @@ name: Android
 
 on: [push, pull_request]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-android:
     name: NDK-C++${{matrix.std}}-${{matrix.abi}}-${{matrix.build_type}}
