@@ -9,6 +9,8 @@
 - Make crash-trace demangling safe when symbol names exceed the output buffer
 - Use the ng-log version in CMake package compatibility errors
 - Restore Linux LWP identifiers in crash signal reports
+- Arrange signal headers before program counters in crash reports after the
+  signal handler emitted the header after the PC
 - Report sub-hour UTC offsets through `LogMessageTime::gmtoffset`
 - Cap oversized `max_log_size` values instead of using the 1 MB minimum
 

@@ -354,6 +354,12 @@ static void HandleSignal(int signal_number
   // First dump time info.
   DumpTimeInfo();
 
+#if defined(HAVE_STACKTRACE) && defined(HAVE_SIGACTION)
+  DumpSignalInfo(signal_number, signal_info);
+#elif !defined(NGLOG_OS_WINDOWS)
+  (void)signal_info;
+#endif
+
 #if !defined(NGLOG_OS_WINDOWS)
   // Get the program counter from ucontext.
   void* pc = GetPC(ucontext);
@@ -365,17 +371,10 @@ static void HandleSignal(int signal_number
   void* stack[32];
   // +1 to exclude this function.
   const int depth = GetStackTrace(stack, ARRAYSIZE(stack), 1);
-#  ifdef HAVE_SIGACTION
-  DumpSignalInfo(signal_number, signal_info);
-#  elif !defined(NGLOG_OS_WINDOWS)
-  (void)signal_info;
-#  endif
   // Dump the stack traces.
   for (int i = 0; i < depth; ++i) {
     DumpStackFrameInfo("    ", stack[i]);
   }
-#elif !defined(NGLOG_OS_WINDOWS)
-  (void)signal_info;
 #endif
 
   // *** TRANSITION ***

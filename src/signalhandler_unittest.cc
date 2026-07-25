@@ -235,6 +235,15 @@ static bool ExpectChildExitsSuccessfully(const char* self_path,
 TEST(SignalHandler, Installed) {
   EXPECT_TRUE(IsFailureSignalHandlerInstalled());
 }
+
+#  if defined(HAVE_SIGACTION) && !defined(NGLOG_OS_WINDOWS)
+TEST(SignalHandler, FailureDumpOrder) {
+  ASSERT_DEATH(CrashInThread(),
+               "\\*\\*\\* Aborted at [^\n]*\n"
+               "\\*\\*\\* SIGSEGV [^\n]*\n"
+               "PC: ");
+}
+#  endif  // defined(HAVE_SIGACTION) && !defined(NGLOG_OS_WINDOWS)
 #endif  // defined(HAVE_STACKTRACE) && defined(HAVE_SYMBOLIZE)
 
 int main(int argc, char** argv) {
