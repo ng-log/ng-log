@@ -5,7 +5,7 @@ on: [push, pull_request]
 jobs:
   build-android:
     name: NDK-C++${{matrix.std}}-${{matrix.abi}}-${{matrix.build_type}}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       actions: read
       contents: read
@@ -14,7 +14,7 @@ jobs:
       run:
         shell: bash
     env:
-      NDK_VERSION: 27.3.13750724
+      NDK_VERSION: 29.0.14206865
     strategy:
       fail-fast: true
       matrix:

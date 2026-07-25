@@ -8,7 +8,7 @@ jobs:
       run:
         shell: bash
     name: GCC-C++${{matrix.std}}-${{matrix.build_type}}-${{matrix.lib}}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-26.04
     permissions:
       actions: read
       contents: read
@@ -71,9 +71,9 @@ jobs:
                 --target install
 
           cmake build_${{matrix.build_type}} \
-                -DCMAKE_INSTALL_INCLUDEDIR=${{runner.workspace}}/foo/include \
-                -DCMAKE_INSTALL_LIBDIR=${{runner.workspace}}/foo/lib \
-                -DCMAKE_INSTALL_DATAROOTDIR=${{runner.workspace}}/foo/share
+                -DCMAKE_INSTALL_INCLUDEDIR=foo/include \
+                -DCMAKE_INSTALL_LIBDIR=foo/lib \
+                -DCMAKE_INSTALL_DATAROOTDIR=foo/share
           cmake --build build_${{matrix.build_type}} \
                 --config ${{matrix.build_type}} \
                 --target install
@@ -93,7 +93,7 @@ jobs:
           cmake -S src/package_config_unittest/working_config \
                 -B build_${{matrix.build_type}}_package_foo \
                 -DCMAKE_BUILD_TYPE=${{matrix.build_type}} \
-                -DCMAKE_PREFIX_PATH=${{runner.workspace}}/foo \
+                -DCMAKE_PREFIX_PATH=${{github.workspace}}/install/foo \
                 -G Ninja
           cmake --build build_${{matrix.build_type}}_package_foo \
                 --config ${{matrix.build_type}}
