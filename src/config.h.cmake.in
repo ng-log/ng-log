@@ -65,6 +65,12 @@
 /* Define if you have the `nanosleep' function */
 #cmakedefine HAVE_NANOSLEEP
 
+/* Define if pthread_getname_np is available */
+#cmakedefine HAVE_PTHREAD_GETNAME_NP
+
+/* Define if GetThreadDescription is available */
+#cmakedefine HAVE_GET_THREAD_DESCRIPTION
+
 /* Define to 1 if you have the <syscall.h> header file. */
 #cmakedefine HAVE_SYSCALL_H
 

@@ -53,6 +53,9 @@
 #ifdef HAVE_SYS_UCONTEXT_H
 #  include <sys/ucontext.h>
 #endif
+#ifdef HAVE_PTHREAD_GETNAME_NP
+#  include <pthread.h>
+#endif
 #ifdef HAVE_UNISTD_H
 #  include <unistd.h>
 #endif
@@ -180,6 +183,37 @@ void WriteToStderr(const char* data, size_t size) {
 // The writer function can be changed by InstallFailureWriter().
 void (*g_failure_writer)(const char* data, size_t size) = WriteToStderr;
 
+#if defined(HAVE_STACKTRACE) && defined(HAVE_SIGACTION)
+constexpr std::size_t kThreadNameBufferSize = 64;
+
+// Called from the failure signal handler, so this function must remain
+// async-signal-safe.
+bool GetThreadName(char* buffer, std::size_t buffer_size) {
+  if (buffer_size == 0) {
+    return false;
+  }
+  buffer[0] = '\0';
+
+#  if defined(NGLOG_OS_WINDOWS) && defined(HAVE_GET_THREAD_DESCRIPTION)
+  PWSTR wide_name = nullptr;
+  if (FAILED(GetThreadDescription(GetCurrentThread(), &wide_name)) ||
+      wide_name == nullptr) {
+    return false;
+  }
+  const int result =
+      WideCharToMultiByte(CP_UTF8, 0, wide_name, -1, buffer,
+                          static_cast<int>(buffer_size), nullptr, nullptr);
+  LocalFree(wide_name);
+  return result > 1;
+#  elif defined(HAVE_PTHREAD_GETNAME_NP)
+  return pthread_getname_np(pthread_self(), buffer, buffer_size) == 0 &&
+         buffer[0] != '\0';
+#  else
+  return false;
+#  endif
+}
+#endif  // defined(HAVE_STACKTRACE) && defined(HAVE_SIGACTION)
+
 // Dumps time information.  We don't dump human-readable time information
 // as localtime() is not guaranteed to be async signal safe.
 void DumpTimeInfo() {
@@ -236,6 +270,13 @@ void DumpSignalInfo(int signal_number, siginfo_t* siginfo) {
   formatter.AppendString(" LWP ");
   formatter.AppendUint64(static_cast<uint64>(tid), 10);
 #  endif
+
+  char thread_name[kThreadNameBufferSize];
+  if (GetThreadName(thread_name, sizeof(thread_name))) {
+    formatter.AppendString(" thread \"");
+    formatter.AppendString(thread_name);
+    formatter.AppendString("\"");
+  }
   formatter.AppendString(") ");
 
   // Only linux has the PID of the signal sender in si_pid.

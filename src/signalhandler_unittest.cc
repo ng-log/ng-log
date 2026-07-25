@@ -56,6 +56,7 @@
 #  include <unistd.h>
 #endif
 #if defined(NGLOG_OS_LINUX)
+#  include <pthread.h>
 #  include <sys/syscall.h>
 #endif  // defined(NGLOG_OS_LINUX)
 #if !defined(NGLOG_OS_WINDOWS)
@@ -236,6 +237,14 @@ TEST(SignalHandler, Installed) {
   EXPECT_TRUE(IsFailureSignalHandlerInstalled());
 }
 #endif  // defined(HAVE_STACKTRACE) && defined(HAVE_SYMBOLIZE)
+
+#if defined(NGLOG_OS_LINUX)
+TEST(SignalHandler, ThreadNameInFailureDump) {
+  constexpr char kThreadName[] = "named-crash";
+  ASSERT_EQ(pthread_setname_np(pthread_self(), kThreadName), 0);
+  ASSERT_DEATH(abort(), "thread \\\"named-crash\\\"");
+}
+#endif  // defined(NGLOG_OS_LINUX)
 
 int main(int argc, char** argv) {
 #if defined(HAVE_STACKTRACE) && defined(HAVE_SYMBOLIZE)

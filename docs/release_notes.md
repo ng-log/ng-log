@@ -11,6 +11,7 @@
 - Prevent concurrent log writers from blocking during memory-drop maintenance
 - Make log cleanup work with non-ASCII Windows directories
 - Omit the default header format when a custom prefix formatter is installed
+- Include the current thread name in failure signal reports when available
 
 !!! warning "Compatibility"
     If your application depends on glog compatibility, use the 0.8.x series.
