@@ -1,4 +1,5 @@
 // Copyright (c) 2022, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -49,16 +50,17 @@ using testing::_;
 using testing::EndsWith;
 using testing::InSequence;
 using testing::InvokeWithoutArgs;
+using testing::StrEq;
 
 // Tests that ScopedMockLog intercepts LOG()s when it's alive.
 TEST(ScopedMockLogTest, InterceptsLog) {
   ScopedMockLog log;
 
   InSequence s;
-  EXPECT_CALL(log,
-              Log(NGLOG_WARNING, EndsWith("mock-log_unittest.cc"), "Fishy."));
-  EXPECT_CALL(log, Log(NGLOG_INFO, _, "Working...")).Times(2);
-  EXPECT_CALL(log, Log(NGLOG_ERROR, _, "Bad!!"));
+  EXPECT_CALL(log, Log(NGLOG_WARNING, EndsWith("mock-log_unittest.cc"),
+                       StrEq("Fishy.")));
+  EXPECT_CALL(log, Log(NGLOG_INFO, _, StrEq("Working..."))).Times(2);
+  EXPECT_CALL(log, Log(NGLOG_ERROR, _, StrEq("Bad!!")));
 
   LOG(WARNING) << "Fishy.";
   LOG(INFO) << "Working...";
@@ -82,13 +84,18 @@ void LogForest() {
 TEST(ScopedMockLogTest, LogDuringIntercept) {
   ScopedMockLog log;
   InSequence s;
-  EXPECT_CALL(log, Log(NGLOG_INFO, __FILE__, "Logging a branch..."))
+  EXPECT_CALL(log,
+              Log(NGLOG_INFO, StrEq(__FILE__), StrEq("Logging a branch...")))
       .WillOnce(InvokeWithoutArgs(LogTree));
-  EXPECT_CALL(log, Log(NGLOG_INFO, __FILE__, "Logging the whole tree..."))
+  EXPECT_CALL(
+      log, Log(NGLOG_INFO, StrEq(__FILE__), StrEq("Logging the whole tree...")))
       .WillOnce(InvokeWithoutArgs(LogForest));
-  EXPECT_CALL(log, Log(NGLOG_INFO, __FILE__, "Logging the entire forest."));
-  EXPECT_CALL(log, Log(NGLOG_INFO, __FILE__, "Logging the entire forest.."));
-  EXPECT_CALL(log, Log(NGLOG_INFO, __FILE__, "Logging the entire forest..."));
+  EXPECT_CALL(log, Log(NGLOG_INFO, StrEq(__FILE__),
+                       StrEq("Logging the entire forest.")));
+  EXPECT_CALL(log, Log(NGLOG_INFO, StrEq(__FILE__),
+                       StrEq("Logging the entire forest..")));
+  EXPECT_CALL(log, Log(NGLOG_INFO, StrEq(__FILE__),
+                       StrEq("Logging the entire forest...")));
   LogBranch();
 }
 

@@ -84,6 +84,7 @@ using testing::AnyNumber;
 using testing::HasSubstr;
 using testing::InitGoogleMock;
 using testing::SaveArg;
+using testing::StrEq;
 using testing::StrictMock;
 using testing::StrNe;
 
@@ -268,14 +269,17 @@ namespace {
 }  // namespace
 
 TEST(DeathNoAllocNewHook, logging) {
-  // tests that NewHook used below works
-  NewHook new_hook;
   // Avoid unused warnings under MinGW
   //
   // NOTE MSVC produces warning C4551 here if we do not take the address of the
   // function explicitly.
   (void)&allocInt;
-  ASSERT_DEATH({ allocInt(); }, "unexpected new");
+  ASSERT_DEATH(
+      {
+        NewHook new_hook;
+        allocInt();
+      },
+      "unexpected new");
 }
 
 void TestRawLogging() {
@@ -1547,7 +1551,7 @@ TEST(DVLog, Basic) {
   // We are expecting that nothing is logged.
   EXPECT_CALL(log, Log(_, _, _)).Times(0);
 #else
-  EXPECT_CALL(log, Log(NGLOG_INFO, __FILE__, "debug log"));
+  EXPECT_CALL(log, Log(NGLOG_INFO, StrEq(__FILE__), StrEq("debug log")));
 #endif
 
   FLAGS_v = 1;
@@ -1568,8 +1572,9 @@ TEST(LogAtLevel, Basic) {
   ScopedMockLog log;
 
   // The function version outputs "logging.h" as a file name.
-  EXPECT_CALL(log, Log(NGLOG_WARNING, StrNe(__FILE__), "function version"));
-  EXPECT_CALL(log, Log(NGLOG_INFO, __FILE__, "macro version"));
+  EXPECT_CALL(log,
+              Log(NGLOG_WARNING, StrNe(__FILE__), StrEq("function version")));
+  EXPECT_CALL(log, Log(NGLOG_INFO, StrEq(__FILE__), StrEq("macro version")));
 
   LogSeverity severity = NGLOG_WARNING;
   LogAtLevel(severity, "function version");
@@ -1599,7 +1604,8 @@ TEST(TestExitOnDFatal, ToBeOrNotToBe) {
 #else
         NGLOG_FATAL;
 #endif
-    EXPECT_CALL(log, Log(severity, __FILE__, "This should not be fatal"));
+    EXPECT_CALL(
+        log, Log(severity, StrEq(__FILE__), StrEq("This should not be fatal")));
     LOG(DFATAL) << "This should not be fatal";
   }
 
@@ -1632,8 +1638,8 @@ TEST(LogBacktraceAt, DoesNotBacktraceWhenDisabled) {
 
   FLAGS_log_backtrace_at = "";
 
-  EXPECT_CALL(log, Log(_, _, "Backtrace me"));
-  EXPECT_CALL(log, Log(_, _, "Not me"));
+  EXPECT_CALL(log, Log(_, _, StrEq("Backtrace me")));
+  EXPECT_CALL(log, Log(_, _, StrEq("Not me")));
 
   BacktraceAtHelper();
 }
@@ -1662,7 +1668,7 @@ TEST(LogBacktraceAt, DoesBacktraceAtRightLineWhenEnabled) {
   EXPECT_CALL(log, Log(_, _, HasSubstr("stacktrace:")))
       .WillOnce(SaveArg<2>(&backtrace_message));
   // Other LOGs should not include a backtrace.
-  EXPECT_CALL(log, Log(_, _, "Not me"));
+  EXPECT_CALL(log, Log(_, _, StrEq("Not me")));
 
   BacktraceAtHelper();
 

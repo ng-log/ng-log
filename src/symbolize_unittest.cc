@@ -34,6 +34,7 @@
 
 #include "symbolize.h"
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <csignal>
@@ -51,6 +52,11 @@ using namespace GFLAGS_NAMESPACE;
 
 using namespace std;
 using namespace nglog;
+
+using testing::AnyOf;
+using testing::IsNull;
+using testing::Not;
+using testing::StrEq;
 
 // Avoid compile error due to "cast between pointer-to-function and
 // pointer-to-object is an extension" warnings.
@@ -125,12 +131,12 @@ TEST(Symbolize, Symbolize) {
       TrySymbolize(reinterpret_cast<void*>(&static_func));
 
 #    if !defined(_MSC_VER) || !defined(NDEBUG)
-  CHECK(nullptr != static_func_symbol);
-  EXPECT_TRUE(strcmp("static_func", static_func_symbol) == 0 ||
-              strcmp("static_func()", static_func_symbol) == 0);
+  ASSERT_THAT(static_func_symbol, Not(IsNull()));
+  EXPECT_THAT(static_func_symbol,
+              AnyOf(StrEq("static_func"), StrEq("static_func()")));
 #    endif
 
-  EXPECT_TRUE(nullptr == TrySymbolize(nullptr));
+  EXPECT_THAT(TrySymbolize(nullptr), IsNull());
 }
 
 struct Foo {
@@ -316,9 +322,8 @@ TEST(Symbolize, SymbolizeStackConsumption) {
   // mangled or an unmangled name here.
   symbol = SymbolizeStackConsumption(reinterpret_cast<void*>(&static_func),
                                      &stack_consumed);
-  CHECK(nullptr != symbol);
-  EXPECT_TRUE(strcmp("static_func", symbol) == 0 ||
-              strcmp("static_func()", symbol) == 0);
+  ASSERT_THAT(symbol, Not(IsNull()));
+  EXPECT_THAT(symbol, AnyOf(StrEq("static_func"), StrEq("static_func()")));
   EXPECT_GT(stack_consumed, 0);
 #      if !defined(HAVE___CXA_DEMANGLE)
   EXPECT_LT(stack_consumed, kStackConsumptionUpperLimit);

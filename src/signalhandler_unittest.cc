@@ -30,8 +30,11 @@
 //
 // Author: Satoru Takabayashi
 //
-// This is a helper binary for testing signalhandler.cc.  The actual test
-// is done in signalhandler_unittest.sh.
+// This is a helper binary for testing signalhandler.cc.  Scenarios that
+// terminate the process are invoked through command-line arguments.
+
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
 
 #include <atomic>
 #include <chrono>
@@ -228,9 +231,17 @@ static bool ExpectChildExitsSuccessfully(const char* self_path,
 #  endif  // defined(NGLOG_OS_LINUX)
 #endif  // !defined(NGLOG_OS_WINDOWS)
 
+#if defined(HAVE_STACKTRACE) && defined(HAVE_SYMBOLIZE)
+TEST(SignalHandler, Installed) {
+  EXPECT_TRUE(IsFailureSignalHandlerInstalled());
+}
+#endif  // defined(HAVE_STACKTRACE) && defined(HAVE_SYMBOLIZE)
+
 int main(int argc, char** argv) {
 #if defined(HAVE_STACKTRACE) && defined(HAVE_SYMBOLIZE)
   InitializeLogging(argv[0]);
+  testing::InitGoogleTest(&argc, argv);
+  testing::InitGoogleMock(&argc, argv);
 #  ifdef NGLOG_USE_GFLAGS
   ParseCommandLineFlags(&argc, &argv, true);
 #  endif
@@ -292,8 +303,7 @@ int main(int argc, char** argv) {
     return ok ? 0 : 1;
 #  endif  // !defined(NGLOG_OS_WINDOWS)
   } else {
-    // Tell the shell script
-    puts("OK");
+    return RUN_ALL_TESTS();
   }
 #endif
   return 0;
