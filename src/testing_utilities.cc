@@ -201,9 +201,11 @@ void PrintDiff(const std::vector<std::string>& golden,
 // Get the captured stdout or stderr as a string
 std::string GetCapturedTestOutput(int fd) {
   CHECK((fd == fileno(stdout)) || (fd == fileno(stderr)));
-  std::unique_ptr<CapturedStream> cap = std::move(s_captured_streams.at(fd));
-  s_captured_streams.erase(fd);
-  CHECK(cap) << ": did you forget CaptureTestStdout() or CaptureTestStderr()?";
+  auto pos = s_captured_streams.find(fd);
+  CHECK(pos != s_captured_streams.end())
+      << ": did you forget CaptureTestStdout() or CaptureTestStderr()?";
+  std::unique_ptr<CapturedStream> cap = std::move(pos->second);
+  s_captured_streams.erase(pos);
 
   // Make sure everything is flushed.
   cap->StopCapture();
@@ -223,9 +225,14 @@ bool IsLoggingPrefix(const std::string& s) {
   if (s.size() != kLoggingPrefixLength) {
     return false;
   }
-  if (!strchr("IWEF", s[0])) return false;
+  if (s[0] == '\0' || !strchr("IWEF", s[0])) return false;
   for (size_t i = 1; i <= 8; ++i) {
-    if (!isdigit(s[i]) && s[i] != "YEARDATE"[i - 1]) return false;
+    // Cast to unsigned char: passing a negative char (e.g. from non-ASCII
+    // log content) to isdigit() is undefined behavior.
+    if (!isdigit(static_cast<unsigned char>(s[i])) &&
+        s[i] != "YEARDATE"[i - 1]) {
+      return false;
+    }
   }
   return true;
 }
@@ -308,14 +315,6 @@ std::string Munge(const std::string& filename) {
 }
 
 bool MungeAndDiffTest(const std::string& golden_filename, CapturedStream* cap) {
-  auto pos = s_captured_streams.find(fileno(stdout));
-
-  if (pos != s_captured_streams.end() && cap == pos->second.get()) {
-    CHECK(cap) << ": did you forget CaptureTestStdout()?";
-  } else {
-    CHECK(cap) << ": did you forget CaptureTestStderr()?";
-  }
-
   cap->StopCapture();
 
   // Run munge
@@ -371,13 +370,17 @@ std::string GetCapturedTestStderr() {
 }
 
 bool MungeAndDiffTestStdout(const std::string& golden_filename) {
-  return MungeAndDiffTest(golden_filename,
-                          s_captured_streams.at(fileno(stdout)).get());
+  auto pos = s_captured_streams.find(fileno(stdout));
+  CHECK(pos != s_captured_streams.end())
+      << ": did you forget CaptureTestStdout()?";
+  return MungeAndDiffTest(golden_filename, pos->second.get());
 }
 
 bool MungeAndDiffTestStderr(const std::string& golden_filename) {
-  return MungeAndDiffTest(golden_filename,
-                          s_captured_streams.at(fileno(stderr)).get());
+  auto pos = s_captured_streams.find(fileno(stderr));
+  CHECK(pos != s_captured_streams.end())
+      << ": did you forget CaptureTestStderr()?";
+  return MungeAndDiffTest(golden_filename, pos->second.get());
 }
 
 void (*g_new_hook)() = nullptr;
