@@ -468,17 +468,12 @@ class LogCleaner {
 
   // Body of the cleaner thread: sleeps until the earliest cleanup deadline
   // (or until woken up by Enable(), Disable() or AddLogFilePattern()) and
-  // removes overdue logs of every pattern whose deadline has passed. Before
-  // terminating, the thread handles all deadlines which have already passed,
-  // which makes cleaning deterministic for callers that disable the cleaner
-  // right before exiting.
+  // removes overdue logs of every pattern whose deadline has passed. Returns
+  // as soon as the cleaner is disabled.
   void ThreadMain();
 
-  // Stops and joins the cleaner thread. Discards the registered patterns
-  // when requested so that no further scan is started (used during
-  // destruction, when objects with static storage duration needed by a scan
-  // may already be gone).
-  void Stop(bool discard_patterns);
+  // Stops and joins the cleaner thread.
+  void Stop();
 
   static void CleanOverdueLogs(
       const std::chrono::system_clock::time_point& current_time,
@@ -1366,16 +1361,13 @@ void LogFileObject::Write(
   }
 }
 
-LogCleaner::~LogCleaner() { Stop(/*discard_patterns=*/true); }
+LogCleaner::~LogCleaner() { Stop(); }
 
-void LogCleaner::Stop(bool discard_patterns) {
+void LogCleaner::Stop() {
   std::thread cleaner;
   {
     std::lock_guard<std::mutex> l{mutex_};
     enabled_ = false;
-    if (discard_patterns) {
-      patterns_.clear();
-    }
     cleaner.swap(thread_);
   }
   cond_.notify_one();
@@ -1402,7 +1394,7 @@ void LogCleaner::Enable(const std::chrono::minutes& overdue) {
   cond_.notify_one();
 }
 
-void LogCleaner::Disable() { Stop(/*discard_patterns=*/false); }
+void LogCleaner::Disable() { Stop(); }
 
 void LogCleaner::AddLogFilePattern(bool base_filename_selected,
                                    const string& base_filename,
@@ -1423,7 +1415,7 @@ void LogCleaner::AddLogFilePattern(bool base_filename_selected,
 void LogCleaner::ThreadMain() {
   std::unique_lock<std::mutex> l{mutex_};
 
-  for (;;) {
+  while (enabled_) {
     // Scans are scheduled on the steady clock; the wall-clock time is only
     // used to decide how old a log file is.
     const auto now = std::chrono::steady_clock::now();
@@ -1457,10 +1449,6 @@ void LogCleaner::ThreadMain() {
       // New patterns may have been registered or the cleaner may have been
       // stopped while the lock was released.
       continue;
-    }
-
-    if (!enabled_) {
-      break;
     }
 
     if (patterns_.empty()) {
