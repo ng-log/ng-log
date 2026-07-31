@@ -1394,7 +1394,28 @@ void LogCleaner::Enable(const std::chrono::minutes& overdue) {
   cond_.notify_one();
 }
 
-void LogCleaner::Disable() { Stop(); }
+void LogCleaner::Disable() {
+  Stop();
+
+  // Callers disable the cleaner right before exiting and expect cleaning to
+  // have happened by the time Disable() returns, so run a final scan here
+  // rather than racing the cleaner thread for it. Stop() has already joined
+  // that thread, so this runs uncontended.
+  std::unordered_map<std::string, LogFilePattern> patterns;
+  std::chrono::minutes overdue;
+  {
+    std::lock_guard<std::mutex> l{mutex_};
+    patterns = patterns_;
+    overdue = overdue_;
+  }
+
+  const auto current_time = std::chrono::system_clock::now();
+  for (const auto& pattern : patterns) {
+    CleanOverdueLogs(current_time, overdue,
+                     pattern.second.base_filename_selected, pattern.first,
+                     pattern.second.filename_extension);
+  }
+}
 
 void LogCleaner::AddLogFilePattern(bool base_filename_selected,
                                    const string& base_filename,
