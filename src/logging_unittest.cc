@@ -18,6 +18,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -1287,6 +1288,31 @@ TEST(Logging, Basename) {
   DeleteFiles(dest + "*");
 }
 
+TEST(Logging, LogfileMode) {
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+
+#ifdef NGLOG_OS_WINDOWS
+  constexpr std::uint32_t kLogfileMode = _S_IREAD | _S_IWRITE;
+#else
+  constexpr std::uint32_t kLogfileMode = S_IRUSR | S_IWUSR;
+#endif
+  nglog::SetFlag(FLAGS_logfile_mode, nglog::FileMode{kLogfileMode});
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
+
+  const string dest = TestTmpDir() + "/logging_test_file_mode";
+  DeleteFiles(dest + "*");
+
+  SetLogDestination(NGLOG_INFO, dest.c_str());
+  LOG(INFO) << "message with configured logfile mode";
+  FlushLogFiles(NGLOG_INFO);
+
+  CheckFile(dest, "message with configured logfile mode");
+
+  LogToStderr();
+  DeleteFiles(dest + "*");
+}
+
 TEST(Logging, BasenameAppendWhenNoTimestamp) {
   nglog::ScopedFlags<> save;
   nglog::SetFlag(FLAGS_logtostderr, false);
@@ -1859,8 +1885,33 @@ static void TestOneTruncate(const char* path, uint64 limit, uint64 keep,
   }
 }
 
+TEST(Logging, TruncateKeepsTrailingLinesByteForByte) {
+#if defined(HAVE_UNISTD_H) || defined(HAVE__CHSIZE_S)
+  const string path = TestTmpDir() + "/truncate_lines";
+  constexpr char kDiscarded[] = "discarded line\n";
+  constexpr char kKept[] = "kept line\n";
+  constexpr std::size_t kKeptLength = sizeof(kKept) - 1;
+  {
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    output << kDiscarded << kKept;
+    ASSERT_TRUE(output);
+  }
+
+  TruncateLogFile(path.c_str(), kKeptLength, kKeptLength);
+
+  std::ifstream input(path, std::ios::binary);
+  const std::string contents{std::istreambuf_iterator<char>(input),
+                             std::istreambuf_iterator<char>()};
+  EXPECT_EQ(contents, kKept);
+  input.close();
+  DeleteFiles(path);
+#else
+  GTEST_SKIP() << "Log truncation is not supported";
+#endif
+}
+
 TEST(Logging, Truncate) {
-#ifdef HAVE_UNISTD_H
+#if defined(HAVE_UNISTD_H) || defined(HAVE__CHSIZE_S)
   fprintf(stderr, "==== Test log truncation\n");
   string path = TestTmpDir() + "/truncatefile";
 

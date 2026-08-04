@@ -1,8 +1,11 @@
 // SPDX-FileCopyrightText: 2026 The ng-log contributors
 // SPDX-License-Identifier: BSD-3-Clause
+//
+// Author: Sergiu Deitsch
 
 #include "internal/utf8.h"
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <climits>
@@ -225,6 +228,338 @@ bool WideToUtf8(const wchar_t* input, std::size_t input_length,
   static_cast<void>(input);
   static_cast<void>(input_length);
   static_cast<void>(output);
+  return false;
+#endif
+}
+
+bool WideToUtf8Buffer(const wchar_t* input, std::size_t input_length,
+                      char* output, std::size_t output_capacity,
+                      std::size_t* output_length) {
+#ifdef NGLOG_OS_WINDOWS
+  if (input == nullptr || output == nullptr || output_length == nullptr ||
+      input_length > static_cast<std::size_t>(INT_MAX) ||
+      output_capacity > static_cast<std::size_t>(INT_MAX)) {
+    return SetConversionError();
+  }
+  *output_length = 0;
+  if (input_length == 0) {
+    return true;
+  }
+
+  const int converted_length = WideCharToMultiByte(
+      CP_UTF8, WC_ERR_INVALID_CHARS, input, static_cast<int>(input_length),
+      output, static_cast<int>(output_capacity), nullptr, nullptr);
+  if (converted_length <= 0) {
+    return SetConversionError();
+  }
+  *output_length = static_cast<std::size_t>(converted_length);
+  return true;
+#else
+  static_cast<void>(input);
+  static_cast<void>(input_length);
+  static_cast<void>(output);
+  static_cast<void>(output_capacity);
+  static_cast<void>(output_length);
+  return false;
+#endif
+}
+
+namespace {
+
+#ifdef NGLOG_OS_WINDOWS
+template <typename Character, typename Writer>
+bool WriteAll(const Character* input, std::size_t input_length,
+              std::size_t maximum_chunk_length, Writer writer) {
+  std::size_t offset = 0;
+  while (offset < input_length) {
+    const std::size_t chunk_length =
+        std::min(input_length - offset, maximum_chunk_length);
+    std::size_t written = 0;
+    if (!writer(input + offset, chunk_length, &written) || written == 0 ||
+        written > chunk_length) {
+      return false;
+    }
+    offset += written;
+  }
+  return true;
+}
+
+// Returns the length of the next chunk that does not split a well-formed
+// UTF-8 sequence. Runs of continuation bytes longer than any valid sequence
+// are ill-formed and may be split.
+std::size_t Utf8ChunkLength(const char* input, std::size_t input_length) {
+  constexpr std::size_t kMaximumContinuationBytes = 3;
+  const std::size_t chunk_length =
+      std::min(input_length, kMaximumWideChunkLength);
+  std::size_t boundary = chunk_length;
+  while (boundary < input_length &&
+         chunk_length - boundary < kMaximumContinuationBytes &&
+         IsContinuation(static_cast<std::uint8_t>(input[boundary]))) {
+    --boundary;
+  }
+  if (boundary == 0 ||
+      (boundary < input_length &&
+       IsContinuation(static_cast<std::uint8_t>(input[boundary])))) {
+    return chunk_length;
+  }
+  return boundary;
+}
+
+bool WriteWideToConsole(const wchar_t* input, std::size_t input_length,
+                        std::size_t* written, void* context) {
+  const DWORD requested = static_cast<DWORD>(input_length);
+  DWORD characters_written = 0;
+  const bool success =
+      WriteConsoleW(static_cast<HANDLE>(context), input, requested,
+                    &characters_written, nullptr) != FALSE;
+  *written = characters_written;
+  return success;
+}
+
+bool WriteUtf8ToConsole(HANDLE handle, const char* input,
+                        std::size_t input_length) {
+  return WriteUtf8AsWide(input, input_length, WriteWideToConsole, handle);
+}
+
+bool GetNativeHandle(int file_descriptor, HANDLE* handle) {
+  const intptr_t native_handle = _get_osfhandle(file_descriptor);
+  if (native_handle == -1) {
+    return false;
+  }
+
+  *handle = reinterpret_cast<HANDLE>(native_handle);
+  return true;
+}
+
+bool IsConsoleHandle(HANDLE handle) {
+  DWORD mode = 0;
+  return GetConsoleMode(handle, &mode) != FALSE;
+}
+
+// Caches whether a standard stream refers to a console, which saves a system
+// call per write. The cache is per thread, so the handle and its result
+// cannot be observed separately while another thread replaces them.
+struct ConsoleState {
+  std::intptr_t handle = -1;
+  bool is_console = false;
+};
+
+ConsoleState* GetConsoleState(std::FILE* output) {
+  thread_local ConsoleState stdout_state;
+  thread_local ConsoleState stderr_state;
+  if (output == stdout) {
+    return &stdout_state;
+  }
+  if (output == stderr) {
+    return &stderr_state;
+  }
+  return nullptr;
+}
+
+bool IsConsoleStream(std::FILE* output, HANDLE handle) {
+  ConsoleState* const state = GetConsoleState(output);
+  if (state == nullptr) {
+    return IsConsoleHandle(handle);
+  }
+
+  const std::intptr_t handle_value = reinterpret_cast<std::intptr_t>(handle);
+  if (state->handle != handle_value) {
+    state->is_console = IsConsoleHandle(handle);
+    state->handle = handle_value;
+  }
+  return state->is_console;
+}
+
+bool WriteBytesToFileDescriptor(int file_descriptor, const char* input,
+                                std::size_t input_length) {
+  constexpr std::size_t kMaximumWriteLength =
+      static_cast<std::size_t>(std::numeric_limits<unsigned int>::max());
+  return WriteAll(input, input_length, kMaximumWriteLength,
+                  [file_descriptor](const char* chunk, std::size_t chunk_length,
+                                    std::size_t* written) {
+                    const int result =
+                        _write(file_descriptor, chunk,
+                               static_cast<unsigned int>(chunk_length));
+                    if (result < 0) {
+                      *written = 0;
+                      return false;
+                    }
+                    *written = static_cast<std::size_t>(result);
+                    return true;
+                  });
+}
+#endif
+
+}  // namespace
+
+bool WriteUtf8AsWide(const char* input, std::size_t input_length,
+                     WideWriteFunction writer, void* context) {
+#ifdef NGLOG_OS_WINDOWS
+  if ((input == nullptr && input_length != 0) || writer == nullptr) {
+    return SetConversionError();
+  }
+  if (input_length == 0) {
+    return true;
+  }
+
+  std::array<wchar_t, kMaximumWideChunkLength> wide_buffer = {};
+  std::size_t offset = 0;
+  while (offset < input_length) {
+    const std::size_t chunk_length =
+        Utf8ChunkLength(input + offset, input_length - offset);
+    if (chunk_length == 0) {
+      return SetConversionError();
+    }
+
+    // Ill-formed sequences are replaced with U+FFFD instead of discarding
+    // the whole message.
+    constexpr DWORD kReplaceInvalidCharacters = 0;
+    const int converted_length =
+        MultiByteToWideChar(CP_UTF8, kReplaceInvalidCharacters, input + offset,
+                            static_cast<int>(chunk_length), wide_buffer.data(),
+                            static_cast<int>(wide_buffer.size()));
+    if (converted_length <= 0) {
+      return SetConversionError();
+    }
+
+    const std::size_t wide_length = static_cast<std::size_t>(converted_length);
+    if (!WriteAll(
+            wide_buffer.data(), wide_length, wide_length,
+            [writer, context](const wchar_t* chunk, std::size_t chunk_size,
+                              std::size_t* written) {
+              return writer(chunk, chunk_size, written, context);
+            })) {
+      return false;
+    }
+    offset += chunk_length;
+  }
+  return true;
+#else
+  static_cast<void>(input);
+  static_cast<void>(input_length);
+  static_cast<void>(writer);
+  static_cast<void>(context);
+  return false;
+#endif
+}
+
+bool WriteWideAsChunks(const wchar_t* input, std::size_t input_length,
+                       WideWriteFunction writer, void* context) {
+#ifdef NGLOG_OS_WINDOWS
+  if ((input == nullptr && input_length != 0) || writer == nullptr) {
+    return SetConversionError();
+  }
+
+  std::size_t offset = 0;
+  while (offset < input_length) {
+    while (offset < input_length && input[offset] == L'\0') {
+      ++offset;
+    }
+    if (offset == input_length) {
+      break;
+    }
+
+    const std::size_t remaining = input_length - offset;
+    std::size_t chunk_length = std::min(remaining, kMaximumWideChunkLength);
+    constexpr wchar_t kHighSurrogateMin = 0xd800;
+    constexpr wchar_t kHighSurrogateMax = 0xdbff;
+    const wchar_t last = input[offset + chunk_length - 1];
+    // Keep surrogate pairs within a single chunk.
+    if (chunk_length < remaining && last >= kHighSurrogateMin &&
+        last <= kHighSurrogateMax) {
+      --chunk_length;
+    }
+    const wchar_t* const null_character =
+        std::find(input + offset, input + offset + chunk_length, L'\0');
+    const std::size_t writable_length =
+        static_cast<std::size_t>(null_character - (input + offset));
+    if (writable_length == 0) {
+      ++offset;
+      continue;
+    }
+
+    if (!WriteAll(
+            input + offset, writable_length, writable_length,
+            [writer, context](const wchar_t* chunk, std::size_t chunk_size,
+                              std::size_t* written) {
+              return writer(chunk, chunk_size, written, context);
+            })) {
+      return false;
+    }
+    offset += writable_length;
+  }
+  return true;
+#else
+  static_cast<void>(input);
+  static_cast<void>(input_length);
+  static_cast<void>(writer);
+  static_cast<void>(context);
+  return false;
+#endif
+}
+
+#ifdef NGLOG_OS_WINDOWS
+bool WriteSignalSafeToFileDescriptor(int file_descriptor, const char* input,
+                                     std::size_t input_length) noexcept {
+  if (file_descriptor < 0 || (input == nullptr && input_length != 0) ||
+      input_length > static_cast<std::size_t>(INT_MAX)) {
+    return false;
+  }
+  if (input_length == 0) {
+    return true;
+  }
+  return _write(file_descriptor, input,
+                static_cast<unsigned int>(input_length)) ==
+         static_cast<int>(input_length);
+}
+#endif
+
+bool WriteUtf8(std::FILE* output, const char* input, std::size_t input_length) {
+  if (output == nullptr || (input == nullptr && input_length != 0)) {
+    errno = EINVAL;
+    return false;
+  }
+  if (input_length == 0) {
+    return true;
+  }
+
+#ifdef NGLOG_OS_WINDOWS
+  HANDLE handle = nullptr;
+  if (GetNativeHandle(_fileno(output), &handle) &&
+      IsConsoleStream(output, handle)) {
+    if (std::fflush(output) != 0) {
+      return false;
+    }
+    return WriteUtf8ToConsole(handle, input, input_length);
+  }
+#endif
+
+  // Redirected output keeps the translation mode chosen by the application.
+  return std::fwrite(input, 1, input_length, output) == input_length;
+}
+
+bool WriteUtf8ToFileDescriptor(int file_descriptor, const char* input,
+                               std::size_t input_length) {
+#ifdef NGLOG_OS_WINDOWS
+  if (file_descriptor < 0 || (input == nullptr && input_length != 0)) {
+    errno = EINVAL;
+    return false;
+  }
+  if (input_length == 0) {
+    return true;
+  }
+
+  HANDLE handle = nullptr;
+  if (GetNativeHandle(file_descriptor, &handle)) {
+    if (IsConsoleHandle(handle)) {
+      return WriteUtf8ToConsole(handle, input, input_length);
+    }
+  }
+  return WriteBytesToFileDescriptor(file_descriptor, input, input_length);
+#else
+  static_cast<void>(file_descriptor);
+  static_cast<void>(input);
+  static_cast<void>(input_length);
   return false;
 #endif
 }

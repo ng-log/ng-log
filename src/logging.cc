@@ -97,8 +97,6 @@ using std::fclose;
 using std::fflush;
 using std::FILE;
 using std::fprintf;
-using std::fputs;
-using std::fwrite;
 using std::perror;
 
 #ifdef __QNX__
@@ -752,16 +750,16 @@ inline void LogDestination::SetEmailLogging(LogSeverity min_severity,
   LogDestination::addresses_ = addresses;
 }
 
-// A minimal adapter satisfying color.h's "Formatter" concept
-// (AppendString(const char*)), so WithColor()/Hyperlink::Wrap() can be used
-// against a plain FILE* stream. Only used to emit the small, fixed
-// escape/hyperlink sequences themselves: the colored content is always
-// written straight to "output" via fwrite() inside the body lambda they
-// wrap, not through this adapter.
+// Adapts a FILE* stream to the formatter that WithColor() in
+// internal/styled_output.h and Hyperlink::Wrap() expect. It only emits the
+// escape and hyperlink sequences. The body lambda they wrap writes the
+// colored content to the stream directly.
 namespace {
 struct FileFormatter {
   FILE* output;
-  void AppendString(const char* s) { fputs(s, output); }
+  void AppendString(const char* text, size_t len) {
+    internal::WriteUtf8(output, text, len);
+  }
 };
 }  // namespace
 
@@ -780,17 +778,18 @@ static void WriteTerminalField(FILE* output, FileFormatter& formatter,
   }
   if (mode == ColorMode::kAnsi) {
     WithColor(formatter, spec, true,
-              [text, len, output] { fwrite(text, len, 1, output); });
+              [text, len, output] { internal::WriteUtf8(output, text, len); });
     return;
   }
 #ifdef NGLOG_OS_WINDOWS
   if (mode == ColorMode::kLegacyConsole) {
-    WithLegacyConsoleAttribute(
-        output, spec, [text, len, output] { fwrite(text, len, 1, output); });
+    WithLegacyConsoleAttribute(output, spec, [text, len, output] {
+      internal::WriteUtf8(output, text, len);
+    });
     return;
   }
 #endif  // NGLOG_OS_WINDOWS
-  fwrite(text, len, 1, output);
+  internal::WriteUtf8(output, text, len);
 }
 
 static void WriteStyledLogField(FILE* output, FileFormatter& formatter,
@@ -921,7 +920,7 @@ static void ColoredWriteToStderrOrStdout(FILE* output, LogSeverity severity,
       want_color ? StreamColorMode(output) : ColorMode::kNone;
 
   if (mode == ColorMode::kNone) {
-    fwrite(message, len, 1, output);
+    internal::WriteUtf8(output, message, len);
     MaybeFlushStdout(output, severity);
     return;
   }
@@ -932,7 +931,7 @@ static void ColoredWriteToStderrOrStdout(FILE* output, LogSeverity severity,
                        spec.style != TextStyle::kNone;
 
   if (!colored) {
-    fwrite(message, len, 1, output);
+    internal::WriteUtf8(output, message, len);
     MaybeFlushStdout(output, severity);
     return;
   }
@@ -978,7 +977,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
     const ColorMode mode =
         want_color ? StreamColorMode(output) : ColorMode::kNone;
     if (mode == ColorMode::kNone) {
-      fwrite(data.message_text_, data.num_chars_to_log_, 1, output);
+      internal::WriteUtf8(output, data.message_text_, data.num_chars_to_log_);
       MaybeFlushStdout(output, data.severity_);
       return;
     }
@@ -1015,7 +1014,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
   // Avoid using cerr from this module since we may get called during
   // exit code, and cerr may be partially or fully destroyed by then.
   if (mode == ColorMode::kNone) {
-    fwrite(message, len, 1, output);
+    internal::WriteUtf8(output, message, len);
     MaybeFlushStdout(output, data.severity_);
     return;
   }
@@ -1043,7 +1042,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
       TextAttributes{theme.Get(Role::kShellCommand), Hyperlink()}, false,
       message + pos, data.prefix_timestamp_len_);
   pos += data.prefix_timestamp_len_;
-  fwrite(message + pos, 1, 1, output);  // The space before the thread id.
+  internal::WriteUtf8(output, message + pos, 1);
   pos += 1;
 
   WriteStyledLogField(
@@ -1051,7 +1050,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
       TextAttributes{theme.Get(Role::kLogThreadId), Hyperlink()}, false,
       message + pos, data.prefix_threadid_len_);
   pos += data.prefix_threadid_len_;
-  fwrite(message + pos, 1, 1, output);  // The space before "file:line".
+  internal::WriteUtf8(output, message + pos, 1);
   pos += 1;
 
   char uri[1024];
@@ -1084,11 +1083,11 @@ static void ColoredWriteToStderrOrStdoutWithFields(
                       TextAttributes{theme.Get(Role::kLogBracket), Hyperlink()},
                       false, message + pos, 1);  // The "]" closing the prefix.
   pos += 1;
-  fwrite(message + pos, 1, 1, output);  // The space after "]".
+  internal::WriteUtf8(output, message + pos, 1);
   pos += 1;
 
   if (!text_colored && data.styles_.size() == 0) {
-    fwrite(message + pos, len - pos, 1, output);
+    internal::WriteUtf8(output, message + pos, len - pos);
     MaybeFlushStdout(output, data.severity_);
     return;
   }
@@ -1120,7 +1119,7 @@ static void ColoredWriteToStderrWithFields(
 static void WriteToStderr(const char* message, size_t len) {
   // Avoid using cerr from this module since we may get called during
   // exit code, and cerr may be partially or fully destroyed by then.
-  fwrite(message, len, 1, stderr);
+  internal::WriteUtf8(stderr, message, len);
 }
 
 static void WritePreInitializationWarning() {
@@ -1158,7 +1157,8 @@ inline void LogDestination::MaybeLogToStderr(
       nglog::GetFlag(FLAGS_alsologtostderr)) {
     ColoredWriteToStderrWithFields(data);
     AlsoErrorWrite(data.severity_, tools::ProgramInvocationShortName(),
-                   data.message_text_ + data.num_prefix_chars_);
+                   data.message_text_ + data.num_prefix_chars_,
+                   data.num_chars_to_log_ - data.num_prefix_chars_);
   }
 }
 
@@ -1392,7 +1392,7 @@ int StatPath(const std::string& path, struct stat* result) {
 #endif
 }
 
-int OpenPath(const std::string& path, int flags, int mode) {
+int OpenPath(const std::string& path, int flags, mode_t mode) {
 #ifdef NGLOG_OS_WINDOWS
   return internal::OpenUtf8(path.data(), path.size(), flags, mode);
 #else
@@ -1413,6 +1413,14 @@ int AccessPath(const std::string& path, int mode) {
   return internal::AccessUtf8(path.data(), path.size(), mode);
 #else
   return access(path.c_str(), mode);
+#endif
+}
+
+bool IsRegularFile(const struct stat& statbuf) {
+#ifdef NGLOG_OS_WINDOWS
+  return (statbuf.st_mode & _S_IFMT) == _S_IFREG;
+#else
+  return S_ISREG(statbuf.st_mode);
 #endif
 }
 
@@ -1829,7 +1837,7 @@ void LogFileObject::WriteUnlocked(
       const string& file_header_string = file_header_stream.str();
 
       const size_t header_len = file_header_string.size();
-      fwrite(file_header_string.data(), 1, header_len, file_.get());
+      std::fwrite(file_header_string.data(), 1, header_len, file_.get());
       file_length_ += header_len;
       bytes_since_flush_ += header_len;
     }
@@ -1843,7 +1851,7 @@ void LogFileObject::WriteUnlocked(
     // 4096 bytes. fwrite() returns 4096 for message lengths that are
     // greater than 4096, thereby indicating an error.
     errno = 0;
-    fwrite(message, 1, message_len, file_.get());
+    std::fwrite(message, 1, message_len, file_.get());
     if (nglog::GetFlag(FLAGS_stop_logging_if_full_disk) &&
         errno == ENOSPC) {  // disk full, stop writing to disk
       stop_writing.store(true, std::memory_order_relaxed);  // until the disk is
@@ -2098,10 +2106,16 @@ LogMessage::~LogMessage() noexcept(false) {
 
   if (fail) {
     const char* message = "*** Check failure stack trace: ***\n";
-    if (write(fileno(stderr), message, strlen(message)) < 0) {
+#ifdef NGLOG_OS_WINDOWS
+    internal::WriteUtf8ToFileDescriptor(fileno(stderr), message,
+                                        std::strlen(message));
+#else
+    if (write(fileno(stderr), message, std::strlen(message)) < 0) {
       // Ignore errors.
     }
-    AlsoErrorWrite(NGLOG_FATAL, tools::ProgramInvocationShortName(), message);
+#endif
+    AlsoErrorWrite(NGLOG_FATAL, tools::ProgramInvocationShortName(), message,
+                   std::strlen(message));
 #if defined(__cpp_lib_uncaught_exceptions) && \
     (__cpp_lib_uncaught_exceptions >= 201411L)
     if (std::uncaught_exceptions() == 0)
@@ -2747,7 +2761,7 @@ static bool SendEmailInternal(const char* dest, const char* subject,
     if (pipe != nullptr) {
       // Add the body if we have one
       if (body) {
-        fwrite(body, sizeof(char), strlen(body), pipe.get());
+        std::fwrite(body, sizeof(char), std::strlen(body), pipe.get());
       }
       pipe.reset();
       const bool ok = pclose_status != -1;
@@ -2886,6 +2900,10 @@ void TruncateLogFile(const char* path, uint64 limit, uint64 keep) {
   off_t read_offset, write_offset;
   // Don't follow symlinks unless they're our own fd symlinks in /proc
   int flags = O_RDWR;
+#  ifdef O_BINARY
+  // Offsets are byte offsets, so text-mode translation would corrupt the copy.
+  flags |= O_BINARY;
+#  endif
   // TODO(hamaji): Support other environments.
 #  ifdef NGLOG_OS_LINUX
   const char* procfd_prefix = "/proc/self/fd/";
@@ -2923,11 +2941,7 @@ void TruncateLogFile(const char* path, uint64 limit, uint64 keep) {
 
   // See if the path refers to a regular file bigger than the
   // specified limit
-#  ifdef NGLOG_OS_WINDOWS
-  if ((statbuf.st_mode & _S_IFMT) != _S_IFREG) return;
-#  else
-  if (!S_ISREG(statbuf.st_mode)) return;
-#  endif
+  if (!IsRegularFile(statbuf)) return;
   if (statbuf.st_size <= static_cast<off_t>(limit)) return;
   if (statbuf.st_size <= static_cast<off_t>(keep)) return;
 

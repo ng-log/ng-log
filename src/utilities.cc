@@ -9,6 +9,8 @@
 
 #include "utilities.h"
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <cerrno>
 #include <csignal>
@@ -63,6 +65,39 @@ namespace {
 
 constexpr char log_filename_timestamp_pattern[] = "[0-9]{8}-[0-9]{6}\\.[0-9]+";
 constexpr char log_filename_never_match_pattern[] = "a^";
+
+#if defined(NGLOG_OS_WINDOWS)
+constexpr std::size_t kTerminatorLength = 1;
+constexpr std::size_t kDebuggerBufferLength =
+    nglog::internal::kMaximumWideChunkLength + kTerminatorLength;
+
+bool WriteWideToDebugger(const wchar_t* input, std::size_t input_length,
+                         std::size_t* written, void*) {
+  std::array<wchar_t, kDebuggerBufferLength> buffer = {};
+  if (input_length >= buffer.size()) {
+    return false;
+  }
+
+  std::copy_n(input, input_length, buffer.data());
+  buffer[input_length] = L'\0';
+  ::OutputDebugStringW(buffer.data());
+  *written = input_length;
+  return true;
+}
+
+// OutputDebugStringW() stops at the first null character, so embedded null
+// characters are skipped rather than truncating the remaining text.
+bool WriteWideToDebuggerSkippingNulls(const wchar_t* input,
+                                      std::size_t input_length,
+                                      std::size_t* written, void* context) {
+  if (!nglog::internal::WriteWideAsChunks(input, input_length,
+                                          WriteWideToDebugger, context)) {
+    return false;
+  }
+  *written = input_length;
+  return true;
+}
+#endif
 
 std::string EscapeRegexCharacters(const std::string& input) {
   constexpr char regex_characters[] = "\\.^$|()[]{}*+?";
@@ -123,25 +158,14 @@ std::regex MakeLogFilenameMatcher(const std::string& base_filename,
   return std::regex(pattern);
 }
 
-void AlsoErrorWrite(LogSeverity severity, const char* tag,
-                    const char* message) noexcept {
+void AlsoErrorWrite(LogSeverity severity, const char* tag, const char* message,
+                    std::size_t message_length) noexcept {
 #if defined(NGLOG_OS_WINDOWS)
   (void)severity;
   (void)tag;
   // On Windows, also output to the debugger
-  std::wstring wide_message;
-  if (!internal::Utf8ToWide(message, std::strlen(message), &wide_message)) {
-    const int length = MultiByteToWideChar(CP_UTF8, 0, message, -1, nullptr, 0);
-    if (length <= 0) {
-      return;
-    }
-    wide_message.resize(static_cast<std::size_t>(length));
-    if (MultiByteToWideChar(CP_UTF8, 0, message, -1, &wide_message[0],
-                            length) <= 0) {
-      return;
-    }
-  }
-  ::OutputDebugStringW(wide_message.c_str());
+  internal::WriteUtf8AsWide(message, message_length,
+                            WriteWideToDebuggerSkippingNulls, nullptr);
 #elif defined(NGLOG_OS_ANDROID)
   constexpr int android_log_levels[] = {
       ANDROID_LOG_INFO,
@@ -150,15 +174,18 @@ void AlsoErrorWrite(LogSeverity severity, const char* tag,
       ANDROID_LOG_FATAL,
   };
 
+  (void)message_length;
   __android_log_write(android_log_levels[severity], tag, message);
 #elif defined(NGLOG_OS_EMSCRIPTEN)
   (void)tag;
+  (void)message_length;
   internal::WriteEmscriptenLog(
       internal::EmscriptenLogLevelForSeverity(severity), message);
 #else
   (void)severity;
   (void)tag;
   (void)message;
+  (void)message_length;
 #endif
 }
 
@@ -212,10 +239,15 @@ static const int kPrintfPointerFieldWidth = 2 + 2 * sizeof(void*);
 
 static void DebugWriteToStderr(const char* data, void*) {
   // This one is signal-safe.
-  if (write(fileno(stderr), data, strlen(data)) < 0) {
+#  ifdef NGLOG_OS_WINDOWS
+  internal::WriteUtf8ToFileDescriptor(fileno(stderr), data, std::strlen(data));
+#  else
+  if (write(fileno(stderr), data, std::strlen(data)) < 0) {
     // Ignore errors.
   }
-  AlsoErrorWrite(NGLOG_FATAL, tools::ProgramInvocationShortName(), data);
+#  endif
+  AlsoErrorWrite(NGLOG_FATAL, tools::ProgramInvocationShortName(), data,
+                 std::strlen(data));
 }
 
 static void DebugWriteToString(const char* data, void* arg) {

@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstring>
 #include <ctime>
+#include <cwchar>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -193,9 +194,13 @@ class MinimalFormatter {
 
 // Writes the given data with the size to the standard error.
 void WriteToStderr(const char* data, size_t size) {
+#ifdef NGLOG_OS_WINDOWS
+  internal::WriteSignalSafeToFileDescriptor(fileno(stderr), data, size);
+#else
   if (write(fileno(stderr), data, size) < 0) {
     // Ignore errors.
   }
+#endif
 }
 
 // The writer function can be changed by InstallFailureWriter().
@@ -218,11 +223,17 @@ bool GetThreadName(char* buffer, std::size_t buffer_size) {
       wide_name == nullptr) {
     return false;
   }
-  const int result =
-      WideCharToMultiByte(CP_UTF8, 0, wide_name, -1, buffer,
-                          static_cast<int>(buffer_size), nullptr, nullptr);
+  constexpr std::size_t kTerminatorLength = 1;
+  std::size_t utf8_name_length = 0;
+  const bool converted = internal::WideToUtf8Buffer(
+      wide_name, std::wcslen(wide_name), buffer,
+      buffer_size - kTerminatorLength, &utf8_name_length);
   LocalFree(wide_name);
-  return result > 1;
+  if (!converted || utf8_name_length == 0) {
+    return false;
+  }
+  buffer[utf8_name_length] = '\0';
+  return true;
 #  elif defined(HAVE_PTHREAD_GETNAME_NP)
   return pthread_getname_np(pthread_self(), buffer, buffer_size) == 0 &&
          buffer[0] != '\0';
@@ -299,16 +310,15 @@ void ComputeHostname() {
 char g_cwd[512] = "";
 
 void ComputeCwd() {
-#ifdef NGLOG_OS_WINDOWS
-  const DWORD len = GetCurrentDirectoryA(sizeof(g_cwd), g_cwd);
-  if (len == 0 || len >= sizeof(g_cwd)) {
+  // A directory that does not fit is omitted rather than truncated, since a
+  // truncated path could end within a multibyte UTF-8 sequence and would
+  // shorten frame paths to a misleading relative form.
+  const std::string& cwd = internal::CachedCwd();
+  if (cwd.size() < sizeof(g_cwd)) {
+    std::memcpy(g_cwd, cwd.c_str(), cwd.size() + 1);
+  } else {
     g_cwd[0] = '\0';
   }
-#elif defined(HAVE_UNISTD_H)
-  if (getcwd(g_cwd, sizeof(g_cwd)) == nullptr) {
-    g_cwd[0] = '\0';
-  }
-#endif  // NGLOG_OS_WINDOWS
 }
 
 // Dumps time information.  We don't dump human-readable time information
