@@ -460,7 +460,7 @@ class LogCleaner {
   // another scan.
   struct LogFilePattern {
     bool base_filename_selected{false};
-    string filename_extension;
+    std::string filename_extension;
     // Scans happen at fixed intervals, so schedule them on the steady clock
     // to stay unaffected by wall-clock adjustments (NTP, daylight saving).
     std::chrono::steady_clock::time_point next_cleanup_time;
@@ -470,7 +470,7 @@ class LogCleaner {
   // (or until woken up by Enable(), Disable() or AddLogFilePattern()) and
   // removes overdue logs of every pattern whose deadline has passed. Returns
   // as soon as the cleaner is disabled.
-  void ThreadMain();
+  void Worker();
 
   // Stops and joins the cleaner thread.
   void Stop();
@@ -1368,7 +1368,7 @@ void LogCleaner::Stop() {
   {
     std::lock_guard<std::mutex> l{mutex_};
     enabled_ = false;
-    cleaner.swap(thread_);
+    cleaner = std::move(thread_);
   }
   cond_.notify_one();
   if (cleaner.joinable()) {
@@ -1380,14 +1380,13 @@ void LogCleaner::Enable(const std::chrono::minutes& overdue) {
   {
     std::lock_guard<std::mutex> l{mutex_};
     overdue_ = overdue;
-    if (!enabled_) {
-      enabled_ = true;
+    if (!std::exchange(enabled_, true)) {
       // Logs may have become overdue while the cleaner was disabled: make all
       // known patterns due for an immediate scan.
       for (auto& pattern : patterns_) {
         pattern.second.next_cleanup_time = {};
       }
-      thread_ = std::thread(&LogCleaner::ThreadMain, this);
+      thread_ = std::thread{&LogCleaner::Worker, this};
     }
   }
   // Wake up the cleaner thread: the overdue window may have changed.
@@ -1420,6 +1419,10 @@ void LogCleaner::Disable() {
 void LogCleaner::AddLogFilePattern(bool base_filename_selected,
                                    const string& base_filename,
                                    const string& filename_extension) {
+  // The only caller, LogFileObject::Write(), already returns early when
+  // base_filename_selected_ is true and base_filename_ is empty (that
+  // combination means "don't write"), so this combination can never reach
+  // here.
   assert(!base_filename_selected || !base_filename.empty());
 
   {
@@ -1433,55 +1436,64 @@ void LogCleaner::AddLogFilePattern(bool base_filename_selected,
   cond_.notify_one();
 }
 
-void LogCleaner::ThreadMain() {
-  std::unique_lock<std::mutex> l{mutex_};
-
-  while (enabled_) {
-    // Scans are scheduled on the steady clock; the wall-clock time is only
-    // used to decide how old a log file is.
+void LogCleaner::Worker() {
+  for (;;) {
+    // Scans are scheduled on the steady clock, so fetch it before taking the
+    // lock; it doesn't depend on any guarded state.
     const auto now = std::chrono::steady_clock::now();
-    const auto current_time = std::chrono::system_clock::now();
 
-    // Collect the patterns which are due for a scan and schedule their next
-    // one.
     std::vector<std::pair<std::string, LogFilePattern>> due;
-    due.reserve(patterns_.size());
-    for (auto& pattern : patterns_) {
-      if (pattern.second.next_cleanup_time <= now) {
-        due.emplace_back(pattern.first, pattern.second);
-        pattern.second.next_cleanup_time =
-            now +
-            std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                std::chrono::duration<int32>{FLAGS_logcleansecs});
+    std::chrono::minutes overdue{};
+
+    {
+      std::unique_lock<std::mutex> l{mutex_};
+      if (!enabled_) {
+        return;
+      }
+
+      // Collect the patterns which are due for a scan and schedule their
+      // next one.
+      due.reserve(patterns_.size());
+      for (auto& pattern : patterns_) {
+        if (pattern.second.next_cleanup_time <= now) {
+          due.emplace_back(pattern.first, pattern.second);
+          pattern.second.next_cleanup_time =
+              now +
+              std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                  std::chrono::duration<int32>{FLAGS_logcleansecs});
+        }
+      }
+
+      if (!due.empty()) {
+        overdue = overdue_;
+      } else if (patterns_.empty()) {
+        cond_.wait(l, [&enabled = enabled_, &patterns = patterns_] {
+          return !enabled || !patterns.empty();
+        });
+        continue;
+      } else {
+        auto next_deadline = patterns_.begin()->second.next_cleanup_time;
+        for (const auto& pattern : patterns_) {
+          next_deadline =
+              std::min(next_deadline, pattern.second.next_cleanup_time);
+        }
+        cond_.wait_until(l, next_deadline);
+        continue;
       }
     }
 
-    if (!due.empty()) {
-      const auto overdue = overdue_;
-      // Scan without the lock held: directory I/O is slow and must not block
-      // threads which are creating log files.
-      l.unlock();
-      for (const auto& pattern : due) {
-        CleanOverdueLogs(current_time, overdue,
-                         pattern.second.base_filename_selected, pattern.first,
-                         pattern.second.filename_extension);
-      }
-      l.lock();
-      // New patterns may have been registered or the cleaner may have been
-      // stopped while the lock was released.
-      continue;
+    // Scan without the lock held: directory I/O is slow and must not block
+    // threads which are creating log files. The wall-clock time is only
+    // needed here, to decide how old a log file is, so it's fetched right
+    // before use rather than unconditionally at the top of the loop.
+    const auto current_time = std::chrono::system_clock::now();
+    for (const auto& pattern : due) {
+      CleanOverdueLogs(current_time, overdue,
+                       pattern.second.base_filename_selected, pattern.first,
+                       pattern.second.filename_extension);
     }
-
-    if (patterns_.empty()) {
-      cond_.wait(l, [this] { return !enabled_ || !patterns_.empty(); });
-    } else {
-      auto next_deadline = patterns_.begin()->second.next_cleanup_time;
-      for (const auto& pattern : patterns_) {
-        next_deadline =
-            std::min(next_deadline, pattern.second.next_cleanup_time);
-      }
-      cond_.wait_until(l, next_deadline);
-    }
+    // New patterns may have been registered or the cleaner may have been
+    // stopped while the lock was released; loop back to re-check both.
   }
 }
 
