@@ -1,5 +1,15 @@
 # Notes for Windows Users
 
+## File and directory paths
+
+All file and directory paths passed to ng-log must use UTF-8 encoding. This
+includes logfile destinations, log directories, and paths passed to
+`TruncateLogFile`.
+
+ng-log converts these paths to UTF-16 and uses the Unicode Windows filesystem
+APIs. Invalid UTF-8 paths are rejected. This behavior is consistent with the
+other supported platforms and does not require a change to the public API.
+
 ng-log defines the severity level `ERROR`, which is also defined by `windows.h`.
 You can make nglog not define `INFO`, `WARNING`, `ERROR`, and `FATAL` by
 defining `NGLOG_NO_ABBREVIATED_SEVERITIES` before including `nglog/logging.h`.

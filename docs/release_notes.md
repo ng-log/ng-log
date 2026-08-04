@@ -12,6 +12,8 @@
 - Remove Bazel build support
 - Prevent concurrent log writers from blocking during memory-drop maintenance
 - Make log cleanup work with non-ASCII Windows directories
+- Breaking change: require UTF-8 encoding for all Windows file and directory
+  path arguments
 - Omit the default header format when a custom prefix formatter is installed
 - Include the current thread name in failure signal reports when available
 

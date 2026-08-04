@@ -512,6 +512,8 @@ set (NGLOG_SRCS
   src/internal/styled_output.h
   src/internal/terminal_capabilities.h
   src/internal/theme.h
+  src/internal/utf8.cc
+  src/internal/utf8.h
   src/subprocess.cc
   src/subprocess.h
   src/symbolize.cc
@@ -1112,6 +1114,7 @@ if (BUILD_TESTING AND GTest_FOUND)
     ${CMAKE_COMMAND}
     -DLOGCLEANUP=$<TARGET_FILE:cleanup_with_non_ascii_prefix_unittest>
     -DTEST_DIR=${ng-log_BINARY_DIR}/
+    -DTEST_ON_WINDOWS=${WIN32}
     -P ${ng-log_SOURCE_DIR}/cmake/RunCleanerTest4.cmake
     WORKING_DIRECTORY ${ng-log_BINARY_DIR})
 

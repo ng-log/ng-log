@@ -56,14 +56,13 @@
 #include "internal/styled_output.h"
 #include "internal/terminal_capabilities.h"
 #include "internal/theme.h"
+#include "internal/utf8.h"
 #include "ng-log/platform.h"
 #include "ng-log/raw_logging.h"
 #include "stacktrace.h"
 #include "utilities.h"
 
-#ifdef NGLOG_OS_WINDOWS
-#  include "windows/dirent.h"
-#else
+#ifndef NGLOG_OS_WINDOWS
 #  include <dirent.h>  // for automatic removal of old logs
 #endif
 
@@ -1168,6 +1167,57 @@ const char possible_dir_delim[] = {'\\', '/'};
 const char possible_dir_delim[] = {'/'};
 #endif
 
+int StatPath(const std::string& path, struct stat* result) {
+#ifdef NGLOG_OS_WINDOWS
+  return internal::StatUtf8(path.data(), path.size(), result);
+#else
+  return stat(path.c_str(), result);
+#endif
+}
+
+int OpenPath(const std::string& path, int flags, int mode) {
+#ifdef NGLOG_OS_WINDOWS
+  return internal::OpenUtf8(path.data(), path.size(), flags, mode);
+#else
+  return open(path.c_str(), flags, mode);
+#endif
+}
+
+int UnlinkPath(const std::string& path) {
+#ifdef NGLOG_OS_WINDOWS
+  return internal::UnlinkUtf8(path.data(), path.size());
+#else
+  return unlink(path.c_str());
+#endif
+}
+
+int AccessPath(const std::string& path, int mode) {
+#ifdef NGLOG_OS_WINDOWS
+  return internal::AccessUtf8(path.data(), path.size(), mode);
+#else
+  return access(path.c_str(), mode);
+#endif
+}
+
+bool ListDirectoryPath(const std::string& path,
+                       std::vector<std::string>* entries) {
+#ifdef NGLOG_OS_WINDOWS
+  return internal::ListDirectoryUtf8(path.data(), path.size(), entries);
+#else
+  DIR* directory = opendir(path.c_str());
+  if (directory == nullptr) {
+    return false;
+  }
+
+  entries->clear();
+  while (const struct dirent* entry = readdir(directory)) {
+    entries->emplace_back(entry->d_name);
+  }
+  closedir(directory);
+  return true;
+#endif
+}
+
 string PrettyDuration(const std::chrono::duration<int>& secs) {
   std::stringstream result;
   int mins = secs.count() / 60;
@@ -1257,7 +1307,7 @@ bool LogFileObject::CreateLogfile(const string& time_pid_string) {
     // the first time or a file is being recreated due to exceeding max size
 
     struct stat statbuf;
-    if (stat(filename, &statbuf) == 0) {
+    if (StatPath(string_filename, &statbuf) == 0) {
       // truncate the file if it exceeds the max size
       if ((static_cast<uint32>(statbuf.st_size) >> 20U) >= MaxLogSize()) {
         flags |= O_TRUNC;
@@ -1268,8 +1318,8 @@ bool LogFileObject::CreateLogfile(const string& time_pid_string) {
     }
   }
 
-  FileDescriptor fd{
-      open(filename, flags, static_cast<mode_t>(FLAGS_logfile_mode))};
+  FileDescriptor fd{OpenPath(string_filename, flags,
+                             static_cast<mode_t>(FLAGS_logfile_mode))};
   if (!fd) return false;
 #ifdef HAVE_FCNTL
   // Mark the file close-on-exec. We don't really care if this fails
@@ -1302,8 +1352,9 @@ bool LogFileObject::CreateLogfile(const string& time_pid_string) {
   file_.reset(fdopen(fd.release(), "a"));  // Make a FILE*.
   if (file_ == nullptr) {                  // Man, we're screwed!
     if (FLAGS_timestamp_in_logfile_name) {
-      unlink(filename);  // Erase the half-baked evidence: an unusable log file,
-                         // only if we just created it.
+      UnlinkPath(
+          string_filename);  // Erase the half-baked evidence: an unusable
+                             // log file, only if we just created it.
     }
     return false;
   }
@@ -1331,7 +1382,7 @@ bool LogFileObject::CreateLogfile(const string& time_pid_string) {
       linkpath = string(
           filename, static_cast<size_t>(slash - filename + 1));  // get dirname
     linkpath += linkname;
-    unlink(linkpath.c_str());  // delete old one if it exists
+    UnlinkPath(linkpath);  // delete old one if it exists
 
 #if defined(NGLOG_OS_WINDOWS)
     // TODO(hamaji): Create lnk file on Windows?
@@ -1348,7 +1399,7 @@ bool LogFileObject::CreateLogfile(const string& time_pid_string) {
     // FLAGS_log_link, if indicated
     if (!FLAGS_log_link.empty()) {
       linkpath = FLAGS_log_link + "/" + linkname;
-      unlink(linkpath.c_str());  // delete old one if it exists
+      UnlinkPath(linkpath);  // delete old one if it exists
       if (symlink(filename, linkpath.c_str()) != 0) {
         // silently ignore failures
       }
@@ -1739,7 +1790,7 @@ void LogCleaner::CleanOverdueLogs(
                                              base_filename, filename_extension);
     for (const std::string& log : logs) {
       // NOTE May fail on Windows if the file is still open
-      int result = unlink(log.c_str());
+      int result = UnlinkPath(log);
       if (result != 0) {
         perror(("Could not remove overdue log " + log).c_str());
       }
@@ -1756,16 +1807,10 @@ vector<string> LogCleaner::GetOverdueLogNames(
   vector<string> overdue_log_names;
 
   // Try to get all files within log_directory.
-  DIR* dir;
-  struct dirent* ent;
-
-  if ((dir = opendir(log_directory.c_str()))) {
-    while ((ent = readdir(dir))) {
-      if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
-        continue;
-      }
-
-      string filepath = ent->d_name;
+  std::vector<std::string> entries;
+  if (ListDirectoryPath(log_directory, &entries)) {
+    for (const std::string& entry : entries) {
+      string filepath = entry;
       const char* const dir_delim_end =
           possible_dir_delim + sizeof(possible_dir_delim);
 
@@ -1781,7 +1826,6 @@ vector<string> LogCleaner::GetOverdueLogNames(
         overdue_log_names.push_back(filepath);
       }
     }
-    closedir(dir);
   }
 
   return overdue_log_names;
@@ -1881,7 +1925,7 @@ bool LogCleaner::IsLogLastModifiedOver(
   // Try to get the last modified time of this file.
   struct stat file_stat;
 
-  if (stat(filepath.c_str(), &file_stat) == 0) {
+  if (StatPath(filepath, &file_stat) == 0) {
     const auto last_modified_time =
         std::chrono::system_clock::from_time_t(file_stat.st_mtime);
     const auto diff = current_time - last_modified_time;
@@ -2713,8 +2757,8 @@ static void GetTempDirectories(vector<string>& list) {
   //   C:/Documents & Settings/whomever/TEMP (or whatever GetTempPath() is)
   //   C:/TMP/
   //   C:/TEMP/
-  char tmp[MAX_PATH];
-  if (GetTempPathA(MAX_PATH, tmp)) list.push_back(tmp);
+  string tmp;
+  if (internal::GetTempPathUtf8(&tmp)) list.push_back(tmp);
   list.push_back("C:\\TMP\\");
   list.push_back("C:\\TEMP\\");
 #else
@@ -2743,7 +2787,7 @@ static void GetTempDirectories(vector<string>& list) {
     list.push_back(dstr);
 
     struct stat statbuf;
-    if (!stat(d, &statbuf) && S_ISDIR(statbuf.st_mode)) {
+    if (!StatPath(dstr, &statbuf) && S_ISDIR(statbuf.st_mode)) {
       // We found a dir that exists - we're done.
       return;
     }
@@ -2770,8 +2814,8 @@ const vector<string>& GetLoggingDirectories() {
     } else {
       GetTempDirectories(*logging_directories_list);
 #ifdef NGLOG_OS_WINDOWS
-      char tmp[MAX_PATH];
-      if (GetWindowsDirectoryA(tmp, MAX_PATH))
+      string tmp;
+      if (internal::GetWindowsDirectoryUtf8(&tmp))
         logging_directories_list->push_back(tmp);
       logging_directories_list->push_back(".\\");
 #else
@@ -2792,7 +2836,7 @@ void GetExistingTempDirectories(vector<string>& list) {
   while (i_dir != list.end()) {
     // zero arg to access means test for existence; no constant
     // defined on windows
-    if (access(i_dir->c_str(), 0)) {
+    if (AccessPath(*i_dir, 0)) {
       i_dir = list.erase(i_dir);
     } else {
       ++i_dir;
@@ -2814,7 +2858,8 @@ void TruncateLogFile(const char* path, uint64 limit, uint64 keep) {
   if (strncmp(procfd_prefix, path, strlen(procfd_prefix))) flags |= O_NOFOLLOW;
 #  endif
 
-  FileDescriptor fd{open(path, flags)};
+  const string path_string(path);
+  FileDescriptor fd{OpenPath(path_string, flags, 0)};
   if (!fd) {
     if (errno == EFBIG) {
       // The log file in question has got too big for us to open. The

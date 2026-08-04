@@ -27,19 +27,20 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <string>
-
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <string>
+
 #include "base/commandlineflags.h"
+#include "internal/utf8.h"
 #include "mock-log.h"
 #include "ng-log/logging.h"
 #include "ng-log/raw_logging.h"
 #include "testing_utilities.h"
 
 #ifdef NGLOG_OS_WINDOWS
-#  include <direct.h>
+#  include <windows.h>
 #else
 #  include <sys/stat.h>
 #  include <sys/types.h>
@@ -62,22 +63,30 @@ using testing::StrNe;
 
 using namespace nglog;
 
-// The directory name deliberately contains non-ASCII characters to exercise
-// the multi-byte to wide character path conversions performed by the log
-// cleaner on Windows (see https://github.com/google/glog/issues/786). The
-// bytes correspond to U+20AC (euro sign) in UTF-8. The directory is created
-// here instead of by the test driver so that its name is encoded consistently
-// with the narrow character strings the logging library passes to the
-// operating system.
+// The directory name deliberately contains U+20AC encoded as UTF-8.
 constexpr const char kLogDir[] = "cleanup_\xE2\x82\xAC_dir";
+#ifdef NGLOG_OS_WINDOWS
+constexpr wchar_t kLogDirWide[] = L"cleanup_\u20AC_dir";
+#endif
 
 static void MakeLogDir(const char* name) {
 #ifdef NGLOG_OS_WINDOWS
-  _mkdir(name);
+  static_cast<void>(name);
+  const BOOL created = CreateDirectoryW(kLogDirWide, nullptr);
+  ASSERT_TRUE(created || GetLastError() == ERROR_ALREADY_EXISTS);
 #else
   mkdir(name, 0777);
 #endif
 }
+
+#ifdef NGLOG_OS_WINDOWS
+TEST(WindowsUtf8Paths, RejectsInvalidUtf8) {
+  constexpr char kInvalidUtf8[] = {'\xC3', '\x28'};
+  std::wstring wide_path;
+  EXPECT_FALSE(nglog::internal::Utf8ToWide(kInvalidUtf8, sizeof(kInvalidUtf8),
+                                           &wide_path));
+}
+#endif
 
 TEST(CleanImmediatelyWithNonAsciiPrefix, logging) {
   using namespace std::chrono_literals;
