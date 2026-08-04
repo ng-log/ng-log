@@ -13,8 +13,17 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstring>
 #include <string>
 #include <utility>
+#include <vector>
+
+#ifdef NGLOG_OS_WINDOWS
+#  include <process.h>
+#  include <windows.h>
+
+#  include "internal/utf8.h"
+#endif
 
 using namespace nglog;
 using namespace std::chrono_literals;
@@ -87,6 +96,64 @@ TEST(Subprocess, SpawnFailsForANonExistentProgram) {
   Subprocess process;
   EXPECT_FALSE(process.Spawn(argv, envp));
 }
+
+#ifdef NGLOG_OS_WINDOWS
+TEST(Subprocess, SpawnsFromUtf8ExecutablePath) {
+  std::string temporary_path;
+  ASSERT_TRUE(nglog::internal::GetTempPathUtf8(&temporary_path));
+  temporary_path += "nglog_subprocess_\xE2\x82\xAC_" +
+                    std::to_string(_getpid()) + "_" +
+                    std::to_string(GetTickCount64());
+
+  std::wstring wide_directory;
+  ASSERT_TRUE(nglog::internal::Utf8ToWide(
+      temporary_path.data(), temporary_path.size(), &wide_directory));
+  ASSERT_TRUE(CreateDirectoryW(wide_directory.c_str(), nullptr));
+
+  std::wstring source_path;
+  ASSERT_TRUE(nglog::internal::Utf8ToWide(SUBPROCESS_HELPER_PATH,
+                                          std::strlen(SUBPROCESS_HELPER_PATH),
+                                          &source_path));
+  const std::wstring copied_path = wide_directory + L"\\helper.exe";
+  ASSERT_TRUE(CopyFileW(source_path.c_str(), copied_path.c_str(), FALSE));
+
+  std::string executable_path;
+  ASSERT_TRUE(nglog::internal::WideToUtf8(
+      copied_path.data(), copied_path.size(), &executable_path));
+  std::vector<char> executable(executable_path.begin(), executable_path.end());
+  executable.push_back('\0');
+  char* argv[] = {executable.data(), nullptr};
+  char* envp[] = {nullptr};
+  Subprocess process;
+  const bool spawned = process.Spawn(argv, envp);
+  const DWORD spawn_error = GetLastError();
+  if (spawned) {
+    process.CloseStdin();
+    process.Wait(kTimeout);
+  }
+  EXPECT_TRUE(DeleteFileW(copied_path.c_str()));
+  EXPECT_TRUE(RemoveDirectoryW(wide_directory.c_str()));
+  ASSERT_TRUE(spawned) << "CreateProcessW error " << spawn_error;
+}
+
+TEST(Subprocess, PassesUtf8Arguments) {
+  char program[] = SUBPROCESS_HELPER_PATH;
+  char option[] = "--echo-arg";
+  char argument[] = "argument_\xE2\x82\xAC";
+  char* argv[] = {program, option, argument, nullptr};
+  char* envp[] = {nullptr};
+
+  Subprocess process;
+  ASSERT_TRUE(process.Spawn(argv, envp));
+  process.CloseStdin();
+
+  char output[kOutputBufferSize] = {};
+  const std::size_t bytes_read =
+      process.ReadStdout(output, sizeof(output), kTimeout);
+  EXPECT_EQ(std::string(output, bytes_read), argument);
+  process.Wait(kTimeout);
+}
+#endif
 
 TEST(Subprocess, OperatorBoolReflectsSpawnState) {
   char* argv[] = {helper_path, nullptr};

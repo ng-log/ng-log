@@ -39,6 +39,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cwchar>
 #include <fstream>
 #include <future>
 #include <iomanip>
@@ -78,6 +79,7 @@
 #include "base/commandlineflags.h"
 #include "internal/flags_scope.h"
 #include "internal/lock_metrics.h"
+#include "internal/utf8.h"
 #include "mock-log.h"
 #include "ng-log/logging.h"
 #include "ng-log/raw_logging.h"
@@ -1049,8 +1051,11 @@ static void GetFiles(const string& pattern, vector<string>* files) {
     files->push_back(string(g.gl_pathv[i]));
   }
 #elif defined(NGLOG_OS_WINDOWS)
-  WIN32_FIND_DATAA data;
-  WindowsHandle handle{FindFirstFileA(pattern.c_str(), &data)};
+  std::wstring wide_pattern;
+  CHECK(nglog::internal::Utf8ToWide(pattern.data(), pattern.size(),
+                                    &wide_pattern));
+  WIN32_FIND_DATAW data;
+  WindowsHandle handle{FindFirstFileW(wide_pattern.c_str(), &data)};
   size_t index = pattern.rfind('\\');
   if (index == string::npos) {
     LOG(FATAL) << "No directory separator.";
@@ -1061,8 +1066,12 @@ static void GetFiles(const string& pattern, vector<string>* files) {
     return;
   }
   do {
-    files->push_back(dirname + data.cFileName);
-  } while (FindNextFileA(handle.get(), &data));
+    std::string filename;
+    const std::size_t filename_length = std::wcslen(data.cFileName);
+    CHECK(nglog::internal::WideToUtf8(data.cFileName, filename_length,
+                                      &filename));
+    files->push_back(dirname + filename);
+  } while (FindNextFileW(handle.get(), &data));
 #else
 #  error There is no way to do glob.
 #endif

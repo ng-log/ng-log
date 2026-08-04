@@ -43,7 +43,7 @@ determined according to the following rules.
 **Windows**
 
 :   ng-log uses the
-    [GetTempPathA](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-gettemppatha)
+    [GetTempPathW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-gettemppathw)
     API function to retrieve the directory for temporary files with a
     fallback to
 
@@ -51,6 +51,13 @@ determined according to the following rules.
     2.  `C:\TEMP\`
 
     (in the order given.)
+
+    All file and directory path arguments passed to ng-log must be encoded as
+    UTF-8. On Windows, ng-log converts these paths to UTF-16 and uses Unicode
+    filesystem APIs. Invalid UTF-8 paths are rejected. MSVC users should also
+    review the [compiler character set
+    guidance](windows.md#compiler-character-sets) when non-ASCII filenames
+    appear in source files or narrow string literals.
 
 **non-Windows**
 

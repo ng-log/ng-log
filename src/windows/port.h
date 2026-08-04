@@ -81,10 +81,8 @@
 #    pragma warning(disable : 4244 4251 4355 4715 4800 4996 4267 4312 4722)
 
 /* file I/O */
-#    define PATH_MAX 1024
 #    define popen _popen
 #    define pclose _pclose
-#    define R_OK 04 /* read-only (for access()) */
 #    define S_ISDIR(m) (((m) & _S_IFMT) == _S_IFDIR)
 
 #    define O_WRONLY _O_WRONLY
@@ -94,24 +92,13 @@
 #    define S_IRUSR S_IREAD
 #    define S_IWUSR S_IWRITE
 
-/* Not quite as lightweight as a hard-link, but more than good enough for us. */
-#    define link(oldpath, newpath) CopyFileA(oldpath, newpath, false)
-
 #    define strcasecmp _stricmp
-#    define strncasecmp _strnicmp
 
 /* In windows-land, hash<> is called hash_compare<> (from xhash.h) */
 /* VC11 provides std::hash */
 #    if defined(_MSC_VER) && (_MSC_VER < 1700)
 #      define hash hash_compare
 #    endif
-
-/* Windows doesn't support specifying the number of buckets as a
- * hash_map constructor arg, so we leave this blank.
- */
-#    define CTEMPLATE_SMALL_HASHTABLE
-
-#    define DEFAULT_TEMPLATE_ROOTDIR ".."
 
 #  endif  // _MSC_VER
 

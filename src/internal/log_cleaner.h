@@ -11,7 +11,6 @@
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
-#include <vector>
 
 #include "internal/lock_metrics.h"
 #include "ng-log/logging.h"
@@ -67,7 +66,7 @@ class NGLOG_NO_EXPORT LogCleaner {
       const std::chrono::minutes& overdue, const std::string& base_filename,
       const LogFilePattern& pattern);
 
-  static std::vector<std::string> GetOverdueLogNames(
+  static std::unordered_set<std::string> GetOverdueLogNames(
       std::string log_directory,
       const std::chrono::system_clock::time_point& current_time,
       const std::chrono::minutes& overdue, const LogFilePattern& pattern);

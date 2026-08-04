@@ -14,6 +14,7 @@
 #include <locale>
 
 #include "config.h"
+#include "internal/utf8.h"
 #include "ng-log/platform.h"
 
 #ifdef NGLOG_OS_WINDOWS
@@ -331,21 +332,22 @@ void FormatDisplayPath(const char* path, std::size_t path_length,
 
 const std::string& CachedHostname() {
   static const std::string hostname = [] {
-    char buf[256] = "";
 #ifdef NGLOG_OS_WINDOWS
-    char name[MAX_COMPUTERNAME_LENGTH + 1];
-    DWORD len = sizeof(name) / sizeof(name[0]);
-    if (GetComputerNameA(name, &len)) {
-      std::copy_n(name, len, buf);
-      buf[len] = '\0';
+    std::string name;
+    if (GetComputerNameUtf8(&name)) {
+      return name;
     }
+    return std::string();
 #elif defined(HAVE_UNISTD_H)
+    char buf[256] = "";
     if (gethostname(buf, sizeof(buf)) != 0) {
       buf[0] = '\0';
     }
     buf[sizeof(buf) - 1] = '\0';
-#endif
     return std::string(buf);
+#else
+    return std::string();
+#endif
   }();
   return hostname;
 }

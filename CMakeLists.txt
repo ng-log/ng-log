@@ -502,6 +502,8 @@ set (NGLOG_SRCS
   src/internal/terminal_capabilities.h
   src/internal/theme.cc
   src/internal/theme.h
+  src/internal/utf8.cc
+  src/internal/utf8.h
   src/libbacktrace.cc
   src/libbacktrace.h
   src/logging.cc
@@ -851,7 +853,7 @@ if (BUILD_TESTING AND GTest_FOUND)
 
     if (MINGW)
       target_link_options (subprocess_test_helper PRIVATE
-        -static -static-libgcc -static-libstdc++)
+        -municode -static -static-libgcc -static-libstdc++)
     endif (MINGW)
   endif (HAVE_SUBPROCESS)
 
@@ -1132,6 +1134,7 @@ if (BUILD_TESTING AND GTest_FOUND)
     ${CMAKE_COMMAND}
     -DLOGCLEANUP=$<TARGET_FILE:cleanup_with_non_ascii_prefix_unittest>
     -DTEST_DIR=${ng-log_BINARY_DIR}/
+    -DTEST_ON_WINDOWS=${WIN32}
     -P ${ng-log_SOURCE_DIR}/cmake/RunCleanerTest4.cmake
     WORKING_DIRECTORY ${ng-log_BINARY_DIR})
 

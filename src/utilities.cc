@@ -45,6 +45,7 @@
 #include "config.h"
 #include "initializer.h"
 #include "internal/emscripten_console.h"
+#include "internal/utf8.h"
 #include "libbacktrace.h"
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
@@ -146,7 +147,19 @@ void AlsoErrorWrite(LogSeverity severity, const char* tag,
   (void)severity;
   (void)tag;
   // On Windows, also output to the debugger
-  ::OutputDebugStringA(message);
+  std::wstring wide_message;
+  if (!internal::Utf8ToWide(message, std::strlen(message), &wide_message)) {
+    const int length = MultiByteToWideChar(CP_UTF8, 0, message, -1, nullptr, 0);
+    if (length <= 0) {
+      return;
+    }
+    wide_message.resize(static_cast<std::size_t>(length));
+    if (MultiByteToWideChar(CP_UTF8, 0, message, -1, &wide_message[0],
+                            length) <= 0) {
+      return;
+    }
+  }
+  ::OutputDebugStringW(wide_message.c_str());
 #elif defined(NGLOG_OS_ANDROID)
   constexpr int android_log_levels[] = {
       ANDROID_LOG_INFO,

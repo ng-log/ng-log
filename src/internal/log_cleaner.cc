@@ -8,18 +8,15 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <memory>
 #include <set>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include "config.h"
+#include "internal/utf8.h"
 #include "utilities.h"
 
-#ifdef NGLOG_OS_WINDOWS
-#  include "windows/dirent.h"
-#else
+#ifndef NGLOG_OS_WINDOWS
 #  include <dirent.h>
 #endif
 
@@ -51,6 +48,87 @@ std::string JoinPath(const std::string& directory,
     return directory + filename;
   }
   return directory + path_delim + filename;
+}
+
+int StatPath(const std::string& path, struct stat* result) {
+#ifdef NGLOG_OS_WINDOWS
+  return StatUtf8(path.data(), path.size(), result);
+#else
+  return ::stat(path.c_str(), result);
+#endif
+}
+
+int UnlinkPath(const std::string& path) {
+#ifdef NGLOG_OS_WINDOWS
+  return UnlinkUtf8(path.data(), path.size());
+#else
+  return ::unlink(path.c_str());
+#endif
+}
+
+bool ForEachDirectoryPath(const std::string& path,
+                          DirectoryEntryCallback callback, void* context) {
+#ifdef NGLOG_OS_WINDOWS
+  return ForEachDirectoryEntryUtf8(path.data(), path.size(), callback, context);
+#else
+  DIR* directory = ::opendir(path.c_str());
+  if (directory == nullptr) {
+    return false;
+  }
+
+  bool success = true;
+  while (const struct dirent* entry = ::readdir(directory)) {
+    if (std::strcmp(entry->d_name, ".") == 0 ||
+        std::strcmp(entry->d_name, "..") == 0) {
+      continue;
+    }
+    if (!callback(entry->d_name, std::strlen(entry->d_name), context)) {
+      success = false;
+      break;
+    }
+  }
+  ::closedir(directory);
+  return success;
+#endif
+}
+
+bool IsLogLastModifiedOverPath(
+    const std::string& filepath,
+    const std::chrono::system_clock::time_point& current_time,
+    const std::chrono::minutes& overdue) {
+  struct stat file_stat;
+  if (StatPath(filepath, &file_stat) != 0) {
+    return false;
+  }
+
+  const auto last_modified_time =
+      std::chrono::system_clock::from_time_t(file_stat.st_mtime);
+  const auto diff = current_time - last_modified_time;
+  return diff >= overdue;
+}
+
+struct OverdueLogContext {
+  const std::string& log_directory;
+  const std::chrono::system_clock::time_point& current_time;
+  const std::chrono::minutes& overdue;
+  const std::regex& filename_regex;
+  std::unordered_set<std::string>* overdue_log_names;
+};
+
+bool VisitOverdueLog(const char* filename, std::size_t filename_length,
+                     void* context) {
+  auto* const overdue_context = static_cast<OverdueLogContext*>(context);
+  const std::string name(filename, filename_length);
+  if (!std::regex_match(name, overdue_context->filename_regex)) {
+    return true;
+  }
+
+  const std::string filepath = JoinPath(overdue_context->log_directory, name);
+  if (IsLogLastModifiedOverPath(filepath, overdue_context->current_time,
+                                overdue_context->overdue)) {
+    overdue_context->overdue_log_names->insert(filepath);
+  }
+  return true;
 }
 
 }  // namespace
@@ -224,19 +302,19 @@ void LogCleaner::CleanOverdueLogs(
   }
 
   for (const std::string& dir : dirs) {
-    std::vector<std::string> logs =
+    std::unordered_set<std::string> logs =
         GetOverdueLogNames(dir, current_time, overdue, pattern);
     for (const std::string& log : logs) {
       // NOTE May fail on Windows if the file is still open.
-      int result = unlink(log.c_str());
+      const int result = UnlinkPath(log);
       if (result != 0) {
-        perror(("Could not remove overdue log " + log).c_str());
+        std::perror(("Could not remove overdue log " + log).c_str());
       }
     }
   }
 }
 
-std::vector<std::string> LogCleaner::GetOverdueLogNames(
+std::unordered_set<std::string> LogCleaner::GetOverdueLogNames(
     std::string log_directory,
     const std::chrono::system_clock::time_point& current_time,
     const std::chrono::minutes& overdue, const LogFilePattern& pattern) {
@@ -253,29 +331,9 @@ std::vector<std::string> LogCleaner::GetOverdueLogNames(
     }
   }
 
-  // Try to get all files within log_directory.
-  struct DirectoryDeleter {
-    void operator()(DIR* directory) const noexcept { closedir(directory); }
-  };
-  using Directory = std::unique_ptr<DIR, DirectoryDeleter>;
-  Directory dir{opendir(log_directory.c_str()), DirectoryDeleter{}};
-  struct dirent* ent;
-
-  if (dir) {
-    while ((ent = readdir(dir.get())) != nullptr) {
-      if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
-        continue;
-      }
-
-      const std::string filename = ent->d_name;
-      if (std::regex_match(filename, pattern.filename_regex)) {
-        const std::string filepath = JoinPath(log_directory, filename);
-        if (IsLogLastModifiedOver(filepath, current_time, overdue)) {
-          overdue_log_names.insert(filepath);
-        }
-      }
-    }
-  }
+  OverdueLogContext context{log_directory, current_time, overdue,
+                            pattern.filename_regex, &overdue_log_names};
+  ForEachDirectoryPath(log_directory, VisitOverdueLog, &context);
 
   return {overdue_log_names.begin(), overdue_log_names.end()};
 }
@@ -284,18 +342,7 @@ bool LogCleaner::IsLogLastModifiedOver(
     const std::string& filepath,
     const std::chrono::system_clock::time_point& current_time,
     const std::chrono::minutes& overdue) {
-  // Try to get the last modified time of this file.
-  struct stat file_stat;
-
-  if (stat(filepath.c_str(), &file_stat) == 0) {
-    const auto last_modified_time =
-        std::chrono::system_clock::from_time_t(file_stat.st_mtime);
-    const auto diff = current_time - last_modified_time;
-    return diff >= overdue;
-  }
-
-  // If failed to get file stat, do not return true.
-  return false;
+  return IsLogLastModifiedOverPath(filepath, current_time, overdue);
 }
 
 }  // namespace internal

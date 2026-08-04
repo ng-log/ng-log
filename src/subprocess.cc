@@ -26,6 +26,8 @@
 #    include <string>
 #    include <type_traits>
 
+#    include "internal/utf8.h"
+
 namespace nglog {
 inline namespace tools {
 
@@ -37,43 +39,37 @@ namespace {
 // command line back into argv[], so that a round trip through
 // CreateProcessW() reproduces |arg| exactly, including embedded spaces,
 // quotes, or backslashes.
-void AppendQuotedArg(const char* arg, std::wstring& out) {
+void AppendQuotedArg(const std::wstring& arg, std::wstring& out) {
   if (!out.empty()) {
     out += L' ';
   }
 
-  std::wstring warg;
-  while (*arg != '\0') {
-    warg += static_cast<wchar_t>(static_cast<unsigned char>(*arg));
-    ++arg;
-  }
-
-  if (!warg.empty() && warg.find_first_of(L" \t\n\v\"") == std::wstring::npos) {
-    out += warg;
+  if (!arg.empty() && arg.find_first_of(L" \t\n\v\"") == std::wstring::npos) {
+    out += arg;
     return;
   }
 
   out += L'"';
 
-  for (std::size_t i = 0; i <= warg.size(); ++i) {
+  for (std::size_t i = 0; i <= arg.size(); ++i) {
     std::size_t num_backslashes = 0;
 
-    while (i < warg.size() && warg[i] == L'\\') {
+    while (i < arg.size() && arg[i] == L'\\') {
       ++num_backslashes;
       ++i;
     }
 
-    if (i == warg.size()) {
+    if (i == arg.size()) {
       out.append(num_backslashes * 2, L'\\');
       break;
     }
 
-    if (warg[i] == L'"') {
+    if (arg[i] == L'"') {
       out.append(num_backslashes * 2 + 1, L'\\');
-      out += warg[i];
+      out += arg[i];
     } else {
       out.append(num_backslashes, L'\\');
-      out += warg[i];
+      out += arg[i];
     }
   }
 
@@ -149,44 +145,26 @@ std::wstring BuildEnvironmentBlock(char* const envp[]) {
   return block;
 }
 
-// Resolves a bare program name (one with no path separator) to a full
-// path, searching the calling process' own directory, its current
-// directory, the system directories, and its own PATH environment
-// variable, in that order. Returns |name| unchanged, path separators and
-// all, if it already looks like a path, or if the search below fails to
-// find it.
-//
-// CreateProcessW() can do this resolution itself when left with a NULL
-// lpApplicationName, but it then searches PATH from the environment
-// block handed to the *new* process rather than this one's own, which
-// would silently defeat RunAddr2Line()'s deliberately minimal child
-// environment: with no PATH entry to search, argv[0] alone would never
-// resolve.
-std::string ResolveExecutablePath(const char* name) {
-  if (std::strpbrk(name, "\\/") != nullptr) {
-    return name;
+bool ResolveExecutablePath(const char* name, std::wstring* resolved_path) {
+  std::wstring wide_name;
+  if (!internal::Utf8ToWide(name, std::strlen(name), &wide_name)) {
+    return false;
   }
 
-  std::wstring wide_name;
-  for (const char* p = name; *p != '\0'; ++p) {
-    wide_name += static_cast<wchar_t>(static_cast<unsigned char>(*p));
+  if (std::strpbrk(name, "\\/") != nullptr) {
+    *resolved_path = std::move(wide_name);
+    return true;
   }
 
   wchar_t buffer[MAX_PATH];
-  const DWORD length = SearchPathW(
-      nullptr, wide_name.c_str(), L".exe",
-      static_cast<DWORD>(sizeof(buffer) / sizeof(buffer[0])), buffer, nullptr);
-
-  if (length == 0 || length >= sizeof(buffer) / sizeof(buffer[0])) {
-    return name;
+  const DWORD length = SearchPathW(nullptr, wide_name.c_str(), L".exe",
+                                   MAX_PATH, buffer, nullptr);
+  if (length == 0 || length >= MAX_PATH) {
+    *resolved_path = std::move(wide_name);
+    return true;
   }
-
-  std::string resolved;
-  resolved.reserve(length);
-  for (DWORD i = 0; i < length; ++i) {
-    resolved += static_cast<char>(buffer[i]);
-  }
-  return resolved;
+  resolved_path->assign(buffer, length);
+  return true;
 }
 
 DWORD ClampTimeoutMillis(std::chrono::milliseconds timeout) {
@@ -328,6 +306,26 @@ void Subprocess::Reset() noexcept {
 bool Subprocess::Spawn(char* const argv[], char* const envp[]) {
   Reset();
 
+  if (argv == nullptr || argv[0] == nullptr || envp == nullptr) {
+    return false;
+  }
+
+  std::wstring executable_path;
+  if (!ResolveExecutablePath(argv[0], &executable_path)) {
+    return false;
+  }
+
+  std::wstring command_line;
+  for (char* const* arg = argv; *arg != nullptr; ++arg) {
+    std::wstring wide_arg;
+    if (!internal::Utf8ToWide(*arg, std::strlen(*arg), &wide_arg)) {
+      return false;
+    }
+    AppendQuotedArg(wide_arg, command_line);
+  }
+
+  std::wstring environment_block = BuildEnvironmentBlock(envp);
+
   UniqueHandle stdin_write;
   UniqueHandle stdin_read;
 
@@ -354,17 +352,6 @@ bool Subprocess::Spawn(char* const argv[], char* const envp[]) {
                                        &inheritable, OPEN_EXISTING,
                                        FILE_ATTRIBUTE_NORMAL, nullptr)};
 
-  std::wstring command_line;
-  if (argv[0] != nullptr) {
-    const std::string resolved = ResolveExecutablePath(argv[0]);
-    AppendQuotedArg(resolved.c_str(), command_line);
-  }
-  for (char* const* arg = argv + 1; *arg != nullptr; ++arg) {
-    AppendQuotedArg(*arg, command_line);
-  }
-
-  std::wstring environment_block = BuildEnvironmentBlock(envp);
-
   STARTUPINFOW startup_info{};
   startup_info.cb = sizeof(startup_info);
   startup_info.dwFlags = STARTF_USESTDHANDLES;
@@ -379,9 +366,10 @@ bool Subprocess::Spawn(char* const argv[], char* const envp[]) {
   // this project's C++14 baseline. Both strings are guaranteed
   // contiguous and NUL-terminated, including when empty.
   const BOOL spawned = CreateProcessW(
-      nullptr, &command_line[0], nullptr, nullptr,
+      executable_path.c_str(), &command_line[0], nullptr, nullptr,
       /*bInheritHandles=*/TRUE, CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,
       &environment_block[0], nullptr, &startup_info, &process_info);
+  const DWORD spawn_error = GetLastError();
 
   // These were only needed for the child to inherit. The child has its
   // own copies (or, on failure, nothing needs them any more).
@@ -389,6 +377,7 @@ bool Subprocess::Spawn(char* const argv[], char* const envp[]) {
   stdout_write.reset();
 
   if (!spawned) {
+    SetLastError(spawn_error);
     return false;
   }
 

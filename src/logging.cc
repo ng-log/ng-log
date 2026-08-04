@@ -74,16 +74,11 @@
 #include "internal/styled_output.h"
 #include "internal/terminal_capabilities.h"
 #include "internal/theme.h"
+#include "internal/utf8.h"
 #include "ng-log/platform.h"
 #include "ng-log/raw_logging.h"
 #include "stacktrace.h"
 #include "utilities.h"
-
-#ifdef NGLOG_OS_WINDOWS
-#  include "windows/dirent.h"
-#else
-#  include <dirent.h>  // for automatic removal of old logs
-#endif
 
 #if defined(HAVE__CHSIZE_S) || defined(NGLOG_OS_WINDOWS)
 #  include <io.h>  // for truncate log file
@@ -168,11 +163,7 @@ static void GetHostName(string* hostname) {
   }
   *hostname = buf.nodename;
 #elif defined(NGLOG_OS_WINDOWS)
-  char buf[MAX_COMPUTERNAME_LENGTH + 1];
-  DWORD len = MAX_COMPUTERNAME_LENGTH + 1;
-  if (GetComputerNameA(buf, &len)) {
-    *hostname = buf;
-  } else {
+  if (!nglog::internal::GetComputerNameUtf8(hostname)) {
     hostname->clear();
   }
 #else
@@ -1418,6 +1409,38 @@ constexpr char possible_dir_delim[] = "\\/";
 constexpr char possible_dir_delim[] = "/";
 #endif
 
+int StatPath(const std::string& path, struct stat* result) {
+#ifdef NGLOG_OS_WINDOWS
+  return internal::StatUtf8(path.data(), path.size(), result);
+#else
+  return stat(path.c_str(), result);
+#endif
+}
+
+int OpenPath(const std::string& path, int flags, int mode) {
+#ifdef NGLOG_OS_WINDOWS
+  return internal::OpenUtf8(path.data(), path.size(), flags, mode);
+#else
+  return open(path.c_str(), flags, mode);
+#endif
+}
+
+int UnlinkPath(const std::string& path) {
+#ifdef NGLOG_OS_WINDOWS
+  return internal::UnlinkUtf8(path.data(), path.size());
+#else
+  return unlink(path.c_str());
+#endif
+}
+
+int AccessPath(const std::string& path, int mode) {
+#ifdef NGLOG_OS_WINDOWS
+  return internal::AccessUtf8(path.data(), path.size(), mode);
+#else
+  return access(path.c_str(), mode);
+#endif
+}
+
 string PrettyDuration(const std::chrono::duration<int>& secs) {
   std::stringstream result;
   int mins = secs.count() / 60;
@@ -1514,7 +1537,7 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
     // the first time or a file is being recreated due to exceeding max size
 
     struct stat statbuf;
-    if (stat(filename.c_str(), &statbuf) == 0) {
+    if (StatPath(filename, &statbuf) == 0) {
       // truncate the file if it exceeds the max size
       if ((static_cast<std::size_t>(statbuf.st_size) >> 20U) >= MaxLogSize()) {
 #if defined(NGLOG_OS_WINDOWS)
@@ -1529,8 +1552,7 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
     }
   }
 
-  FileDescriptor fd{
-      open(filename.c_str(), flags, static_cast<mode_t>(FLAGS_logfile_mode))};
+  FileDescriptor fd{OpenPath(filename, flags, FLAGS_logfile_mode)};
   if (!fd) {
 #ifdef NGLOG_OS_WINDOWS
     create_error_message_ = StrError(errno);
@@ -1593,8 +1615,8 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
     create_error_message_ = StrError(errno);
 #endif
     if (FLAGS_timestamp_in_logfile_name) {
-      unlink(filename.c_str());  // Erase the half-baked evidence: an unusable
-                                 // log file, only if we just created it.
+      UnlinkPath(filename);  // Erase the half-baked evidence: an unusable
+                             // log file, only if we just created it.
     }
     return false;
   }
@@ -1626,7 +1648,7 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
       linkpath = filename.substr(0, separator + 1);
     }
     linkpath += linkname;
-    unlink(linkpath.c_str());  // delete old one if it exists
+    UnlinkPath(linkpath);  // delete old one if it exists
 
 #if defined(NGLOG_OS_WINDOWS)
     // TODO(hamaji): Create lnk file on Windows?
@@ -1645,7 +1667,7 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
     // FLAGS_log_link, if indicated
     if (!FLAGS_log_link.empty()) {
       linkpath = FLAGS_log_link + "/" + linkname;
-      unlink(linkpath.c_str());  // delete old one if it exists
+      UnlinkPath(linkpath);  // delete old one if it exists
       if (symlink(filename.c_str(), linkpath.c_str()) != 0) {
         // silently ignore failures
       }
@@ -2732,8 +2754,8 @@ static void GetTempDirectories(vector<string>& list) {
   //   C:/Documents & Settings/whomever/TEMP (or whatever GetTempPath() is)
   //   C:/TMP/
   //   C:/TEMP/
-  char tmp[MAX_PATH];
-  if (GetTempPathA(MAX_PATH, tmp)) list.push_back(tmp);
+  string tmp;
+  if (internal::GetTempPathUtf8(&tmp)) list.push_back(tmp);
   list.push_back("C:\\TMP\\");
   list.push_back("C:\\TEMP\\");
 #else
@@ -2762,7 +2784,7 @@ static void GetTempDirectories(vector<string>& list) {
     list.push_back(dstr);
 
     struct stat statbuf;
-    if (!stat(d, &statbuf) && S_ISDIR(statbuf.st_mode)) {
+    if (!StatPath(dstr, &statbuf) && S_ISDIR(statbuf.st_mode)) {
       // We found a dir that exists - we're done.
       return;
     }
@@ -2788,8 +2810,8 @@ const vector<string>& GetLoggingDirectories() {
     } else {
       GetTempDirectories(*logging_directories_list);
 #ifdef NGLOG_OS_WINDOWS
-      char tmp[MAX_PATH];
-      if (GetWindowsDirectoryA(tmp, MAX_PATH))
+      string tmp;
+      if (internal::GetWindowsDirectoryUtf8(&tmp))
         logging_directories_list->push_back(tmp);
       logging_directories_list->push_back(".\\");
 #else
@@ -2810,7 +2832,7 @@ void GetExistingTempDirectories(vector<string>& list) {
   while (i_dir != list.end()) {
     // zero arg to access means test for existence; no constant
     // defined on windows
-    if (access(i_dir->c_str(), 0)) {
+    if (AccessPath(*i_dir, 0)) {
       i_dir = list.erase(i_dir);
     } else {
       ++i_dir;
@@ -2832,7 +2854,8 @@ void TruncateLogFile(const char* path, uint64 limit, uint64 keep) {
   if (strncmp(procfd_prefix, path, strlen(procfd_prefix))) flags |= O_NOFOLLOW;
 #  endif
 
-  FileDescriptor fd{open(path, flags)};
+  const string path_string(path);
+  FileDescriptor fd{OpenPath(path_string, flags, 0)};
   if (!fd) {
     if (errno == EFBIG) {
       // The log file in question has got too big for us to open. The
@@ -2862,7 +2885,11 @@ void TruncateLogFile(const char* path, uint64 limit, uint64 keep) {
 
   // See if the path refers to a regular file bigger than the
   // specified limit
+#  ifdef NGLOG_OS_WINDOWS
+  if ((statbuf.st_mode & _S_IFMT) != _S_IFREG) return;
+#  else
   if (!S_ISREG(statbuf.st_mode)) return;
+#  endif
   if (statbuf.st_size <= static_cast<off_t>(limit)) return;
   if (statbuf.st_size <= static_cast<off_t>(keep)) return;
 
