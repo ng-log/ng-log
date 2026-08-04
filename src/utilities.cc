@@ -43,6 +43,7 @@
 #include "addr2line.h"
 #include "config.h"
 #include "initializer.h"
+#include "internal/utf8.h"
 #include "libbacktrace.h"
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
@@ -88,13 +89,27 @@ inline namespace tools {
 
 constexpr int FileDescriptor::InvalidHandle;
 
-void AlsoErrorWrite(LogSeverity severity, const char* tag,
-                    const char* message) noexcept {
+void AlsoErrorWrite(LogSeverity severity, const char* tag, const char* message,
+                    std::size_t message_length) noexcept {
 #if defined(NGLOG_OS_WINDOWS)
   (void)severity;
   (void)tag;
-  // On Windows, also output to the debugger
-  ::OutputDebugStringA(message);
+  std::wstring wide_message;
+  if (!internal::Utf8ToWide(message, message_length, &wide_message)) {
+    ::OutputDebugStringW(L"[invalid UTF-8 log message]");
+    return;
+  }
+  std::size_t begin = 0;
+  while (begin <= wide_message.size()) {
+    const std::size_t end = wide_message.find(L'\0', begin);
+    const std::wstring part = wide_message.substr(
+        begin, end == std::wstring::npos ? std::wstring::npos : end - begin);
+    ::OutputDebugStringW(part.c_str());
+    if (end == std::wstring::npos) {
+      break;
+    }
+    begin = end + 1;
+  }
 #elif defined(NGLOG_OS_ANDROID)
   constexpr int android_log_levels[] = {
       ANDROID_LOG_INFO,
@@ -108,6 +123,7 @@ void AlsoErrorWrite(LogSeverity severity, const char* tag,
   (void)severity;
   (void)tag;
   (void)message;
+  (void)message_length;
 #endif
 }
 
@@ -132,10 +148,15 @@ static const int kPrintfPointerFieldWidth = 2 + 2 * sizeof(void*);
 
 static void DebugWriteToStderr(const char* data, void*) {
   // This one is signal-safe.
-  if (write(fileno(stderr), data, strlen(data)) < 0) {
+#  ifdef NGLOG_OS_WINDOWS
+  internal::WriteUtf8ToFileDescriptor(fileno(stderr), data, std::strlen(data));
+#  else
+  if (write(fileno(stderr), data, std::strlen(data)) < 0) {
     // Ignore errors.
   }
-  AlsoErrorWrite(NGLOG_FATAL, tools::ProgramInvocationShortName(), data);
+#  endif
+  AlsoErrorWrite(NGLOG_FATAL, tools::ProgramInvocationShortName(), data,
+                 std::strlen(data));
 }
 
 static void DebugWriteToString(const char* data, void* arg) {

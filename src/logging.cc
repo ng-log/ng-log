@@ -119,8 +119,6 @@ using std::fclose;
 using std::fflush;
 using std::FILE;
 using std::fprintf;
-using std::fputs;
-using std::fwrite;
 using std::perror;
 
 #ifdef __QNX__
@@ -166,10 +164,12 @@ static void GetHostName(string* hostname) {
   }
   *hostname = buf.nodename;
 #elif defined(NGLOG_OS_WINDOWS)
-  char buf[MAX_COMPUTERNAME_LENGTH + 1];
+  wchar_t buf[MAX_COMPUTERNAME_LENGTH + 1];
   DWORD len = MAX_COMPUTERNAME_LENGTH + 1;
-  if (GetComputerNameA(buf, &len)) {
-    *hostname = buf;
+  std::string converted;
+  if (GetComputerNameW(buf, &len) &&
+      nglog::internal::WideToUtf8(buf, len, &converted)) {
+    *hostname = std::move(converted);
   } else {
     hostname->clear();
   }
@@ -724,15 +724,18 @@ inline void LogDestination::SetEmailLogging(LogSeverity min_severity,
 }
 
 // A minimal adapter satisfying color.h's "Formatter" concept
-// (AppendString(const char*)), so WithColor()/Hyperlink::Wrap() can be used
+// (AppendString(const char*, size_t)), so WithColor()/Hyperlink::Wrap() can be
+// used
 // against a plain FILE* stream. Only used to emit the small, fixed
 // escape/hyperlink sequences themselves: the colored content is always
-// written straight to "output" via fwrite() inside the body lambda they
+// written straight to "output" via WriteUtf8() inside the body lambda they
 // wrap, not through this adapter.
 namespace {
 struct FileFormatter {
   FILE* output;
-  void AppendString(const char* s) { fputs(s, output); }
+  void AppendString(const char* text, size_t len) {
+    internal::WriteUtf8(output, text, len);
+  }
 };
 }  // namespace
 
@@ -751,17 +754,18 @@ static void WriteTerminalField(FILE* output, FileFormatter& formatter,
   }
   if (mode == ColorMode::kAnsi) {
     WithColor(formatter, spec, true,
-              [text, len, output] { fwrite(text, len, 1, output); });
+              [text, len, output] { internal::WriteUtf8(output, text, len); });
     return;
   }
 #ifdef NGLOG_OS_WINDOWS
   if (mode == ColorMode::kLegacyConsole) {
-    WithLegacyConsoleAttribute(
-        output, spec, [text, len, output] { fwrite(text, len, 1, output); });
+    WithLegacyConsoleAttribute(output, spec, [text, len, output] {
+      internal::WriteUtf8(output, text, len);
+    });
     return;
   }
 #endif  // NGLOG_OS_WINDOWS
-  fwrite(text, len, 1, output);
+  internal::WriteUtf8(output, text, len);
 }
 
 static void WriteStyledLogField(FILE* output, FileFormatter& formatter,
@@ -843,7 +847,7 @@ static void ColoredWriteToStderrOrStdout(FILE* output, LogSeverity severity,
       want_color ? StreamColorMode(output) : ColorMode::kNone;
 
   if (mode == ColorMode::kNone) {
-    fwrite(message, len, 1, output);
+    internal::WriteUtf8(output, message, len);
     MaybeFlushStdout(output, severity);
     return;
   }
@@ -854,7 +858,7 @@ static void ColoredWriteToStderrOrStdout(FILE* output, LogSeverity severity,
                        spec.style != TextStyle::kNone;
 
   if (!colored) {
-    fwrite(message, len, 1, output);
+    internal::WriteUtf8(output, message, len);
     MaybeFlushStdout(output, severity);
     return;
   }
@@ -899,7 +903,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
     const ColorMode mode =
         want_color ? StreamColorMode(output) : ColorMode::kNone;
     if (mode == ColorMode::kNone) {
-      fwrite(data.message_text_, data.num_chars_to_log_, 1, output);
+      internal::WriteUtf8(output, data.message_text_, data.num_chars_to_log_);
       MaybeFlushStdout(output, data.severity_);
       return;
     }
@@ -934,7 +938,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
   // Avoid using cerr from this module since we may get called during
   // exit code, and cerr may be partially or fully destroyed by then.
   if (mode == ColorMode::kNone) {
-    fwrite(message, len, 1, output);
+    internal::WriteUtf8(output, message, len);
     MaybeFlushStdout(output, data.severity_);
     return;
   }
@@ -962,7 +966,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
       TextAttributes{theme.Get(Role::kShellCommand), Hyperlink()}, false,
       message + pos, data.prefix_timestamp_len_);
   pos += data.prefix_timestamp_len_;
-  fwrite(message + pos, 1, 1, output);  // The space before the thread id.
+  internal::WriteUtf8(output, message + pos, 1);
   pos += 1;
 
   WriteStyledLogField(
@@ -970,7 +974,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
       TextAttributes{theme.Get(Role::kLogThreadId), Hyperlink()}, false,
       message + pos, data.prefix_threadid_len_);
   pos += data.prefix_threadid_len_;
-  fwrite(message + pos, 1, 1, output);  // The space before "file:line".
+  internal::WriteUtf8(output, message + pos, 1);
   pos += 1;
 
   char uri[1024];
@@ -1002,11 +1006,11 @@ static void ColoredWriteToStderrOrStdoutWithFields(
                       TextAttributes{theme.Get(Role::kLogBracket), Hyperlink()},
                       false, message + pos, 1);  // The "]" closing the prefix.
   pos += 1;
-  fwrite(message + pos, 1, 1, output);  // The space after "]".
+  internal::WriteUtf8(output, message + pos, 1);
   pos += 1;
 
   if (!text_colored && data.styles_.size() == 0) {
-    fwrite(message + pos, len - pos, 1, output);
+    internal::WriteUtf8(output, message + pos, len - pos);
     MaybeFlushStdout(output, data.severity_);
     return;
   }
@@ -1038,7 +1042,7 @@ static void ColoredWriteToStderrWithFields(
 static void WriteToStderr(const char* message, size_t len) {
   // Avoid using cerr from this module since we may get called during
   // exit code, and cerr may be partially or fully destroyed by then.
-  fwrite(message, len, 1, stderr);
+  internal::WriteUtf8(stderr, message, len);
 }
 
 inline void LogDestination::MaybeLogToStderr(
@@ -1046,7 +1050,8 @@ inline void LogDestination::MaybeLogToStderr(
   if ((data.severity_ >= FLAGS_stderrthreshold) || FLAGS_alsologtostderr) {
     ColoredWriteToStderrWithFields(data);
     AlsoErrorWrite(data.severity_, tools::ProgramInvocationShortName(),
-                   data.message_text_ + data.num_prefix_chars_);
+                   data.message_text_ + data.num_prefix_chars_,
+                   data.num_chars_to_log_ - data.num_prefix_chars_);
   }
 }
 
@@ -1547,7 +1552,7 @@ void LogFileObject::Write(
       const string& file_header_string = file_header_stream.str();
 
       const size_t header_len = file_header_string.size();
-      fwrite(file_header_string.data(), 1, header_len, file_.get());
+      std::fwrite(file_header_string.data(), 1, header_len, file_.get());
       file_length_ += header_len;
       bytes_since_flush_ += header_len;
     }
@@ -1561,7 +1566,7 @@ void LogFileObject::Write(
     // 4096 bytes. fwrite() returns 4096 for message lengths that are
     // greater than 4096, thereby indicating an error.
     errno = 0;
-    fwrite(message, 1, message_len, file_.get());
+    std::fwrite(message, 1, message_len, file_.get());
     if (FLAGS_stop_logging_if_full_disk &&
         errno == ENOSPC) {  // disk full, stop writing to disk
       stop_writing = true;  // until the disk is
@@ -2153,10 +2158,16 @@ LogMessage::~LogMessage() noexcept(false) {
 
   if (fail) {
     const char* message = "*** Check failure stack trace: ***\n";
-    if (write(fileno(stderr), message, strlen(message)) < 0) {
+#ifdef NGLOG_OS_WINDOWS
+    internal::WriteUtf8ToFileDescriptor(fileno(stderr), message,
+                                        std::strlen(message));
+#else
+    if (write(fileno(stderr), message, std::strlen(message)) < 0) {
       // Ignore errors.
     }
-    AlsoErrorWrite(NGLOG_FATAL, tools::ProgramInvocationShortName(), message);
+#endif
+    AlsoErrorWrite(NGLOG_FATAL, tools::ProgramInvocationShortName(), message,
+                   std::strlen(message));
 #if defined(__cpp_lib_uncaught_exceptions) && \
     (__cpp_lib_uncaught_exceptions >= 201411L)
     if (std::uncaught_exceptions() == 0)
@@ -2715,7 +2726,7 @@ static bool SendEmailInternal(const char* dest, const char* subject,
     if (pipe != nullptr) {
       // Add the body if we have one
       if (body) {
-        fwrite(body, sizeof(char), strlen(body), pipe);
+        std::fwrite(body, sizeof(char), strlen(body), pipe);
       }
       bool ok = pclose(pipe) != -1;
       if (!ok) {

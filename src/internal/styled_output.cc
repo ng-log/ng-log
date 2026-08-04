@@ -7,6 +7,8 @@
 
 #include <cstring>
 
+#include "utf8.h"
+
 #ifdef NGLOG_OS_WINDOWS
 #  include <io.h>
 #else
@@ -21,8 +23,12 @@ namespace internal {
 
 void WriteRawToStderr(const char* text) {
   const std::size_t len = std::strlen(text);
+#ifdef NGLOG_OS_WINDOWS
+  WriteUtf8ToFileDescriptor(fileno(stderr), text, len);
+#else
   if (write(fileno(stderr), text, len) < 0) {
   }
+#endif
 }
 
 }  // namespace internal

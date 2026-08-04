@@ -37,7 +37,9 @@
 #include <csignal>
 #include <cstring>
 #include <ctime>
+#include <cwchar>
 #include <sstream>
+#include <string>
 #include <thread>
 
 #include "config.h"
@@ -45,6 +47,7 @@
 #include "internal/styled_output.h"
 #include "internal/terminal_capabilities.h"
 #include "internal/theme.h"
+#include "internal/utf8.h"
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "ng-log/platform.h"
@@ -215,9 +218,13 @@ class MinimalFormatter {
 
 // Writes the given data with the size to the standard error.
 void WriteToStderr(const char* data, size_t size) {
+#ifdef NGLOG_OS_WINDOWS
+  internal::WriteUtf8ToFileDescriptor(fileno(stderr), data, size);
+#else
   if (write(fileno(stderr), data, size) < 0) {
     // Ignore errors.
   }
+#endif
 }
 
 // The writer function can be changed by InstallFailureWriter().
@@ -240,11 +247,16 @@ bool GetThreadName(char* buffer, std::size_t buffer_size) {
       wide_name == nullptr) {
     return false;
   }
-  const int result =
-      WideCharToMultiByte(CP_UTF8, 0, wide_name, -1, buffer,
-                          static_cast<int>(buffer_size), nullptr, nullptr);
+  std::string utf8_name;
+  const bool converted =
+      internal::WideToUtf8(wide_name, std::wcslen(wide_name), &utf8_name);
   LocalFree(wide_name);
-  return result > 1;
+  if (!converted || utf8_name.empty() || utf8_name.size() >= buffer_size) {
+    return false;
+  }
+  std::memcpy(buffer, utf8_name.data(), utf8_name.size());
+  buffer[utf8_name.size()] = '\0';
+  return true;
 #  elif defined(HAVE_PTHREAD_GETNAME_NP)
   return pthread_getname_np(pthread_self(), buffer, buffer_size) == 0 &&
          buffer[0] != '\0';
@@ -279,11 +291,15 @@ char g_hostname[256] = "";
 
 void ComputeHostname() {
 #ifdef NGLOG_OS_WINDOWS
-  char buf[MAX_COMPUTERNAME_LENGTH + 1];
+  wchar_t buf[MAX_COMPUTERNAME_LENGTH + 1];
   DWORD len = sizeof(buf) / sizeof(buf[0]);
-  if (GetComputerNameA(buf, &len)) {
-    MinimalFormatter formatter(g_hostname, sizeof(g_hostname));
-    formatter.AppendString(buf);
+  std::string hostname;
+  if (GetComputerNameW(buf, &len) &&
+      internal::WideToUtf8(buf, len, &hostname)) {
+    const std::size_t copy_length =
+        std::min(hostname.size(), sizeof(g_hostname) - 1);
+    std::memcpy(g_hostname, hostname.data(), copy_length);
+    g_hostname[copy_length] = '\0';
   }
 #elif defined(HAVE_UNISTD_H)
   if (gethostname(g_hostname, sizeof(g_hostname)) != 0) {
@@ -303,9 +319,17 @@ char g_cwd[512] = "";
 
 void ComputeCwd() {
 #ifdef NGLOG_OS_WINDOWS
-  const DWORD len = GetCurrentDirectoryA(sizeof(g_cwd), g_cwd);
-  if (len == 0 || len >= sizeof(g_cwd)) {
+  wchar_t wide_cwd[sizeof(g_cwd)];
+  const DWORD wide_cwd_size = sizeof(wide_cwd) / sizeof(wide_cwd[0]);
+  const DWORD len = GetCurrentDirectoryW(wide_cwd_size, wide_cwd);
+  std::string cwd;
+  if (len == 0 || len >= wide_cwd_size ||
+      !internal::WideToUtf8(wide_cwd, len, &cwd)) {
     g_cwd[0] = '\0';
+  } else {
+    const std::size_t copy_length = std::min(cwd.size(), sizeof(g_cwd) - 1);
+    std::memcpy(g_cwd, cwd.data(), copy_length);
+    g_cwd[copy_length] = '\0';
   }
 #elif defined(HAVE_UNISTD_H)
   if (getcwd(g_cwd, sizeof(g_cwd)) == nullptr) {

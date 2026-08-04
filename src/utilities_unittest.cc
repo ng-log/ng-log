@@ -33,8 +33,20 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <string>
+
+#include "internal/utf8.h"
 #include "ng-log/logging.h"
 #include "testing_utilities.h"
+
+#ifdef NGLOG_OS_WINDOWS
+#  include <fcntl.h>
+#  include <io.h>
+#  include <windows.h>
+#endif
 
 #ifdef NGLOG_USE_GFLAGS
 #  include <gflags/gflags.h>
@@ -46,6 +58,65 @@ using namespace nglog;
 TEST(utilities, InitializeLoggingDeathTest) {
   ASSERT_DEATH(InitializeLogging("foobar"), "");
 }
+
+TEST(Utf8Output, PreservesRedirectedBytes) {
+  const std::string message = "caf\xC3\xA9 \xE2\x98\x83";
+  std::FILE* file = std::tmpfile();
+  ASSERT_NE(file, nullptr);
+
+  EXPECT_TRUE(nglog::internal::WriteUtf8(file, message.data(), message.size()));
+  ASSERT_EQ(std::fflush(file), 0);
+  ASSERT_EQ(std::fseek(file, 0, SEEK_SET), 0);
+
+  std::string output(message.size(), '\0');
+  ASSERT_EQ(std::fread(output.data(), 1, output.size(), file), output.size());
+  EXPECT_EQ(output, message);
+  std::fclose(file);
+}
+
+TEST(Utf8Output, PreservesLengthDelimitedBytes) {
+  const char message[] = {'a', '\0', '\xFF', 'b'};
+  std::FILE* file = std::tmpfile();
+  ASSERT_NE(file, nullptr);
+
+  EXPECT_TRUE(nglog::internal::WriteUtf8(file, message, sizeof(message)));
+  ASSERT_EQ(std::fflush(file), 0);
+  ASSERT_EQ(std::fseek(file, 0, SEEK_SET), 0);
+
+  char output[sizeof(message)] = {};
+  ASSERT_EQ(std::fread(output, 1, sizeof(output), file), sizeof(output));
+  EXPECT_EQ(std::memcmp(output, message, sizeof(message)), 0);
+  std::fclose(file);
+}
+
+#ifdef NGLOG_OS_WINDOWS
+TEST(Utf8Output, WritesUnicodeToConsole) {
+  HANDLE console = CreateConsoleScreenBuffer(
+      GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+      CONSOLE_TEXTMODE_BUFFER, nullptr);
+  if (console == INVALID_HANDLE_VALUE) {
+    GTEST_SKIP() << "Windows console is unavailable";
+  }
+
+  const int file_descriptor = _open_osfhandle(
+      reinterpret_cast<intptr_t>(console), _O_WRONLY | _O_BINARY);
+  ASSERT_NE(file_descriptor, -1);
+
+  const std::string message = "caf\xC3\xA9 \xE2\x98\x83";
+  ASSERT_TRUE(nglog::internal::WriteUtf8ToFileDescriptor(
+      file_descriptor, message.data(), message.size()));
+
+  wchar_t output[7] = {};
+  COORD position = {0, 0};
+  DWORD characters_read = 0;
+  ASSERT_TRUE(ReadConsoleOutputCharacterW(console, output, 6, position,
+                                          &characters_read));
+  ASSERT_EQ(characters_read, 6U);
+  EXPECT_EQ(std::wstring(L"caf\u00e9 \u2603"),
+            std::wstring(output, characters_read));
+  _close(file_descriptor);
+}
+#endif
 
 int main(int argc, char** argv) {
   InitializeLogging(argv[0]);

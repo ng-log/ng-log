@@ -10,6 +10,13 @@ ng-log converts these paths to UTF-16 and uses the Unicode Windows filesystem
 APIs. Invalid UTF-8 paths are rejected. This behavior is consistent with the
 other supported platforms and does not require a change to the public API.
 
+## Log output
+
+Log messages are expected to use UTF-8. When standard output or standard error
+is connected to a Windows console, ng-log converts the message to UTF-16 and
+writes it with the Unicode console API. Redirected output remains UTF-8 bytes.
+Debugger output uses the corresponding Unicode debugger API.
+
 ng-log defines the severity level `ERROR`, which is also defined by `windows.h`.
 You can make nglog not define `INFO`, `WARNING`, `ERROR`, and `FATAL` by
 defining `NGLOG_NO_ABBREVIATED_SEVERITIES` before including `nglog/logging.h`.

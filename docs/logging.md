@@ -56,6 +56,10 @@ All file and directory path arguments passed to ng-log must be encoded as
 UTF-8. On Windows, ng-log converts these paths to UTF-16 and uses Unicode
 filesystem APIs. Invalid UTF-8 paths are rejected.
 
+Log messages also use UTF-8. On Windows, console output is converted to
+UTF-16 and written with Unicode console APIs, while redirected output remains
+UTF-8. Debugger output uses the Unicode debugger API.
+
 **non-Windows**
 
 :   The directory is determined by referencing the environment variables

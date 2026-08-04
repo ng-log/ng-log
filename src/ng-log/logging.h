@@ -417,19 +417,34 @@ struct NGLOG_EXPORT LogMessageTime {
 // A very useful logging macro to log windows errors:
 #  define LOG_SYSRESULT(result)                                                \
     if (FAILED(HRESULT_FROM_WIN32(result))) {                                  \
-      LPSTR message = nullptr;                                                 \
-      LPSTR msg = reinterpret_cast<LPSTR>(&message);                           \
-      DWORD message_length = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER |   \
+      LPWSTR message = nullptr;                                                \
+      LPWSTR msg = reinterpret_cast<LPWSTR>(&message);                         \
+      DWORD message_length = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER |   \
                                                 FORMAT_MESSAGE_FROM_SYSTEM |   \
                                                 FORMAT_MESSAGE_IGNORE_INSERTS, \
                                             0, result, 0, msg, 100, nullptr);  \
-      std::unique_ptr<char, decltype(&LocalFree)> release{message,             \
-                                                          &LocalFree};         \
+      std::unique_ptr<wchar_t, decltype(&LocalFree)> release{message,          \
+                                                             &LocalFree};      \
       if (message_length > 0) {                                                \
-        nglog::LogMessage(__FILE__, __LINE__, NGLOG_ERROR, 0,                  \
-                          &nglog::LogMessage::SendToLog)                       \
-                .stream()                                                      \
-            << reinterpret_cast<const char*>(message);                         \
+        const int utf8_length = WideCharToMultiByte(                           \
+            CP_UTF8, WC_ERR_INVALID_CHARS, message,                            \
+            static_cast<int>(message_length), nullptr, 0, nullptr, nullptr);   \
+        std::string utf8_message;                                              \
+        if (utf8_length > 0) {                                                 \
+          utf8_message.resize(static_cast<std::size_t>(utf8_length));          \
+          if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, message,      \
+                                  static_cast<int>(message_length),            \
+                                  &utf8_message[0], utf8_length, nullptr,      \
+                                  nullptr) != utf8_length) {                   \
+            utf8_message.clear();                                              \
+          }                                                                    \
+        }                                                                      \
+        if (!utf8_message.empty()) {                                           \
+          nglog::LogMessage(__FILE__, __LINE__, NGLOG_ERROR, 0,                \
+                            &nglog::LogMessage::SendToLog)                     \
+                  .stream()                                                    \
+              << utf8_message;                                                 \
+        }                                                                      \
       }                                                                        \
     }
 #endif

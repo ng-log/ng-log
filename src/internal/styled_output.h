@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdio>
+#include <cstring>
 #include <utility>
 
 #include "ng-log/export.h"
@@ -36,9 +37,9 @@ inline void WithColor(Formatter& formatter, ColorSpec spec, bool enabled,
   }
   char sequence[24];
   spec.FormatAnsiSequence(sequence, sizeof(sequence));
-  formatter.AppendString(sequence);
+  formatter.AppendString(sequence, std::strlen(sequence));
   body();
-  formatter.AppendString(kAnsiReset);
+  formatter.AppendString(kAnsiReset, std::strlen(kAnsiReset));
 }
 
 NGLOG_NO_EXPORT void WriteRawToStderr(const char* text);

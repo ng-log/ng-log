@@ -1025,13 +1025,14 @@ static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(void* pc, char* out,
   }
 
   char object_path[kMaxObjectPathUtf8Length];
-  const int narrow_len =
-      WideCharToMultiByte(CP_UTF8, 0, wide_path, -1, object_path,
-                          sizeof(object_path), nullptr, nullptr);
+  const int narrow_len = WideCharToMultiByte(
+      CP_UTF8, 0, wide_path, static_cast<int>(wide_len), object_path,
+      sizeof(object_path) - 1, nullptr, nullptr);
 
   if (narrow_len <= 0) {
     return false;
   }
+  object_path[narrow_len] = '\0';
 
   // addr2line resolves addresses against the file's own coordinate
   // system, i.e. relative to the PE's declared ImageBase, not the

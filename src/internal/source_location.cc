@@ -15,6 +15,7 @@
 
 #include "config.h"
 #include "ng-log/platform.h"
+#include "utf8.h"
 
 #ifdef NGLOG_OS_WINDOWS
 #  include <windows.h>
@@ -328,12 +329,13 @@ const std::string& CachedHostname() {
   static const std::string hostname = [] {
     char buf[256] = "";
 #ifdef NGLOG_OS_WINDOWS
-    char name[MAX_COMPUTERNAME_LENGTH + 1];
+    wchar_t name[MAX_COMPUTERNAME_LENGTH + 1];
     DWORD len = sizeof(name) / sizeof(name[0]);
-    if (GetComputerNameA(name, &len)) {
-      std::copy_n(name, len, buf);
-      buf[len] = '\0';
+    std::string converted;
+    if (GetComputerNameW(name, &len) && WideToUtf8(name, len, &converted)) {
+      return converted;
     }
+    return std::string();
 #elif defined(HAVE_UNISTD_H)
     if (gethostname(buf, sizeof(buf)) != 0) {
       buf[0] = '\0';
@@ -349,11 +351,14 @@ const std::string& CachedCwd() {
   static const std::string cwd = [] {
     char buf[512] = "";
 #ifdef NGLOG_OS_WINDOWS
-    const DWORD len = GetCurrentDirectoryA(sizeof(buf), buf);
-    if (len == 0 || len >= sizeof(buf)) {
-      buf[0] = '\0';
+    wchar_t wide_buf[sizeof(buf) / sizeof(buf[0])];
+    const DWORD len = GetCurrentDirectoryW(
+        static_cast<DWORD>(sizeof(wide_buf) / sizeof(wide_buf[0])), wide_buf);
+    if (len == 0 || len >= sizeof(wide_buf) / sizeof(wide_buf[0])) {
+      return std::string();
     }
-    return std::string(buf, len);
+    std::string converted;
+    return WideToUtf8(wide_buf, len, &converted) ? converted : std::string();
 #elif defined(HAVE_UNISTD_H)
     if (getcwd(buf, sizeof(buf)) == nullptr) {
       buf[0] = '\0';

@@ -35,6 +35,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cwchar>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -64,6 +65,7 @@
 #include <gtest/gtest.h>
 
 #include "base/commandlineflags.h"
+#include "internal/utf8.h"
 #include "mock-log.h"
 #include "ng-log/logging.h"
 #include "ng-log/raw_logging.h"
@@ -659,8 +661,10 @@ static void GetFiles(const string& pattern, vector<string>* files) {
   }
   globfree(&g);
 #elif defined(NGLOG_OS_WINDOWS)
-  WIN32_FIND_DATAA data;
-  HANDLE handle = FindFirstFileA(pattern.c_str(), &data);
+  std::wstring wide_pattern;
+  CHECK(internal::Utf8ToWide(pattern.data(), pattern.size(), &wide_pattern));
+  WIN32_FIND_DATAW data;
+  HANDLE handle = FindFirstFileW(wide_pattern.c_str(), &data);
   size_t index = pattern.rfind('\\');
   if (index == string::npos) {
     LOG(FATAL) << "No directory separator.";
@@ -671,8 +675,11 @@ static void GetFiles(const string& pattern, vector<string>* files) {
     return;
   }
   do {
-    files->push_back(dirname + data.cFileName);
-  } while (FindNextFileA(handle, &data));
+    std::string filename;
+    CHECK(internal::WideToUtf8(data.cFileName, std::wcslen(data.cFileName),
+                               &filename));
+    files->push_back(dirname + filename);
+  } while (FindNextFileW(handle, &data));
   if (!FindClose(handle)) {
     LOG_SYSRESULT(GetLastError());
   }

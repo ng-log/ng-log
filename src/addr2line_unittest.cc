@@ -22,10 +22,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cwchar>
 #include <memory>
 #include <string>
 
 #include "config.h"
+#include "internal/utf8.h"
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "symbolize.h"
@@ -86,17 +88,19 @@ constexpr std::size_t kCopyBufferSize = 4096;
 // CHECK-fails on error.
 std::string MakeScratchDirectory() {
 #ifdef NGLOG_OS_WINDOWS
-  char temp_path[MAX_PATH];
-  CHECK_NE(0U, GetTempPathA(sizeof(temp_path), temp_path));
-  char dir[MAX_PATH];
-  // GetTempFileNameA() is used only to obtain a name that is guaranteed
+  wchar_t temp_path[MAX_PATH];
+  CHECK_NE(0U, GetTempPathW(ARRAYSIZE(temp_path), temp_path));
+  wchar_t dir[MAX_PATH];
+  // GetTempFileNameW() is used only to obtain a name that is guaranteed
   // unique within |temp_path|. The file it creates is immediately
   // replaced with a directory of the same name, which is the standard
   // way to reserve a unique temporary directory name on Windows.
-  CHECK_NE(0U, GetTempFileNameA(temp_path, "a2l", 0, dir));
-  CHECK(DeleteFileA(dir));
-  CHECK(CreateDirectoryA(dir, nullptr));
-  return dir;
+  CHECK_NE(0U, GetTempFileNameW(temp_path, L"a2l", 0, dir));
+  CHECK(DeleteFileW(dir));
+  CHECK(CreateDirectoryW(dir, nullptr));
+  std::string result;
+  CHECK(internal::WideToUtf8(dir, std::wcslen(dir), &result));
+  return result;
 #else
   char dir_template[] = "/tmp/addr2line_unittest.XXXXXX";
   const char* dir = mkdtemp(dir_template);
@@ -107,7 +111,9 @@ std::string MakeScratchDirectory() {
 
 void RemoveScratchDirectory(const std::string& dir) {
 #ifdef NGLOG_OS_WINDOWS
-  RemoveDirectoryA(dir.c_str());
+  std::wstring wide_dir;
+  CHECK(internal::Utf8ToWide(dir.data(), dir.size(), &wide_dir));
+  RemoveDirectoryW(wide_dir.c_str());
 #else
   rmdir(dir.c_str());
 #endif  // NGLOG_OS_WINDOWS
@@ -121,7 +127,12 @@ std::string MakeFakeAddr2Line(const std::string& dir, const char* helper_path) {
   // CreateProcess() appends ".exe" automatically to an extension-less
   // name, matching how the production code spawns "addr2line".
   const std::string path = dir + "\\addr2line.exe";
-  CHECK(CopyFileA(helper_path, path.c_str(), FALSE));
+  std::wstring wide_helper_path;
+  std::wstring wide_path;
+  CHECK(internal::Utf8ToWide(helper_path, std::strlen(helper_path),
+                             &wide_helper_path));
+  CHECK(internal::Utf8ToWide(path.data(), path.size(), &wide_path));
+  CHECK(CopyFileW(wide_helper_path.c_str(), wide_path.c_str(), FALSE));
   return path;
 #else
   const std::string path = dir + "/addr2line";
@@ -145,7 +156,9 @@ std::string MakeFakeAddr2Line(const std::string& dir, const char* helper_path) {
 
 void RemoveFakeAddr2Line(const std::string& path) {
 #ifdef NGLOG_OS_WINDOWS
-  DeleteFileA(path.c_str());
+  std::wstring wide_path;
+  CHECK(internal::Utf8ToWide(path.data(), path.size(), &wide_path));
+  DeleteFileW(wide_path.c_str());
 #else
   unlink(path.c_str());
 #endif  // NGLOG_OS_WINDOWS

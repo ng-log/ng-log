@@ -147,8 +147,8 @@ inline namespace tools {
 #  define ATTRIBUTE_NOINLINE
 #endif
 
-void AlsoErrorWrite(LogSeverity severity, const char* tag,
-                    const char* message) noexcept;
+void AlsoErrorWrite(LogSeverity severity, const char* tag, const char* message,
+                    std::size_t message_length) noexcept;
 
 const char* ProgramInvocationShortName();
 

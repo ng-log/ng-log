@@ -1,32 +1,7 @@
-/* Copyright (c) 2026, The ng-log contributors
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+// SPDX-FileCopyrightText: 2026 The ng-log contributors
+// SPDX-License-Identifier: BSD-3-Clause
+//
+// Author: Sergiu Deitsch
 
 #include "internal/utf8.h"
 
@@ -248,6 +223,122 @@ bool WideToUtf8(const wchar_t* input, std::size_t input_length,
   static_cast<void>(input);
   static_cast<void>(input_length);
   static_cast<void>(output);
+  return false;
+#endif
+}
+
+namespace {
+
+#ifdef NGLOG_OS_WINDOWS
+bool WriteUtf8ToConsole(HANDLE handle, const char* input,
+                        std::size_t input_length) {
+  std::wstring wide_input;
+  if (!Utf8ToWide(input, input_length, &wide_input)) {
+    return false;
+  }
+
+  std::size_t offset = 0;
+  while (offset < wide_input.size()) {
+    const std::size_t remaining = wide_input.size() - offset;
+    const DWORD chunk_size = static_cast<DWORD>(std::min<std::size_t>(
+        remaining,
+        static_cast<std::size_t>(std::numeric_limits<DWORD>::max())));
+    DWORD written = 0;
+    if (!WriteConsoleW(handle, wide_input.data() + offset, chunk_size, &written,
+                       nullptr) ||
+        written != chunk_size) {
+      return false;
+    }
+    offset += written;
+  }
+  return true;
+}
+
+bool GetNativeHandle(int file_descriptor, HANDLE* handle) {
+  const intptr_t native_handle = _get_osfhandle(file_descriptor);
+  if (native_handle == -1) {
+    return false;
+  }
+
+  *handle = reinterpret_cast<HANDLE>(native_handle);
+  return true;
+}
+
+bool IsConsoleHandle(HANDLE handle) {
+  DWORD mode = 0;
+  return GetConsoleMode(handle, &mode) != FALSE;
+}
+
+bool WriteBytesToHandle(HANDLE handle, const char* input,
+                        std::size_t input_length) {
+  std::size_t offset = 0;
+  while (offset < input_length) {
+    const DWORD chunk_size = static_cast<DWORD>(
+        std::min(input_length - offset,
+                 static_cast<std::size_t>(std::numeric_limits<DWORD>::max())));
+    DWORD written = 0;
+    if (!WriteFile(handle, input + offset, chunk_size, &written, nullptr) ||
+        written != chunk_size) {
+      return false;
+    }
+    offset += written;
+  }
+  return true;
+}
+#endif
+
+}  // namespace
+
+bool WriteUtf8(std::FILE* output, const char* input, std::size_t input_length) {
+  if (output == nullptr || (input == nullptr && input_length != 0)) {
+    errno = EINVAL;
+    return false;
+  }
+  if (input_length == 0) {
+    return true;
+  }
+
+#ifdef NGLOG_OS_WINDOWS
+  HANDLE handle = nullptr;
+  if (GetNativeHandle(_fileno(output), &handle)) {
+    if (std::fflush(output) != 0) {
+      return false;
+    }
+    const bool is_console = IsConsoleHandle(handle);
+    if ((is_console && WriteUtf8ToConsole(handle, input, input_length)) ||
+        (!is_console && WriteBytesToHandle(handle, input, input_length))) {
+      return true;
+    }
+  }
+#endif
+
+  return std::fwrite(input, 1, input_length, output) == input_length;
+}
+
+bool WriteUtf8ToFileDescriptor(int file_descriptor, const char* input,
+                               std::size_t input_length) {
+#ifdef NGLOG_OS_WINDOWS
+  if (file_descriptor < 0 || (input == nullptr && input_length != 0)) {
+    errno = EINVAL;
+    return false;
+  }
+  if (input_length == 0) {
+    return true;
+  }
+
+  HANDLE handle = nullptr;
+  if (GetNativeHandle(file_descriptor, &handle)) {
+    const bool is_console = IsConsoleHandle(handle);
+    if ((is_console && WriteUtf8ToConsole(handle, input, input_length)) ||
+        (!is_console && WriteBytesToHandle(handle, input, input_length))) {
+      return true;
+    }
+  }
+  return false;
+#else
+  static_cast<void>(file_descriptor);
+  static_cast<void>(input);
+  static_cast<void>(input_length);
   return false;
 #endif
 }
