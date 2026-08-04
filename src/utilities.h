@@ -133,8 +133,8 @@ std::intmax_t SafeWrite(int fd, const void* data, std::size_t size) noexcept;
 
 inline namespace tools {
 
-void AlsoErrorWrite(LogSeverity severity, const char* tag,
-                    const char* message) noexcept;
+void AlsoErrorWrite(LogSeverity severity, const char* tag, const char* message,
+                    std::size_t message_length) noexcept;
 
 std::string MakeLogFilename(const std::string& base_filename,
                             const std::string& time_pid_string,

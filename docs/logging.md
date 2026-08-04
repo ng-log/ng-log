@@ -59,6 +59,10 @@ determined according to the following rules.
     guidance](windows.md#compiler-character-sets) when non-ASCII filenames
     appear in source files or narrow string literals.
 
+Log messages also use UTF-8. On Windows, console output is converted to
+UTF-16 and written with Unicode console APIs, while redirected output remains
+UTF-8. Debugger output uses the Unicode debugger API.
+
 **non-Windows**
 
 :   The directory is determined by referencing the environment variables

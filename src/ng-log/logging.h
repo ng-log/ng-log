@@ -409,15 +409,15 @@ struct NGLOG_EXPORT LogMessageTime {
 
 #if defined(NGLOG_OS_WINDOWS)
 // A very useful logging macro to log windows errors:
-#  define LOG_SYSRESULT(result)                                               \
-    if (FAILED(HRESULT_FROM_WIN32(result))) {                                 \
-      const std::string message = nglog::tools::FormatWindowsMessage(result); \
-      if (!message.empty()) {                                                 \
-        nglog::LogMessage(__FILE__, __LINE__, NGLOG_ERROR, 0,                 \
-                          &nglog::LogMessage::SendToLog)                      \
-                .stream()                                                     \
-            << message;                                                       \
-      }                                                                       \
+#  define LOG_SYSRESULT(result)                                 \
+    if (FAILED(HRESULT_FROM_WIN32(result))) {                   \
+      const std::string message = FormatWindowsMessage(result); \
+      if (!message.empty()) {                                   \
+        nglog::LogMessage(__FILE__, __LINE__, NGLOG_ERROR, 0,   \
+                          &nglog::LogMessage::SendToLog)        \
+                .stream()                                       \
+            << message;                                         \
+      }                                                         \
     }
 #endif
 

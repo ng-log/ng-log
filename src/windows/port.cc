@@ -42,22 +42,27 @@
 #include <memory>
 
 #include "config.h"
+#include "internal/utf8.h"
 
 namespace nglog {
 inline namespace tools {
 
 std::string FormatWindowsMessage(std::uint32_t error) {
-  LPSTR message = nullptr;
-  const DWORD message_length = FormatMessageA(
+  LPWSTR message = nullptr;
+  const DWORD message_length = FormatMessageW(
       FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
           FORMAT_MESSAGE_IGNORE_INSERTS,
-      nullptr, static_cast<DWORD>(error), 0, reinterpret_cast<LPSTR>(&message),
+      nullptr, static_cast<DWORD>(error), 0, reinterpret_cast<LPWSTR>(&message),
       0, nullptr);
-  std::unique_ptr<char, decltype(&LocalFree)> release{message, &LocalFree};
+  std::unique_ptr<wchar_t, decltype(&LocalFree)> release{message, &LocalFree};
   if (message_length == 0) {
     return {};
   }
-  return {message, message_length};
+  std::string result;
+  if (!internal::WideToUtf8(message, message_length, &result)) {
+    return {};
+  }
+  return result;
 }
 
 #ifndef HAVE_LOCALTIME_R

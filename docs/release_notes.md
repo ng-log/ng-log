@@ -15,6 +15,7 @@
 - Make log cleanup work with non-ASCII Windows directories
 - Breaking change: require UTF-8 encoding for all Windows file and directory
   path arguments
+- Use UTF-8 log messages with Unicode Windows console and debugger output
 - Omit the default header format when a custom prefix formatter is installed
 - Improve suppressed logging performance by avoiding message construction and
   reduce overhead when formatting default prefixes

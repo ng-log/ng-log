@@ -37,7 +37,9 @@
 #include <csignal>
 #include <cstring>
 #include <ctime>
+#include <cwchar>
 #include <sstream>
+#include <string>
 #include <thread>
 
 #include "config.h"
@@ -216,9 +218,13 @@ class MinimalFormatter {
 
 // Writes the given data with the size to the standard error.
 void WriteToStderr(const char* data, size_t size) {
+#ifdef NGLOG_OS_WINDOWS
+  internal::WriteSignalSafeToFileDescriptor(fileno(stderr), data, size);
+#else
   if (write(fileno(stderr), data, size) < 0) {
     // Ignore errors.
   }
+#endif
 }
 
 // The writer function can be changed by InstallFailureWriter().
@@ -226,6 +232,7 @@ void (*g_failure_writer)(const char* data, size_t size) = WriteToStderr;
 
 #if defined(HAVE_STACKTRACE) && defined(HAVE_SIGACTION)
 constexpr std::size_t kThreadNameBufferSize = 64;
+constexpr std::size_t kTerminatorLength = 1;
 
 // Called from the failure signal handler, so this function must remain
 // async-signal-safe.
@@ -241,11 +248,16 @@ bool GetThreadName(char* buffer, std::size_t buffer_size) {
       wide_name == nullptr) {
     return false;
   }
-  const int result =
-      WideCharToMultiByte(CP_UTF8, 0, wide_name, -1, buffer,
-                          static_cast<int>(buffer_size), nullptr, nullptr);
+  std::size_t utf8_name_length = 0;
+  const bool converted = internal::WideToUtf8Buffer(
+      wide_name, std::wcslen(wide_name), buffer,
+      buffer_size - kTerminatorLength, &utf8_name_length);
   LocalFree(wide_name);
-  return result > 1;
+  if (!converted || utf8_name_length == 0) {
+    return false;
+  }
+  buffer[utf8_name_length] = '\0';
+  return true;
 #  elif defined(HAVE_PTHREAD_GETNAME_NP)
   return pthread_getname_np(pthread_self(), buffer, buffer_size) == 0 &&
          buffer[0] != '\0';
@@ -303,9 +315,17 @@ char g_cwd[512] = "";
 
 void ComputeCwd() {
 #ifdef NGLOG_OS_WINDOWS
-  const DWORD len = GetCurrentDirectoryA(sizeof(g_cwd), g_cwd);
-  if (len == 0 || len >= sizeof(g_cwd)) {
+  wchar_t wide_cwd[sizeof(g_cwd)];
+  const DWORD wide_cwd_size = sizeof(wide_cwd) / sizeof(wide_cwd[0]);
+  const DWORD len = GetCurrentDirectoryW(wide_cwd_size, wide_cwd);
+  std::string cwd;
+  if (len == 0 || len >= wide_cwd_size ||
+      !internal::WideToUtf8(wide_cwd, len, &cwd)) {
     g_cwd[0] = '\0';
+  } else {
+    const std::size_t copy_length = std::min(cwd.size(), sizeof(g_cwd) - 1);
+    std::memcpy(g_cwd, cwd.data(), copy_length);
+    g_cwd[copy_length] = '\0';
   }
 #elif defined(HAVE_UNISTD_H)
   if (getcwd(g_cwd, sizeof(g_cwd)) == nullptr) {

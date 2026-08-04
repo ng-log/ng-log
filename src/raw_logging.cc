@@ -56,6 +56,7 @@
 #endif
 #include <fcntl.h>  // for open()
 
+#include "internal/utf8.h"
 #include "ng-log/logging.h"
 #include "ng-log/raw_logging.h"
 #include "stacktrace.h"
@@ -184,7 +185,12 @@ void RawLog(LogSeverity severity, const char* file, int line,
   // avoiding FILE buffering (to avoid invoking malloc()), and bypassing
   // libc (to side-step any libc interception).
   // We write just once to avoid races with other invocations of RawLog.
+#ifdef NGLOG_OS_WINDOWS
+  internal::WriteUtf8ToFileDescriptor(fileno(stderr), buffer,
+                                      std::strlen(buffer));
+#else
   internal::SafeWrite(fileno(stderr), buffer, strlen(buffer));
+#endif
   if (severity == NGLOG_FATAL) {
     std::call_once(crashed, [file, line, msg_start, msg_size] {
       crash_reason.filename = file;

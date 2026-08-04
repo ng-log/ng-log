@@ -39,6 +39,41 @@ not convert runtime text obtained from files, environment variables, or other
 APIs. Applications must convert such text to UTF-8 before passing it to ng-log.
 ASCII input is valid UTF-8.
 
+## Log output
+
+Log messages are expected to use UTF-8. When standard output or standard error
+is connected to a Windows console, ng-log converts the message to UTF-16 and
+writes it with the Unicode console API. Redirected output remains UTF-8 bytes.
+Debugger output uses the corresponding Unicode debugger API.
+
+## Compiler character sets
+
+ng-log expects narrow string arguments to contain UTF-8 bytes. With MSVC, use
+[`/utf-8`](https://learn.microsoft.com/en-us/cpp/build/reference/utf-8-set-source-and-executable-character-sets-to-utf-8)
+when source files are stored as UTF-8 and ordinary narrow string literals must
+also be encoded as UTF-8. This option is equivalent to
+`/source-charset:utf-8 /execution-charset:utf-8`. These options enable
+`/validate-charset` by default.
+
+Use
+[`/source-charset:utf-8`](https://learn.microsoft.com/en-us/cpp/build/reference/source-charset-set-source-character-set)
+by itself only when MSVC must read the source as UTF-8 but the program
+intentionally uses another execution character set. Non-ASCII ordinary narrow
+string literals produced by such a build are not necessarily valid ng-log
+input.
+
+Use
+[`/execution-charset:utf-8`](https://learn.microsoft.com/en-us/cpp/build/reference/execution-charset-set-execution-character-set)
+by itself when the source encoding is already identified correctly, such as by
+a byte-order mark or another compiler option, and ordinary narrow string
+literals must be UTF-8. For UTF-8 source files without a byte-order mark, also
+specify `/source-charset:utf-8` or use `/utf-8`.
+
+These options affect source decoding and compile-time string literals. They do
+not convert runtime text obtained from files, environment variables, or other
+APIs. Applications must convert such text to UTF-8 before passing it to ng-log.
+ASCII input is valid UTF-8 and uses the fast paths described above.
+
 ng-log defines the severity level `ERROR`, which is also defined by `windows.h`.
 You can make nglog not define `INFO`, `WARNING`, `ERROR`, and `FATAL` by
 defining `NGLOG_NO_ABBREVIATED_SEVERITIES` before including `nglog/logging.h`.

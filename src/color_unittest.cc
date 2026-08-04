@@ -646,14 +646,31 @@ TEST(Emscripten, ReadsNodeEnvironment) {
 
 struct AppendOnlyFormatter {
   std::string text;
-  void AppendString(const char* str) { text += str; }
+  void AppendString(const char* str, std::size_t length) {
+    text.append(str, length);
+  }
 };
+
+struct LegacyFormatter {
+  std::string text;
+  void AppendString(const char* str) { text.append(str); }
+};
+
+TEST(Hyperlink, SupportsLegacyFormatter) {
+  LegacyFormatter formatter;
+  Hyperlink hyperlink("https://example.com");
+
+  hyperlink.Wrap(formatter, [&formatter] { formatter.AppendString("body"); });
+
+  EXPECT_EQ(formatter.text,
+            "\033]8;;https://example.com\033\\body\033]8;;\033\\");
+}
 
 TEST(WithColor, WrapsBodyWhenEnabled) {
   AppendOnlyFormatter formatter;
   WithColor(formatter,
             ColorSpec{Color::kRed, TextStyle::kNone, Color::kDefault}, true,
-            [&formatter] { formatter.AppendString("x"); });
+            [&formatter] { formatter.AppendString("x", 1); });
   EXPECT_EQ(formatter.text, "\033[31mx\033[0m");
 }
 
@@ -661,14 +678,14 @@ TEST(WithColor, SkipsEscapeCodesWhenDisabled) {
   AppendOnlyFormatter formatter;
   WithColor(formatter,
             ColorSpec{Color::kRed, TextStyle::kNone, Color::kDefault}, false,
-            [&formatter] { formatter.AppendString("x"); });
+            [&formatter] { formatter.AppendString("x", 1); });
   EXPECT_EQ(formatter.text, "x");
 }
 
 TEST(Hyperlink, WrapsBodyWhenUriIsPresent) {
   AppendOnlyFormatter formatter;
   Hyperlink("file:///a").Wrap(formatter, [&formatter] {
-    formatter.AppendString("x");
+    formatter.AppendString("x", 1);
   });
   EXPECT_EQ(formatter.text, "\033]8;;file:///a\033\\x\033]8;;\033\\");
 }
@@ -676,7 +693,7 @@ TEST(Hyperlink, WrapsBodyWhenUriIsPresent) {
 TEST(Hyperlink, SkipsWhenUriIsMissing) {
   AppendOnlyFormatter formatter;
   Hyperlink(nullptr).Wrap(formatter,
-                          [&formatter] { formatter.AppendString("x"); });
+                          [&formatter] { formatter.AppendString("x", 1); });
   EXPECT_EQ(formatter.text, "x");
 }
 
