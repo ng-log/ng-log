@@ -16,6 +16,7 @@
 #include "internal/styled_output.h"
 #include "internal/terminal_capabilities.h"
 #include "internal/theme.h"
+#include "internal/utf8.h"
 #include "ng-log/internal/color_spec.h"
 #include "ng-log/internal/hyperlink.h"
 #include "ng-log/logging.h"
@@ -624,6 +625,14 @@ TEST(SourceLocation, CachesHostAndWorkingDirectory) {
   EXPECT_EQ(&CachedHostname(), &CachedHostname());
   EXPECT_EQ(&CachedCwd(), &CachedCwd());
 }
+
+#ifdef NGLOG_OS_WINDOWS
+TEST(SourceLocation, UsesUtf8ComputerName) {
+  std::string expected;
+  ASSERT_TRUE(GetComputerNameUtf8(&expected));
+  EXPECT_EQ(CachedHostname(), expected);
+}
+#endif
 
 TEST(StyledOutput, WritesRawText) {
   WriteRawToStderr("");

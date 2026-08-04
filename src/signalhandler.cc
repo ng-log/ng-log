@@ -22,6 +22,7 @@
 #include "internal/styled_output.h"
 #include "internal/terminal_capabilities.h"
 #include "internal/theme.h"
+#include "internal/utf8.h"
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "ng-log/platform.h"
@@ -276,11 +277,10 @@ bool ComputeSymbolizeFileBasePath() {
 
 void ComputeHostname() {
 #ifdef NGLOG_OS_WINDOWS
-  char buf[MAX_COMPUTERNAME_LENGTH + 1];
-  DWORD len = sizeof(buf) / sizeof(buf[0]);
-  if (GetComputerNameA(buf, &len)) {
+  std::string hostname;
+  if (nglog::internal::GetComputerNameUtf8(&hostname)) {
     MinimalFormatter formatter(g_hostname, sizeof(g_hostname));
-    formatter.AppendString(buf);
+    formatter.AppendString(hostname.c_str());
   }
 #elif defined(HAVE_UNISTD_H)
   if (gethostname(g_hostname, sizeof(g_hostname)) != 0) {

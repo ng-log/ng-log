@@ -33,13 +33,12 @@ Files that cannot carry such a header are covered by `REUSE.toml` in the
 project's root directory. The full license texts are located in the `LICENSES/`
 directory.
 
-The following files are licensed differently. Neither of them is part of the
-installed library interface.
+The following file is licensed differently. It is not part of the installed
+library interface.
 
-| File                   | License                                                 | Purpose                                                    |
-| ---------------------- | ------------------------------------------------------- | ---------------------------------------------------------- |
-| `src/windows/dirent.h` | [MIT](https://spdx.org/licenses/MIT.html)               | Directory listing compatibility layer used on Windows only |
-| `src/fuzz_demangle.cc` | [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html) | Fuzz target for OSS-Fuzz that is not part of the library   |
+| File                   | License                                                 | Purpose                                                  |
+| ---------------------- | ------------------------------------------------------- | -------------------------------------------------------- |
+| `src/fuzz_demangle.cc` | [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html) | Fuzz target for OSS-Fuzz that is not part of the library |
 
 ## The 3-Clause BSD License
 

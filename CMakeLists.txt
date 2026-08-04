@@ -587,6 +587,8 @@ set (NGLOG_SRCS
   src/internal/terminal_capabilities.h
   src/internal/theme.cc
   src/internal/theme.h
+  src/internal/utf8.cc
+  src/internal/utf8.h
   src/libbacktrace.cc
   src/libbacktrace.h
   src/logging.cc
@@ -700,13 +702,6 @@ set_target_properties (ng-log PROPERTIES VERSION ${ng-log_VERSION})
 set_target_properties (ng-log PROPERTIES SOVERSION 0)
 
 set (_ng-log_SPDX_LICENSE BSD-3-Clause)
-
-# The Windows port compiles the MIT licensed dirent implementation into the
-# library.
-if (WIN32)
-  string (APPEND _ng-log_SPDX_LICENSE " AND MIT")
-endif (WIN32)
-
 set_property (TARGET ng-log PROPERTY SPDX_LICENSE ${_ng-log_SPDX_LICENSE})
 
 if (CYGWIN OR WIN32)
@@ -1069,7 +1064,7 @@ if (BUILD_TESTING AND GTest_FOUND)
     if (MINGW)
       # Keep the child independent of MinGW runtime DLLs on PATH.
       target_link_options (subprocess_test_helper PRIVATE
-        -static -static-libgcc -static-libstdc++)
+        -municode -static -static-libgcc -static-libstdc++)
     endif (MINGW)
   endif (HAVE_SUBPROCESS)
 
@@ -1357,6 +1352,7 @@ if (BUILD_TESTING AND GTest_FOUND)
     -DLOGCLEANUP=$<TARGET_FILE:cleanup_with_non_ascii_prefix_unittest>
     "-DEMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
     -DTEST_DIR=${ng-log_BINARY_DIR}/
+    -DTEST_ON_WINDOWS=${WIN32}
     -P ${ng-log_SOURCE_DIR}/cmake/RunCleanerTest4.cmake
     WORKING_DIRECTORY ${ng-log_BINARY_DIR})
 
