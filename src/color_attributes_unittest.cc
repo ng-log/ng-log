@@ -38,7 +38,7 @@ TEST(ColorAttributes, DirectAppendPreservesPlainText) {
       Hyperlink("file:///tmp/example.cc")};
 
   {
-    LogMessage log("attributes.cc", 42, nglog::NGLOG_INFO, &message);
+    LogMessage log("attributes.cc", 42, NGLOG_INFO, &message);
     log.AppendText("direct", 6, attributes);
   }
 
@@ -49,7 +49,7 @@ TEST(ColorAttributes, StyledValueWorksWithLogStream) {
   std::string message;
 
   {
-    LogMessage log("attributes.cc", 42, nglog::NGLOG_INFO, &message);
+    LogMessage log("attributes.cc", 42, NGLOG_INFO, &message);
     log.stream() << Styled(
         ColorSpec{Color::kCyan, TextStyle::kNone, Color::kDefault},
         std::string("value"));
@@ -194,7 +194,7 @@ TEST(ColorAttributes, TruncatedStyledTextRemainsBounded) {
   const std::string text(LogMessage::kMaxLogMessageLen + 1, 'x');
 
   {
-    LogMessage log("attributes.cc", 42, nglog::NGLOG_INFO, &message);
+    LogMessage log("attributes.cc", 42, NGLOG_INFO, &message);
     log.AppendText(text.data(), text.size(), TextAttributes{});
   }
 
@@ -230,7 +230,7 @@ TEST(ColorAttributes, RendersStyledSpansAndHyperlinksOnAnsiOutput) {
 
   CaptureTestStderr();
   {
-    LogMessage log("attributes.cc", 42, nglog::NGLOG_INFO);
+    LogMessage log("attributes.cc", 42, NGLOG_INFO);
     log.stream() << "before"
                  << Styled(
                         TextAttributes{ColorSpec{Color::kCyan, TextStyle::kBold,

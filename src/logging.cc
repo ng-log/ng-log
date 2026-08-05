@@ -817,6 +817,16 @@ static void WriteStyledLogBody(FILE* output, FileFormatter& formatter,
   }
 }
 
+// Unlike stderr, stdout is typically buffered by the C runtime, so honor
+// FLAGS_logbuflevel the same way file logging does; otherwise messages can be
+// held back indefinitely even with buffering disabled
+// (--logbuflevel=-1).
+static void MaybeFlushStdout(FILE* output, LogSeverity severity) {
+  if (output == stdout && severity > FLAGS_logbuflevel) {
+    fflush(output);
+  }
+}
+
 // Writes "message"/"len" to "output", colored as a single block by
 // "severity" (the whole-line coloring logging.cc used before per-field
 // prefix coloring was added). Used whenever a caller doesn't have a
@@ -832,21 +842,28 @@ static void ColoredWriteToStderrOrStdout(FILE* output, LogSeverity severity,
                           (is_stdout && FLAGS_colorlogtostdout);
   const ColorMode mode =
       want_color ? StreamColorMode(output) : ColorMode::kNone;
+
   if (mode == ColorMode::kNone) {
     fwrite(message, len, 1, output);
+    MaybeFlushStdout(output, severity);
     return;
   }
+
   const ColorSpec spec = DefaultTheme().Get(SeverityToRole(severity));
   const bool colored = spec.foreground != Color::kDefault ||
                        spec.background != Color::kDefault ||
                        spec.style != TextStyle::kNone;
+
   if (!colored) {
     fwrite(message, len, 1, output);
+    MaybeFlushStdout(output, severity);
     return;
   }
+
   FileFormatter formatter{output};
   WriteStyledLogField(output, formatter, mode,
                       TextAttributes{spec, Hyperlink()}, false, message, len);
+  MaybeFlushStdout(output, severity);
 }
 
 static void ColoredWriteToStdout(LogSeverity severity, const char* message,
@@ -884,6 +901,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
         want_color ? StreamColorMode(output) : ColorMode::kNone;
     if (mode == ColorMode::kNone) {
       fwrite(data.message_text_, data.num_chars_to_log_, 1, output);
+      MaybeFlushStdout(output, data.severity_);
       return;
     }
 
@@ -902,6 +920,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
                          hyperlinks_enabled, data.message_text_, 0,
                          data.num_chars_to_log_);
     }
+    MaybeFlushStdout(output, data.severity_);
     return;
   }
 
@@ -917,6 +936,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
   // exit code, and cerr may be partially or fully destroyed by then.
   if (mode == ColorMode::kNone) {
     fwrite(message, len, 1, output);
+    MaybeFlushStdout(output, data.severity_);
     return;
   }
 
@@ -988,6 +1008,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
 
   if (!text_colored && data.styles_.size() == 0) {
     fwrite(message + pos, len - pos, 1, output);
+    MaybeFlushStdout(output, data.severity_);
     return;
   }
 
@@ -996,6 +1017,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
                                   StreamSupportsHyperlinks(output);
   WriteStyledLogBody(output, formatter, mode, data.styles_, text_spec,
                      hyperlinks_enabled, message, pos, len);
+  MaybeFlushStdout(output, data.severity_);
 }
 
 static void ColoredWriteToStdoutWithFields(

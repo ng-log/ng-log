@@ -448,7 +448,7 @@ void DumpSignalInfo(int signal_number, siginfo_t* siginfo) {
 #  if defined(NGLOG_OS_LINUX) && defined(HAVE_SYS_SYSCALL_H) && \
       defined(HAVE_SYS_TYPES_H)
   {
-    pid_t tid = syscall(SYS_gettid);
+    long tid = syscall(SYS_gettid);
     plain.Reset();
     plain.AppendString(" LWP ");
     g_failure_writer(plain_buf, plain.num_bytes_written());

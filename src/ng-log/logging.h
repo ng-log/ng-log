@@ -329,7 +329,7 @@ struct NGLOG_EXPORT LogMessageTime {
 #if NGLOG_STRIP_LOG == 0
 #  define NGLOG_COMPACT_LOG_INFO nglog::LogMessage(__FILE__, __LINE__)
 #  define LOG_TO_STRING_INFO(message) \
-    nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_INFO, message)
+    nglog::LogMessage(__FILE__, __LINE__, NGLOG_INFO, message)
 #else
 #  define NGLOG_COMPACT_LOG_INFO nglog::NullStream()
 #  define LOG_TO_STRING_INFO(message) nglog::NullStream()
@@ -337,9 +337,9 @@ struct NGLOG_EXPORT LogMessageTime {
 
 #if NGLOG_STRIP_LOG <= 1
 #  define NGLOG_COMPACT_LOG_WARNING \
-    nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_WARNING)
+    nglog::LogMessage(__FILE__, __LINE__, NGLOG_WARNING)
 #  define LOG_TO_STRING_WARNING(message) \
-    nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_WARNING, message)
+    nglog::LogMessage(__FILE__, __LINE__, NGLOG_WARNING, message)
 #else
 #  define NGLOG_COMPACT_LOG_WARNING nglog::NullStream()
 #  define LOG_TO_STRING_WARNING(message) nglog::NullStream()
@@ -347,9 +347,9 @@ struct NGLOG_EXPORT LogMessageTime {
 
 #if NGLOG_STRIP_LOG <= 2
 #  define NGLOG_COMPACT_LOG_ERROR \
-    nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_ERROR)
+    nglog::LogMessage(__FILE__, __LINE__, NGLOG_ERROR)
 #  define LOG_TO_STRING_ERROR(message) \
-    nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_ERROR, message)
+    nglog::LogMessage(__FILE__, __LINE__, NGLOG_ERROR, message)
 #else
 #  define NGLOG_COMPACT_LOG_ERROR nglog::NullStream()
 #  define LOG_TO_STRING_ERROR(message) nglog::NullStream()
@@ -358,7 +358,7 @@ struct NGLOG_EXPORT LogMessageTime {
 #if NGLOG_STRIP_LOG <= 3
 #  define NGLOG_COMPACT_LOG_FATAL nglog::LogMessageFatal(__FILE__, __LINE__)
 #  define LOG_TO_STRING_FATAL(message) \
-    nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_FATAL, message)
+    nglog::LogMessage(__FILE__, __LINE__, NGLOG_FATAL, message)
 #else
 #  define NGLOG_COMPACT_LOG_FATAL nglog::NullStreamFatal()
 #  define LOG_TO_STRING_FATAL(message) nglog::NullStreamFatal()
@@ -376,40 +376,40 @@ struct NGLOG_EXPORT LogMessageTime {
 #  define NGLOG_COMPACT_LOG_DFATAL NGLOG_COMPACT_LOG_ERROR
 #elif NGLOG_STRIP_LOG <= 3
 #  define NGLOG_COMPACT_LOG_DFATAL \
-    nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_FATAL)
+    nglog::LogMessage(__FILE__, __LINE__, NGLOG_FATAL)
 #else
 #  define NGLOG_COMPACT_LOG_DFATAL nglog::NullStreamFatal()
 #endif
 
-#define NGLOG_LOG_INFO(counter)                                     \
-  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_INFO, counter, \
+#define NGLOG_LOG_INFO(counter)                              \
+  nglog::LogMessage(__FILE__, __LINE__, NGLOG_INFO, counter, \
                     &nglog::LogMessage::SendToLog)
-#define SYSLOG_INFO(counter)                                        \
-  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_INFO, counter, \
+#define SYSLOG_INFO(counter)                                 \
+  nglog::LogMessage(__FILE__, __LINE__, NGLOG_INFO, counter, \
                     &nglog::LogMessage::SendToSyslogAndLog)
-#define NGLOG_LOG_WARNING(counter)                                     \
-  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_WARNING, counter, \
+#define NGLOG_LOG_WARNING(counter)                              \
+  nglog::LogMessage(__FILE__, __LINE__, NGLOG_WARNING, counter, \
                     &nglog::LogMessage::SendToLog)
-#define SYSLOG_WARNING(counter)                                        \
-  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_WARNING, counter, \
+#define SYSLOG_WARNING(counter)                                 \
+  nglog::LogMessage(__FILE__, __LINE__, NGLOG_WARNING, counter, \
                     &nglog::LogMessage::SendToSyslogAndLog)
-#define NGLOG_LOG_ERROR(counter)                                     \
-  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_ERROR, counter, \
+#define NGLOG_LOG_ERROR(counter)                              \
+  nglog::LogMessage(__FILE__, __LINE__, NGLOG_ERROR, counter, \
                     &nglog::LogMessage::SendToLog)
-#define SYSLOG_ERROR(counter)                                        \
-  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_ERROR, counter, \
+#define SYSLOG_ERROR(counter)                                 \
+  nglog::LogMessage(__FILE__, __LINE__, NGLOG_ERROR, counter, \
                     &nglog::LogMessage::SendToSyslogAndLog)
-#define NGLOG_LOG_FATAL(counter)                                     \
-  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_FATAL, counter, \
+#define NGLOG_LOG_FATAL(counter)                              \
+  nglog::LogMessage(__FILE__, __LINE__, NGLOG_FATAL, counter, \
                     &nglog::LogMessage::SendToLog)
-#define SYSLOG_FATAL(counter)                                        \
-  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_FATAL, counter, \
+#define SYSLOG_FATAL(counter)                                 \
+  nglog::LogMessage(__FILE__, __LINE__, NGLOG_FATAL, counter, \
                     &nglog::LogMessage::SendToSyslogAndLog)
-#define NGLOG_LOG_DFATAL(counter)                                     \
-  nglog::LogMessage(__FILE__, __LINE__, nglog::DFATAL_LEVEL, counter, \
+#define NGLOG_LOG_DFATAL(counter)                              \
+  nglog::LogMessage(__FILE__, __LINE__, DFATAL_LEVEL, counter, \
                     &nglog::LogMessage::SendToLog)
-#define SYSLOG_DFATAL(counter)                                        \
-  nglog::LogMessage(__FILE__, __LINE__, nglog::DFATAL_LEVEL, counter, \
+#define SYSLOG_DFATAL(counter)                                 \
+  nglog::LogMessage(__FILE__, __LINE__, DFATAL_LEVEL, counter, \
                     &nglog::LogMessage::SendToSyslogAndLog)
 
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || \
@@ -426,7 +426,7 @@ struct NGLOG_EXPORT LogMessageTime {
       std::unique_ptr<char, decltype(&LocalFree)> release{message,             \
                                                           &LocalFree};         \
       if (message_length > 0) {                                                \
-        nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_ERROR, 0,           \
+        nglog::LogMessage(__FILE__, __LINE__, NGLOG_ERROR, 0,                  \
                           &nglog::LogMessage::SendToLog)                       \
                 .stream()                                                      \
             << reinterpret_cast<const char*>(message);                         \
@@ -491,13 +491,13 @@ class LogSink;  // defined below
 //   LogSink* sink;
 //   LogSeverity severity;
 // The cast is to disambiguate nullptr arguments.
-#define LOG_TO_SINK(sink, severity)                              \
-  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_##severity, \
-                    static_cast<nglog::LogSink*>(sink), true)    \
+#define LOG_TO_SINK(sink, severity)                           \
+  nglog::LogMessage(__FILE__, __LINE__, NGLOG_##severity,     \
+                    static_cast<nglog::LogSink*>(sink), true) \
       .stream()
-#define LOG_TO_SINK_BUT_NOT_TO_LOGFILE(sink, severity)           \
-  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_##severity, \
-                    static_cast<nglog::LogSink*>(sink), false)   \
+#define LOG_TO_SINK_BUT_NOT_TO_LOGFILE(sink, severity)         \
+  nglog::LogMessage(__FILE__, __LINE__, NGLOG_##severity,      \
+                    static_cast<nglog::LogSink*>(sink), false) \
       .stream()
 
 // If a non-nullptr string pointer is given, we write this message to that
@@ -823,8 +823,8 @@ DECLARE_CHECK_STROP_IMPL(strcasecmp, false)
 
 #define PLOG(severity) NGLOG_PLOG(severity, 0).stream()
 
-#define NGLOG_PLOG(severity, counter)                                          \
-  nglog::ErrnoLogMessage(__FILE__, __LINE__, nglog::NGLOG_##severity, counter, \
+#define NGLOG_PLOG(severity, counter)                                   \
+  nglog::ErrnoLogMessage(__FILE__, __LINE__, NGLOG_##severity, counter, \
                          &nglog::LogMessage::SendToLog)
 
 #define PLOG_IF(severity, condition) \
@@ -891,19 +891,19 @@ namespace nglog {
             .count(),                                                          \
         std::memory_order_relaxed);                                            \
   if (LOG_TIME_DELTA > LOG_TIME_PERIOD)                                        \
-  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_##severity).stream()
+  nglog::LogMessage(__FILE__, __LINE__, NGLOG_##severity).stream()
 
-#define SOME_KIND_OF_LOG_EVERY_N(severity, n, what_to_do)               \
-  static std::atomic<int> LOG_OCCURRENCES(0), LOG_OCCURRENCES_MOD_N(0); \
-  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                 \
-      __FILE__, __LINE__, &LOG_OCCURRENCES, sizeof(int), ""));          \
-  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                 \
-      __FILE__, __LINE__, &LOG_OCCURRENCES_MOD_N, sizeof(int), ""));    \
-  ++LOG_OCCURRENCES;                                                    \
-  if (++LOG_OCCURRENCES_MOD_N > n) LOG_OCCURRENCES_MOD_N -= n;          \
-  if (LOG_OCCURRENCES_MOD_N == 1)                                       \
-  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_##severity,        \
-                    LOG_OCCURRENCES, &what_to_do)                       \
+#define SOME_KIND_OF_LOG_EVERY_N(severity, n, what_to_do)                  \
+  static std::atomic<int> LOG_OCCURRENCES(0), LOG_OCCURRENCES_MOD_N(0);    \
+  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                    \
+      __FILE__, __LINE__, &LOG_OCCURRENCES, sizeof(int), ""));             \
+  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                    \
+      __FILE__, __LINE__, &LOG_OCCURRENCES_MOD_N, sizeof(int), ""));       \
+  ++LOG_OCCURRENCES;                                                       \
+  if (++LOG_OCCURRENCES_MOD_N > n) LOG_OCCURRENCES_MOD_N -= n;             \
+  if (LOG_OCCURRENCES_MOD_N == 1)                                          \
+  nglog::LogMessage(__FILE__, __LINE__, NGLOG_##severity, LOG_OCCURRENCES, \
+                    &what_to_do)                                           \
       .stream()
 
 #define SOME_KIND_OF_LOG_IF_EVERY_N(severity, condition, n, what_to_do)       \
@@ -915,8 +915,8 @@ namespace nglog {
   ++LOG_OCCURRENCES;                                                          \
   if ((condition) &&                                                          \
       ((LOG_OCCURRENCES_MOD_N = (LOG_OCCURRENCES_MOD_N + 1) % n) == (1 % n))) \
-  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_##severity,              \
-                    LOG_OCCURRENCES, &what_to_do)                             \
+  nglog::LogMessage(__FILE__, __LINE__, NGLOG_##severity, LOG_OCCURRENCES,    \
+                    &what_to_do)                                              \
       .stream()
 
 #define SOME_KIND_OF_PLOG_EVERY_N(severity, n, what_to_do)              \
@@ -928,18 +928,18 @@ namespace nglog {
   ++LOG_OCCURRENCES;                                                    \
   if (++LOG_OCCURRENCES_MOD_N > n) LOG_OCCURRENCES_MOD_N -= n;          \
   if (LOG_OCCURRENCES_MOD_N == 1)                                       \
-  nglog::ErrnoLogMessage(__FILE__, __LINE__, nglog::NGLOG_##severity,   \
+  nglog::ErrnoLogMessage(__FILE__, __LINE__, NGLOG_##severity,          \
                          LOG_OCCURRENCES, &what_to_do)                  \
       .stream()
 
-#define SOME_KIND_OF_LOG_FIRST_N(severity, n, what_to_do)        \
-  static std::atomic<int> LOG_OCCURRENCES(0);                    \
-  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(          \
-      __FILE__, __LINE__, &LOG_OCCURRENCES, sizeof(int), ""));   \
-  if (LOG_OCCURRENCES <= n) ++LOG_OCCURRENCES;                   \
-  if (LOG_OCCURRENCES <= n)                                      \
-  nglog::LogMessage(__FILE__, __LINE__, nglog::NGLOG_##severity, \
-                    LOG_OCCURRENCES, &what_to_do)                \
+#define SOME_KIND_OF_LOG_FIRST_N(severity, n, what_to_do)                  \
+  static std::atomic<int> LOG_OCCURRENCES(0);                              \
+  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                    \
+      __FILE__, __LINE__, &LOG_OCCURRENCES, sizeof(int), ""));             \
+  if (LOG_OCCURRENCES <= n) ++LOG_OCCURRENCES;                             \
+  if (LOG_OCCURRENCES <= n)                                                \
+  nglog::LogMessage(__FILE__, __LINE__, NGLOG_##severity, LOG_OCCURRENCES, \
+                    &what_to_do)                                           \
       .stream()
 
 namespace internal {

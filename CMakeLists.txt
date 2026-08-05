@@ -726,6 +726,18 @@ if (BUILD_TESTING AND GTest_FOUND)
 
   target_link_libraries (color_attributes_unittest PRIVATE ng-log_test)
 
+  add_executable (logtostdout_unittest
+    src/logtostdout_unittest.cc
+  )
+
+  target_link_libraries (logtostdout_unittest PRIVATE ng-log_test)
+
+  gtest_discover_tests (logtostdout_unittest
+    TEST_PREFIX logtostdout.
+    DISCOVERY_TIMEOUT 30
+    DISCOVERY_MODE PRE_TEST
+  )
+
   add_executable (stl_logging_unittest
     src/stl_logging_unittest.cc
   )
@@ -1204,6 +1216,41 @@ if (BUILD_TESTING AND GTest_FOUND)
       "log_severity_conversion test will be disabled"
     )
     set_tests_properties (log_severity_conversion DISABLED ON)
+  endif (CMAKE_COMPILER_IS_GNUCXX)
+
+  add_test (NAME log_severity_qualified COMMAND ${CMAKE_CTEST_COMMAND}
+    --build-config $<CONFIG>
+    --build-and-test
+    "${ng-log_SOURCE_DIR}/src/log_severity_unittest"
+    "${ng-log_BINARY_DIR}/Tests/log_severity_qualified"
+    --build-generator ${CMAKE_GENERATOR}
+    --build-makeprogram ${CMAKE_MAKE_PROGRAM}
+    --build-target ng-log_log_severity_qualified
+    --build-options
+    -DCMAKE_BUILD_TYPE=$<CONFIG>
+    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+    -DCMAKE_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}
+    -DCMAKE_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}
+    -Dng-log_DIR=${ng-log_BINARY_DIR}
+  )
+  if (CMAKE_COMPILER_IS_GNUCXX)
+    set_tests_properties (log_severity_qualified PROPERTIES
+      PASS_REGULAR_EXPRESSION "NGLOG_INFO.*is not a member.*nglog"
+    )
+  elseif (CMAKE_CXX_COMPILER_ID MATCHES Clang)
+    set_tests_properties (log_severity_qualified PROPERTIES
+      PASS_REGULAR_EXPRESSION "no member named 'NGLOG_INFO' in namespace 'nglog'"
+    )
+  elseif (MSVC)
+    set_tests_properties (log_severity_qualified PROPERTIES
+      PASS_REGULAR_EXPRESSION "NGLOG_INFO.*is not a member of 'nglog'"
+    )
+  else (CMAKE_COMPILER_IS_GNUCXX)
+    message (AUTHOR_WARNING
+      "Unsupported C++ compiler ${CMAKE_CXX_COMPILER_ID}: "
+      "log_severity_qualified test will be disabled"
+    )
+    set_tests_properties (log_severity_qualified DISABLED ON)
   endif (CMAKE_COMPILER_IS_GNUCXX)
 
   add_test (NAME includes_logging COMMAND ${CMAKE_CTEST_COMMAND}
