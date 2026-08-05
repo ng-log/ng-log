@@ -653,6 +653,18 @@ if (BUILD_TESTING AND GTest_FOUND)
 
   target_link_libraries (logging_unittest PRIVATE ng-log_test)
 
+  add_executable (logtostdout_unittest
+    src/logtostdout_unittest.cc
+  )
+
+  target_link_libraries (logtostdout_unittest PRIVATE ng-log_test)
+
+  gtest_discover_tests (logtostdout_unittest
+    TEST_PREFIX logtostdout.
+    DISCOVERY_TIMEOUT 30
+    DISCOVERY_MODE PRE_TEST
+  )
+
   add_executable (stl_logging_unittest
     src/stl_logging_unittest.cc
   )
