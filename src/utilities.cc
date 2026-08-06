@@ -119,6 +119,7 @@ void AlsoErrorWrite(LogSeverity severity, const char* tag, const char* message,
   };
 
   __android_log_write(android_log_levels[severity], tag, message);
+  (void)message_length;
 #else
   (void)severity;
   (void)tag;

@@ -850,6 +850,31 @@ TEST(Logging, Basename) {
   DeleteFiles(dest + "*");
 }
 
+TEST(Logging, LogfileMode) {
+  FlagSaver saver;
+  FLAGS_logtostderr = false;
+
+#ifdef NGLOG_OS_WINDOWS
+  constexpr int kLogfileMode = _S_IREAD | _S_IWRITE;
+#else
+  constexpr int kLogfileMode = S_IRUSR | S_IWUSR;
+#endif
+  FLAGS_logfile_mode = kLogfileMode;
+  FLAGS_timestamp_in_logfile_name = false;
+
+  const string dest = TestTmpDir() + "/logging_test_file_mode";
+  DeleteFiles(dest + "*");
+
+  SetLogDestination(NGLOG_INFO, dest.c_str());
+  LOG(INFO) << "message with configured logfile mode";
+  FlushLogFiles(NGLOG_INFO);
+
+  CheckFile(dest, "message with configured logfile mode");
+
+  LogToStderr();
+  DeleteFiles(dest + "*");
+}
+
 TEST(Logging, BasenameAppendWhenNoTimestamp) {
   FlagSaver saver;
   FLAGS_logtostderr = false;
@@ -1117,7 +1142,7 @@ static void TestOneTruncate(const char* path, uint64 limit, uint64 keep,
 }
 
 TEST(Logging, Truncate) {
-#ifdef HAVE_UNISTD_H
+#if defined(HAVE_UNISTD_H) || defined(HAVE__CHSIZE_S)
   fprintf(stderr, "==== Test log truncation\n");
   string path = TestTmpDir() + "/truncatefile";
 

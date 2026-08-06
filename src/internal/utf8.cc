@@ -269,19 +269,18 @@ bool IsConsoleHandle(HANDLE handle) {
   return GetConsoleMode(handle, &mode) != FALSE;
 }
 
-bool WriteBytesToHandle(HANDLE handle, const char* input,
-                        std::size_t input_length) {
+bool WriteBytesToFileDescriptor(int file_descriptor, const char* input,
+                                std::size_t input_length) {
   std::size_t offset = 0;
   while (offset < input_length) {
-    const DWORD chunk_size = static_cast<DWORD>(
-        std::min(input_length - offset,
-                 static_cast<std::size_t>(std::numeric_limits<DWORD>::max())));
-    DWORD written = 0;
-    if (!WriteFile(handle, input + offset, chunk_size, &written, nullptr) ||
-        written != chunk_size) {
+    const unsigned int chunk_size = static_cast<unsigned int>(std::min(
+        input_length - offset,
+        static_cast<std::size_t>(std::numeric_limits<unsigned int>::max())));
+    const int written = _write(file_descriptor, input + offset, chunk_size);
+    if (written != static_cast<int>(chunk_size)) {
       return false;
     }
-    offset += written;
+    offset += static_cast<std::size_t>(written);
   }
   return true;
 }
@@ -301,13 +300,14 @@ bool WriteUtf8(std::FILE* output, const char* input, std::size_t input_length) {
 #ifdef NGLOG_OS_WINDOWS
   HANDLE handle = nullptr;
   if (GetNativeHandle(_fileno(output), &handle)) {
-    if (std::fflush(output) != 0) {
-      return false;
+    if (IsConsoleHandle(handle)) {
+      if (std::fflush(output) != 0) {
+        return false;
+      }
+      return WriteUtf8ToConsole(handle, input, input_length);
     }
-    const bool is_console = IsConsoleHandle(handle);
-    if ((is_console && WriteUtf8ToConsole(handle, input, input_length)) ||
-        (!is_console && WriteBytesToHandle(handle, input, input_length))) {
-      return true;
+    if (_setmode(_fileno(output), _O_BINARY) == -1) {
+      return false;
     }
   }
 #endif
@@ -328,13 +328,14 @@ bool WriteUtf8ToFileDescriptor(int file_descriptor, const char* input,
 
   HANDLE handle = nullptr;
   if (GetNativeHandle(file_descriptor, &handle)) {
-    const bool is_console = IsConsoleHandle(handle);
-    if ((is_console && WriteUtf8ToConsole(handle, input, input_length)) ||
-        (!is_console && WriteBytesToHandle(handle, input, input_length))) {
-      return true;
+    if (IsConsoleHandle(handle)) {
+      return WriteUtf8ToConsole(handle, input, input_length);
     }
   }
-  return false;
+  if (_setmode(file_descriptor, _O_BINARY) == -1) {
+    return false;
+  }
+  return WriteBytesToFileDescriptor(file_descriptor, input, input_length);
 #else
   static_cast<void>(file_descriptor);
   static_cast<void>(input);

@@ -65,6 +65,7 @@ TEST(Utf8Output, PreservesRedirectedBytes) {
   ASSERT_NE(file, nullptr);
 
   EXPECT_TRUE(nglog::internal::WriteUtf8(file, message.data(), message.size()));
+  EXPECT_EQ(std::ftell(file), static_cast<long>(message.size()));
   ASSERT_EQ(std::fflush(file), 0);
   ASSERT_EQ(std::fseek(file, 0, SEEK_SET), 0);
 

@@ -1204,6 +1204,14 @@ int AccessPath(const std::string& path, int mode) {
 #endif
 }
 
+bool IsRegularFile(const struct stat& statbuf) {
+#ifdef NGLOG_OS_WINDOWS
+  return (statbuf.st_mode & _S_IFMT) == _S_IFREG;
+#else
+  return S_ISREG(statbuf.st_mode);
+#endif
+}
+
 bool ListDirectoryPath(const std::string& path,
                        std::vector<std::string>* entries) {
 #ifdef NGLOG_OS_WINDOWS
@@ -1323,8 +1331,7 @@ bool LogFileObject::CreateLogfile(const string& time_pid_string) {
     }
   }
 
-  FileDescriptor fd{OpenPath(string_filename, flags,
-                             static_cast<mode_t>(FLAGS_logfile_mode))};
+  FileDescriptor fd{OpenPath(string_filename, flags, FLAGS_logfile_mode)};
   if (!fd) return false;
 #ifdef HAVE_FCNTL
   // Mark the file close-on-exec. We don't really care if this fails
@@ -2900,7 +2907,7 @@ void TruncateLogFile(const char* path, uint64 limit, uint64 keep) {
 
   // See if the path refers to a regular file bigger than the
   // specified limit
-  if (!S_ISREG(statbuf.st_mode)) return;
+  if (!IsRegularFile(statbuf)) return;
   if (statbuf.st_size <= static_cast<off_t>(limit)) return;
   if (statbuf.st_size <= static_cast<off_t>(keep)) return;
 
