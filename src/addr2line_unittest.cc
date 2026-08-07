@@ -13,6 +13,7 @@
 #include "ng-log/platform.h"
 
 #ifdef NGLOG_OS_WINDOWS
+#  include <process.h>
 #  include <windows.h>
 #else
 #  include <sys/stat.h>
@@ -26,9 +27,13 @@
 #include <cwchar>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "config.h"
 #include "internal/utf8.h"
+#ifdef NGLOG_OS_WINDOWS
+#  include "long_path_test.h"
+#endif
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "symbolize.h"
@@ -37,6 +42,10 @@
 using namespace nglog;
 
 namespace {
+
+#ifdef NGLOG_OS_WINDOWS
+bool g_long_path_child = false;
+#endif
 
 void SetPathEnvironmentVariable(const char* value) {
 #ifdef NGLOG_OS_WINDOWS
@@ -375,6 +384,68 @@ const char* TrySymbolize(void* pc) {
   return nullptr;
 }
 
+#ifdef NGLOG_OS_WINDOWS
+bool RunLongPathSymbolizeChild(DWORD* create_error) {
+  *create_error = ERROR_SUCCESS;
+  nglog::testing_internal::LongPathTestDirectory directory;
+  const std::string directory_name = "nglog_symbolize_long_path_" +
+                                     std::to_string(_getpid()) + "_" +
+                                     std::to_string(GetTickCount64());
+  if (!directory.CreateInTemporaryDirectory(directory_name)) {
+    return false;
+  }
+
+  constexpr DWORD kInitialExecutablePathLength = 256;
+  constexpr std::size_t kBufferGrowthFactor = 2;
+  std::vector<wchar_t> executable_path(kInitialExecutablePathLength);
+  while (true) {
+    const DWORD length =
+        GetModuleFileNameW(nullptr, executable_path.data(),
+                           static_cast<DWORD>(executable_path.size()));
+    if (length == 0) {
+      return false;
+    }
+    if (length < executable_path.size()) {
+      executable_path.resize(length);
+      break;
+    }
+    executable_path.resize(executable_path.size() * kBufferGrowthFactor);
+  }
+
+  constexpr wchar_t kChildName[] = L"long_path_symbolize.exe";
+  const std::wstring child_path = directory.ExtendedChildPath(kChildName);
+  if (!CopyFileW(executable_path.data(), child_path.c_str(), FALSE)) {
+    return false;
+  }
+
+  std::wstring command_line = L'"' + child_path +
+                              L"\" --gtest_filter="
+                              L"Addr2LineSymbolizeCallback."
+                              L"ResolvesFromLongModulePath "
+                              L"--long-path-child";
+  STARTUPINFOW startup_info = {};
+  startup_info.cb = sizeof(startup_info);
+  PROCESS_INFORMATION process_info = {};
+  const BOOL created =
+      CreateProcessW(child_path.c_str(), &command_line[0], nullptr, nullptr,
+                     FALSE, 0, nullptr, nullptr, &startup_info, &process_info);
+  if (!created) {
+    *create_error = GetLastError();
+    DeleteFileW(child_path.c_str());
+    return false;
+  }
+
+  WaitForSingleObject(process_info.hProcess, INFINITE);
+  DWORD exit_code = 0;
+  const BOOL read_exit_code =
+      GetExitCodeProcess(process_info.hProcess, &exit_code);
+  CloseHandle(process_info.hThread);
+  CloseHandle(process_info.hProcess);
+  DeleteFileW(child_path.c_str());
+  return read_exit_code && exit_code == 0;
+}
+#endif
+
 }  // namespace
 
 // On platforms where addr2line supplements a name resolver that always
@@ -399,6 +470,39 @@ TEST(Addr2LineSymbolizeCallback, ResolvesFileAndLine) {
   }
   EXPECT_NE(nullptr, std::strstr(symbol, "FunctionSymbolizedForAddr2LineTest"));
 }
+
+#ifdef NGLOG_OS_WINDOWS
+TEST(Addr2LineSymbolizeCallback, ResolvesFromLongModulePath) {
+  if (!g_long_path_child) {
+    nglog::SetFlag(FLAGS_symbolize_line_info, true);
+    ASSERT_TRUE(InstallAddr2LineSymbolizeCallback());
+    const char* const short_path_symbol = TrySymbolize(
+        reinterpret_cast<void*>(&InstallAddr2LineSymbolizeCallback));
+    InstallSymbolizeCallback(nullptr);
+    if (short_path_symbol == nullptr) {
+      GTEST_SKIP() << "addr2line not available or not resolving";
+    }
+
+    DWORD create_error = ERROR_SUCCESS;
+    const bool resolved = RunLongPathSymbolizeChild(&create_error);
+    if (!resolved && create_error == ERROR_INVALID_NAME &&
+        nglog::testing_internal::IsWine()) {
+      GTEST_SKIP() << "Wine does not launch executables through extended paths";
+    }
+    EXPECT_TRUE(resolved);
+    return;
+  }
+
+  nglog::SetFlag(FLAGS_symbolize_line_info, true);
+  ASSERT_TRUE(InstallAddr2LineSymbolizeCallback());
+  const char* symbol =
+      TrySymbolize(reinterpret_cast<void*>(&InstallAddr2LineSymbolizeCallback));
+  InstallSymbolizeCallback(nullptr);
+
+  ASSERT_NE(symbol, nullptr);
+  EXPECT_NE(std::strstr(symbol, "InstallAddr2LineSymbolizeCallback"), nullptr);
+}
+#endif
 
 TEST(Addr2LineSymbolizeCallback, DisabledByFlag) {
   nglog::SetFlag(FLAGS_symbolize_line_info, false);
@@ -578,6 +682,21 @@ TEST(Addr2LineSymbolizeCallback, SkipsGracefullyWhenAddr2LineProducesNoOutput) {
 }
 
 int main(int argc, char** argv) {
+#ifdef NGLOG_OS_WINDOWS
+  constexpr char kLongPathChildFlag[] = "--long-path-child";
+  constexpr int kFirstArgument = 1;
+  for (int index = kFirstArgument; index < argc; ++index) {
+    if (std::strcmp(argv[index], kLongPathChildFlag) != 0) {
+      continue;
+    }
+    g_long_path_child = true;
+    for (int argument = index; argument + 1 < argc; ++argument) {
+      argv[argument] = argv[argument + 1];
+    }
+    --argc;
+    break;
+  }
+#endif
   nglog::SetFlag(FLAGS_logtostderr, true);
   InitializeLogging(argv[0]);
   testing::InitGoogleTest(&argc, argv);

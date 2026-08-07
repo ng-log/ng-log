@@ -31,6 +31,7 @@
 #    include <memory>
 #    include <string>
 #    include <type_traits>
+#    include <vector>
 
 #    include "internal/utf8.h"
 
@@ -151,6 +152,104 @@ std::wstring BuildEnvironmentBlock(char* const envp[]) {
   return block;
 }
 
+constexpr wchar_t kExecutableExtension[] = L".exe";
+
+// Mirrors CreateProcessW(), which appends .exe to a program name without an
+// extension only when the name is passed on the command line.
+void AppendDefaultExtension(std::wstring* path) {
+  const std::size_t name_start = path->find_last_of(L"\\/");
+  const std::size_t extension_start = path->find_last_of(L'.');
+  if (extension_start == std::wstring::npos ||
+      (name_start != std::wstring::npos && extension_start < name_start)) {
+    *path += kExecutableExtension;
+  }
+}
+
+// Searches the calling process' own directory, its current directory, the
+// system directories, and its own PATH environment variable, in that order.
+bool SearchExecutable(const std::wstring& name, std::wstring* executable_path) {
+  std::vector<wchar_t> buffer(MAX_PATH);
+  while (true) {
+    const DWORD length =
+        SearchPathW(nullptr, name.c_str(), kExecutableExtension,
+                    static_cast<DWORD>(buffer.size()), buffer.data(), nullptr);
+    if (length == 0) {
+      return false;
+    }
+    if (length < buffer.size()) {
+      return internal::PrepareWindowsPath(buffer.data(), length,
+                                          executable_path);
+    }
+    // The returned length includes the terminating null character.
+    buffer.resize(length);
+  }
+}
+
+// Searches PATH entries that SearchPathW() cannot resolve because the
+// resulting path exceeds MAX_PATH.
+bool FindExecutableInPath(const std::wstring& name,
+                          std::wstring* executable_path) {
+  const DWORD required_length = GetEnvironmentVariableW(L"PATH", nullptr, 0);
+  if (required_length == 0) {
+    return false;
+  }
+
+  std::vector<wchar_t> buffer(required_length);
+  const DWORD length = GetEnvironmentVariableW(
+      L"PATH", buffer.data(), static_cast<DWORD>(buffer.size()));
+  if (length == 0 || length >= buffer.size()) {
+    return false;
+  }
+
+  std::wstring path(buffer.data(), length);
+  std::size_t entry_begin = 0;
+  constexpr std::size_t kSingleCharacterLength = 1;
+  constexpr std::size_t kQuotePairLength = 2;
+  while (entry_begin <= path.size()) {
+    const std::size_t entry_end = path.find(L';', entry_begin);
+    const std::size_t entry_length = entry_end == std::wstring::npos
+                                         ? std::wstring::npos
+                                         : entry_end - entry_begin;
+    std::wstring entry = path.substr(entry_begin, entry_length);
+    if (entry.size() >= kQuotePairLength && entry.front() == L'"' &&
+        entry.back() == L'"') {
+      entry =
+          entry.substr(kSingleCharacterLength, entry.size() - kQuotePairLength);
+    }
+
+    if (!entry.empty()) {
+      std::wstring candidate = std::move(entry);
+      if (candidate.back() != L'\\' && candidate.back() != L'/') {
+        candidate += L'\\';
+      }
+      candidate += name;
+      AppendDefaultExtension(&candidate);
+
+      std::wstring prepared_candidate;
+      if (internal::PrepareWindowsPath(candidate.data(), candidate.size(),
+                                       &prepared_candidate)) {
+        const DWORD attributes = GetFileAttributesW(prepared_candidate.c_str());
+        if (attributes != INVALID_FILE_ATTRIBUTES &&
+            (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
+          *executable_path = std::move(prepared_candidate);
+          return true;
+        }
+      }
+    }
+
+    if (entry_end == std::wstring::npos) {
+      break;
+    }
+    entry_begin = entry_end + kSingleCharacterLength;
+  }
+  return false;
+}
+
+// Resolves a program name without a path separator using this process'
+// search order rather than leaving the lookup to CreateProcessW(). The
+// latter searches PATH from the environment block handed to the new
+// process, which would defeat a deliberately minimal child environment.
+// Falls back to |name| with the default extension if the search fails.
 bool ResolveExecutablePath(const char* name, std::wstring* resolved_path) {
   std::wstring wide_name;
   if (!internal::Utf8ToWide(name, std::strlen(name), &wide_name)) {
@@ -158,18 +257,17 @@ bool ResolveExecutablePath(const char* name, std::wstring* resolved_path) {
   }
 
   if (std::strpbrk(name, "\\/") != nullptr) {
-    *resolved_path = std::move(wide_name);
-    return true;
+    AppendDefaultExtension(&wide_name);
+    return internal::PrepareWindowsPath(wide_name.data(), wide_name.size(),
+                                        resolved_path);
   }
 
-  wchar_t buffer[MAX_PATH];
-  const DWORD length = SearchPathW(nullptr, wide_name.c_str(), L".exe",
-                                   MAX_PATH, buffer, nullptr);
-  if (length == 0 || length >= MAX_PATH) {
-    *resolved_path = std::move(wide_name);
+  if (SearchExecutable(wide_name, resolved_path) ||
+      FindExecutableInPath(wide_name, resolved_path)) {
     return true;
   }
-  resolved_path->assign(buffer, length);
+  AppendDefaultExtension(&wide_name);
+  *resolved_path = std::move(wide_name);
   return true;
 }
 
@@ -355,8 +453,15 @@ bool Subprocess<SubprocessMode::kNormal>::Spawn(char* const argv[],
     return false;
   }
 
+  std::wstring executable_argument;
+  if (!internal::Utf8ToWide(argv[0], std::strlen(argv[0]),
+                            &executable_argument)) {
+    return false;
+  }
+
   std::wstring command_line;
-  for (char* const* arg = argv; *arg != nullptr; ++arg) {
+  AppendQuotedArg(executable_argument, command_line);
+  for (char* const* arg = argv + 1; *arg != nullptr; ++arg) {
     std::wstring wide_arg;
     if (!internal::Utf8ToWide(*arg, std::strlen(*arg), &wide_arg)) {
       return false;

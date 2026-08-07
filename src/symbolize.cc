@@ -1627,15 +1627,14 @@ static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
 
 #    include <windows.h>
 
+#    include <array>
+#    include <string>
+
 #    include "addr2line.h"
+#    include "internal/utf8.h"
 
 namespace nglog {
 inline namespace tools {
-
-namespace {
-// Room for the worst-case UTF-8 expansion of a MAX_PATH UTF-16 string.
-constexpr int kMaxObjectPathUtf8Length = MAX_PATH * 3;
-}  // namespace
 
 NGLOG_ATTRIBUTE_NOINLINE
 static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
@@ -1648,23 +1647,6 @@ static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
                           reinterpret_cast<LPCWSTR>(pc), &module)) {
     return false;
   }
-
-  wchar_t wide_path[MAX_PATH];
-  const DWORD wide_len = GetModuleFileNameW(module, wide_path, MAX_PATH);
-
-  if (wide_len == 0 || wide_len >= MAX_PATH) {
-    return false;
-  }
-
-  char object_path[kMaxObjectPathUtf8Length];
-  const int narrow_len = WideCharToMultiByte(
-      CP_UTF8, 0, wide_path, static_cast<int>(wide_len), object_path,
-      sizeof(object_path) - 1, nullptr, nullptr);
-
-  if (narrow_len <= 0) {
-    return false;
-  }
-  object_path[narrow_len] = '\0';
 
   // addr2line resolves addresses against the file's own coordinate
   // system, i.e. relative to the PE's declared ImageBase, not the
@@ -1680,8 +1662,60 @@ static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
   const auto image_base =
       static_cast<uintptr_t>(nt_headers->OptionalHeader.ImageBase);
   const auto relocation = runtime_base - image_base;
-  return ResolveFunctionAndLine(object_path, pc, relocation, out, out_size,
-                                options, frame);
+
+  constexpr std::size_t kBufferGrowthFactor = 2;
+  constexpr std::size_t kMaxObjectPathUtf8Length = MAX_PATH * 3;
+  std::array<wchar_t, MAX_PATH> short_path = {};
+  const DWORD short_length = GetModuleFileNameW(
+      module, short_path.data(), static_cast<DWORD>(short_path.size()));
+  if (short_length == 0) {
+    return false;
+  }
+
+  const wchar_t* wide_path = short_path.data();
+  std::size_t wide_length = short_length;
+  std::wstring long_path;
+  if (short_length >= short_path.size()) {
+    long_path.resize(short_path.size() * kBufferGrowthFactor);
+    while (true) {
+      const DWORD length = GetModuleFileNameW(
+          module, &long_path[0], static_cast<DWORD>(long_path.size()));
+      if (length == 0) {
+        return false;
+      }
+      if (length < long_path.size()) {
+        long_path.resize(length);
+        wide_path = long_path.c_str();
+        wide_length = length;
+        break;
+      }
+      if (long_path.size() >
+          std::numeric_limits<DWORD>::max() / kBufferGrowthFactor) {
+        return false;
+      }
+      long_path.resize(long_path.size() * kBufferGrowthFactor);
+    }
+  }
+
+  if (wide_length < MAX_PATH) {
+    std::array<char, kMaxObjectPathUtf8Length> object_path = {};
+    std::size_t object_length = 0;
+    if (!internal::WideToUtf8Buffer(wide_path, wide_length, object_path.data(),
+                                    object_path.size() - 1, &object_length)) {
+      return false;
+    }
+    object_path[object_length] = '\0';
+    return ResolveFunctionAndLine(object_path.data(), pc, relocation, out,
+                                  out_size, options, frame);
+  }
+
+  std::string object_path;
+  if (!internal::WideToUtf8(wide_path, wide_length, &object_path)) {
+    return false;
+  }
+
+  return ResolveFunctionAndLine(object_path.c_str(), pc, relocation, out,
+                                out_size, options, frame);
 }
 
 }  // namespace tools

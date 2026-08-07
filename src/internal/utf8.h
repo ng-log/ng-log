@@ -25,6 +25,9 @@ enum class WindowsPathKind { kInvalid, kNarrow, kWide };
 NGLOG_NO_EXPORT bool IsAscii(const char* input, std::size_t input_length);
 NGLOG_NO_EXPORT WindowsPathKind ClassifyWindowsPath(const char* path,
                                                     std::size_t path_length);
+NGLOG_NO_EXPORT bool PrepareWindowsPath(const wchar_t* path,
+                                        std::size_t path_length,
+                                        std::wstring* prepared_path);
 #endif
 
 //! Maximum number of UTF-16 code units passed to a WideWriteFunction at once.

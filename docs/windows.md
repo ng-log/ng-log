@@ -13,12 +13,13 @@ All file and directory paths passed to ng-log must use UTF-8 encoding. This
 includes logfile destinations, log directories, and paths passed to
 `TruncateLogFile`.
 
-ng-log uses narrow C runtime filesystem operations for ASCII paths containing
-fewer than `MAX_PATH` bytes unless they start with the `\\?\` or `\\.\`
-namespace prefix. Other paths are converted to UTF-16. Directory enumeration
-uses Unicode Windows APIs so every entry name can be represented. Invalid
-UTF-8 paths are rejected. This behavior is consistent with the other supported
-platforms and does not require a change to the public API.
+ng-log uses narrow C runtime filesystem operations for ASCII paths that remain
+shorter than `MAX_PATH` after resolving them against the current directory,
+unless they start with the `\\?\` or `\\.\` namespace prefix. Other paths are
+converted to UTF-16. Directory enumeration uses Unicode Windows APIs so every
+entry name can be represented. Invalid UTF-8 paths are rejected. This behavior
+is consistent with the other supported platforms and does not require a change
+to the public API.
 
 ## Compiler character sets
 
@@ -48,6 +49,25 @@ not convert runtime text obtained from files, environment variables, or other
 APIs. Applications must convert such text to UTF-8 before passing it to ng-log.
 ASCII input is valid UTF-8.
 
+## Long paths
+
+ng-log supports file and directory paths longer than `MAX_PATH` without
+requiring callers to add an extended-length path prefix. Relative paths,
+drive paths, and UNC paths are converted to absolute extended-length paths
+when necessary. Paths that already use an extended-length or device prefix
+are preserved.
+
+The short ASCII fast path is unchanged. It avoids UTF-16 conversion and path
+normalization while a path remains below `MAX_PATH`. The length of a relative
+path includes the current directory it is resolved against, so a short
+relative path inside a deep directory is also treated as a long path. Longer
+paths use the Unicode path handling described above. Individual path components and the
+complete path remain subject to the limits of the underlying Windows file
+system.
+
+Long-path normalization uses the Windows PathCch API. As a result, ng-log now
+requires Windows 8 or Windows Server 2012 or later.
+
 ## Log output
 
 Log messages are expected to use UTF-8. When standard output or standard error
@@ -56,8 +76,11 @@ to the console handle without converting them to UTF-16. Messages containing
 non-ASCII characters are converted to UTF-16 and written with the Unicode
 console API. Redirected output is written as UTF-8 through the stream's
 existing translation mode, so a text-mode stream translates line feeds into
-CRLF sequences exactly like the application's own output. Debugger output uses
-the corresponding Unicode debugger API.
+CRLF sequences exactly like the application's own output. Ill-formed UTF-8
+sequences are replaced with U+FFFD when writing to the console or the debugger.
+Debugger output uses the corresponding Unicode debugger API.
+
+## Severity levels
 
 ng-log defines the severity level `ERROR`, which is also defined by `windows.h`.
 You can make nglog not define `INFO`, `WARNING`, `ERROR`, and `FATAL` by

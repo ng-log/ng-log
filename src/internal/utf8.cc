@@ -22,6 +22,9 @@
 #  include <io.h>
 #  include <sys/stat.h>
 #  include <windows.h>
+
+// The target architecture macros that pathcch.h requires come from windows.h.
+#  include <pathcch.h>
 #endif
 
 namespace nglog {
@@ -182,6 +185,60 @@ bool HasWindowsNamespacePrefix(const char* path, std::size_t path_length) {
           std::memcmp(path, kDevicePrefix, kNamespacePrefixLength) == 0);
 }
 
+bool HasWindowsNamespacePrefix(const std::wstring& path) {
+  constexpr wchar_t kExtendedLengthPrefix[] = L"\\\\?\\";
+  constexpr wchar_t kDevicePrefix[] = L"\\\\.\\";
+  constexpr std::size_t kNamespacePrefixLength =
+      sizeof(kExtendedLengthPrefix) / sizeof(kExtendedLengthPrefix[0]) - 1;
+  return path.size() >= kNamespacePrefixLength &&
+         (path.compare(0, kNamespacePrefixLength, kExtendedLengthPrefix) == 0 ||
+          path.compare(0, kNamespacePrefixLength, kDevicePrefix) == 0);
+}
+
+template <typename Character>
+bool IsWindowsPathSeparator(Character character) {
+  return character == static_cast<Character>('\\') ||
+         character == static_cast<Character>('/');
+}
+
+// Returns whether the path names a drive root or a UNC share, including the
+// namespace prefixes, and therefore does not depend on the current directory.
+template <typename Character>
+bool IsFullyQualifiedWindowsPath(const Character* path,
+                                 std::size_t path_length) {
+  constexpr std::size_t kUncPrefixLength = 2;
+  constexpr std::size_t kDrivePrefixLength = 3;
+  if (path_length >= kUncPrefixLength && IsWindowsPathSeparator(path[0]) &&
+      IsWindowsPathSeparator(path[1])) {
+    return true;
+  }
+  if (path_length < kDrivePrefixLength) {
+    return false;
+  }
+  const Character drive = path[0];
+  const bool is_drive_letter = (drive >= static_cast<Character>('A') &&
+                                drive <= static_cast<Character>('Z')) ||
+                               (drive >= static_cast<Character>('a') &&
+                                drive <= static_cast<Character>('z'));
+  return is_drive_letter && path[1] == static_cast<Character>(':') &&
+         IsWindowsPathSeparator(path[2]);
+}
+
+// Returns an upper bound for the length of the path once Windows resolves it
+// against the current directory. The MAX_PATH limit applies to this length
+// rather than to the length of a relative path.
+template <typename Character>
+std::size_t ResolvedWindowsPathLength(const Character* path,
+                                      std::size_t path_length) {
+  if (IsFullyQualifiedWindowsPath(path, path_length)) {
+    return path_length;
+  }
+  // The returned size includes the terminating null character, which
+  // accounts for the separator joining both paths.
+  const DWORD current_directory_size = GetCurrentDirectoryW(0, nullptr);
+  return path_length + current_directory_size;
+}
+
 template <typename NarrowOperation, typename WideOperation>
 int DispatchWindowsPath(const char* path, std::size_t path_length,
                         NarrowOperation narrow_operation,
@@ -203,7 +260,17 @@ int DispatchWindowsPath(const char* path, std::size_t path_length,
         SetConversionError();
         return -1;
       }
-      return wide_operation(wide_path.c_str());
+      if (ResolvedWindowsPathLength(wide_path.data(), wide_path.size()) <
+              MAX_PATH ||
+          HasWindowsNamespacePrefix(wide_path)) {
+        return wide_operation(wide_path.c_str());
+      }
+      std::wstring prepared_path;
+      if (!PrepareWindowsPath(wide_path.data(), wide_path.size(),
+                              &prepared_path)) {
+        return -1;
+      }
+      return wide_operation(prepared_path.c_str());
     }
   }
   SetConversionError();
@@ -263,9 +330,93 @@ WindowsPathKind ClassifyWindowsPath(const char* path, std::size_t path_length) {
 
   return analysis.is_ascii &&
                  path_length < static_cast<std::size_t>(MAX_PATH) &&
-                 !HasWindowsNamespacePrefix(path, path_length)
+                 !HasWindowsNamespacePrefix(path, path_length) &&
+                 ResolvedWindowsPathLength(path, path_length) <
+                     static_cast<std::size_t>(MAX_PATH)
              ? WindowsPathKind::kNarrow
              : WindowsPathKind::kWide;
+}
+
+bool PrepareWindowsPath(const wchar_t* path, std::size_t path_length,
+                        std::wstring* prepared_path) {
+  if (path == nullptr || prepared_path == nullptr ||
+      path_length >= PATHCCH_MAX_CCH) {
+    errno = path_length >= PATHCCH_MAX_CCH ? ENAMETOOLONG : EINVAL;
+    return false;
+  }
+
+  std::wstring input(path, path_length);
+  if (!IsValidPath(input)) {
+    return SetConversionError();
+  }
+  if (ResolvedWindowsPathLength(path, path_length) < MAX_PATH) {
+    *prepared_path = std::move(input);
+    return true;
+  }
+
+  constexpr wchar_t kExtendedPrefix[] = L"\\\\?\\";
+  constexpr wchar_t kDevicePrefix[] = L"\\\\.\\";
+  constexpr std::size_t kPrefixLength =
+      sizeof(kExtendedPrefix) / sizeof(kExtendedPrefix[0]) - 1;
+  if (HasWindowsNamespacePrefix(input)) {
+    *prepared_path = std::move(input);
+    return true;
+  }
+
+  std::replace(input.begin(), input.end(), L'/', L'\\');
+
+  const DWORD current_directory_length = GetCurrentDirectoryW(0, nullptr);
+  if (current_directory_length == 0) {
+    return false;
+  }
+  std::vector<wchar_t> current_directory(current_directory_length);
+  const DWORD written = GetCurrentDirectoryW(
+      static_cast<DWORD>(current_directory.size()), current_directory.data());
+  if (written == 0 || written >= current_directory.size()) {
+    return false;
+  }
+
+  std::vector<wchar_t> combined(PATHCCH_MAX_CCH);
+  const HRESULT result = PathCchCombineEx(
+      combined.data(), combined.size(), current_directory.data(), input.c_str(),
+      PATHCCH_ALLOW_LONG_PATHS);
+  if (FAILED(result)) {
+    errno = HRESULT_CODE(result) == ERROR_FILENAME_EXCED_RANGE ? ENAMETOOLONG
+                                                               : EINVAL;
+    return false;
+  }
+
+  std::wstring canonical_path(combined.data());
+  if (canonical_path.size() < MAX_PATH ||
+      canonical_path.compare(0, kPrefixLength, kExtendedPrefix) == 0 ||
+      canonical_path.compare(0, kPrefixLength, kDevicePrefix) == 0) {
+    *prepared_path = std::move(canonical_path);
+    return true;
+  }
+
+  constexpr wchar_t kUncPrefix[] = L"\\\\";
+  constexpr wchar_t kExtendedUncPrefix[] = L"\\\\?\\UNC\\";
+  constexpr std::size_t kUncPrefixLength =
+      sizeof(kUncPrefix) / sizeof(kUncPrefix[0]) - 1;
+  constexpr std::size_t kExtendedUncPrefixLength =
+      sizeof(kExtendedUncPrefix) / sizeof(kExtendedUncPrefix[0]) - 1;
+  const bool is_unc =
+      canonical_path.compare(0, kUncPrefixLength, kUncPrefix) == 0;
+  const std::size_t prepared_length =
+      canonical_path.size() +
+      (is_unc ? kExtendedUncPrefixLength - kUncPrefixLength : kPrefixLength);
+  if (prepared_length >= PATHCCH_MAX_CCH) {
+    errno = ENAMETOOLONG;
+    return false;
+  }
+
+  if (is_unc) {
+    *prepared_path =
+        kExtendedUncPrefix + canonical_path.substr(kUncPrefixLength);
+  } else {
+    *prepared_path = kExtendedPrefix + canonical_path;
+  }
+  return true;
 }
 #endif
 
@@ -811,11 +962,28 @@ bool ForEachDirectoryEntryUtf8(const char* path, std::size_t path_length,
   }
   wide_path.push_back(L'*');
 
+  const wchar_t* search_path = wide_path.c_str();
+  std::wstring prepared_path;
+  if (ResolvedWindowsPathLength(wide_path.data(), wide_path.size()) >=
+          MAX_PATH &&
+      !HasWindowsNamespacePrefix(wide_path)) {
+    if (!PrepareWindowsPath(wide_path.data(), wide_path.size(),
+                            &prepared_path)) {
+      return false;
+    }
+    search_path = prepared_path.c_str();
+  }
   WIN32_FIND_DATAW data;
-  const HANDLE handle = FindFirstFileW(wide_path.c_str(), &data);
+  const HANDLE handle = FindFirstFileW(search_path, &data);
   if (handle == INVALID_HANDLE_VALUE) {
     return false;
   }
+  // The callback can throw, so the search handle is released by RAII.
+  struct SearchHandle {
+    HANDLE handle;
+    ~SearchHandle() { FindClose(handle); }
+  };
+  const SearchHandle search{handle};
 
   bool success = true;
   do {
@@ -837,7 +1005,6 @@ bool ForEachDirectoryEntryUtf8(const char* path, std::size_t path_length,
   if (success && GetLastError() != ERROR_NO_MORE_FILES) {
     success = false;
   }
-  FindClose(handle);
   return success;
 #else
   static_cast<void>(path);

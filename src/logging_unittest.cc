@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "config.h"
+#include "ng-log/platform.h"
 #ifdef HAVE_GLOB_H
 #  include <glob.h>
 #endif
@@ -45,6 +46,7 @@
 #ifdef NGLOG_OS_WINDOWS
 #  include <windows.h>
 
+#  include "long_path_test.h"
 #  include "windows/port.h"
 #endif
 
@@ -1785,6 +1787,92 @@ TEST(Logging, Extension) {
   // Release file handle for the destination file to unlock the file in Windows.
   LogToStderr();
   DeleteFiles(dest + "*");
+}
+
+TEST(Logging, WritesToLongPath) {
+#ifdef NGLOG_OS_WINDOWS
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
+
+  nglog::testing_internal::LongPathTestDirectory directory;
+  const std::string directory_name =
+      "nglog_logging_long_path_" + std::to_string(_getpid());
+  ASSERT_TRUE(directory.CreateInTemporaryDirectory(directory_name));
+  const std::string path = directory.ChildPath("logging_test");
+
+  SetLogDestination(NGLOG_INFO, path.c_str());
+  LOG(INFO) << "message written through a long path";
+  FlushLogFiles(NGLOG_INFO);
+  LogToStderr();
+
+  struct stat file_status = {};
+  ASSERT_EQ(nglog::internal::StatUtf8(path.data(), path.size(), &file_status),
+            0);
+  EXPECT_GT(file_status.st_size, 0);
+  EXPECT_EQ(nglog::internal::UnlinkUtf8(path.data(), path.size()), 0);
+#else
+  GTEST_SKIP() << "Requires Windows";
+#endif
+}
+
+TEST(Logging, TruncatesLongPath) {
+#if defined(NGLOG_OS_WINDOWS) && defined(HAVE__CHSIZE_S)
+  nglog::testing_internal::LongPathTestDirectory directory;
+  const std::string directory_name =
+      "nglog_truncate_long_path_" + std::to_string(_getpid());
+  ASSERT_TRUE(directory.CreateInTemporaryDirectory(directory_name));
+  const std::string path = directory.ChildPath("truncate_test");
+
+  const int file_descriptor = nglog::internal::OpenUtf8(
+      path.data(), path.size(), O_RDWR | O_CREAT | O_TRUNC | O_BINARY,
+      _S_IREAD | _S_IWRITE);
+  ASSERT_NE(file_descriptor, -1);
+  constexpr char kContents[] = "discardkeep";
+  ASSERT_EQ(_write(file_descriptor, kContents, sizeof(kContents) - 1),
+            static_cast<int>(sizeof(kContents) - 1));
+  ASSERT_EQ(_close(file_descriptor), 0);
+
+  TruncateLogFile(path.c_str(), 10, 4);
+
+  struct stat file_status = {};
+  ASSERT_EQ(nglog::internal::StatUtf8(path.data(), path.size(), &file_status),
+            0);
+  EXPECT_EQ(file_status.st_size, 4);
+  EXPECT_EQ(nglog::internal::UnlinkUtf8(path.data(), path.size()), 0);
+#else
+  GTEST_SKIP() << "Requires Windows with _chsize_s";
+#endif
+}
+
+TEST(Logging, CleansLongPath) {
+#ifdef NGLOG_OS_WINDOWS
+  using namespace std::chrono_literals;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
+
+  nglog::testing_internal::LongPathTestDirectory directory;
+  const std::string directory_name =
+      "nglog_cleaner_long_path_" + std::to_string(_getpid());
+  ASSERT_TRUE(directory.CreateInTemporaryDirectory(directory_name));
+  const std::string path = directory.ChildPath("cleanup_test");
+
+  SetLogDestination(NGLOG_INFO, path.c_str());
+  LOG(INFO) << "message for long-path cleanup";
+  FlushLogFiles(NGLOG_INFO);
+  LogToStderr();
+
+  EnableLogCleaner(0h);
+  DisableLogCleaner();
+
+  const bool file_exists =
+      nglog::internal::AccessUtf8(path.data(), path.size(), 0) == 0;
+  EXPECT_FALSE(file_exists);
+  if (file_exists) {
+    EXPECT_EQ(nglog::internal::UnlinkUtf8(path.data(), path.size()), 0);
+  }
+#endif
 }
 
 struct MyLogger : public base::Logger {

@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -47,6 +48,8 @@ void LogSystemResultOutsideNamespace(DWORD result) { LOG_SYSRESULT(result); }
 #  include <process.h>
 #  include <sys/stat.h>
 #  include <windows.h>
+
+#  include "long_path_test.h"
 
 namespace {
 
@@ -287,6 +290,27 @@ TEST(WindowsUtf8Path, ListsUnicodeDirectoryEntries) {
   EXPECT_TRUE(RemoveDirectoryW(wide_directory.c_str()));
 }
 
+TEST(WindowsUtf8Path, ClosesDirectoryWhenCallbackThrows) {
+  constexpr char kCurrentDirectory[] = ".";
+  DWORD handles_before = 0;
+  ASSERT_TRUE(GetProcessHandleCount(GetCurrentProcess(), &handles_before));
+  if (handles_before == 0) {
+    GTEST_SKIP() << "The process handle count is unavailable";
+  }
+
+  EXPECT_THROW(nglog::internal::ForEachDirectoryEntryUtf8(
+                   kCurrentDirectory, sizeof(kCurrentDirectory) - 1,
+                   [](const char*, std::size_t, void*) -> bool {
+                     throw std::runtime_error("callback failed");
+                   },
+                   nullptr),
+               std::runtime_error);
+
+  DWORD handles_after = 0;
+  ASSERT_TRUE(GetProcessHandleCount(GetCurrentProcess(), &handles_after));
+  EXPECT_EQ(handles_after, handles_before);
+}
+
 TEST(WindowsUtf8Path, RejectsInvalidUtf8DirectoryPath) {
   constexpr char kInvalidUtf8[] = {'\xC3', '\x28'};
   std::vector<std::string> entries;
@@ -436,8 +460,12 @@ TEST(WindowsUtf8Path, ClassifiesLengthDelimitedPaths) {
   constexpr char kDevicePath[] = "\\\\.\\NUL";
   constexpr std::size_t kTerminatorLength = 1;
   constexpr std::size_t kMaximumPathLength = static_cast<std::size_t>(MAX_PATH);
-  const std::string largest_narrow_path(kMaximumPathLength - kTerminatorLength,
-                                        'a');
+  constexpr char kDriveRoot[] = "C:\\";
+  constexpr std::size_t kDriveRootLength = sizeof(kDriveRoot) - 1;
+  const std::string largest_narrow_path =
+      kDriveRoot +
+      std::string(kMaximumPathLength - kTerminatorLength - kDriveRootLength,
+                  'a');
   const std::string long_ascii_path(kMaximumPathLength, 'a');
 
   EXPECT_EQ(nglog::internal::ClassifyWindowsPath(kAsciiPath.data(),
@@ -466,6 +494,86 @@ TEST(WindowsUtf8Path, ClassifiesLengthDelimitedPaths) {
             nglog::internal::WindowsPathKind::kWide);
 }
 
+TEST(WindowsUtf8Path, PreparesExtendedPaths) {
+  constexpr wchar_t kExtendedUncPrefix[] = L"\\\\?\\UNC\\";
+  constexpr wchar_t kExtendedPrefix[] = L"\\\\?\\";
+  constexpr std::size_t kExtendedPrefixLength =
+      sizeof(kExtendedPrefix) / sizeof(kExtendedPrefix[0]) - 1;
+  constexpr wchar_t kUncPrefix[] = L"\\\\";
+  constexpr std::size_t kUncPrefixLength =
+      sizeof(kUncPrefix) / sizeof(kUncPrefix[0]) - 1;
+  const std::wstring long_drive_path = L"C:\\" + std::wstring(MAX_PATH, L'a');
+  const std::wstring long_unc_path =
+      L"\\\\server\\share\\" + std::wstring(MAX_PATH, L'a');
+  const std::wstring extended_path =
+      L"\\\\?\\C:\\" + std::wstring(MAX_PATH, L'a');
+  const std::wstring relative_path =
+      L"parent/child/../" + std::wstring(MAX_PATH, L'a');
+
+  std::wstring prepared;
+  ASSERT_TRUE(nglog::internal::PrepareWindowsPath(
+      long_drive_path.data(), long_drive_path.size(), &prepared));
+  EXPECT_EQ(prepared, std::wstring(kExtendedPrefix) + long_drive_path);
+
+  ASSERT_TRUE(nglog::internal::PrepareWindowsPath(
+      long_unc_path.data(), long_unc_path.size(), &prepared));
+  EXPECT_EQ(prepared, std::wstring(kExtendedUncPrefix) +
+                          long_unc_path.substr(kUncPrefixLength));
+
+  ASSERT_TRUE(nglog::internal::PrepareWindowsPath(
+      extended_path.data(), extended_path.size(), &prepared));
+  EXPECT_EQ(prepared, extended_path);
+
+  ASSERT_TRUE(nglog::internal::PrepareWindowsPath(
+      relative_path.data(), relative_path.size(), &prepared));
+  EXPECT_EQ(prepared.compare(0, kExtendedPrefixLength, kExtendedPrefix), 0);
+  EXPECT_EQ(prepared.find(L'/'), std::wstring::npos);
+  EXPECT_EQ(prepared.find(L"\\..\\"), std::wstring::npos);
+}
+
+TEST(WindowsUtf8Path, ExtendsShortRelativePathInLongCurrentDirectory) {
+  constexpr std::size_t kCurrentDirectoryLength = 200;
+  constexpr std::size_t kRelativePathLength = 100;
+  std::array<wchar_t, MAX_PATH> previous_directory = {};
+  ASSERT_NE(GetCurrentDirectoryW(static_cast<DWORD>(previous_directory.size()),
+                                 previous_directory.data()),
+            0U);
+  std::array<wchar_t, MAX_PATH> temporary_directory = {};
+  const DWORD temporary_length =
+      GetTempPathW(static_cast<DWORD>(temporary_directory.size()),
+                   temporary_directory.data());
+  ASSERT_NE(temporary_length, 0U);
+  ASSERT_LT(temporary_length, kCurrentDirectoryLength);
+
+  const std::wstring directory =
+      std::wstring(temporary_directory.data(), temporary_length) +
+      std::wstring(kCurrentDirectoryLength - temporary_length, L'd');
+  ASSERT_TRUE(CreateDirectoryW(directory.c_str(), nullptr));
+  ASSERT_TRUE(SetCurrentDirectoryW(directory.c_str()));
+
+  const std::string relative_path(kRelativePathLength, 'r');
+  const nglog::internal::WindowsPathKind kind =
+      nglog::internal::ClassifyWindowsPath(relative_path.data(),
+                                           relative_path.size());
+  const std::wstring wide_relative_path(relative_path.begin(),
+                                        relative_path.end());
+  std::wstring prepared;
+  const bool prepared_successfully = nglog::internal::PrepareWindowsPath(
+      wide_relative_path.data(), wide_relative_path.size(), &prepared);
+  constexpr char kShortRelativePath[] = "r";
+  const nglog::internal::WindowsPathKind short_kind =
+      nglog::internal::ClassifyWindowsPath(kShortRelativePath,
+                                           sizeof(kShortRelativePath) - 1);
+
+  SetCurrentDirectoryW(previous_directory.data());
+  EXPECT_TRUE(RemoveDirectoryW(directory.c_str()));
+
+  EXPECT_EQ(kind, nglog::internal::WindowsPathKind::kWide);
+  EXPECT_EQ(short_kind, nglog::internal::WindowsPathKind::kNarrow);
+  ASSERT_TRUE(prepared_successfully);
+  EXPECT_EQ(prepared, MakeExtendedPath(directory) + L'\\' + wide_relative_path);
+}
+
 TEST(WindowsUtf8Path, OperatesOnLengthDelimitedAsciiPath) {
   const std::string path =
       "nglog_ascii_path_" + std::to_string(_getpid()) + ".tmp";
@@ -485,6 +593,43 @@ TEST(WindowsUtf8Path, OperatesOnLengthDelimitedAsciiPath) {
   EXPECT_EQ(nglog::internal::AccessUtf8(length_delimited_path.data(),
                                         length_delimited_path.size(), 0),
             0);
+  EXPECT_EQ(nglog::internal::UnlinkUtf8(length_delimited_path.data(),
+                                        length_delimited_path.size()),
+            0);
+}
+
+TEST(WindowsUtf8Path, OperatesBeyondMaxPath) {
+  nglog::testing_internal::LongPathTestDirectory directory;
+  const std::string directory_name =
+      "nglog_long_path_" + std::to_string(_getpid());
+  ASSERT_TRUE(directory.Create(directory_name));
+
+  constexpr char kFilename[] = "log_\xE2\x82\xAC.txt";
+  const std::string path = directory.ChildPath(kFilename);
+  const std::vector<char> length_delimited_path(path.begin(), path.end());
+
+  const int file_descriptor = nglog::internal::OpenUtf8(
+      length_delimited_path.data(), length_delimited_path.size(),
+      _O_CREAT | _O_TRUNC | _O_WRONLY | _O_BINARY, _S_IREAD | _S_IWRITE);
+  ASSERT_NE(file_descriptor, -1) << std::strerror(errno);
+  ASSERT_EQ(_close(file_descriptor), 0);
+
+  struct stat file_status = {};
+  EXPECT_EQ(
+      nglog::internal::StatUtf8(length_delimited_path.data(),
+                                length_delimited_path.size(), &file_status),
+      0);
+  EXPECT_EQ(nglog::internal::AccessUtf8(length_delimited_path.data(),
+                                        length_delimited_path.size(), 0),
+            0);
+
+  std::vector<std::string> entries;
+  ASSERT_TRUE(nglog::internal::ListDirectoryUtf8(
+      directory.relative_path().data(), directory.relative_path().size(),
+      &entries));
+  EXPECT_NE(std::find(entries.begin(), entries.end(), kFilename),
+            entries.end());
+
   EXPECT_EQ(nglog::internal::UnlinkUtf8(length_delimited_path.data(),
                                         length_delimited_path.size()),
             0);

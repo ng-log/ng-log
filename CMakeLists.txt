@@ -687,6 +687,12 @@ if (HAVE_DBGHELP)
   set (ng-log_libraries_options_for_static_linking "${ng-log_libraries_options_for_static_linking} -ldbghelp")
 endif (HAVE_DBGHELP)
 
+if (WIN32)
+  target_link_libraries (ng-log PRIVATE pathcch)
+  set (ng-log_libraries_options_for_static_linking
+    "${ng-log_libraries_options_for_static_linking} -lpathcch")
+endif (WIN32)
+
 target_link_libraries (ng-log PRIVATE Threads::Threads)
 
 if (CMAKE_THREAD_LIBS_INIT)
