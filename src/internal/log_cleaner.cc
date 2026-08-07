@@ -5,24 +5,19 @@
 
 #include "internal/log_cleaner.h"
 
+#include <sys/stat.h>
+
 #include <cassert>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
-#include <cstring>
 #include <set>
 #include <string>
 #include <utility>
 
 #include "config.h"
-#include "internal/utf8.h"
+#include "internal/path.h"
 #include "utilities.h"
-
-#ifndef NGLOG_OS_WINDOWS
-#  include <dirent.h>
-#endif
-
-#include <sys/stat.h>
 
 #ifdef HAVE_UNISTD_H
 #  include <unistd.h>
@@ -51,48 +46,6 @@ std::string JoinPath(const std::string& directory,
     return directory + filename;
   }
   return directory + path_delim + filename;
-}
-
-int StatPath(const std::string& path, struct stat* result) {
-#ifdef NGLOG_OS_WINDOWS
-  return StatUtf8(path.data(), path.size(), result);
-#else
-  return ::stat(path.c_str(), result);
-#endif
-}
-
-int UnlinkPath(const std::string& path) {
-#ifdef NGLOG_OS_WINDOWS
-  return UnlinkUtf8(path.data(), path.size());
-#else
-  return ::unlink(path.c_str());
-#endif
-}
-
-bool ForEachDirectoryPath(const std::string& path,
-                          DirectoryEntryCallback callback, void* context) {
-#ifdef NGLOG_OS_WINDOWS
-  return ForEachDirectoryEntryUtf8(path.data(), path.size(), callback, context);
-#else
-  DIR* directory = ::opendir(path.c_str());
-  if (directory == nullptr) {
-    return false;
-  }
-
-  bool success = true;
-  while (const struct dirent* entry = ::readdir(directory)) {
-    if (std::strcmp(entry->d_name, ".") == 0 ||
-        std::strcmp(entry->d_name, "..") == 0) {
-      continue;
-    }
-    if (!callback(entry->d_name, std::strlen(entry->d_name), context)) {
-      success = false;
-      break;
-    }
-  }
-  ::closedir(directory);
-  return success;
-#endif
 }
 
 bool IsLogLastModifiedOverPath(

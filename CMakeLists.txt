@@ -223,6 +223,35 @@ check_cxx_symbol_exists (sigaction signal.h HAVE_SIGACTION)
 check_cxx_symbol_exists (sigaltstack signal.h HAVE_SIGALTSTACK)
 check_cxx_symbol_exists (waitpid sys/wait.h HAVE_WAITPID)
 
+# Emscripten emulates descriptor-relative operations by resolving complete
+# pathnames, which remain subject to the same length limit.
+if (NOT EMSCRIPTEN)
+  check_cxx_source_compiles ([=[
+#ifndef _GNU_SOURCE
+#  define _GNU_SOURCE 1
+#endif
+
+#include <dirent.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+int main() {
+  struct stat status;
+  int fd = open(".", O_RDONLY | O_DIRECTORY);
+  int child_fd = openat(fd, ".", O_RDONLY | O_DIRECTORY);
+  static_cast<void>(fstatat(fd, ".", &status, 0));
+  static_cast<void>(faccessat(fd, ".", F_OK, 0));
+  static_cast<void>(unlinkat(fd, "missing", 0));
+  static_cast<void>(symlinkat("missing", fd, "link"));
+  DIR* directory = fdopendir(fd);
+  static_cast<void>(directory);
+  static_cast<void>(close(child_fd));
+  return 0;
+}
+]=] HAVE_POSIX_LONG_PATH_SUPPORT)
+endif (NOT EMSCRIPTEN)
+
 if (WIN32)
   check_cxx_symbol_exists (GetThreadDescription
     "windows.h;processthreadsapi.h" HAVE_GET_THREAD_DESCRIPTION)
@@ -575,6 +604,8 @@ set (NGLOG_SRCS
   src/internal/lock_metrics.h
   src/internal/log_cleaner.cc
   src/internal/log_cleaner.h
+  src/internal/path.cc
+  src/internal/path.h
   src/internal/process_flag_registry.cc
   src/internal/process_flag_registry.h
   src/internal/source_location.cc

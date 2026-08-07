@@ -35,6 +35,8 @@ SPDX-License-Identifier: BSD-3-Clause
   without namespace prefixes and for ASCII console output
 - Support Windows paths longer than `MAX_PATH` without requiring callers to
   add extended-length path prefixes
+- Support POSIX log paths longer than `PATH_MAX` through descriptor-relative
+  filesystem operations
 - Breaking change: require Windows 8 or Windows Server 2012 or later
 - Omit the default header format when a custom prefix formatter is installed
 - Improve suppressed logging performance by avoiding message construction and

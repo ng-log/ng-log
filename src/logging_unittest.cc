@@ -7,6 +7,7 @@
 
 #include <fcntl.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -36,6 +37,9 @@
 #ifdef HAVE_GLOB_H
 #  include <glob.h>
 #endif
+#ifndef NGLOG_OS_WINDOWS
+#  include <dirent.h>
+#endif
 #include <sys/stat.h>
 #ifdef HAVE_UNISTD_H
 #  include <unistd.h>
@@ -54,6 +58,7 @@
 #include <gtest/gtest.h>
 
 #include "internal/lock_metrics.h"
+#include "internal/path.h"
 #include "internal/utf8.h"
 #include "mock-log.h"
 #include "ng-log/flags.h"
@@ -216,6 +221,155 @@ int RunSlowMailerScenario(const char* program, const char* marker_path,
   return EXIT_SUCCESS;
 }
 #endif  // HAVE_SUBPROCESS
+
+#ifdef HAVE_POSIX_LONG_PATH_SUPPORT
+class PosixLongPathTestDirectory final {
+ public:
+  PosixLongPathTestDirectory() = default;
+  PosixLongPathTestDirectory(const PosixLongPathTestDirectory&) = delete;
+  PosixLongPathTestDirectory& operator=(const PosixLongPathTestDirectory&) =
+      delete;
+
+  ~PosixLongPathTestDirectory() { Cleanup(); }
+
+  void Cleanup() {
+    if (directory_fds_.empty()) {
+      if (root_created_) {
+        rmdir(root_path_.c_str());
+        root_created_ = false;
+        root_path_.clear();
+      }
+      return;
+    }
+
+    for (const int descriptor : directory_fds_) {
+      fchmod(descriptor, S_IRWXU);
+    }
+
+    const int contents_fd = dup(directory_fds_.back());
+    if (contents_fd != -1) {
+      DIR* directory = fdopendir(contents_fd);
+      if (directory != nullptr) {
+        while (const struct dirent* entry = readdir(directory)) {
+          if (std::strcmp(entry->d_name, ".") != 0 &&
+              std::strcmp(entry->d_name, "..") != 0) {
+            unlinkat(directory_fds_.back(), entry->d_name, 0);
+          }
+        }
+        closedir(directory);
+      } else {
+        close(contents_fd);
+      }
+    }
+
+    for (std::size_t index = directory_fds_.size(); index > 1; --index) {
+      close(directory_fds_[index - 1]);
+      unlinkat(directory_fds_[index - 2], components_[index - 2].c_str(),
+               AT_REMOVEDIR);
+    }
+    close(directory_fds_.front());
+    rmdir(root_path_.c_str());
+    directory_fds_.clear();
+    components_.clear();
+    root_created_ = false;
+    root_path_.clear();
+    path_.clear();
+  }
+
+  bool CreateInTemporaryDirectory(const std::string& name) {
+    return Create(TestTmpDir() + '/' + name);
+  }
+
+  bool CreateInCurrentDirectory(const std::string& name) {
+    return Create(name);
+  }
+
+  const std::string& path() const { return path_; }
+
+  bool MakeSearchOnly() {
+    for (const int descriptor : directory_fds_) {
+      if (fchmod(descriptor, S_IXUSR) != 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  std::string ChildPath(const std::string& name) const {
+    return path_ + '/' + name;
+  }
+
+  std::string ReadChild(const char* name) const {
+    FileDescriptor fd{openat(directory_fds_.back(), name, O_RDONLY)};
+    if (!fd) {
+      return std::string();
+    }
+
+    std::string contents;
+    constexpr std::size_t kBufferLength = 4096;
+    char buffer[kBufferLength];
+    while (true) {
+      const ssize_t length = read(fd.get(), buffer, sizeof(buffer));
+      if (length <= 0) {
+        break;
+      }
+      contents.append(buffer, static_cast<std::size_t>(length));
+    }
+    return contents;
+  }
+
+ private:
+  bool Create(const std::string& root_path) {
+    root_path_ = root_path;
+    if (mkdir(root_path_.c_str(), S_IRWXU) != 0) {
+      return false;
+    }
+    root_created_ = true;
+
+    const int root_fd = open(root_path_.c_str(), O_RDONLY | O_DIRECTORY);
+    if (root_fd == -1) {
+      rmdir(root_path_.c_str());
+      root_created_ = false;
+      root_path_.clear();
+      return false;
+    }
+    directory_fds_.push_back(root_fd);
+    path_ = root_path_;
+
+    constexpr long kDefaultPathLimit = 4096;
+    constexpr std::size_t kPathLengthMargin = 64;
+    const long configured_path_limit =
+        pathconf(root_path_.c_str(), _PC_PATH_MAX);
+    const std::size_t path_limit = static_cast<std::size_t>(
+        configured_path_limit > 0 ? configured_path_limit : kDefaultPathLimit);
+    constexpr char kComponent[] = "long_path_component";
+    while (path_.size() <= path_limit + kPathLengthMargin) {
+      const int parent_fd = directory_fds_.back();
+      if (mkdirat(parent_fd, kComponent, S_IRWXU) != 0) {
+        Cleanup();
+        return false;
+      }
+      const int child_fd =
+          openat(parent_fd, kComponent, O_RDONLY | O_DIRECTORY);
+      if (child_fd == -1) {
+        unlinkat(parent_fd, kComponent, AT_REMOVEDIR);
+        Cleanup();
+        return false;
+      }
+      components_.emplace_back(kComponent);
+      directory_fds_.push_back(child_fd);
+      path_ += '/';
+      path_ += kComponent;
+    }
+    return true;
+  }
+  std::string root_path_;
+  std::string path_;
+  std::vector<std::string> components_;
+  std::vector<int> directory_fds_;
+  bool root_created_ = false;
+};
+#endif
 
 }  // namespace
 
@@ -1290,6 +1444,80 @@ TEST(Logging, Basename) {
   DeleteFiles(dest + "*");
 }
 
+#ifdef HAVE_POSIX_LONG_PATH_SUPPORT
+TEST(Logging, LongPosixPath) {
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
+
+  PosixLongPathTestDirectory directory;
+  const std::string directory_name =
+      "nglog_posix_long_path_" + std::to_string(getpid());
+  ASSERT_TRUE(directory.CreateInTemporaryDirectory(directory_name));
+  constexpr char kFilename[] = "logging_test_long_path";
+  const std::string destination = directory.ChildPath(kFilename);
+
+  SetLogDestination(NGLOG_INFO, destination.c_str());
+  LOG(INFO) << "message in long POSIX path";
+  FlushLogFiles(NGLOG_INFO);
+  LogToStderr();
+
+  EXPECT_THAT(directory.ReadChild(kFilename),
+              HasSubstr("message in long POSIX path"));
+}
+
+TEST(PosixPathOperations, LongRelativePath) {
+  PosixLongPathTestDirectory directory;
+  const std::string directory_name =
+      "nglog_posix_path_operations_" + std::to_string(getpid());
+  ASSERT_TRUE(directory.CreateInCurrentDirectory(directory_name));
+
+  constexpr char kFilename[] = "path_operations_file";
+  constexpr char kLinkName[] = "path_operations_link";
+  constexpr char kContents[] = "long path contents";
+  const std::string filename = directory.ChildPath(kFilename);
+  const std::string link_path = directory.ChildPath(kLinkName);
+  constexpr int kFileMode = S_IRUSR | S_IWUSR;
+  FileDescriptor fd{internal::OpenPosixPath(
+      filename, O_CREAT | O_WRONLY | O_TRUNC, kFileMode)};
+  ASSERT_TRUE(fd);
+  ASSERT_EQ(write(fd.get(), kContents, sizeof(kContents) - 1),
+            static_cast<ssize_t>(sizeof(kContents) - 1));
+  fd.reset();
+
+  struct stat status;
+  ASSERT_EQ(internal::StatPosixPath(filename, &status), 0);
+  EXPECT_EQ(status.st_size, static_cast<off_t>(sizeof(kContents) - 1));
+  EXPECT_EQ(internal::AccessPosixPath(filename, F_OK), 0);
+
+  std::vector<std::string> entries;
+  ASSERT_TRUE(internal::ListPosixDirectory(directory.path(), &entries));
+  EXPECT_THAT(entries, ::testing::Contains(kFilename));
+  EXPECT_THAT(entries, ::testing::Not(::testing::Contains(".")));
+  EXPECT_THAT(entries, ::testing::Not(::testing::Contains("..")));
+
+  ASSERT_EQ(
+      internal::SymlinkPosixPath(kFilename, sizeof(kFilename) - 1, link_path),
+      0);
+  ASSERT_EQ(internal::StatPosixPath(link_path, &status), 0);
+  EXPECT_EQ(status.st_size, static_cast<off_t>(sizeof(kContents) - 1));
+
+  ASSERT_EQ(internal::TruncatePosixPath(filename), 0);
+  ASSERT_EQ(internal::StatPosixPath(filename, &status), 0);
+  EXPECT_EQ(status.st_size, 0);
+
+  EXPECT_EQ(internal::UnlinkPosixPath(link_path), 0);
+  EXPECT_EQ(internal::UnlinkPosixPath(filename), 0);
+
+  std::string invalid_path = directory.ChildPath("invalid");
+  invalid_path.push_back('\0');
+  invalid_path += "suffix";
+  errno = 0;
+  EXPECT_EQ(internal::OpenPosixPath(invalid_path, O_RDONLY, 0), -1);
+  EXPECT_EQ(errno, EINVAL);
+}
+#endif
+
 TEST(Logging, LogfileMode) {
   nglog::ScopedFlags<> save;
   nglog::SetFlag(FLAGS_logtostderr, false);
@@ -1872,8 +2100,102 @@ TEST(Logging, CleansLongPath) {
   if (file_exists) {
     EXPECT_EQ(nglog::internal::UnlinkUtf8(path.data(), path.size()), 0);
   }
+#elif defined(HAVE_POSIX_LONG_PATH_SUPPORT)
+  using namespace std::chrono_literals;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, true);
+
+  PosixLongPathTestDirectory directory;
+  const std::string directory_name =
+      "nglog_cleaner_long_path_" + std::to_string(getpid());
+  ASSERT_TRUE(directory.CreateInTemporaryDirectory(directory_name));
+  constexpr char kLogBase[] = "cleanup_test";
+  const std::string path = directory.ChildPath(kLogBase);
+
+  SetLogDestination(NGLOG_INFO, path.c_str());
+  LOG(INFO) << "message for long-path cleanup";
+  FlushLogFiles(NGLOG_INFO);
+  LogToStderr();
+
+  const std::string stale_path =
+      tools::MakeLogFilename(path, "20200101-000000.1", std::string(), true);
+  FileDescriptor stale_file{
+      internal::OpenPosixPath(stale_path, O_WRONLY | O_CREAT, S_IRUSR)};
+  ASSERT_TRUE(stale_file);
+
+  EnableLogCleaner(0h);
+  DisableLogCleaner();
+
+  EXPECT_EQ(internal::AccessPosixPath(stale_path, F_OK), -1);
+  if (internal::AccessPosixPath(stale_path, F_OK) == 0) {
+    EXPECT_EQ(internal::UnlinkPosixPath(stale_path), 0);
+  }
+#else
+  GTEST_SKIP() << "Requires long path support";
 #endif
 }
+
+#ifdef HAVE_POSIX_LONG_PATH_SUPPORT
+TEST(PosixPathOperations, LongPathWithDotComponents) {
+  PosixLongPathTestDirectory directory;
+  const std::string directory_name =
+      "nglog_posix_dot_components_" + std::to_string(getpid());
+  ASSERT_TRUE(directory.CreateInCurrentDirectory(directory_name));
+
+  constexpr char kFilename[] = "dot_components_file";
+  std::string path = "./" + directory.path();
+  std::size_t separator = 0;
+  while ((separator = path.find('/', separator + 1)) != std::string::npos) {
+    path.insert(separator, "/.");
+    separator += 2;
+  }
+  path += "/./";
+  path += kFilename;
+
+  FileDescriptor fd{internal::OpenPosixPath(path, O_CREAT | O_WRONLY | O_TRUNC,
+                                            S_IRUSR | S_IWUSR)};
+  ASSERT_TRUE(fd) << std::strerror(errno);
+  fd.reset();
+  EXPECT_EQ(internal::AccessPosixPath(directory.ChildPath(kFilename), F_OK), 0);
+  EXPECT_EQ(internal::UnlinkPosixPath(path), 0);
+}
+
+TEST(PosixPathOperations, LongPathOfSeparatorsNamesRoot) {
+  constexpr long kDefaultPathLimit = 4096;
+  const long configured_path_limit = pathconf("/", _PC_PATH_MAX);
+  const std::size_t path_limit = static_cast<std::size_t>(
+      configured_path_limit > 0 ? configured_path_limit : kDefaultPathLimit);
+  const std::string path(path_limit + 1, '/');
+
+  struct stat status;
+  ASSERT_EQ(internal::StatPosixPath(path, &status), 0) << std::strerror(errno);
+  EXPECT_TRUE(S_ISDIR(status.st_mode));
+
+  struct stat root_status;
+  ASSERT_EQ(stat("/", &root_status), 0);
+  EXPECT_EQ(status.st_ino, root_status.st_ino);
+  EXPECT_EQ(status.st_dev, root_status.st_dev);
+}
+
+TEST(PosixPathOperations, SearchOnlyParents) {
+  PosixLongPathTestDirectory directory;
+  const std::string directory_name =
+      "nglog_posix_search_only_" + std::to_string(getpid());
+  ASSERT_TRUE(directory.CreateInTemporaryDirectory(directory_name));
+
+  constexpr char kFilename[] = "search_only_file";
+  const std::string filename = directory.ChildPath(kFilename);
+  FileDescriptor fd{internal::OpenPosixPath(
+      filename, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR)};
+  ASSERT_TRUE(fd) << std::strerror(errno);
+  fd.reset();
+  ASSERT_TRUE(directory.MakeSearchOnly());
+
+  fd.reset(internal::OpenPosixPath(filename, O_RDONLY, 0));
+  ASSERT_TRUE(fd) << std::strerror(errno);
+}
+#endif
 
 struct MyLogger : public base::Logger {
   string data;

@@ -31,6 +31,7 @@ namespace nglog {
 namespace internal {
 
 #ifdef NGLOG_OS_WINDOWS
+
 namespace {
 
 constexpr std::uint8_t kAsciiMax = 0x7f;
@@ -303,9 +304,7 @@ bool GetWindowsPath(GetPathFunction get_path, std::string* path) {
 }
 
 }  // namespace
-#endif
 
-#ifdef NGLOG_OS_WINDOWS
 bool IsAscii(const char* input, std::size_t input_length) {
   if (input == nullptr) {
     return input_length == 0;
@@ -418,11 +417,9 @@ bool PrepareWindowsPath(const wchar_t* path, std::size_t path_length,
   }
   return true;
 }
-#endif
 
 bool Utf8ToWide(const char* input, std::size_t input_length,
                 std::wstring* output) {
-#ifdef NGLOG_OS_WINDOWS
   if (input == nullptr || output == nullptr) {
     return SetConversionError();
   }
@@ -433,17 +430,10 @@ bool Utf8ToWide(const char* input, std::size_t input_length,
     return SetConversionError();
   }
   return ConvertUtf8ToWide(input, input_length, output);
-#else
-  static_cast<void>(input);
-  static_cast<void>(input_length);
-  static_cast<void>(output);
-  return false;
-#endif
 }
 
 bool WideToUtf8(const wchar_t* input, std::size_t input_length,
                 std::string* output) {
-#ifdef NGLOG_OS_WINDOWS
   if (input == nullptr || output == nullptr) {
     return SetConversionError();
   }
@@ -473,18 +463,11 @@ bool WideToUtf8(const wchar_t* input, std::size_t input_length,
 
   *output = std::move(converted);
   return true;
-#else
-  static_cast<void>(input);
-  static_cast<void>(input_length);
-  static_cast<void>(output);
-  return false;
-#endif
 }
 
 bool WideToUtf8Buffer(const wchar_t* input, std::size_t input_length,
                       char* output, std::size_t output_capacity,
                       std::size_t* output_length) {
-#ifdef NGLOG_OS_WINDOWS
   if (input == nullptr || output == nullptr || output_length == nullptr ||
       input_length > static_cast<std::size_t>(INT_MAX) ||
       output_capacity > static_cast<std::size_t>(INT_MAX)) {
@@ -503,19 +486,10 @@ bool WideToUtf8Buffer(const wchar_t* input, std::size_t input_length,
   }
   *output_length = static_cast<std::size_t>(converted_length);
   return true;
-#else
-  static_cast<void>(input);
-  static_cast<void>(input_length);
-  static_cast<void>(output);
-  static_cast<void>(output_capacity);
-  static_cast<void>(output_length);
-  return false;
-#endif
 }
 
 namespace {
 
-#ifdef NGLOG_OS_WINDOWS
 template <typename Character, typename Writer>
 bool WriteAll(const Character* input, std::size_t input_length,
               std::size_t maximum_chunk_length, Writer writer) {
@@ -657,13 +631,11 @@ bool WriteUtf8ToConsole(HANDLE handle, const char* input,
   }
   return WriteUtf8AsWide(input, input_length, WriteWideToConsole, handle);
 }
-#endif
 
 }  // namespace
 
 bool WriteUtf8AsWide(const char* input, std::size_t input_length,
                      WideWriteFunction writer, void* context) {
-#ifdef NGLOG_OS_WINDOWS
   if ((input == nullptr && input_length != 0) || writer == nullptr) {
     return SetConversionError();
   }
@@ -703,18 +675,10 @@ bool WriteUtf8AsWide(const char* input, std::size_t input_length,
     offset += chunk_length;
   }
   return true;
-#else
-  static_cast<void>(input);
-  static_cast<void>(input_length);
-  static_cast<void>(writer);
-  static_cast<void>(context);
-  return false;
-#endif
 }
 
 bool WriteWideAsChunks(const wchar_t* input, std::size_t input_length,
                        WideWriteFunction writer, void* context) {
-#ifdef NGLOG_OS_WINDOWS
   if ((input == nullptr && input_length != 0) || writer == nullptr) {
     return SetConversionError();
   }
@@ -758,16 +722,8 @@ bool WriteWideAsChunks(const wchar_t* input, std::size_t input_length,
     offset += writable_length;
   }
   return true;
-#else
-  static_cast<void>(input);
-  static_cast<void>(input_length);
-  static_cast<void>(writer);
-  static_cast<void>(context);
-  return false;
-#endif
 }
 
-#ifdef NGLOG_OS_WINDOWS
 bool WriteSignalSafeToFileDescriptor(int file_descriptor, const char* input,
                                      std::size_t input_length) noexcept {
   if (file_descriptor < 0 || (input == nullptr && input_length != 0) ||
@@ -781,7 +737,8 @@ bool WriteSignalSafeToFileDescriptor(int file_descriptor, const char* input,
                 static_cast<unsigned int>(input_length)) ==
          static_cast<int>(input_length);
 }
-#endif
+
+#endif  // NGLOG_OS_WINDOWS
 
 bool WriteUtf8(std::FILE* output, const char* input, std::size_t input_length) {
   if (output == nullptr || (input == nullptr && input_length != 0)) {
@@ -807,9 +764,10 @@ bool WriteUtf8(std::FILE* output, const char* input, std::size_t input_length) {
   return std::fwrite(input, 1, input_length, output) == input_length;
 }
 
+#ifdef NGLOG_OS_WINDOWS
+
 bool WriteUtf8ToFileDescriptor(int file_descriptor, const char* input,
                                std::size_t input_length) {
-#ifdef NGLOG_OS_WINDOWS
   if (file_descriptor < 0 || (input == nullptr && input_length != 0)) {
     errno = EINVAL;
     return false;
@@ -825,16 +783,9 @@ bool WriteUtf8ToFileDescriptor(int file_descriptor, const char* input,
     }
   }
   return WriteBytesToFileDescriptor(file_descriptor, input, input_length);
-#else
-  static_cast<void>(file_descriptor);
-  static_cast<void>(input);
-  static_cast<void>(input_length);
-  return false;
-#endif
 }
 
 int OpenUtf8(const char* path, std::size_t path_length, int flags, int mode) {
-#ifdef NGLOG_OS_WINDOWS
   return DispatchWindowsPath(
       path, path_length,
       [flags, mode](const char* narrow_path) {
@@ -843,17 +794,9 @@ int OpenUtf8(const char* path, std::size_t path_length, int flags, int mode) {
       [flags, mode](const wchar_t* wide_path) {
         return _wopen(wide_path, flags, mode);
       });
-#else
-  static_cast<void>(path);
-  static_cast<void>(path_length);
-  static_cast<void>(flags);
-  static_cast<void>(mode);
-  return -1;
-#endif
 }
 
 int StatUtf8(const char* path, std::size_t path_length, struct stat* result) {
-#ifdef NGLOG_OS_WINDOWS
   return DispatchWindowsPath(
       path, path_length,
       [result](const char* narrow_path) { return ::stat(narrow_path, result); },
@@ -868,67 +811,37 @@ int StatUtf8(const char* path, std::size_t path_length, struct stat* result) {
         return _wstat(wide_path, reinterpret_cast<struct _stat*>(result));
 #  endif
       });
-#else
-  static_cast<void>(path);
-  static_cast<void>(path_length);
-  static_cast<void>(result);
-  return -1;
-#endif
 }
 
 int UnlinkUtf8(const char* path, std::size_t path_length) {
-#ifdef NGLOG_OS_WINDOWS
   return DispatchWindowsPath(
       path, path_length,
       [](const char* narrow_path) { return _unlink(narrow_path); },
       [](const wchar_t* wide_path) { return _wunlink(wide_path); });
-#else
-  static_cast<void>(path);
-  static_cast<void>(path_length);
-  return -1;
-#endif
 }
 
 int AccessUtf8(const char* path, std::size_t path_length, int mode) {
-#ifdef NGLOG_OS_WINDOWS
   return DispatchWindowsPath(
       path, path_length,
       [mode](const char* narrow_path) { return _access(narrow_path, mode); },
       [mode](const wchar_t* wide_path) { return _waccess(wide_path, mode); });
-#else
-  static_cast<void>(path);
-  static_cast<void>(path_length);
-  static_cast<void>(mode);
-  return -1;
-#endif
 }
 
 bool GetTempPathUtf8(std::string* path) {
-#ifdef NGLOG_OS_WINDOWS
   return GetWindowsPath(
       [](DWORD size, wchar_t* buffer) { return GetTempPathW(size, buffer); },
       path);
-#else
-  static_cast<void>(path);
-  return false;
-#endif
 }
 
 bool GetWindowsDirectoryUtf8(std::string* path) {
-#ifdef NGLOG_OS_WINDOWS
   return GetWindowsPath(
       [](DWORD size, wchar_t* buffer) {
         return GetWindowsDirectoryW(buffer, size);
       },
       path);
-#else
-  static_cast<void>(path);
-  return false;
-#endif
 }
 
 bool GetComputerNameUtf8(std::string* name) {
-#ifdef NGLOG_OS_WINDOWS
   if (name == nullptr) {
     return SetConversionError();
   }
@@ -937,15 +850,10 @@ bool GetComputerNameUtf8(std::string* name) {
   DWORD length = static_cast<DWORD>(buffer.size());
   return GetComputerNameW(buffer.data(), &length) &&
          WideToUtf8(buffer.data(), length, name);
-#else
-  static_cast<void>(name);
-  return false;
-#endif
 }
 
 bool ForEachDirectoryEntryUtf8(const char* path, std::size_t path_length,
                                DirectoryEntryCallback callback, void* context) {
-#ifdef NGLOG_OS_WINDOWS
   if (callback == nullptr) {
     return SetConversionError();
   }
@@ -1006,44 +914,30 @@ bool ForEachDirectoryEntryUtf8(const char* path, std::size_t path_length,
     success = false;
   }
   return success;
-#else
-  static_cast<void>(path);
-  static_cast<void>(path_length);
-  static_cast<void>(callback);
-  static_cast<void>(context);
-  return false;
-#endif
 }
 
 namespace {
 
-#ifdef NGLOG_OS_WINDOWS
 bool AppendDirectoryEntry(const char* entry, std::size_t length,
                           void* context) {
   auto* const entries = static_cast<std::vector<std::string>*>(context);
   entries->emplace_back(entry, length);
   return true;
 }
-#endif
 
 }  // namespace
 
 bool ListDirectoryUtf8(const char* path, std::size_t path_length,
                        std::vector<std::string>* entries) {
-#ifdef NGLOG_OS_WINDOWS
   if (entries == nullptr) {
     return SetConversionError();
   }
   entries->clear();
   return ForEachDirectoryEntryUtf8(path, path_length, AppendDirectoryEntry,
                                    entries);
-#else
-  static_cast<void>(path);
-  static_cast<void>(path_length);
-  static_cast<void>(entries);
-  return false;
-#endif
 }
+
+#endif  // NGLOG_OS_WINDOWS
 
 }  // namespace internal
 }  // namespace nglog

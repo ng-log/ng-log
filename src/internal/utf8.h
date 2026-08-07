@@ -19,6 +19,9 @@ struct stat;
 namespace nglog {
 namespace internal {
 
+NGLOG_NO_EXPORT bool WriteUtf8(std::FILE* output, const char* input,
+                               std::size_t input_length);
+
 #ifdef NGLOG_OS_WINDOWS
 enum class WindowsPathKind { kInvalid, kNarrow, kWide };
 
@@ -28,7 +31,6 @@ NGLOG_NO_EXPORT WindowsPathKind ClassifyWindowsPath(const char* path,
 NGLOG_NO_EXPORT bool PrepareWindowsPath(const wchar_t* path,
                                         std::size_t path_length,
                                         std::wstring* prepared_path);
-#endif
 
 //! Maximum number of UTF-16 code units passed to a WideWriteFunction at once.
 constexpr std::size_t kMaximumWideChunkLength = 1024;
@@ -51,15 +53,11 @@ NGLOG_NO_EXPORT bool WriteUtf8AsWide(const char* input,
 NGLOG_NO_EXPORT bool WriteWideAsChunks(const wchar_t* input,
                                        std::size_t input_length,
                                        WideWriteFunction writer, void* context);
-NGLOG_NO_EXPORT bool WriteUtf8(std::FILE* output, const char* input,
-                               std::size_t input_length);
 NGLOG_NO_EXPORT bool WriteUtf8ToFileDescriptor(int file_descriptor,
                                                const char* input,
                                                std::size_t input_length);
-#ifdef NGLOG_OS_WINDOWS
 NGLOG_NO_EXPORT bool WriteSignalSafeToFileDescriptor(
     int file_descriptor, const char* input, std::size_t input_length) noexcept;
-#endif
 NGLOG_NO_EXPORT int OpenUtf8(const char* path, std::size_t path_length,
                              int flags, int mode);
 NGLOG_NO_EXPORT int StatUtf8(const char* path, std::size_t path_length,
@@ -79,6 +77,7 @@ NGLOG_NO_EXPORT bool ForEachDirectoryEntryUtf8(const char* path,
 NGLOG_NO_EXPORT bool ListDirectoryUtf8(const char* path,
                                        std::size_t path_length,
                                        std::vector<std::string>* entries);
+#endif  // NGLOG_OS_WINDOWS
 
 }  // namespace internal
 }  // namespace nglog

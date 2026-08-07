@@ -43,6 +43,7 @@
 #include "config.h"
 #include "internal/lock_metrics.h"
 #include "internal/log_cleaner.h"
+#include "internal/path.h"
 #include "internal/source_location.h"
 #include "internal/style_recorder.h"
 #include "internal/styled_output.h"
@@ -1384,38 +1385,6 @@ constexpr char possible_dir_delim[] = "\\/";
 constexpr char possible_dir_delim[] = "/";
 #endif
 
-int StatPath(const std::string& path, struct stat* result) {
-#ifdef NGLOG_OS_WINDOWS
-  return internal::StatUtf8(path.data(), path.size(), result);
-#else
-  return stat(path.c_str(), result);
-#endif
-}
-
-int OpenPath(const std::string& path, int flags, mode_t mode) {
-#ifdef NGLOG_OS_WINDOWS
-  return internal::OpenUtf8(path.data(), path.size(), flags, mode);
-#else
-  return open(path.c_str(), flags, mode);
-#endif
-}
-
-int UnlinkPath(const std::string& path) {
-#ifdef NGLOG_OS_WINDOWS
-  return internal::UnlinkUtf8(path.data(), path.size());
-#else
-  return unlink(path.c_str());
-#endif
-}
-
-int AccessPath(const std::string& path, int mode) {
-#ifdef NGLOG_OS_WINDOWS
-  return internal::AccessUtf8(path.data(), path.size(), mode);
-#else
-  return access(path.c_str(), mode);
-#endif
-}
-
 bool IsRegularFile(const struct stat& statbuf) {
 #ifdef NGLOG_OS_WINDOWS
   return (statbuf.st_mode & _S_IFMT) == _S_IFREG;
@@ -1524,7 +1493,7 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
     // the first time or a file is being recreated due to exceeding max size
 
     struct stat statbuf;
-    if (StatPath(filename, &statbuf) == 0) {
+    if (internal::StatPath(filename, &statbuf) == 0) {
       // truncate the file if it exceeds the max size
       if ((static_cast<std::size_t>(statbuf.st_size) >> 20U) >= MaxLogSize()) {
 #if defined(NGLOG_OS_WINDOWS)
@@ -1539,8 +1508,9 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
     }
   }
 
-  FileDescriptor fd{
-      OpenPath(filename, flags, nglog::GetFlag(FLAGS_logfile_mode).value())};
+  FileDescriptor fd{internal::OpenPath(
+      filename, flags,
+      static_cast<int>(nglog::GetFlag(FLAGS_logfile_mode).value()))};
   if (!fd) {
 #ifdef NGLOG_OS_WINDOWS
     create_error_message_ = StrError(errno);
@@ -1603,8 +1573,9 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
     create_error_message_ = StrError(errno);
 #endif
     if (nglog::GetFlag(FLAGS_timestamp_in_logfile_name)) {
-      UnlinkPath(filename);  // Erase the half-baked evidence: an unusable
-                             // log file, only if we just created it.
+      // Erase the half-baked evidence: an unusable log file, only if we just
+      // created it.
+      internal::UnlinkPath(filename);
     }
     return false;
   }
@@ -1636,7 +1607,7 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
       linkpath = filename.substr(0, separator + 1);
     }
     linkpath += linkname;
-    UnlinkPath(linkpath);  // delete old one if it exists
+    internal::UnlinkPath(linkpath);  // delete old one if it exists
 
 #if defined(NGLOG_OS_WINDOWS)
     // TODO(hamaji): Create lnk file on Windows?
@@ -1647,7 +1618,9 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
     const char* linkdest = separator != std::string::npos
                                ? filename.c_str() + separator + 1
                                : filename.c_str();
-    if (symlink(linkdest, linkpath.c_str()) != 0) {
+    const std::size_t linkdest_length =
+        filename.size() - (separator == std::string::npos ? 0 : separator + 1);
+    if (internal::SymlinkPosixPath(linkdest, linkdest_length, linkpath) != 0) {
       // silently ignore failures
     }
 
@@ -1656,8 +1629,9 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
     const std::string log_link = nglog::GetFlag(FLAGS_log_link);
     if (!log_link.empty()) {
       linkpath = log_link + "/" + linkname;
-      UnlinkPath(linkpath);  // delete old one if it exists
-      if (symlink(filename.c_str(), linkpath.c_str()) != 0) {
+      internal::UnlinkPath(linkpath);  // delete old one if it exists
+      if (internal::SymlinkPosixPath(filename.data(), filename.size(),
+                                     linkpath) != 0) {
         // silently ignore failures
       }
     }
@@ -2836,7 +2810,7 @@ static void GetTempDirectories(vector<string>& list) {
     list.push_back(dstr);
 
     struct stat statbuf;
-    if (!StatPath(dstr, &statbuf) && S_ISDIR(statbuf.st_mode)) {
+    if (internal::StatPath(dstr, &statbuf) == 0 && S_ISDIR(statbuf.st_mode)) {
       // We found a dir that exists - we're done.
       return;
     }
@@ -2884,7 +2858,7 @@ void GetExistingTempDirectories(vector<string>& list) {
   while (i_dir != list.end()) {
     // zero arg to access means test for existence; no constant
     // defined on windows
-    if (AccessPath(*i_dir, 0)) {
+    if (internal::AccessPath(*i_dir, 0) != 0) {
       i_dir = list.erase(i_dir);
     } else {
       ++i_dir;
@@ -2911,7 +2885,7 @@ void TruncateLogFile(const char* path, uint64 limit, uint64 keep) {
 #  endif
 
   const string path_string(path);
-  FileDescriptor fd{OpenPath(path_string, flags, 0)};
+  FileDescriptor fd{internal::OpenPath(path_string, flags, 0)};
   if (!fd) {
     if (errno == EFBIG) {
       // The log file in question has got too big for us to open. The
@@ -2922,7 +2896,7 @@ void TruncateLogFile(const char* path, uint64 limit, uint64 keep) {
 #  ifdef HAVE__CHSIZE_S
       if (_chsize_s(fd.get(), 0) != 0) {
 #  else
-      if (truncate(path, 0) == -1) {
+      if (internal::TruncatePosixPath(path_string) == -1) {
 #  endif
         PLOG(ERROR) << "Unable to truncate " << path;
       } else {
@@ -2941,7 +2915,9 @@ void TruncateLogFile(const char* path, uint64 limit, uint64 keep) {
 
   // See if the path refers to a regular file bigger than the
   // specified limit
-  if (!IsRegularFile(statbuf)) return;
+  if (!IsRegularFile(statbuf)) {
+    return;
+  }
   if (statbuf.st_size <= static_cast<off_t>(limit)) return;
   if (statbuf.st_size <= static_cast<off_t>(keep)) return;
 

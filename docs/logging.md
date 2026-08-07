@@ -87,6 +87,16 @@ determined according to the following rules.
 
     if set with a fallback to `/tmp/`.
 
+On POSIX systems with descriptor-relative filesystem APIs, ng-log supports log
+paths longer than the complete pathname limit reported by `PATH_MAX`. Ordinary
+paths use the direct filesystem operation as a fast path. If that operation
+fails with `ENAMETOOLONG`, ng-log resolves the directory components through
+file descriptors and retries the operation relative to the containing
+directory. Individual path components and symbolic link targets remain subject
+to the limits of the underlying filesystem. Emscripten emulates
+descriptor-relative operations through complete pathnames, so the limit still
+applies there.
+
 The default path to a log file on Linux, for instance, could be
 
     /tmp/hello_world.example.com.hamaji.log.INFO.20080709-222411.10474
