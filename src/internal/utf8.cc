@@ -10,13 +10,12 @@
 #include <cerrno>
 #include <climits>
 #include <cstdint>
+#include <cstring>
 #include <cwchar>
 #include <limits>
 #include <string>
 #include <utility>
 #include <vector>
-
-#include "ng-log/platform.h"
 
 #ifdef NGLOG_OS_WINDOWS
 #  include <fcntl.h>
@@ -45,22 +44,35 @@ constexpr std::uint8_t kSurrogateFirstByte = 0xed;
 constexpr std::uint8_t kSurrogateMaxSecond = 0x9f;
 constexpr std::uint8_t kFourByteMinSecond = 0x90;
 constexpr std::uint8_t kFourByteMaxSecond = 0x8f;
+constexpr std::size_t kMaximumUtf8Length = static_cast<std::size_t>(INT_MAX);
 
 bool IsContinuation(std::uint8_t value) {
   return value >= kContinuationMin && value <= kContinuationMax;
 }
 
-bool IsValidUtf8(const char* input, std::size_t input_length) {
+struct Utf8Analysis {
+  bool is_valid;
+  bool is_ascii;
+  bool has_null;
+};
+
+Utf8Analysis AnalyzeUtf8(const char* input, std::size_t input_length) {
+  bool is_ascii = true;
+  bool has_null = false;
   for (std::size_t index = 0; index < input_length; ++index) {
     const std::uint8_t first = static_cast<std::uint8_t>(input[index]);
+    if (first == 0) {
+      has_null = true;
+    }
     if (first <= kAsciiMax) {
       continue;
     }
+    is_ascii = false;
 
     if (first >= kTwoByteMin && first <= kTwoByteMax) {
       if (index + 1 >= input_length ||
           !IsContinuation(static_cast<std::uint8_t>(input[index + 1]))) {
-        return false;
+        return {false, is_ascii, has_null};
       }
       ++index;
       continue;
@@ -68,7 +80,7 @@ bool IsValidUtf8(const char* input, std::size_t input_length) {
 
     if (first >= kThreeByteMin && first <= kThreeByteMax) {
       if (index + 2 >= input_length) {
-        return false;
+        return {false, is_ascii, has_null};
       }
       const std::uint8_t second = static_cast<std::uint8_t>(input[index + 1]);
       const bool valid_second =
@@ -80,7 +92,7 @@ bool IsValidUtf8(const char* input, std::size_t input_length) {
            IsContinuation(second));
       if (!valid_second ||
           !IsContinuation(static_cast<std::uint8_t>(input[index + 2]))) {
-        return false;
+        return {false, is_ascii, has_null};
       }
       index += 2;
       continue;
@@ -88,7 +100,7 @@ bool IsValidUtf8(const char* input, std::size_t input_length) {
 
     if (first >= kFourByteMin && first <= kFourByteMax) {
       if (index + 3 >= input_length) {
-        return false;
+        return {false, is_ascii, has_null};
       }
       const std::uint8_t second = static_cast<std::uint8_t>(input[index + 1]);
       const bool valid_second =
@@ -101,15 +113,19 @@ bool IsValidUtf8(const char* input, std::size_t input_length) {
       if (!valid_second ||
           !IsContinuation(static_cast<std::uint8_t>(input[index + 2])) ||
           !IsContinuation(static_cast<std::uint8_t>(input[index + 3]))) {
-        return false;
+        return {false, is_ascii, has_null};
       }
       index += 3;
       continue;
     }
 
-    return false;
+    return {false, is_ascii, has_null};
   }
-  return true;
+  return {true, is_ascii, has_null};
+}
+
+bool IsValidUtf8(const char* input, std::size_t input_length) {
+  return AnalyzeUtf8(input, input_length).is_valid;
 }
 
 bool SetConversionError() {
@@ -119,6 +135,79 @@ bool SetConversionError() {
 
 bool IsValidPath(const std::wstring& path) {
   return path.find(L'\0') == std::wstring::npos;
+}
+
+bool ConvertUtf8ToWide(const char* input, std::size_t input_length,
+                       std::wstring* output) {
+  if (input == nullptr || output == nullptr) {
+    return SetConversionError();
+  }
+  if (input_length > static_cast<std::size_t>(INT_MAX)) {
+    return SetConversionError();
+  }
+
+  if (input_length == 0) {
+    output->clear();
+    return true;
+  }
+
+  const int length =
+      MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, input,
+                          static_cast<int>(input_length), nullptr, 0);
+  if (length <= 0) {
+    return SetConversionError();
+  }
+
+  std::wstring converted(static_cast<std::size_t>(length), L'\0');
+  const int converted_length = MultiByteToWideChar(
+      CP_UTF8, MB_ERR_INVALID_CHARS, input, static_cast<int>(input_length),
+      &converted[0], length);
+  if (converted_length != length) {
+    return SetConversionError();
+  }
+
+  *output = std::move(converted);
+  return true;
+}
+
+bool HasWindowsNamespacePrefix(const char* path, std::size_t path_length) {
+  constexpr char kExtendedLengthPrefix[] = "\\\\?\\";
+  constexpr char kDevicePrefix[] = "\\\\.\\";
+  constexpr std::size_t kTerminatorLength = 1;
+  constexpr std::size_t kNamespacePrefixLength =
+      sizeof(kExtendedLengthPrefix) - kTerminatorLength;
+  return path_length >= kNamespacePrefixLength &&
+         (std::memcmp(path, kExtendedLengthPrefix, kNamespacePrefixLength) ==
+              0 ||
+          std::memcmp(path, kDevicePrefix, kNamespacePrefixLength) == 0);
+}
+
+template <typename NarrowOperation, typename WideOperation>
+int DispatchWindowsPath(const char* path, std::size_t path_length,
+                        NarrowOperation narrow_operation,
+                        WideOperation wide_operation) {
+  switch (ClassifyWindowsPath(path, path_length)) {
+    case WindowsPathKind::kInvalid:
+      SetConversionError();
+      return -1;
+    case WindowsPathKind::kNarrow: {
+      std::array<char, MAX_PATH> narrow_path = {};
+      std::memcpy(narrow_path.data(), path, path_length);
+      narrow_path[path_length] = '\0';
+      return narrow_operation(narrow_path.data());
+    }
+    case WindowsPathKind::kWide: {
+      std::wstring wide_path;
+      if (!ConvertUtf8ToWide(path, path_length, &wide_path) ||
+          !IsValidPath(wide_path)) {
+        SetConversionError();
+        return -1;
+      }
+      return wide_operation(wide_path.c_str());
+    }
+  }
+  SetConversionError();
+  return -1;
 }
 
 template <typename GetPathFunction>
@@ -149,41 +238,50 @@ bool GetWindowsPath(GetPathFunction get_path, std::string* path) {
 }  // namespace
 #endif
 
+#ifdef NGLOG_OS_WINDOWS
+bool IsAscii(const char* input, std::size_t input_length) {
+  if (input == nullptr) {
+    return input_length == 0;
+  }
+  for (std::size_t index = 0; index < input_length; ++index) {
+    if (static_cast<std::uint8_t>(input[index]) > kAsciiMax) {
+      return false;
+    }
+  }
+  return true;
+}
+
+WindowsPathKind ClassifyWindowsPath(const char* path, std::size_t path_length) {
+  if (path == nullptr || path_length > kMaximumUtf8Length) {
+    return WindowsPathKind::kInvalid;
+  }
+
+  const Utf8Analysis analysis = AnalyzeUtf8(path, path_length);
+  if (!analysis.is_valid || analysis.has_null) {
+    return WindowsPathKind::kInvalid;
+  }
+
+  return analysis.is_ascii &&
+                 path_length < static_cast<std::size_t>(MAX_PATH) &&
+                 !HasWindowsNamespacePrefix(path, path_length)
+             ? WindowsPathKind::kNarrow
+             : WindowsPathKind::kWide;
+}
+#endif
+
 bool Utf8ToWide(const char* input, std::size_t input_length,
                 std::wstring* output) {
 #ifdef NGLOG_OS_WINDOWS
   if (input == nullptr || output == nullptr) {
     return SetConversionError();
   }
-  if (input_length > static_cast<std::size_t>(INT_MAX)) {
+  if (input_length > kMaximumUtf8Length) {
     return SetConversionError();
-  }
-
-  if (input_length == 0) {
-    output->clear();
-    return true;
   }
   if (!IsValidUtf8(input, input_length)) {
     return SetConversionError();
   }
-
-  const int length =
-      MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, input,
-                          static_cast<int>(input_length), nullptr, 0);
-  if (length <= 0) {
-    return SetConversionError();
-  }
-
-  std::wstring converted(static_cast<std::size_t>(length), L'\0');
-  const int converted_length = MultiByteToWideChar(
-      CP_UTF8, MB_ERR_INVALID_CHARS, input, static_cast<int>(input_length),
-      &converted[0], length);
-  if (converted_length != length) {
-    return SetConversionError();
-  }
-
-  *output = std::move(converted);
-  return true;
+  return ConvertUtf8ToWide(input, input_length, output);
 #else
   static_cast<void>(input);
   static_cast<void>(input_length);
@@ -316,13 +414,8 @@ bool WriteWideToConsole(const wchar_t* input, std::size_t input_length,
   return success;
 }
 
-bool WriteUtf8ToConsole(HANDLE handle, const char* input,
-                        std::size_t input_length) {
-  return WriteUtf8AsWide(input, input_length, WriteWideToConsole, handle);
-}
-
 bool GetNativeHandle(int file_descriptor, HANDLE* handle) {
-  const intptr_t native_handle = _get_osfhandle(file_descriptor);
+  const std::intptr_t native_handle = _get_osfhandle(file_descriptor);
   if (native_handle == -1) {
     return false;
   }
@@ -370,6 +463,23 @@ bool IsConsoleStream(std::FILE* output, HANDLE handle) {
   return state->is_console;
 }
 
+bool WriteBytesToHandle(HANDLE handle, const char* input,
+                        std::size_t input_length) {
+  constexpr std::size_t kMaximumWriteLength =
+      static_cast<std::size_t>(std::numeric_limits<DWORD>::max());
+  return WriteAll(input, input_length, kMaximumWriteLength,
+                  [handle](const char* chunk, std::size_t chunk_length,
+                           std::size_t* written) {
+                    const DWORD requested = static_cast<DWORD>(chunk_length);
+                    DWORD bytes_written = 0;
+                    const bool success =
+                        WriteFile(handle, chunk, requested, &bytes_written,
+                                  nullptr) != FALSE;
+                    *written = bytes_written;
+                    return success;
+                  });
+}
+
 bool WriteBytesToFileDescriptor(int file_descriptor, const char* input,
                                 std::size_t input_length) {
   constexpr std::size_t kMaximumWriteLength =
@@ -387,6 +497,14 @@ bool WriteBytesToFileDescriptor(int file_descriptor, const char* input,
                     *written = static_cast<std::size_t>(result);
                     return true;
                   });
+}
+
+bool WriteUtf8ToConsole(HANDLE handle, const char* input,
+                        std::size_t input_length) {
+  if (IsAscii(input, input_length)) {
+    return WriteBytesToHandle(handle, input, input_length);
+  }
+  return WriteUtf8AsWide(input, input_length, WriteWideToConsole, handle);
 }
 #endif
 
@@ -566,15 +684,14 @@ bool WriteUtf8ToFileDescriptor(int file_descriptor, const char* input,
 
 int OpenUtf8(const char* path, std::size_t path_length, int flags, int mode) {
 #ifdef NGLOG_OS_WINDOWS
-  std::wstring wide_path;
-  if (!Utf8ToWide(path, path_length, &wide_path)) {
-    return -1;
-  }
-  if (!IsValidPath(wide_path)) {
-    SetConversionError();
-    return -1;
-  }
-  return _wopen(wide_path.c_str(), flags, mode);
+  return DispatchWindowsPath(
+      path, path_length,
+      [flags, mode](const char* narrow_path) {
+        return _open(narrow_path, flags, mode);
+      },
+      [flags, mode](const wchar_t* wide_path) {
+        return _wopen(wide_path, flags, mode);
+      });
 #else
   static_cast<void>(path);
   static_cast<void>(path_length);
@@ -586,23 +703,20 @@ int OpenUtf8(const char* path, std::size_t path_length, int flags, int mode) {
 
 int StatUtf8(const char* path, std::size_t path_length, struct stat* result) {
 #ifdef NGLOG_OS_WINDOWS
-  std::wstring wide_path;
-  if (!Utf8ToWide(path, path_length, &wide_path)) {
-    return -1;
-  }
-  if (!IsValidPath(wide_path)) {
-    SetConversionError();
-    return -1;
-  }
+  return DispatchWindowsPath(
+      path, path_length,
+      [result](const char* narrow_path) { return ::stat(narrow_path, result); },
+      [result](const wchar_t* wide_path) {
 #  if defined(__MINGW32__)
-  return wstat(wide_path.c_str(), result);
+        return wstat(wide_path, result);
 #  else
-  // The C runtime declares struct stat as a distinct type with the layout of
-  // struct _stat and converts between both in its own stat().
-  static_assert(sizeof(struct stat) == sizeof(struct _stat),
-                "struct stat must have the layout of struct _stat");
-  return _wstat(wide_path.c_str(), reinterpret_cast<struct _stat*>(result));
+        // The C runtime declares struct stat as a distinct type with the
+        // layout of struct _stat and converts between both in its own stat().
+        static_assert(sizeof(struct stat) == sizeof(struct _stat),
+                      "struct stat must have the layout of struct _stat");
+        return _wstat(wide_path, reinterpret_cast<struct _stat*>(result));
 #  endif
+      });
 #else
   static_cast<void>(path);
   static_cast<void>(path_length);
@@ -613,15 +727,10 @@ int StatUtf8(const char* path, std::size_t path_length, struct stat* result) {
 
 int UnlinkUtf8(const char* path, std::size_t path_length) {
 #ifdef NGLOG_OS_WINDOWS
-  std::wstring wide_path;
-  if (!Utf8ToWide(path, path_length, &wide_path)) {
-    return -1;
-  }
-  if (!IsValidPath(wide_path)) {
-    SetConversionError();
-    return -1;
-  }
-  return _wunlink(wide_path.c_str());
+  return DispatchWindowsPath(
+      path, path_length,
+      [](const char* narrow_path) { return _unlink(narrow_path); },
+      [](const wchar_t* wide_path) { return _wunlink(wide_path); });
 #else
   static_cast<void>(path);
   static_cast<void>(path_length);
@@ -631,15 +740,10 @@ int UnlinkUtf8(const char* path, std::size_t path_length) {
 
 int AccessUtf8(const char* path, std::size_t path_length, int mode) {
 #ifdef NGLOG_OS_WINDOWS
-  std::wstring wide_path;
-  if (!Utf8ToWide(path, path_length, &wide_path)) {
-    return -1;
-  }
-  if (!IsValidPath(wide_path)) {
-    SetConversionError();
-    return -1;
-  }
-  return _waccess(wide_path.c_str(), mode);
+  return DispatchWindowsPath(
+      path, path_length,
+      [mode](const char* narrow_path) { return _access(narrow_path, mode); },
+      [mode](const wchar_t* wide_path) { return _waccess(wide_path, mode); });
 #else
   static_cast<void>(path);
   static_cast<void>(path_length);

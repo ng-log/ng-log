@@ -31,6 +31,8 @@ SPDX-License-Identifier: BSD-3-Clause
 - Use UTF-8 log messages with Unicode Windows console and debugger output
 - Prevent `TruncateLogFile` from corrupting log files with line breaks on
   Windows
+- Avoid UTF-16 conversion for ASCII Windows paths shorter than `MAX_PATH`
+  without namespace prefixes and for ASCII console output
 - Omit the default header format when a custom prefix formatter is installed
 - Improve suppressed logging performance by avoiding message construction and
   reduce overhead when formatting default prefixes
