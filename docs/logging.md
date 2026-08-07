@@ -53,15 +53,21 @@ determined according to the following rules.
     (in the order given.)
 
     All file and directory path arguments passed to ng-log must be encoded as
-    UTF-8. On Windows, ng-log converts these paths to UTF-16 and uses Unicode
-    filesystem APIs. Invalid UTF-8 paths are rejected. MSVC users should also
-    review the [compiler character set
+    UTF-8. On Windows, ASCII paths shorter than `MAX_PATH` without a namespace
+    prefix use narrow C runtime filesystem operations. Other paths use Unicode
+    filesystem APIs. Invalid UTF-8 paths are rejected. Directory enumeration
+    uses Unicode Windows APIs so every entry name can be represented. MSVC users
+    should also review the [compiler character set
     guidance](windows.md#compiler-character-sets) when non-ASCII filenames
     appear in source files or narrow string literals.
 
-Log messages also use UTF-8. On Windows, console output is converted to
-UTF-16 and written with Unicode console APIs, while redirected output remains
-UTF-8. Debugger output uses the Unicode debugger API.
+    Log messages also use UTF-8. On Windows, an ASCII fast path writes console
+    output directly to the console handle without converting it to UTF-16.
+    Output containing non-ASCII characters is converted to UTF-16 and written
+    with Unicode console APIs. Redirected output remains UTF-8. Debugger output
+    uses the Unicode debugger API. MSVC users should also review the [compiler
+    character set guidance](windows.md#compiler-character-sets) when non-ASCII
+    text appears in source files or narrow string literals.
 
 **non-Windows**
 

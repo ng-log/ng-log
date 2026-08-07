@@ -54,6 +54,12 @@
 #  include <process.h>
 #  include <sys/stat.h>
 #  include <windows.h>
+
+namespace {
+
+std::wstring MakeExtendedPath(const std::wstring& path);
+
+}  // namespace
 #endif
 
 #ifdef NGLOG_USE_GFLAGS
@@ -262,6 +268,14 @@ TEST(WindowsUtf8Path, RejectsInvalidUtf8DirectoryPath) {
       kInvalidUtf8, sizeof(kInvalidUtf8), &entries));
   EXPECT_EQ(errno, EINVAL);
 }
+
+TEST(WindowsUtf8Path, ClassifiesInvalidUtf8Path) {
+  constexpr char kInvalidUtf8[] = {'\xC3', '\x28'};
+
+  EXPECT_EQ(
+      nglog::internal::ClassifyWindowsPath(kInvalidUtf8, sizeof(kInvalidUtf8)),
+      nglog::internal::WindowsPathKind::kInvalid);
+}
 #endif
 
 TEST(Utf8Output, PreservesRedirectedBytes) {
@@ -328,7 +342,305 @@ TEST(Utf8Output, WritesSignalSafeLengthDelimitedBytes) {
   std::fclose(file);
 }
 
+TEST(WindowsUtf8Path, ClassifiesLengthDelimitedPaths) {
+  constexpr std::array<char, 3> kAsciiPath = {'l', 'o', 'g'};
+  constexpr std::array<char, 4> kPathWithNull = {'l', 'o', '\0', 'g'};
+  constexpr char kUtf8Path[] = "caf\xC3\xA9";
+  constexpr char kExtendedPath[] = "\\\\?\\C:\\log";
+  constexpr char kExtendedUncPath[] = "\\\\?\\UNC\\server\\share";
+  constexpr char kDevicePath[] = "\\\\.\\NUL";
+  constexpr std::size_t kTerminatorLength = 1;
+  constexpr std::size_t kMaximumPathLength = static_cast<std::size_t>(MAX_PATH);
+  const std::string largest_narrow_path(kMaximumPathLength - kTerminatorLength,
+                                        'a');
+  const std::string long_ascii_path(kMaximumPathLength, 'a');
+
+  EXPECT_EQ(nglog::internal::ClassifyWindowsPath(kAsciiPath.data(),
+                                                 kAsciiPath.size()),
+            nglog::internal::WindowsPathKind::kNarrow);
+  EXPECT_EQ(nglog::internal::ClassifyWindowsPath(kPathWithNull.data(),
+                                                 kPathWithNull.size()),
+            nglog::internal::WindowsPathKind::kInvalid);
+  EXPECT_EQ(nglog::internal::ClassifyWindowsPath(
+                kUtf8Path, sizeof(kUtf8Path) - kTerminatorLength),
+            nglog::internal::WindowsPathKind::kWide);
+  EXPECT_EQ(nglog::internal::ClassifyWindowsPath(
+                kExtendedPath, sizeof(kExtendedPath) - kTerminatorLength),
+            nglog::internal::WindowsPathKind::kWide);
+  EXPECT_EQ(nglog::internal::ClassifyWindowsPath(
+                kExtendedUncPath, sizeof(kExtendedUncPath) - kTerminatorLength),
+            nglog::internal::WindowsPathKind::kWide);
+  EXPECT_EQ(nglog::internal::ClassifyWindowsPath(
+                kDevicePath, sizeof(kDevicePath) - kTerminatorLength),
+            nglog::internal::WindowsPathKind::kWide);
+  EXPECT_EQ(nglog::internal::ClassifyWindowsPath(largest_narrow_path.data(),
+                                                 largest_narrow_path.size()),
+            nglog::internal::WindowsPathKind::kNarrow);
+  EXPECT_EQ(nglog::internal::ClassifyWindowsPath(long_ascii_path.data(),
+                                                 long_ascii_path.size()),
+            nglog::internal::WindowsPathKind::kWide);
+}
+
+TEST(WindowsUtf8Path, OperatesOnLengthDelimitedAsciiPath) {
+  const std::string path =
+      "nglog_ascii_path_" + std::to_string(_getpid()) + ".tmp";
+  const std::vector<char> length_delimited_path(path.begin(), path.end());
+
+  const int file_descriptor = nglog::internal::OpenUtf8(
+      length_delimited_path.data(), length_delimited_path.size(),
+      _O_CREAT | _O_TRUNC | _O_WRONLY | _O_BINARY, _S_IREAD | _S_IWRITE);
+  ASSERT_NE(file_descriptor, -1);
+  ASSERT_EQ(_close(file_descriptor), 0);
+
+  struct stat file_status = {};
+  EXPECT_EQ(
+      nglog::internal::StatUtf8(length_delimited_path.data(),
+                                length_delimited_path.size(), &file_status),
+      0);
+  EXPECT_EQ(nglog::internal::AccessUtf8(length_delimited_path.data(),
+                                        length_delimited_path.size(), 0),
+            0);
+  EXPECT_EQ(nglog::internal::UnlinkUtf8(length_delimited_path.data(),
+                                        length_delimited_path.size()),
+            0);
+}
+
+TEST(WindowsUtf8Path, OperatesOnExtendedLengthPath) {
+  constexpr DWORD kRequiredSizeQuery = 0;
+  constexpr int kExistenceMode = 0;
+  constexpr std::size_t kTerminatorLength = 1;
+  const DWORD current_directory_buffer_length =
+      GetCurrentDirectoryW(kRequiredSizeQuery, nullptr);
+  ASSERT_NE(current_directory_buffer_length, 0U);
+
+  std::vector<wchar_t> current_directory(current_directory_buffer_length);
+  const DWORD current_directory_length = GetCurrentDirectoryW(
+      current_directory_buffer_length, current_directory.data());
+  ASSERT_EQ(current_directory_length,
+            current_directory_buffer_length - kTerminatorLength);
+
+  const std::wstring current_directory_path(current_directory.data(),
+                                            current_directory_length);
+  std::wstring wide_path = MakeExtendedPath(current_directory_path);
+  if (wide_path.back() != L'\\') {
+    wide_path.push_back(L'\\');
+  }
+  wide_path += L"nglog_extended_path_" + std::to_wstring(_getpid()) + L".tmp";
+
+  std::string path;
+  ASSERT_TRUE(
+      nglog::internal::WideToUtf8(wide_path.data(), wide_path.size(), &path));
+  const int file_descriptor = nglog::internal::OpenUtf8(
+      path.data(), path.size(), _O_CREAT | _O_TRUNC | _O_WRONLY | _O_BINARY,
+      _S_IREAD | _S_IWRITE);
+  ASSERT_NE(file_descriptor, -1);
+  ASSERT_EQ(_close(file_descriptor), 0);
+
+  struct stat file_status = {};
+  EXPECT_EQ(nglog::internal::StatUtf8(path.data(), path.size(), &file_status),
+            0);
+  EXPECT_EQ(
+      nglog::internal::AccessUtf8(path.data(), path.size(), kExistenceMode), 0);
+  EXPECT_EQ(nglog::internal::UnlinkUtf8(path.data(), path.size()), 0);
+}
+
+TEST(WindowsUtf8Path, MakesExtendedPathForDriveAndUncDirectories) {
+  EXPECT_EQ(MakeExtendedPath(L"C:\\work"), L"\\\\?\\C:\\work");
+  EXPECT_EQ(MakeExtendedPath(L"\\\\server\\share\\work"),
+            L"\\\\?\\UNC\\server\\share\\work");
+  EXPECT_EQ(MakeExtendedPath(L"\\\\?\\C:\\work"), L"\\\\?\\C:\\work");
+  EXPECT_EQ(MakeExtendedPath(L"\\\\?\\UNC\\server\\share\\work"),
+            L"\\\\?\\UNC\\server\\share\\work");
+}
+
+TEST(WindowsUtf8Path, OpensDeviceNamespacePath) {
+  constexpr char kNullDevice[] = "\\\\.\\NUL";
+  constexpr int kUnusedMode = 0;
+  constexpr std::size_t kTerminatorLength = 1;
+  const int file_descriptor = nglog::internal::OpenUtf8(
+      kNullDevice, sizeof(kNullDevice) - kTerminatorLength,
+      _O_WRONLY | _O_BINARY, kUnusedMode);
+  ASSERT_NE(file_descriptor, -1);
+  EXPECT_EQ(_close(file_descriptor), 0);
+}
+
+TEST(Utf8Output, ClassifiesAsciiWithoutTerminator) {
+  constexpr std::array<char, 4> kAsciiMessage = {'l', 'o', 'g', '\0'};
+  constexpr char kUtf8Message[] = "caf\xC3\xA9";
+
+  EXPECT_TRUE(
+      nglog::internal::IsAscii(kAsciiMessage.data(), kAsciiMessage.size()));
+  EXPECT_FALSE(
+      nglog::internal::IsAscii(kUtf8Message, sizeof(kUtf8Message) - 1));
+}
+
+TEST(Utf8Output, WritesAsciiToConsoleFileDescriptor) {
+  HANDLE console = CreateConsoleScreenBuffer(
+      GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+      CONSOLE_TEXTMODE_BUFFER, nullptr);
+  if (console == INVALID_HANDLE_VALUE) {
+    GTEST_SKIP() << "Windows console is unavailable";
+  }
+
+  const int file_descriptor = _open_osfhandle(
+      reinterpret_cast<std::intptr_t>(console), _O_WRONLY | _O_BINARY);
+  ASSERT_NE(file_descriptor, -1);
+
+  constexpr std::array<char, 3> kMessage = {'l', 'o', 'g'};
+  ASSERT_TRUE(nglog::internal::WriteUtf8ToFileDescriptor(
+      file_descriptor, kMessage.data(), kMessage.size()));
+
+  std::array<wchar_t, kMessage.size()> output = {};
+  constexpr COORD kPosition = {0, 0};
+  DWORD characters_read = 0;
+  ASSERT_TRUE(ReadConsoleOutputCharacterW(console, output.data(),
+                                          static_cast<DWORD>(output.size()),
+                                          kPosition, &characters_read));
+  ASSERT_EQ(characters_read, output.size());
+  EXPECT_EQ(std::wstring(L"log"), std::wstring(output.data(), characters_read));
+  _close(file_descriptor);
+}
+
+TEST(Utf8Output, WritesAsciiToConsoleFile) {
+  HANDLE console = CreateConsoleScreenBuffer(
+      GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+      CONSOLE_TEXTMODE_BUFFER, nullptr);
+  if (console == INVALID_HANDLE_VALUE) {
+    GTEST_SKIP() << "Windows console is unavailable";
+  }
+
+  const int file_descriptor = _open_osfhandle(
+      reinterpret_cast<std::intptr_t>(console), _O_WRONLY | _O_BINARY);
+  ASSERT_NE(file_descriptor, -1);
+  std::FILE* stream = _fdopen(file_descriptor, "wb");
+  ASSERT_NE(stream, nullptr);
+
+  constexpr std::size_t kMessageLength = 3;
+  constexpr std::array<char, kMessageLength> kMessage = {'l', 'o', 'g'};
+  ASSERT_TRUE(
+      nglog::internal::WriteUtf8(stream, kMessage.data(), kMessage.size()));
+
+  std::array<wchar_t, kMessage.size()> output = {};
+  constexpr COORD kPosition = {0, 0};
+  DWORD characters_read = 0;
+  ASSERT_TRUE(ReadConsoleOutputCharacterW(console, output.data(),
+                                          static_cast<DWORD>(output.size()),
+                                          kPosition, &characters_read));
+  ASSERT_EQ(characters_read, output.size());
+  EXPECT_EQ(std::wstring(L"log"), std::wstring(output.data(), characters_read));
+  std::fclose(stream);
+}
+
+TEST(Utf8Output, PreservesRedirectedFileDescriptorBytes) {
+  constexpr std::size_t kMessageLength = 4;
+  constexpr std::size_t kPipeEndCount = 2;
+  constexpr unsigned int kPipeBufferLength = 4096;
+  std::array<int, kPipeEndCount> file_descriptors = {};
+  ASSERT_EQ(_pipe(file_descriptors.data(), kPipeBufferLength, _O_BINARY), 0);
+
+  constexpr std::array<char, kMessageLength> kMessage = {'a', '\0', '\xFF',
+                                                         'b'};
+  ASSERT_TRUE(nglog::internal::WriteUtf8ToFileDescriptor(
+      file_descriptors[1], kMessage.data(), kMessage.size()));
+  ASSERT_EQ(_close(file_descriptors[1]), 0);
+
+  std::array<char, kMessage.size()> output = {};
+  ASSERT_EQ(_read(file_descriptors[0], output.data(),
+                  static_cast<unsigned int>(output.size())),
+            static_cast<int>(output.size()));
+  EXPECT_EQ(output, kMessage);
+  EXPECT_EQ(_close(file_descriptors[0]), 0);
+}
+
+TEST(Utf8Output, PreservesAppendModeFileDescriptor) {
+  constexpr int kFilePermissions = _S_IREAD | _S_IWRITE;
+  constexpr int kCreateFlags = _O_CREAT | _O_TRUNC | _O_WRONLY | _O_BINARY;
+  constexpr int kAppendFlags = _O_WRONLY | _O_APPEND | _O_BINARY;
+  constexpr int kReadFlags = _O_RDONLY | _O_BINARY;
+  constexpr char kInitialMessage[] = "first";
+  constexpr char kAppendedMessage[] = "second";
+  constexpr std::size_t kExpectedLength =
+      sizeof(kInitialMessage) + sizeof(kAppendedMessage) - 2;
+  const std::string path =
+      "nglog_append_path_" + std::to_string(_getpid()) + ".tmp";
+
+  const int initial_file_descriptor =
+      _open(path.c_str(), kCreateFlags, kFilePermissions);
+  ASSERT_NE(initial_file_descriptor, -1);
+  ASSERT_EQ(_write(initial_file_descriptor, kInitialMessage,
+                   sizeof(kInitialMessage) - 1),
+            static_cast<int>(sizeof(kInitialMessage) - 1));
+  ASSERT_EQ(_close(initial_file_descriptor), 0);
+
+  const int append_file_descriptor =
+      _open(path.c_str(), kAppendFlags, kFilePermissions);
+  ASSERT_NE(append_file_descriptor, -1);
+  ASSERT_EQ(_lseek(append_file_descriptor, 0, SEEK_SET), 0);
+  ASSERT_TRUE(nglog::internal::WriteUtf8ToFileDescriptor(
+      append_file_descriptor, kAppendedMessage, sizeof(kAppendedMessage) - 1));
+  ASSERT_EQ(_close(append_file_descriptor), 0);
+
+  const int read_file_descriptor = _open(path.c_str(), kReadFlags);
+  ASSERT_NE(read_file_descriptor, -1);
+  std::array<char, kExpectedLength> output = {};
+  ASSERT_EQ(_read(read_file_descriptor, output.data(), output.size()),
+            static_cast<int>(output.size()));
+  EXPECT_EQ(std::string(output.data(), output.size()), "firstsecond");
+  ASSERT_EQ(_close(read_file_descriptor), 0);
+  ASSERT_EQ(_unlink(path.c_str()), 0);
+}
+
+TEST(Utf8Output, PreservesRedirectedTextModeFileBytes) {
+  std::FILE* stream = std::tmpfile();
+  ASSERT_NE(stream, nullptr);
+  ASSERT_NE(_setmode(_fileno(stream), _O_TEXT), -1);
+
+  constexpr std::size_t kCarriageReturnLength = 1;
+  constexpr std::size_t kMessageLength = 3;
+  constexpr std::array<char, kMessageLength> kMessage = {'a', '\n', 'b'};
+  ASSERT_TRUE(
+      nglog::internal::WriteUtf8(stream, kMessage.data(), kMessage.size()));
+  ASSERT_EQ(std::fflush(stream), 0);
+
+  const std::intptr_t native_handle = _get_osfhandle(_fileno(stream));
+  ASSERT_NE(native_handle, -1);
+  const HANDLE handle = reinterpret_cast<HANDLE>(native_handle);
+  LARGE_INTEGER position = {};
+  ASSERT_TRUE(SetFilePointerEx(handle, position, nullptr, FILE_BEGIN));
+
+  constexpr std::size_t kMaximumTranslatedBytes =
+      kMessage.size() + kCarriageReturnLength;
+  std::array<char, kMaximumTranslatedBytes> output = {};
+  DWORD bytes_read = 0;
+  ASSERT_TRUE(ReadFile(handle, output.data(), static_cast<DWORD>(output.size()),
+                       &bytes_read, nullptr));
+  ASSERT_EQ(bytes_read, kMessage.size());
+  EXPECT_EQ(std::memcmp(output.data(), kMessage.data(), kMessage.size()), 0);
+  std::fclose(stream);
+}
+
 namespace {
+
+std::wstring MakeExtendedPath(const std::wstring& path) {
+  constexpr wchar_t kExtendedPrefix[] = L"\\\\?\\";
+  constexpr wchar_t kUncPrefix[] = L"\\\\";
+  constexpr wchar_t kExtendedUncPrefix[] = L"\\\\?\\UNC\\";
+  constexpr std::size_t kTerminatorLength = 1;
+  constexpr std::size_t kUncPrefixLength = 2;
+  constexpr std::size_t kExtendedPrefixLength =
+      sizeof(kExtendedPrefix) / sizeof(kExtendedPrefix[0]) - kTerminatorLength;
+
+  if (path.compare(0, kExtendedPrefixLength, kExtendedPrefix,
+                   kExtendedPrefixLength) == 0) {
+    return path;
+  }
+  if (path.compare(0, kUncPrefixLength, kUncPrefix, kUncPrefixLength) == 0) {
+    std::wstring extended_path = kExtendedUncPrefix;
+    extended_path.append(path, kUncPrefixLength, std::wstring::npos);
+    return extended_path;
+  }
+  return std::wstring(kExtendedPrefix) + path;
+}
 
 constexpr std::size_t kPartialWideWriteLength = 2;
 constexpr std::size_t kLargeUtf8MessageLength = 4096;
@@ -435,7 +747,7 @@ TEST(Utf8Output, WritesUnicodeToConsole) {
   }
 
   const int file_descriptor = _open_osfhandle(
-      reinterpret_cast<intptr_t>(console), _O_WRONLY | _O_BINARY);
+      reinterpret_cast<std::intptr_t>(console), _O_WRONLY | _O_BINARY);
   ASSERT_NE(file_descriptor, -1);
   std::FILE* stream = _fdopen(file_descriptor, "wb");
   ASSERT_NE(stream, nullptr);

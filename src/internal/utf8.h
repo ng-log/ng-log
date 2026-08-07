@@ -12,11 +12,20 @@
 #include <vector>
 
 #include "ng-log/export.h"
+#include "ng-log/platform.h"
 
 struct stat;
 
 namespace nglog {
 namespace internal {
+
+#ifdef NGLOG_OS_WINDOWS
+enum class WindowsPathKind { kInvalid, kNarrow, kWide };
+
+NGLOG_NO_EXPORT bool IsAscii(const char* input, std::size_t input_length);
+NGLOG_NO_EXPORT WindowsPathKind ClassifyWindowsPath(const char* path,
+                                                    std::size_t path_length);
+#endif
 
 using WideWriteFunction = bool (*)(const wchar_t* input,
                                    std::size_t input_length,
