@@ -487,6 +487,7 @@ set (NGLOG_SRCS
   src/internal/color_format.cc
   src/internal/hyperlink.cc
   src/internal/lock_metrics.cc
+  src/internal/log_cleaner.cc
   src/internal/source_location.cc
   src/internal/style_recorder.cc
   src/internal/styled_output.cc
@@ -512,6 +513,7 @@ set (NGLOG_SRCS
   src/ng-log/internal/text_style.h
   src/internal/source_location.h
   src/internal/lock_metrics.h
+  src/internal/log_cleaner.h
   src/internal/style_recorder.h
   src/internal/styled_output.h
   src/internal/terminal_capabilities.h
