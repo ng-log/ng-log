@@ -192,7 +192,13 @@ check_cxx_symbol_exists (posix_spawn spawn.h HAVE_POSIX_SPAWN)
 check_cxx_symbol_exists (posix_spawn_file_actions_addopen spawn.h
   HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDOPEN)
 check_cxx_symbol_exists (pread unistd.h HAVE_PREAD)
+
+cmake_push_check_state (RESET)
+set (CMAKE_REQUIRED_LIBRARIES ${CMAKE_THREAD_LIBS_INIT})
+check_cxx_symbol_exists (pthread_atfork pthread.h HAVE_PTHREAD_ATFORK)
 check_cxx_symbol_exists (pthread_getname_np pthread.h HAVE_PTHREAD_GETNAME_NP)
+cmake_pop_check_state ()
+
 check_cxx_symbol_exists (pwrite unistd.h HAVE_PWRITE)
 check_cxx_symbol_exists (sched_yield sched.h HAVE_SCHED_YIELD)
 check_cxx_symbol_exists (sigaction signal.h HAVE_SIGACTION)
@@ -482,6 +488,7 @@ set (NGLOG_SRCS
   src/demangle.h
   src/flags.cc
   src/initializer.h
+  src/internal/character_classification.h
   src/internal/color_format.cc
   src/internal/hyperlink.cc
   src/internal/lock_metrics.cc
@@ -743,6 +750,12 @@ if (BUILD_TESTING AND GTest_FOUND)
     DISCOVERY_MODE PRE_TEST
   )
 
+  add_executable (log_cleaner_unittest
+    src/internal/log_cleaner_unittest.cc
+  )
+
+  target_link_libraries (log_cleaner_unittest PRIVATE ng-log_test)
+
   add_executable (preinit_warning_unittest
     src/preinit_warning_unittest.cc
   )
@@ -942,6 +955,14 @@ if (BUILD_TESTING AND GTest_FOUND)
     TEST_PREFIX preinit_warning.
     DISCOVERY_TIMEOUT 30
     DISCOVERY_MODE PRE_TEST
+  )
+
+  gtest_discover_tests (log_cleaner_unittest
+    TEST_PREFIX log_cleaner.
+    DISCOVERY_TIMEOUT 30
+    DISCOVERY_MODE PRE_TEST
+    PROPERTIES
+      RESOURCE_LOCK captured_stream
   )
 
   gtest_discover_tests (color_attributes_unittest

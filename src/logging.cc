@@ -39,7 +39,6 @@
 #include <array>
 #include <atomic>
 #include <cassert>
-#include <cctype>  // for std::isspace
 #include <cerrno>  // for errno
 #include <chrono>
 #include <climits>
@@ -67,6 +66,7 @@
 #include <vector>
 
 #include "config.h"
+#include "internal/character_classification.h"
 #include "internal/lock_metrics.h"
 #include "internal/log_cleaner.h"
 #include "internal/source_location.h"
@@ -2602,7 +2602,7 @@ static string ShellEscape(const string& src) {
 
 // Trim whitespace from both ends of the provided string.
 static inline void trim(std::string& s) {
-  const auto toRemove = [](char ch) { return std::isspace(ch) == 0; };
+  const auto toRemove = [](char ch) { return !internal::IsWhitespace(ch); };
   s.erase(s.begin(), std::find_if(s.begin(), s.end(), toRemove));
   s.erase(std::find_if(s.rbegin(), s.rend(), toRemove).base(), s.end());
 }
@@ -3085,6 +3085,7 @@ void InstallPrefixFormatter(PrefixFormatterCallback callback, void* data) {
 }
 
 void ShutdownLogging() {
+  internal::g_log_cleaner.Disable();
   ShutdownLoggingUtilities();
   LogDestination::DeleteLogDestinations();
   logging_directories_list = nullptr;

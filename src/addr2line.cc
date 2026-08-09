@@ -8,7 +8,6 @@
 #ifdef HAVE_ADDR2LINE
 
 #  include <algorithm>
-#  include <cctype>
 #  include <chrono>
 #  include <cstdint>
 #  include <cstdio>
@@ -17,6 +16,7 @@
 #  include <iterator>
 
 #  include "demangle.h"
+#  include "internal/character_classification.h"
 #  include "ng-log/flags.h"
 #  include "subprocess.h"
 #  include "symbolize.h"
@@ -75,9 +75,9 @@ std::size_t FormatAddr2LineOutput(const char* input, std::size_t input_len,
   // line, which commonly happens right at a CHECK/LOG(FATAL) call site. The
   // line number itself is always the leading run of digits. Anything after
   // that (the annotation, if present) is ignored.
-  const char* const digits_end = std::find_if(
-      line_field, line_field + line_field_span_len,
-      [](char c) { return std::isdigit(static_cast<unsigned char>(c)) == 0; });
+  const char* const digits_end =
+      std::find_if(line_field, line_field + line_field_span_len,
+                   [](char c) { return !internal::IsDecimalDigit(c); });
   const std::size_t line_field_len =
       static_cast<std::size_t>(digits_end - line_field);
 

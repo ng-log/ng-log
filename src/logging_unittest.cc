@@ -1276,6 +1276,31 @@ TEST(Logging, HeaderFormatLineWithCustomPrefixFormatter) {
   DeleteFiles(dest + "*");
 }
 
+TEST(Logging, CleanerKeepsActiveLogWithoutTimestamp) {
+  using namespace std::chrono_literals;
+  FlagSaver saver;
+  const bool original_timestamp_in_logfile_name =
+      FLAGS_timestamp_in_logfile_name;
+  FLAGS_logtostderr = false;
+  FLAGS_timestamp_in_logfile_name = false;
+
+  const string dest = TestTmpDir() + "/logging_test_cleaner_no_timestamp";
+  DeleteFiles(dest + "*");
+
+  SetLogDestination(NGLOG_INFO, dest.c_str());
+  EnableLogCleaner(0min);
+  LOG(INFO) << "active log must remain available";
+  FlushLogFiles(NGLOG_INFO);
+  DisableLogCleaner();
+
+  struct stat statbuf;
+  EXPECT_EQ(stat(dest.c_str(), &statbuf), 0);
+
+  LogToStderr();
+  DeleteFiles(dest + "*");
+  FLAGS_timestamp_in_logfile_name = original_timestamp_in_logfile_name;
+}
+
 TEST(Logging, TwoProcessesWrite) {
 // The implementation relies on advisory file locking.
 #if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && defined(HAVE_FCNTL)

@@ -35,7 +35,7 @@
 #include <sys/types.h>
 
 #include <algorithm>
-#include <cctype>
+#include <cerrno>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -47,6 +47,15 @@
 #ifdef HAVE_UNISTD_H
 #  include <unistd.h>
 #endif
+
+#if defined(HAVE_FORK) && defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H)
+#  include <signal.h>
+#  include <sys/wait.h>
+
+#  include <thread>
+#endif
+
+#include "internal/character_classification.h"
 
 namespace nglog {
 extern void GetExistingTempDirectories(std::vector<std::string>& list);
@@ -227,10 +236,7 @@ bool IsLoggingPrefix(const std::string& s) {
   }
   if (s[0] == '\0' || !strchr("IWEF", s[0])) return false;
   for (size_t i = 1; i <= 8; ++i) {
-    // Cast to unsigned char: passing a negative char (e.g. from non-ASCII
-    // log content) to isdigit() is undefined behavior.
-    if (!isdigit(static_cast<unsigned char>(s[i])) &&
-        s[i] != "YEARDATE"[i - 1]) {
+    if (!internal::IsDecimalDigit(s[i]) && s[i] != "YEARDATE"[i - 1]) {
       return false;
     }
   }
@@ -382,6 +388,39 @@ bool MungeAndDiffTestStderr(const std::string& golden_filename) {
       << ": did you forget CaptureTestStderr()?";
   return MungeAndDiffTest(golden_filename, pos->second.get());
 }
+
+#if defined(HAVE_FORK) && defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H)
+bool WaitForChildOrKill(pid_t pid, std::chrono::milliseconds poll_interval,
+                        std::chrono::milliseconds timeout, int* status,
+                        WaitPidFunction waitpid_function) {
+  if (waitpid_function == nullptr) {
+    waitpid_function = &waitpid;
+  }
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  for (;;) {
+    const pid_t result = waitpid_function(pid, status, WNOHANG);
+    if (result < 0) {
+      if (errno == EINTR) {
+        if (std::chrono::steady_clock::now() >= deadline) {
+          break;
+        }
+        continue;
+      }
+      break;
+    }
+    if (result == pid) {
+      return true;
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+      break;
+    }
+    std::this_thread::sleep_for(poll_interval);
+  }
+  kill(pid, SIGKILL);
+  waitpid_function(pid, status, 0);
+  return false;
+}
+#endif
 
 void (*g_new_hook)() = nullptr;
 

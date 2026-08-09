@@ -54,6 +54,7 @@
 #include "ng-log/platform.h"
 #include "stacktrace.h"
 #include "symbolize.h"
+#include "testing_utilities.h"
 
 #if defined(HAVE_UNISTD_H)
 #  include <unistd.h>
@@ -149,6 +150,8 @@ static void ReturnFromFailureHandler() {
 static bool ExpectChildDiesBySignal(
     const char* self_path, const char* child_command,
     std::initializer_list<int> acceptable_signals, int timeout_seconds) {
+  constexpr std::chrono::milliseconds kPollInterval{20};
+
   pid_t pid = fork();
   if (pid == 0) {
     execl(self_path, self_path, child_command, static_cast<char*>(nullptr));
@@ -159,22 +162,11 @@ static bool ExpectChildDiesBySignal(
     return false;
   }
 
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::seconds(timeout_seconds);
   int status = 0;
-  bool reaped = false;
-  while (std::chrono::steady_clock::now() < deadline) {
-    if (waitpid(pid, &status, WNOHANG) == pid) {
-      reaped = true;
-      break;
-    }
-    usleep(20000);
-  }
-  if (!reaped) {
+  if (!WaitForChildOrKill(pid, kPollInterval,
+                          std::chrono::seconds(timeout_seconds), &status)) {
     fprintf(stderr, "%s: timed out after %d seconds\n", child_command,
             timeout_seconds);
-    kill(pid, SIGKILL);
-    waitpid(pid, &status, 0);
     return false;
   }
   if (WIFSIGNALED(status)) {
@@ -198,6 +190,8 @@ static bool ExpectChildDiesBySignal(
 static bool ExpectChildExitsSuccessfully(const char* self_path,
                                          const char* child_command,
                                          int timeout_seconds) {
+  constexpr std::chrono::milliseconds kPollInterval{20};
+
   pid_t pid = fork();
   if (pid == 0) {
     execl(self_path, self_path, child_command, static_cast<char*>(nullptr));
@@ -208,28 +202,22 @@ static bool ExpectChildExitsSuccessfully(const char* self_path,
     return false;
   }
 
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::seconds(timeout_seconds);
   int status = 0;
-  while (std::chrono::steady_clock::now() < deadline) {
-    if (waitpid(pid, &status, WNOHANG) == pid) {
-      if (WIFEXITED(status) && WEXITSTATUS(status) == 0) return true;
-      if (WIFSIGNALED(status)) {
-        fprintf(stderr, "%s: died by signal %d\n", child_command,
-                WTERMSIG(status));
-      } else if (WIFEXITED(status)) {
-        fprintf(stderr, "%s: exited with code %d\n", child_command,
-                WEXITSTATUS(status));
-      }
-      return false;
-    }
-    usleep(20000);
+  if (!WaitForChildOrKill(pid, kPollInterval,
+                          std::chrono::seconds(timeout_seconds), &status)) {
+    fprintf(stderr, "%s: timed out after %d seconds\n", child_command,
+            timeout_seconds);
+    return false;
   }
-
-  fprintf(stderr, "%s: timed out after %d seconds\n", child_command,
-          timeout_seconds);
-  kill(pid, SIGKILL);
-  waitpid(pid, &status, 0);
+  if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+    return true;
+  }
+  if (WIFSIGNALED(status)) {
+    fprintf(stderr, "%s: died by signal %d\n", child_command, WTERMSIG(status));
+  } else if (WIFEXITED(status)) {
+    fprintf(stderr, "%s: exited with code %d\n", child_command,
+            WEXITSTATUS(status));
+  }
   return false;
 }
 #  endif  // defined(NGLOG_OS_LINUX)

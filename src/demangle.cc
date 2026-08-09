@@ -44,6 +44,7 @@
 #include <memory>
 #include <type_traits>
 
+#include "internal/character_classification.h"
 #include "utilities.h"
 
 #if defined(HAVE___CXA_DEMANGLE)
@@ -59,6 +60,8 @@
 
 namespace nglog {
 inline namespace tools {
+
+using internal::IsDecimalDigit;
 
 #if !defined(_MSC_VER)
 namespace {
@@ -364,15 +367,6 @@ void Append(State* state, const char* const str, ssize_t length) {
   }
 }
 
-// We don't use equivalents in libc to avoid locale issues.
-bool IsLower(char c) { return c >= 'a' && c <= 'z'; }
-
-bool IsAlpha(char c) {
-  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
-}
-
-bool IsDigit(char c) { return c >= '0' && c <= '9'; }
-
 // Returns true if "str" is a function clone suffix.  These suffixes are used
 // by GCC 4.5.x and later versions to indicate functions which have been
 // cloned during optimization.  We treat any sequence (.<alpha>+.<digit>+)+ as
@@ -381,18 +375,18 @@ bool IsFunctionCloneSuffix(const char* str) {
   std::size_t i = 0;
   while (str[i] != '\0') {
     // Consume a single .<alpha>+.<digit>+ sequence.
-    if (str[i] != '.' || !IsAlpha(str[i + 1])) {
+    if (str[i] != '.' || !internal::IsAlpha(str[i + 1])) {
       return false;
     }
     i += 2;
-    while (IsAlpha(str[i])) {
+    while (internal::IsAlpha(str[i])) {
       ++i;
     }
-    if (str[i] != '.' || !IsDigit(str[i + 1])) {
+    if (str[i] != '.' || !internal::IsDecimalDigit(str[i + 1])) {
       return false;
     }
     i += 2;
-    while (IsDigit(str[i])) {
+    while (internal::IsDecimalDigit(str[i])) {
       ++i;
     }
   }
@@ -417,7 +411,7 @@ void MaybeAppendWithLength(State* state, const char* const str,
     // "prev_name" would point at output buffer bytes that were never
     // initialized by the demangler, which get read back later when
     // reconstructing constructor/destructor names.
-    if (!state->overflowed && (IsAlpha(str[0]) || str[0] == '_')) {
+    if (!state->overflowed && (internal::IsAlpha(str[0]) || str[0] == '_')) {
       state->prev_name = out_cur_before_append;
       state->prev_name_length = length;
     }
@@ -846,7 +840,7 @@ bool ParseNumber(State* state, std::int64_t* number_out) {
   State copy = *state;
   const bool negative = ParseOneCharToken(state, 'n');
   const char* p = state->mangled_cur;
-  if (*p == '0' && IsDigit(p[1])) {
+  if (*p == '0' && internal::IsDecimalDigit(p[1])) {
     *state = copy;
     return false;
   }
@@ -854,7 +848,7 @@ bool ParseNumber(State* state, std::int64_t* number_out) {
   // Most grammar productions only need to validate and consume a number.
   // Avoid imposing an artificial integer limit when its value is discarded.
   if (number_out == nullptr) {
-    while (IsDigit(*p)) {
+    while (IsDecimalDigit(*p)) {
       ++p;
     }
     if (p != state->mangled_cur) {
@@ -871,7 +865,7 @@ bool ParseNumber(State* state, std::int64_t* number_out) {
   constexpr std::uint64_t kMaxNegative = kMaxPositive + 1;
   const std::uint64_t limit = negative ? kMaxNegative : kMaxPositive;
   for (; *p != '\0'; ++p) {
-    if (IsDigit(*p)) {
+    if (IsDecimalDigit(*p)) {
       const std::uint64_t digit = static_cast<std::uint64_t>(*p - '0');
       if (number > limit / 10 || (number == limit / 10 && digit > limit % 10)) {
         *state = copy;
@@ -945,7 +939,7 @@ bool ParsePositiveNumber(State* state, std::int64_t* number_out) {
 bool ParseFloatNumber(State* state) {
   const char* p = state->mangled_cur;
   for (; *p != '\0'; ++p) {
-    if (!IsDigit(*p) && !(*p >= 'a' && *p <= 'f')) {
+    if (!internal::IsLowerHexDigit(*p)) {
       break;
     }
   }
@@ -962,7 +956,7 @@ bool ParseSeqId(State* state) {
   const char* p = state->mangled_cur;
   const char* const first = p;
   for (; *p != '\0'; ++p) {
-    if (!IsDigit(*p) && !(*p >= 'A' && *p <= 'Z')) {
+    if (!internal::IsDecimalDigit(*p) && !internal::IsUpper(*p)) {
       break;
     }
   }
@@ -1036,7 +1030,8 @@ bool ParseOperatorName(State* state) {
 
   // Other operator names should start with a lower alphabet followed
   // by a lower/upper alphabet.
-  if (!(IsLower(state->mangled_cur[0]) && IsAlpha(state->mangled_cur[1]))) {
+  if (!(internal::IsLower(state->mangled_cur[0]) &&
+        internal::IsAlpha(state->mangled_cur[1]))) {
     return false;
   }
   // We may want to perform a binary search if we really need speed.
@@ -1045,7 +1040,7 @@ bool ParseOperatorName(State* state) {
     if (state->mangled_cur[0] == p->abbrev[0] &&
         state->mangled_cur[1] == p->abbrev[1]) {
       MaybeAppend(state, "operator");
-      if (IsLower(*p->real_name)) {  // new, delete, etc.
+      if (internal::IsLower(*p->real_name)) {  // new, delete, etc.
         MaybeAppend(state, " ");
       }
       MaybeAppend(state, p->real_name);
@@ -1058,7 +1053,8 @@ bool ParseOperatorName(State* state) {
 
 bool OperatorHasArity(const char* const op, const OperatorArity arity) {
   if (StrPrefix(op, "cv") || StrPrefix(op, "li") ||
-      (op[0] == 'v' && AtLeastNumCharsRemaining(op, 2) && IsDigit(op[1]))) {
+      (op[0] == 'v' && AtLeastNumCharsRemaining(op, 2) &&
+       IsDecimalDigit(op[1]))) {
     return arity == OperatorArity::kUnary;
   }
 

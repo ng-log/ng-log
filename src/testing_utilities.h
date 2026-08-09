@@ -34,12 +34,17 @@
 #ifndef NGLOG_SRC_TESTING_UTILITIES_H_
 #define NGLOG_SRC_TESTING_UTILITIES_H_
 
+#include <chrono>
 #include <cstdint>
 #include <string>
 
 #include "config.h"
 #include "ng-log/logging.h"
 #include "utilities.h"
+
+#if defined(HAVE_FORK) && defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H)
+#  include <sys/types.h>
+#endif
 
 #if defined(NGLOG_USE_WINDOWS_PORT)
 #  include "port.h"
@@ -104,6 +109,18 @@ std::string GetCapturedTestStderr();
 // given golden file.
 bool MungeAndDiffTestStdout(const std::string& golden_filename);
 bool MungeAndDiffTestStderr(const std::string& golden_filename);
+
+#if defined(HAVE_FORK) && defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H)
+using WaitPidFunction = pid_t (*)(pid_t, int*, int);
+
+// Waits for `pid` to exit, polling every `poll_interval` up to `timeout`,
+// then SIGKILLs and reaps it. Returns true if it exited on its own, false if
+// killed. `*status` always receives the reaping waitpid() call's status. The
+// optional function is used by tests to exercise interrupted waits.
+bool WaitForChildOrKill(pid_t pid, std::chrono::milliseconds poll_interval,
+                        std::chrono::milliseconds timeout, int* status,
+                        WaitPidFunction waitpid_function = nullptr);
+#endif
 
 // Save flags used from logging_unittest.cc.
 #ifndef NGLOG_USE_GFLAGS

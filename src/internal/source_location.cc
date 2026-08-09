@@ -6,14 +6,13 @@
 #include "source_location.h"
 
 #include <algorithm>
-#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
 #include <limits>
-#include <locale>
 
 #include "config.h"
+#include "internal/character_classification.h"
 #include "ng-log/platform.h"
 
 #ifdef NGLOG_OS_WINDOWS
@@ -31,20 +30,17 @@ namespace {
 
 bool IsAbsolutePath(const char* path, std::size_t len) {
   const bool is_posix_absolute = len >= 1 && path[0] == '/';
-  const bool is_windows_absolute =
-      len >= 3 && std::isalpha(static_cast<unsigned char>(path[0])) != 0 &&
-      path[1] == ':' && (path[2] == '\\' || path[2] == '/');
+  const bool is_windows_absolute = len >= 3 && IsAlpha(path[0]) &&
+                                   path[1] == ':' &&
+                                   (path[2] == '\\' || path[2] == '/');
   return is_posix_absolute || is_windows_absolute;
 }
 
 bool IsPathSeparator(char c) { return c == '/' || c == '\\'; }
 
 bool IsUriPathCharacter(char c) {
-  const unsigned char byte = static_cast<unsigned char>(c);
-  const char locale_char = static_cast<char>(byte);
-  const std::locale& locale = std::locale::classic();
-  return std::isalnum(locale_char, locale) != 0 || c == '-' || c == '.' ||
-         c == '_' || c == '~' || c == '/' || c == ':';
+  return IsAlphanumeric(c) || c == '-' || c == '.' || c == '_' || c == '~' ||
+         c == '/' || c == ':';
 }
 
 bool GetUriEncodedLength(const char* path, std::size_t path_length,
@@ -85,10 +81,6 @@ char* AppendUriEncodedPath(const char* path, std::size_t path_length,
     }
   }
   return out;
-}
-
-bool IsDigitChar(char c) {
-  return std::isdigit(static_cast<unsigned char>(c)) != 0;
 }
 
 const char* FindLastPathSeparator(const char* begin, const char* end) {
@@ -134,12 +126,12 @@ bool SplitFileLineSpan(const char* span, std::size_t span_length,
                        const char** line, std::size_t* line_length) {
   const auto rend = std::make_reverse_iterator(span);
   const auto rbegin = std::make_reverse_iterator(span + span_length);
-  const auto digits_rend = std::find_if(rbegin, rend, IsDigitChar);
+  const auto digits_rend = std::find_if(rbegin, rend, IsDecimalDigit);
   if (digits_rend == rend) {
     return false;
   }
 
-  const auto colon = std::find_if_not(digits_rend, rend, IsDigitChar);
+  const auto colon = std::find_if_not(digits_rend, rend, IsDecimalDigit);
   if (colon == rend || *colon != ':') {
     return false;
   }
