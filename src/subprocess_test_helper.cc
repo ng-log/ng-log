@@ -10,6 +10,7 @@
 // relying on a shell or OS-shipped utility being present, on every platform
 // Subprocess itself supports.
 
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <thread>

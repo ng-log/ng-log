@@ -27,26 +27,34 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <string>
-
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <stdio.h>
 
-#include "base/commandlineflags.h"
-#include "mock-log.h"
+#include <chrono>
+#include <ostream>
+#include <string>
+
+#include "ng-log/flags.h"
+#include "ng-log/log_severity.h"
 #include "ng-log/logging.h"
-#include "ng-log/raw_logging.h"
 #include "testing_utilities.h"
+
+namespace nglog {
+namespace nglog_testing {
+class ScopedMockLog;
+}  // namespace nglog_testing
+}  // namespace nglog
 
 #ifdef NGLOG_OS_WINDOWS
 #  include <direct.h>
 #else
 #  include <sys/stat.h>
-#  include <sys/types.h>
 #endif
 
 #ifdef NGLOG_USE_GFLAGS
 #  include <gflags/gflags.h>
+
 using namespace GFLAGS_NAMESPACE;
 #endif
 

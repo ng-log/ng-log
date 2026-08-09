@@ -32,12 +32,17 @@
 //
 // Implementation of InstallFailureSignalHandler().
 
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+
 #include <algorithm>
 #include <atomic>
 #include <csignal>
 #include <cstring>
 #include <ctime>
 #include <sstream>
+#include <string>
 #include <thread>
 
 #include "config.h"
@@ -46,8 +51,10 @@
 #include "internal/terminal_capabilities.h"
 #include "internal/theme.h"
 #include "ng-log/flags.h"
+#include "ng-log/log_severity.h"
 #include "ng-log/logging.h"
 #include "ng-log/platform.h"
+#include "ng-log/types.h"
 #include "stacktrace.h"
 #include "symbolize.h"
 #include "utilities.h"
@@ -66,7 +73,6 @@
 #endif
 #if defined(HAVE_SYS_SYSCALL_H) && defined(HAVE_SYS_TYPES_H)
 #  include <sys/syscall.h>
-#  include <sys/types.h>
 #endif
 #ifdef NGLOG_OS_WINDOWS
 #  include <windows.h>

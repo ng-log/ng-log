@@ -34,11 +34,11 @@
 #ifndef NGLOG_SRC_TESTING_UTILITIES_H_
 #define NGLOG_SRC_TESTING_UTILITIES_H_
 
+#include <stdio.h>
+
 #include <cstdint>
 #include <string>
 
-#include "config.h"
-#include "ng-log/logging.h"
 #include "utilities.h"
 
 #if defined(NGLOG_USE_WINDOWS_PORT)

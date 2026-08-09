@@ -32,14 +32,18 @@
 // Broken out from logging.cc by Soren Lassen
 // logging_unittest.cc covers the functionality herein
 
+#include "ng-log/vlog_is_on.h"
+
 #include <cerrno>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <string>
 
+#include "ng-log/export.h"
+#include "ng-log/flags.h"
 #include "ng-log/raw_logging.h"
+#include "ng-log/types.h"
 
 // glog doesn't have annotation
 #define ANNOTATE_BENIGN_RACE(address, description)

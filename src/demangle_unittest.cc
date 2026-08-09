@@ -35,6 +35,7 @@
 #include "demangle.h"
 
 #include <gtest/gtest.h>
+#include <string.h>
 
 #include <fstream>
 #include <iostream>
@@ -42,12 +43,13 @@
 
 #include "base/commandlineflags.h"
 #include "config.h"
+#include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "testing_utilities.h"
-#include "utilities.h"
 
 #ifdef NGLOG_USE_GFLAGS
 #  include <gflags/gflags.h>
+
 using namespace GFLAGS_NAMESPACE;
 #endif
 

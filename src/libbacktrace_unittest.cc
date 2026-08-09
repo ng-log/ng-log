@@ -11,8 +11,8 @@
 
 #include <cstring>
 #include <iostream>
+#include <string>
 
-#include "config.h"
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "symbolize.h"
@@ -20,6 +20,7 @@
 
 #ifdef NGLOG_USE_GFLAGS
 #  include <gflags/gflags.h>
+
 using namespace GFLAGS_NAMESPACE;
 #endif  // NGLOG_USE_GFLAGS
 

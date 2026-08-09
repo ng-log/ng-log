@@ -30,15 +30,26 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <stdio.h>
 
-#include "base/commandlineflags.h"
-#include "mock-log.h"
+#include <chrono>
+#include <ostream>
+#include <string>
+
+#include "ng-log/flags.h"
+#include "ng-log/log_severity.h"
 #include "ng-log/logging.h"
-#include "ng-log/raw_logging.h"
 #include "testing_utilities.h"
+
+namespace nglog {
+namespace nglog_testing {
+class ScopedMockLog;
+}  // namespace nglog_testing
+}  // namespace nglog
 
 #ifdef NGLOG_USE_GFLAGS
 #  include <gflags/gflags.h>
+
 using namespace GFLAGS_NAMESPACE;
 #endif
 

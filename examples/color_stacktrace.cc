@@ -13,6 +13,10 @@
 
 #include <cerrno>
 #include <cstdlib>
+#include <ostream>
+
+#include "ng-log/log_severity.h"
+#include "ng-log/vlog_is_on.h"
 
 #ifdef __unix__
 #  include <sys/resource.h>

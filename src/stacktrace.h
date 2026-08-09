@@ -36,7 +36,6 @@
 
 #include "config.h"
 #include "ng-log/export.h"
-#include "ng-log/platform.h"
 #if defined(HAVE_LIBUNWIND)
 #  define STACKTRACE_H "stacktrace_libunwind-inl.h"
 #elif defined(HAVE_UNWIND)

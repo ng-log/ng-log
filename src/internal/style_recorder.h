@@ -13,6 +13,7 @@
 
 namespace nglog {
 namespace internal {
+struct TextAttributes;
 
 class NGLOG_NO_EXPORT StyleRecorder {
  public:

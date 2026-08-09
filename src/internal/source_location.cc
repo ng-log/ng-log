@@ -7,14 +7,12 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstdlib>
 #include <cstring>
 #include <iterator>
 #include <limits>
 #include <locale>
 
 #include "config.h"
-#include "ng-log/platform.h"
 
 #ifdef NGLOG_OS_WINDOWS
 #  include <windows.h>

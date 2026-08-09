@@ -31,30 +31,29 @@
 //
 // logging_unittest.cc covers the functionality herein
 
+#include <sys/syscall.h>
+
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 #include <iomanip>
+#include <iterator>
 #include <mutex>
 #include <ostream>
-#include <streambuf>
 #include <thread>
 
 #include "config.h"
+#include "ng-log/flags.h"
+#include "ng-log/log_severity.h"
 
 #ifdef HAVE_UNISTD_H
 #  include <unistd.h>  // for close() and write()
 #endif
 #if defined(HAVE_SYSCALL_H)
-#  include <syscall.h>  // for syscall()
 #elif defined(HAVE_SYS_SYSCALL_H)
 #  include <sys/syscall.h>  // for syscall()
 #endif
-#ifdef HAVE_UNISTD_H
-#  include <unistd.h>
-#endif
-#include <fcntl.h>  // for open()
-
 #include "ng-log/logging.h"
 #include "ng-log/raw_logging.h"
 #include "stacktrace.h"

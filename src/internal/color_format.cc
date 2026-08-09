@@ -4,11 +4,15 @@
 // Author: Sergiu Deitsch
 
 #include <algorithm>
+#include <cstddef>
 
 #include "ng-log/internal/color_spec.h"
 
 namespace nglog {
 namespace internal {
+enum class Color;
+enum class TextStyle : unsigned int;
+struct ColorValue;
 
 namespace {
 

@@ -31,15 +31,18 @@
 
 // The common part of the striplog tests.
 
+#include <gflags/gflags.h>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
-#include <iosfwd>
+#include <ostream>
 #include <string>
 
 #include "base/commandlineflags.h"
-#include "config.h"
+#include "ng-log/flags.h"
+#include "ng-log/log_severity.h"
 #include "ng-log/logging.h"
+#include "ng-log/vlog_is_on.h"
 
 NGLOG_DEFINE_bool(check_mode, false, "Prints 'opt' or 'dbg'");
 

@@ -93,6 +93,7 @@
 #endif
 
 namespace nglog {
+struct SiteFlag;
 
 // Set VLOG(_IS_ON) level for module_pattern to log_level.
 // This lets us dynamically control what is normally set by the --vmodule flag.

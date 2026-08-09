@@ -13,7 +13,9 @@
 
 #include "internal/style_recorder.h"
 #include "internal/theme.h"
+#include "ng-log/flags.h"
 #include "ng-log/internal/styled_value.h"
+#include "ng-log/log_severity.h"
 #include "ng-log/logging.h"
 #include "testing_utilities.h"
 
@@ -21,6 +23,7 @@ using testing::HasSubstr;
 
 #ifdef NGLOG_USE_GFLAGS
 #  include <gflags/gflags.h>
+
 using namespace GFLAGS_NAMESPACE;
 #endif
 

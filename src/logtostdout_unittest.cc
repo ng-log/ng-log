@@ -11,12 +11,14 @@
 #include <sstream>
 #include <string>
 
-#include "base/commandlineflags.h"
+#include "ng-log/flags.h"
+#include "ng-log/log_severity.h"
 #include "ng-log/logging.h"
 #include "testing_utilities.h"
 
 #ifdef NGLOG_USE_GFLAGS
 #  include <gflags/gflags.h>
+
 using namespace GFLAGS_NAMESPACE;
 #endif
 

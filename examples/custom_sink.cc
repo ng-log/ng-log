@@ -37,6 +37,8 @@
 #include <iostream>
 #include <iterator>
 
+#include "ng-log/log_severity.h"
+
 namespace {
 
 struct MyLogSink : nglog::LogSink {  // (1)!

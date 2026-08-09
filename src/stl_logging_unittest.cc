@@ -32,14 +32,15 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdio>
 #include <functional>
 #include <iostream>
 #include <map>
 #include <ostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
-#include "config.h"
 #include "ng-log/logging.h"
 
 using namespace std;

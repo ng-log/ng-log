@@ -39,7 +39,9 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <cstddef>
 #include <mutex>
+#include <ostream>
 #include <string>
 #include <thread>
 

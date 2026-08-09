@@ -30,20 +30,26 @@
 //
 // Author: Ray Sidney
 
+#include <errno.h>
 #include <fcntl.h>
+#include <stdint.h>
+#include <string.h>
+#include <sys/types.h>
+#include <time.h>
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <functional>
 #include <future>
 #include <iomanip>
-#include <iostream>
 #include <memory>
 #include <mutex>
 #include <queue>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -51,6 +57,10 @@
 #include <vector>
 
 #include "config.h"
+#include "ng-log/flags.h"
+#include "ng-log/log_severity.h"
+#include "ng-log/platform.h"
+#include "ng-log/vlog_is_on.h"
 #ifdef HAVE_GLOB_H
 #  include <glob.h>
 #endif
@@ -65,7 +75,6 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include "base/commandlineflags.h"
 #include "internal/lock_metrics.h"
 #include "mock-log.h"
 #include "ng-log/logging.h"
@@ -76,6 +85,7 @@
 
 #ifdef NGLOG_USE_GFLAGS
 #  include <gflags/gflags.h>
+
 using namespace GFLAGS_NAMESPACE;
 #endif
 

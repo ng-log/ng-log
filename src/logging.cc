@@ -39,10 +39,13 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <iomanip>
 #include <iterator>
 #include <memory>
 #include <mutex>
+#include <new>
+#include <ratio>
 #include <shared_mutex>
 #include <string>
 #include <thread>
@@ -63,6 +66,8 @@
 #include "stacktrace.h"
 #include "utilities.h"
 
+struct tm;
+
 #ifdef NGLOG_OS_WINDOWS
 #  include "windows/dirent.h"
 #else
@@ -70,12 +75,11 @@
 #endif
 
 #include <fcntl.h>
+#include <strings.h>
 #include <sys/stat.h>
 
 #include <cctype>  // for std::isspace
 #include <cerrno>  // for errno
-#include <climits>
-#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
@@ -85,9 +89,6 @@
 
 #ifdef HAVE__CHSIZE_S
 #  include <io.h>  // for truncate log file
-#endif
-#ifdef HAVE_PWD_H
-#  include <pwd.h>
 #endif
 #ifdef HAVE_SYS_UTSNAME_H
 #  include <sys/utsname.h>  // For uname.

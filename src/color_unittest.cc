@@ -5,16 +5,17 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <stdio.h>
 
 #include <cstring>
 #include <string>
 #include <type_traits>
-#include <vector>
 
 #include "internal/source_location.h"
 #include "internal/styled_output.h"
 #include "internal/terminal_capabilities.h"
 #include "internal/theme.h"
+#include "ng-log/flags.h"
 #include "ng-log/internal/color_spec.h"
 #include "ng-log/internal/hyperlink.h"
 #include "ng-log/logging.h"
@@ -25,6 +26,7 @@
 
 #ifdef NGLOG_USE_GFLAGS
 #  include <gflags/gflags.h>
+
 using namespace GFLAGS_NAMESPACE;
 #endif
 

@@ -38,15 +38,11 @@
 #define NGLOG_LOGGING_H
 
 #include <atomic>
-#include <cerrno>
 #include <chrono>
 #include <cstddef>
-#include <cstdlib>
 #include <cstring>
 #include <ctime>
-#include <iosfwd>
 #include <memory>
-#include <ostream>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -55,8 +51,10 @@
 
 #include "ng-log/export.h"
 #include "ng-log/flags.h"
+#include "ng-log/internal/color.h"
+#include "ng-log/internal/hyperlink.h"
+#include "ng-log/internal/style_markers.h"
 #include "ng-log/internal/styled_value.h"
-#include "ng-log/platform.h"
 #include "ng-log/types.h"
 
 #if defined(__has_attribute)
@@ -72,7 +70,17 @@
 #include "ng-log/log_severity.h"
 #include "ng-log/vlog_is_on.h"
 
+struct tm;
+
 namespace nglog {
+class ErrnoLogMessage;
+class LogMessageFatal;
+class NullStream;
+
+namespace internal {
+struct LogMessageVoidify;
+struct TextAttributes;
+}  // namespace internal
 
 struct NGLOG_EXPORT LogMessageTime {
   LogMessageTime();

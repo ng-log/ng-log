@@ -33,8 +33,8 @@
 #include <cstdio>
 #include <cstdlib>
 
-#include "base/commandlineflags.h"
 #include "config.h"
+#include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "utilities.h"
 

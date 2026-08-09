@@ -36,17 +36,23 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <string.h>
+#include <unistd.h>
 
 #include <csignal>
 #include <iostream>
+#include <string>
 
 #include "config.h"
+#include "ng-log/flags.h"
+#include "ng-log/log_severity.h"
 #include "ng-log/logging.h"
 #include "stacktrace.h"
 #include "utilities.h"
 
 #ifdef NGLOG_USE_GFLAGS
 #  include <gflags/gflags.h>
+
 using namespace GFLAGS_NAMESPACE;
 #endif
 
@@ -418,6 +424,7 @@ static void ATTRIBUTE_NOINLINE TestWithReturnAddress() {
 
 #    ifdef _MSC_VER
 #      include <intrin.h>
+
 #      pragma intrinsic(_ReturnAddress)
 #    endif
 

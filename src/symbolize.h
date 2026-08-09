@@ -55,12 +55,13 @@
 #ifndef NGLOG_INTERNAL_SYMBOLIZE_H
 #define NGLOG_INTERNAL_SYMBOLIZE_H
 
+#include <elf.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
 
 #include "config.h"
-#include "ng-log/platform.h"
 
 #if defined(HAVE_LINK_H)
 #  include <link.h>  // For ElfW() macro.

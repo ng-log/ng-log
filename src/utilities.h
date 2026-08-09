@@ -62,7 +62,7 @@
 #define PRIoS __PRIS_PREFIX "o"
 
 #include "config.h"
-#include "ng-log/platform.h"
+#include "ng-log/export.h"
 #if defined(NGLOG_USE_WINDOWS_PORT)
 #  include "port.h"
 #endif
@@ -72,14 +72,18 @@
 #if !defined(HAVE_SSIZE_T)
 #  if defined(NGLOG_OS_WINDOWS)
 #    include <basetsd.h>
+
 using ssize_t = SSIZE_T;
 #  else
 using ssize_t = std::ptrdiff_t;
 #  endif
 #endif
 
-#include "ng-log/log_severity.h"
 #include "ng-log/types.h"
+
+namespace nglog {
+enum LogSeverity : int;
+}  // namespace nglog
 
 // There are three different ways we can try to get the stack trace:
 //

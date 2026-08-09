@@ -41,9 +41,9 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
-#include <limits>
+#include <memory>
 
-#include "utilities.h"
+#include "config.h"
 
 #if defined(HAVE___CXA_DEMANGLE)
 #  include <cxxabi.h>

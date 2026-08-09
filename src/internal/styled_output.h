@@ -7,7 +7,6 @@
 #define NGLOG_INTERNAL_STYLED_OUTPUT_H
 
 #include <cstddef>
-#include <cstdio>
 #include <utility>
 
 #include "ng-log/export.h"
@@ -21,6 +20,8 @@
 
 namespace nglog {
 namespace internal {
+class Hyperlink;
+struct TextAttributes;
 
 constexpr const char* const kAnsiReset = "\033[0m";
 constexpr const char* const kOsc8Prefix = "\033]8;;";

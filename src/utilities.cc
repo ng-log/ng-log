@@ -34,17 +34,21 @@
 
 #include "utilities.h"
 
+#include <string.h>
+#include <sys/types.h>
+
 #include <atomic>
 #include <cerrno>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <ostream>
 
-#include "addr2line.h"
 #include "config.h"
 #include "initializer.h"
 #include "libbacktrace.h"
 #include "ng-log/flags.h"
+#include "ng-log/log_severity.h"
 #include "ng-log/logging.h"
 #include "stacktrace.h"
 #include "symbolize.h"
@@ -52,11 +56,7 @@
 #ifdef NGLOG_OS_ANDROID
 #  include <android/log.h>
 #endif
-#ifdef HAVE_SYS_TIME_H
-#  include <sys/time.h>
-#endif
 #if defined(HAVE_SYSCALL_H)
-#  include <syscall.h>  // for syscall()
 #elif defined(HAVE_SYS_SYSCALL_H)
 #  include <sys/syscall.h>  // for syscall()
 #endif
@@ -117,10 +117,6 @@ void AlsoErrorWrite(LogSeverity severity, const char* tag,
 
 // The following APIs are all internal.
 #ifdef HAVE_STACKTRACE
-
-#  include "base/commandlineflags.h"
-#  include "stacktrace.h"
-#  include "symbolize.h"
 
 namespace nglog {
 

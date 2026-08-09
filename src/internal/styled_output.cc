@@ -5,6 +5,8 @@
 
 #include "styled_output.h"
 
+#include <stdio.h>
+
 #include <cstring>
 
 #ifdef NGLOG_OS_WINDOWS

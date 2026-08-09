@@ -37,11 +37,13 @@
 
 // For google. This must go first so we get _XOPEN_SOURCE.
 #include <gmock/gmock.h>
+#include <stddef.h>
 
 #include <string>
 
+#include "gtest/gtest.h"
+#include "ng-log/log_severity.h"
 #include "ng-log/logging.h"
-#include "utilities.h"
 
 namespace nglog {
 namespace nglog_testing {

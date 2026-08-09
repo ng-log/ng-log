@@ -36,6 +36,7 @@
 #include <fcntl.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <sys/types.h>
 
 #include <atomic>
 #include <cerrno>
@@ -50,10 +51,10 @@
 #include <thread>
 
 #include "config.h"
+#include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "ng-log/platform.h"
 #include "stacktrace.h"
-#include "symbolize.h"
 
 #if defined(HAVE_UNISTD_H)
 #  include <unistd.h>
@@ -67,6 +68,7 @@
 #endif
 #ifdef NGLOG_USE_GFLAGS
 #  include <gflags/gflags.h>
+
 using namespace GFLAGS_NAMESPACE;
 #endif
 #if defined(_MSC_VER)

@@ -10,7 +10,6 @@
 
 #include "ng-log/export.h"
 #include "ng-log/internal/color_spec.h"
-#include "ng-log/platform.h"
 
 #ifdef NGLOG_OS_WINDOWS
 #  include <windows.h>

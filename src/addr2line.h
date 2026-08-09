@@ -15,13 +15,6 @@
 #ifndef NGLOG_INTERNAL_ADDR2LINE_H
 #define NGLOG_INTERNAL_ADDR2LINE_H
 
-#include <cstddef>
-#include <cstdint>
-
-#include "config.h"
-#include "ng-log/export.h"
-#include "symbolize.h"
-
 #ifdef HAVE_ADDR2LINE
 
 namespace nglog {

@@ -32,14 +32,21 @@
 
 #include <benchmark/benchmark.h>
 
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <initializer_list>
+#include <ostream>
 
 #include "internal/lock_metrics.h"
+#include "ng-log/flags.h"
+#include "ng-log/log_severity.h"
 #include "ng-log/logging.h"
+#include "ng-log/vlog_is_on.h"
 
 #ifdef NGLOG_USE_GFLAGS
 #  include <gflags/gflags.h>
+
 using namespace GFLAGS_NAMESPACE;
 #endif
 

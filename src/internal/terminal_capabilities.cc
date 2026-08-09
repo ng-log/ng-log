@@ -5,7 +5,6 @@
 
 #include "terminal_capabilities.h"
 
-#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 

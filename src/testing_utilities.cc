@@ -30,12 +30,14 @@
 
 #include "testing_utilities.h"
 
+#include <errno.h>
 #include <fcntl.h>
+#include <stdlib.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -43,6 +45,9 @@
 #include <sstream>
 #include <utility>
 #include <vector>
+
+#include "config.h"
+#include "ng-log/logging.h"
 
 #ifdef HAVE_UNISTD_H
 #  include <unistd.h>

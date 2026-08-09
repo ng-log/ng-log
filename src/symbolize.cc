@@ -57,12 +57,12 @@
 
 #include "utilities.h"
 
+struct backtrace_state;
+
 #if defined(HAVE_SYMBOLIZE)
 
-#  include <algorithm>
 #  include <cstdlib>
 #  include <cstring>
-#  include <limits>
 
 #  include "demangle.h"
 

@@ -19,7 +19,6 @@
 
 #include "config.h"
 #include "ng-log/export.h"
-#include "ng-log/platform.h"
 
 #ifdef HAVE_SUBPROCESS
 
