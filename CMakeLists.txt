@@ -731,6 +731,12 @@ if (BUILD_TESTING AND GTest_FOUND)
 
   target_link_libraries (logging_unittest PRIVATE ng-log_test)
 
+  add_executable (preinit_warning_unittest
+    src/preinit_warning_unittest.cc
+  )
+
+  target_link_libraries (preinit_warning_unittest PRIVATE ng-log_test)
+
   add_executable (color_attributes_unittest
     src/color_attributes_unittest.cc
   )
@@ -935,6 +941,12 @@ if (BUILD_TESTING AND GTest_FOUND)
       # fixed path under TestTmpDir(), so tests using them must not run
       # concurrently with each other or with the cleanup_* tests below.
       RESOURCE_LOCK captured_stream
+  )
+
+  gtest_discover_tests (preinit_warning_unittest
+    TEST_PREFIX preinit_warning.
+    DISCOVERY_TIMEOUT 30
+    DISCOVERY_MODE PRE_TEST
   )
 
   gtest_discover_tests (color_attributes_unittest

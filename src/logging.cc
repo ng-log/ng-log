@@ -1173,6 +1173,34 @@ static void WriteToStderr(const char* message, size_t len) {
   fwrite(message, len, 1, stderr);
 }
 
+static void WritePreInitializationWarning() {
+  constexpr char kWarning[] = "WARNING";
+  constexpr char kPrefix[] = ": Logging before ";
+  constexpr char kSymbol[] = "InitializeLogging()";
+  constexpr char kMiddle[] = " is written to ";
+  constexpr char kStream[] = "STDERR";
+  constexpr char kNewline[] = "\n";
+
+  const ColorMode mode =
+      FLAGS_colorlogtostderr ? StreamColorMode(stderr) : ColorMode::kNone;
+  const Theme& theme = DefaultTheme();
+  const auto write_content = [](const char* text, size_t) {
+    WriteRawToStderr(text);
+  };
+  const auto write_styled = [mode, &write_content](ColorSpec spec,
+                                                   const char* text) {
+    WriteStyledField(spec, mode, write_content, text, strlen(text));
+  };
+  const auto write_plain = [](const char* text) { WriteRawToStderr(text); };
+
+  write_styled(theme.Get(Role::kLogWarning), kWarning);
+  write_plain(kPrefix);
+  write_styled(theme.Get(Role::kStackFunction), kSymbol);
+  write_plain(kMiddle);
+  write_styled(theme.Get(Role::kMetaIdentifier), kStream);
+  write_plain(kNewline);
+}
+
 inline void LogDestination::MaybeLogToStderr(
     const internal::LogMessageData& data) {
   if ((data.severity_ >= FLAGS_stderrthreshold) || FLAGS_alsologtostderr) {
@@ -2470,10 +2498,7 @@ void LogMessage::SendToLog() EXCLUSIVE_LOCKS_REQUIRED(log_mutex) {
   // Messages of a given severity get logged to lower severity logs, too
 
   if (!already_warned_before_init && !IsLoggingInitialized()) {
-    const char w[] =
-        "WARNING: Logging before InitializeLogging() is "
-        "written to STDERR\n";
-    WriteToStderr(w, strlen(w));
+    WritePreInitializationWarning();
     already_warned_before_init = true;
   }
 
