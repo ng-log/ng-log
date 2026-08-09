@@ -16,6 +16,7 @@
 - Improve suppressed logging performance by avoiding message construction and
   reduce overhead when formatting default prefixes
 - Improve logging throughput for applications that log from multiple threads
+- Allow sink callbacks to run concurrently and safely perform nested logging
 - Include the current thread name in failure signal reports when available
 
 !!! warning "Compatibility"

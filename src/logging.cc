@@ -34,6 +34,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <chrono>
 #include <condition_variable>
@@ -691,6 +692,7 @@ class LogDestination {
 
   // arbitrary global logging destinations.
   static std::shared_ptr<const vector<LogSink*>> sinks_;
+  static std::atomic<bool> sinks_present_;
 
   // Protects the vector sinks_,
   // but not the LogSink objects its elements reference.
@@ -712,6 +714,7 @@ string LogDestination::addresses_;
 string LogDestination::hostname_;
 
 std::shared_ptr<const vector<LogSink*>> LogDestination::sinks_;
+std::atomic<bool> LogDestination::sinks_present_{false};
 LogDestination::SinkMutex LogDestination::sink_mutex_;
 std::mutex LogDestination::sink_call_mutex_;
 std::condition_variable LogDestination::sink_call_cond_;
@@ -796,6 +799,7 @@ inline void LogDestination::AddLogSink(LogSink* destination) {
   std::vector<LogSink*> sinks = sinks_ ? *sinks_ : std::vector<LogSink*>{};
   sinks.push_back(destination);
   sinks_ = std::make_shared<const std::vector<LogSink*>>(std::move(sinks));
+  sinks_present_.store(true, std::memory_order_release);
 }
 
 inline void LogDestination::RemoveLogSink(LogSink* destination) {
@@ -809,6 +813,7 @@ inline void LogDestination::RemoveLogSink(LogSink* destination) {
       sinks.erase(std::remove(sinks.begin(), sinks.end(), destination),
                   sinks.end());
       sinks_ = std::make_shared<const std::vector<LogSink*>>(std::move(sinks));
+      sinks_present_.store(!sinks_->empty(), std::memory_order_release);
     }
   }
   WaitForSinkCalls(destination);
@@ -1292,6 +1297,10 @@ inline void LogDestination::WaitForSinks(internal::LogMessageData* data) {
 }
 
 std::shared_ptr<const std::vector<LogSink*>> LogDestination::GetSinksForCall() {
+  if (!sinks_present_.load(std::memory_order_acquire)) {
+    return nullptr;
+  }
+
   std::shared_lock<SinkMutex> l{sink_mutex_};
   const auto sinks = sinks_;
   if (sinks) {
@@ -2373,14 +2382,45 @@ void LogMessage::Flush() {
   }
   data_->message_text_[data_->num_chars_to_log_] = '\0';
 
-  // Prevent any subtle race conditions by wrapping a mutex lock around
-  // the actual logging action per se.
+  const auto send_method = data_->send_method_;
+  const bool send_to_sink = send_method == &LogMessage::SendToSink ||
+                            send_method == &LogMessage::SendToSinkAndLog;
+  const bool send_to_registered_sinks =
+      send_method == &LogMessage::SendToLog ||
+      send_method == &LogMessage::SendToSyslogAndLog ||
+      send_method == &LogMessage::SendToSinkAndLog ||
+      send_method == &LogMessage::WriteToStringAndLog ||
+      (send_method == &LogMessage::SaveOrSendToLog &&
+       data_->outvec_ == nullptr);
+  const bool wait_for_sinks_before_count = send_to_registered_sinks &&
+                                           data_->severity_ == NGLOG_FATAL &&
+                                           exit_on_dfatal;
+
+  if (send_to_sink) {
+    SendToSink();
+  }
+
+  // Protect the shared logging destinations while dispatching the message.
   {
     std::lock_guard<internal::LogMutex> l{log_mutex};
-    (this->*(data_->send_method_))();
-    ++num_messages_[static_cast<int>(data_->severity_)];
+    if (send_method == &LogMessage::SendToSinkAndLog) {
+      SendToLog();
+    } else if (send_method != &LogMessage::SendToSink) {
+      (this->*send_method)();
+    }
   }
-  LogDestination::WaitForSinks(data_);
+
+  if (send_to_registered_sinks) {
+    SendToRegisteredSinks();
+  }
+
+  if (wait_for_sinks_before_count) {
+    LogDestination::WaitForSinks(data_);
+  }
+  ++num_messages_[static_cast<int>(data_->severity_)];
+  if (!wait_for_sinks_before_count) {
+    LogDestination::WaitForSinks(data_);
+  }
 
   if (append_newline) {
     // Fix the ostrstream back how it was before we screwed with it.
@@ -2447,11 +2487,6 @@ void LogMessage::SendToLog() EXCLUSIVE_LOCKS_REQUIRED(log_mutex) {
       ColoredWriteToStderrWithFields(*data_);
     }
 
-    // this could be protected by a flag if necessary.
-    LogDestination::LogToSinks(
-        data_->severity_, data_->fullname_, data_->basename_, data_->line_,
-        time_, data_->message_text_ + data_->num_prefix_chars_,
-        (data_->num_chars_to_log_ - data_->num_prefix_chars_ - 1));
   } else {
     // log this message to all log files of severity <= severity_
     LogDestination::LogToAllLogfilesLocked(data_->severity_, time_.when(),
@@ -2461,10 +2496,6 @@ void LogMessage::SendToLog() EXCLUSIVE_LOCKS_REQUIRED(log_mutex) {
     LogDestination::MaybeLogToStderr(*data_);
     LogDestination::MaybeLogToEmail(data_->severity_, data_->message_text_,
                                     data_->num_chars_to_log_);
-    LogDestination::LogToSinks(
-        data_->severity_, data_->fullname_, data_->basename_, data_->line_,
-        time_, data_->message_text_ + data_->num_prefix_chars_,
-        (data_->num_chars_to_log_ - data_->num_prefix_chars_ - 1));
     // NOTE: -1 removes trailing \n
   }
 
@@ -2494,8 +2525,6 @@ void LogMessage::SendToLog() EXCLUSIVE_LOCKS_REQUIRED(log_mutex) {
         }
       }
     }
-
-    LogDestination::WaitForSinks(data_);
   }
 }
 
@@ -2536,8 +2565,7 @@ void LogMessage::Fail() {
   std::abort();
 }
 
-// L >= log_mutex (callers must hold the log_mutex).
-void LogMessage::SendToSink() EXCLUSIVE_LOCKS_REQUIRED(log_mutex) {
+void LogMessage::SendToSink() {
   if (data_->sink_ != nullptr) {
     RAW_DCHECK(data_->num_chars_to_log_ > 0 &&
                    data_->message_text_[data_->num_chars_to_log_ - 1] == '\n',
@@ -2547,6 +2575,13 @@ void LogMessage::SendToSink() EXCLUSIVE_LOCKS_REQUIRED(log_mutex) {
         time_, data_->message_text_ + data_->num_prefix_chars_,
         (data_->num_chars_to_log_ - data_->num_prefix_chars_ - 1));
   }
+}
+
+void LogMessage::SendToRegisteredSinks() {
+  LogDestination::LogToSinks(
+      data_->severity_, data_->fullname_, data_->basename_, data_->line_, time_,
+      data_->message_text_ + data_->num_prefix_chars_,
+      (data_->num_chars_to_log_ - data_->num_prefix_chars_ - 1));
 }
 
 // L >= log_mutex (callers must hold the log_mutex).

@@ -32,6 +32,7 @@
 
 #include <fcntl.h>
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
@@ -558,6 +559,63 @@ class BlockingLogger : public base::Logger {
   bool released_{false};
 };
 
+class ReentrantLogSink : public LogSink {
+ public:
+  void send(LogSeverity /* severity */, const char* /* full_filename */,
+            const char* /* base_filename */, int /* line */,
+            const LogMessageTime& /* time */, const char* /* message */,
+            size_t /* message_len */) override {
+    bool expected = false;
+    if (!nested_started_.compare_exchange_strong(expected, true)) {
+      return;
+    }
+
+    const std::shared_ptr<State> state = state_;
+    std::thread nested_thread([state] {
+      LOG(INFO) << "Nested log from sink callback.";
+      {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->nested_finished = true;
+      }
+      state->condition.notify_all();
+    });
+    nested_thread.detach();
+
+    std::unique_lock<std::mutex> lock(state->mutex);
+    const bool nested_completed = state->condition.wait_for(
+        lock, kSinkCallbackTimeout, [state] { return state->nested_finished; });
+    state->nested_completed_during_callback = nested_completed;
+    lock.unlock();
+    state->condition.notify_all();
+  }
+
+  bool WaitForNestedCompletion() const {
+    std::unique_lock<std::mutex> lock(state_->mutex);
+    return state_->condition.wait_for(
+        lock, kSinkCallbackTimeout, [this] { return state_->nested_finished; });
+  }
+
+  bool NestedCompletedDuringCallback() const {
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    return state_->nested_completed_during_callback;
+  }
+
+ private:
+  static constexpr std::chrono::seconds kSinkCallbackTimeout{1};
+
+  struct State {
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool nested_finished{false};
+    bool nested_completed_during_callback{false};
+  };
+
+  std::atomic<bool> nested_started_{false};
+  std::shared_ptr<State> state_{std::make_shared<State>()};
+};
+
+constexpr std::chrono::seconds ReentrantLogSink::kSinkCallbackTimeout;
+
 void TestLogSink() {
   TestLogSinkImpl sink;
   LogSink* no_sink = nullptr;
@@ -601,6 +659,45 @@ void TestLogSink() {
     LogMessage("foo", LogMessage::kNoLogPrefix, NGLOG_INFO).stream() << error;
   }
 }
+
+TEST(Logging, RegisteredSinkCanLogDuringSend) {
+  ReentrantLogSink sink;
+  AddLogSink(&sink);
+
+  LOG(INFO) << "Log to registered reentrant sink.";
+
+  RemoveLogSink(&sink);
+  EXPECT_TRUE(sink.WaitForNestedCompletion());
+  EXPECT_TRUE(sink.NestedCompletedDuringCallback());
+}
+
+TEST(Logging, DirectSinkCanLogDuringSend) {
+  FlagSaver saver;
+  FLAGS_logtostderr = true;
+
+  ReentrantLogSink sink;
+  LOG_TO_SINK_BUT_NOT_TO_LOGFILE(&sink, INFO)
+      << "Log to direct reentrant sink.";
+
+  EXPECT_TRUE(sink.WaitForNestedCompletion());
+  EXPECT_TRUE(sink.NestedCompletedDuringCallback());
+}
+
+#ifdef NGLOG_ENABLE_LOCK_METRICS
+TEST(Logging, DirectSinkWithoutRegisteredSinksDoesNotLockSinkRegistry) {
+  FlagSaver saver;
+  FLAGS_logtostderr = true;
+  internal::ResetLockMetrics();
+
+  TestLogSinkImpl sink;
+  LOG_TO_SINK_BUT_NOT_TO_LOGFILE(&sink, INFO)
+      << "Log without registered sinks.";
+
+  const internal::LockMetrics metrics =
+      internal::GetLockMetrics(internal::LockKind::kSink);
+  EXPECT_EQ(metrics.acquisitions, 0U);
+}
+#endif
 
 // For testing using CHECK*() on anonymous enums.
 enum { CASE_A, CASE_B };

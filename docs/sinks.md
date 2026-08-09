@@ -22,9 +22,12 @@ class LogSink {
 The user must implement `#!cpp nglog::LogSink::send`, which is called by the
 library every time a message is logged.
 
-!!! warning "Possible deadlock due to nested logging"
-    This method can't use `LOG()` or `CHECK()` as logging system mutex(s) are
-    held during this call.
+Sink callbacks may run concurrently for different messages. They must be
+thread-safe and may use `LOG()` or `CHECK()` for nested logging.
+
+Callbacks for the sinks associated with one message retain the library's
+existing sink order. No ordering is guaranteed between callbacks for different
+messages.
 
 ## Registering Log Sinks
 
