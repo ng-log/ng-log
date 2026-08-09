@@ -33,6 +33,8 @@ include (GNUInstallDirs)
 
 option (BUILD_SHARED_LIBS "Build shared libraries" ON)
 option (BUILD_EXAMPLES "Build examples" ON)
+option (WITH_LOCK_METRICS
+  "Enable internal lock contention metrics" OFF)
 option (PRINT_UNSYMBOLIZED_STACK_TRACES
   "Print file offsets in traces instead of symbolizing" OFF)
 option (WITH_GFLAGS "Use gflags" ON)
@@ -484,6 +486,7 @@ set (NGLOG_SRCS
   src/base/commandlineflags.h
   src/internal/color_format.cc
   src/internal/hyperlink.cc
+  src/internal/lock_metrics.cc
   src/internal/source_location.cc
   src/internal/style_recorder.cc
   src/internal/styled_output.cc
@@ -508,6 +511,7 @@ set (NGLOG_SRCS
   src/ng-log/internal/text_attributes.h
   src/ng-log/internal/text_style.h
   src/internal/source_location.h
+  src/internal/lock_metrics.h
   src/internal/style_recorder.h
   src/internal/styled_output.h
   src/internal/terminal_capabilities.h
@@ -536,6 +540,10 @@ add_library (ng-log_internal OBJECT
 )
 target_compile_features (ng-log_internal PUBLIC $<TARGET_PROPERTY:ng-log,COMPILE_FEATURES>)
 set_target_properties (ng-log_internal PROPERTIES DEFINE_SYMBOL ng_log_EXPORTS)
+
+if (WITH_LOCK_METRICS)
+  target_compile_definitions (ng-log_internal PRIVATE NGLOG_ENABLE_LOCK_METRICS)
+endif (WITH_LOCK_METRICS)
 
 # Some generators (such as Xcode) do not generate any output if the target does
 # not reference at least one source file.
@@ -710,6 +718,9 @@ if (BUILD_TESTING AND GTest_FOUND)
     $<TARGET_PROPERTY:ng-log,LINK_LIBRARIES> GTest::gtest GTest::gmock)
   target_compile_definitions (ng-log_test INTERFACE NGLOG_STATIC_DEFINE
     $<TARGET_PROPERTY:ng-log,COMPILE_DEFINITIONS>)
+  if (WITH_LOCK_METRICS)
+    target_compile_definitions (ng-log_test INTERFACE NGLOG_ENABLE_LOCK_METRICS)
+  endif (WITH_LOCK_METRICS)
   target_compile_features (ng-log_test INTERFACE
     $<TARGET_PROPERTY:ng-log,COMPILE_FEATURES>)
   target_include_directories (ng-log_test INTERFACE $<TARGET_PROPERTY:ng-log,INCLUDE_DIRECTORIES>)
@@ -736,6 +747,8 @@ if (BUILD_TESTING AND GTest_FOUND)
     TEST_PREFIX logtostdout.
     DISCOVERY_TIMEOUT 30
     DISCOVERY_MODE PRE_TEST
+    PROPERTIES
+      RESOURCE_LOCK captured_stream
   )
 
   add_executable (stl_logging_unittest
@@ -927,6 +940,8 @@ if (BUILD_TESTING AND GTest_FOUND)
   gtest_discover_tests (color_attributes_unittest
     TEST_PREFIX color_attributes.
     DISCOVERY_TIMEOUT 30
+    PROPERTIES
+      RESOURCE_LOCK captured_stream
   )
 
   if (TARGET signalhandler_unittest)
@@ -1374,6 +1389,9 @@ if (benchmark_FOUND)
   )
 
   target_link_libraries (logging_benchmark PRIVATE ng-log benchmark::benchmark)
+  if (WITH_LOCK_METRICS)
+    target_compile_definitions (logging_benchmark PRIVATE NGLOG_ENABLE_LOCK_METRICS)
+  endif (WITH_LOCK_METRICS)
 endif (benchmark_FOUND)
 
 if (BUILD_EXAMPLES)

@@ -37,7 +37,11 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -48,6 +52,8 @@ using testing::EndsWith;
 using testing::InSequence;
 using testing::InvokeWithoutArgs;
 using testing::StrEq;
+
+constexpr std::chrono::milliseconds kSinkCallbackTimeout{100};
 
 // Tests that ScopedMockLog intercepts LOG()s when it's alive.
 TEST(ScopedMockLogTest, InterceptsLog) {
@@ -94,6 +100,106 @@ TEST(ScopedMockLogTest, LogDuringIntercept) {
   EXPECT_CALL(log, Log(NGLOG_INFO, StrEq(__FILE__),
                        StrEq("Logging the entire forest...")));
   LogBranch();
+}
+
+TEST(ScopedMockLogTest, SendsToSinksInReverseRegistrationOrder) {
+  ScopedMockLog first;
+  ScopedMockLog second;
+  InSequence s;
+  EXPECT_CALL(second, Log(NGLOG_INFO, StrEq(__FILE__),
+                          StrEq("Logging in registration order.")));
+  EXPECT_CALL(first, Log(NGLOG_INFO, StrEq(__FILE__),
+                         StrEq("Logging in registration order.")));
+
+  LOG(INFO) << "Logging in registration order.";
+}
+
+class ReentrantLogSink : public nglog::LogSink {
+ public:
+  ~ReentrantLogSink() override { JoinThreads(); }
+
+  void send(nglog::LogSeverity /* severity */, const char* /* full_filename */,
+            const char* /* base_filename */, int /* line */,
+            const nglog::LogMessageTime& /* time */, const char* /* message */,
+            std::size_t /* message_len */) override {}
+
+  void WaitTillSent() override {
+    {
+      std::lock_guard<std::mutex> lock{mutex_};
+      if (started_) {
+        return;
+      }
+      started_ = true;
+    }
+
+    add_thread_ = std::thread([this] {
+      {
+        std::lock_guard<std::mutex> lock{mutex_};
+        add_started_ = true;
+      }
+      condition_.notify_all();
+      nglog::AddLogSink(this);
+      {
+        std::lock_guard<std::mutex> lock{mutex_};
+        add_finished_ = true;
+      }
+      condition_.notify_all();
+    });
+
+    {
+      std::unique_lock<std::mutex> lock{mutex_};
+      condition_.wait(lock, [this] { return add_started_; });
+    }
+
+    log_thread_ = std::thread([this] {
+      LOG(INFO) << "Logging from a sink callback.";
+      {
+        std::lock_guard<std::mutex> lock{mutex_};
+        log_finished_ = true;
+      }
+      condition_.notify_all();
+    });
+
+    std::unique_lock<std::mutex> lock{mutex_};
+    callback_completed_ =
+        condition_.wait_for(lock, kSinkCallbackTimeout,
+                            [this] { return add_finished_ && log_finished_; });
+  }
+
+  bool CallbackCompleted() const {
+    std::lock_guard<std::mutex> lock{mutex_};
+    return callback_completed_;
+  }
+
+ private:
+  void JoinThreads() {
+    if (add_thread_.joinable()) {
+      add_thread_.join();
+    }
+    if (log_thread_.joinable()) {
+      log_thread_.join();
+    }
+  }
+
+  mutable std::mutex mutex_;
+  std::condition_variable condition_;
+  std::thread add_thread_;
+  std::thread log_thread_;
+  bool started_{false};
+  bool add_started_{false};
+  bool add_finished_{false};
+  bool log_finished_{false};
+  bool callback_completed_{false};
+};
+
+TEST(ScopedMockLogTest, SinkCallbackCanLogWhileSinksChange) {
+  ReentrantLogSink sink;
+  nglog::AddLogSink(&sink);
+
+  LOG(INFO) << "Start sink callback.";
+
+  EXPECT_TRUE(sink.CallbackCompleted());
+  nglog::RemoveLogSink(&sink);
 }
 
 }  // namespace

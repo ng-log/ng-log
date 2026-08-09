@@ -33,9 +33,11 @@
 #include <fcntl.h>
 
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <future>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -64,6 +66,7 @@
 #include <gtest/gtest.h>
 
 #include "base/commandlineflags.h"
+#include "internal/lock_metrics.h"
 #include "mock-log.h"
 #include "ng-log/logging.h"
 #include "ng-log/raw_logging.h"
@@ -518,6 +521,41 @@ class TestLogSinkImpl : public LogSink {
     errors.push_back(ToString(severity, base_filename, line, logmsgtime,
                               message, message_len));
   }
+};
+
+class BlockingLogger : public base::Logger {
+ public:
+  void Write(bool /* force_flush */,
+             const std::chrono::system_clock::time_point&,
+             const char* /* message */, size_t /* length */) override {
+    std::unique_lock<std::mutex> lock(mutex_);
+    entered_ = true;
+    condition_.notify_all();
+    condition_.wait(lock, [this] { return released_; });
+  }
+
+  void Flush() override {}
+  uint32 LogSize() override { return 0; }
+
+  bool WaitUntilEntered() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return condition_.wait_for(lock, std::chrono::seconds(1),
+                               [this] { return entered_; });
+  }
+
+  void Release() {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      released_ = true;
+    }
+    condition_.notify_all();
+  }
+
+ private:
+  std::mutex mutex_;
+  std::condition_variable condition_;
+  bool entered_{false};
+  bool released_{false};
 };
 
 void TestLogSink() {
@@ -1219,6 +1257,59 @@ TEST(Logging, DropLogMemoryConcurrentWriters) {
   FLAGS_drop_log_memory = old_drop_log_memory;
   FLAGS_logbufsecs = old_logbufsecs;
 #endif
+}
+
+TEST(Logging, MessageCountDoesNotWaitForLogger) {
+  FlagSaver saver;
+  FLAGS_logtostderr = false;
+  FLAGS_logtostdout = false;
+
+  base::Logger* old_logger = base::GetLogger(NGLOG_INFO);
+  auto* logger = new BlockingLogger;
+  base::SetLogger(NGLOG_INFO, logger);
+
+  std::thread logging_thread([] { LOG(INFO) << "blocked logger"; });
+  ASSERT_TRUE(logger->WaitUntilEntered());
+
+  std::future<int64> message_count = std::async(
+      std::launch::async, [] { return LogMessage::num_messages(NGLOG_INFO); });
+  EXPECT_EQ(message_count.wait_for(std::chrono::milliseconds(100)),
+            std::future_status::ready);
+
+  logger->Release();
+  logging_thread.join();
+  EXPECT_EQ(message_count.wait_for(std::chrono::seconds(1)),
+            std::future_status::ready);
+  if (message_count.valid()) {
+    message_count.get();
+  }
+  base::SetLogger(NGLOG_INFO, old_logger);
+}
+
+TEST(Logging, DefaultFileDispatchDoesNotRelockFile) {
+  FlagSaver saver;
+  FLAGS_logtostderr = false;
+  FLAGS_logtostdout = false;
+  FLAGS_timestamp_in_logfile_name = false;
+
+  const std::string destination =
+      TestTmpDir() + "/logging_test_default_file_dispatch";
+  DeleteFiles(destination + "*");
+  SetLogDestination(NGLOG_INFO, destination.c_str());
+
+#ifdef NGLOG_ENABLE_LOCK_METRICS
+  internal::ResetLockMetrics();
+#endif
+  LOG(INFO) << "default file dispatch";
+
+#ifdef NGLOG_ENABLE_LOCK_METRICS
+  const internal::LockMetrics metrics =
+      internal::GetLockMetrics(internal::LockKind::kFile);
+  EXPECT_EQ(metrics.acquisitions, 0U);
+#endif
+
+  LogToStderr();
+  DeleteFiles(destination + "*");
 }
 
 struct RecordDeletionLogger : public base::Logger {

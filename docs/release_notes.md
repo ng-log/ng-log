@@ -15,6 +15,7 @@
 - Omit the default header format when a custom prefix formatter is installed
 - Improve suppressed logging performance by avoiding message construction and
   reduce overhead when formatting default prefixes
+- Improve logging throughput for applications that log from multiple threads
 - Include the current thread name in failure signal reports when available
 
 !!! warning "Compatibility"

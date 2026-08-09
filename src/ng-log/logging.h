@@ -1344,7 +1344,7 @@ class NGLOG_EXPORT LogMessage {
   void RecordCrashReason(internal::CrashReason* reason);
 
   // Counts of messages sent at each priority:
-  static int64 num_messages_[NUM_SEVERITIES];  // under log_mutex
+  static std::atomic<int64> num_messages_[NUM_SEVERITIES];
 
   // We keep the data in a separate struct so that each instance of
   // LogMessage uses less stack space.

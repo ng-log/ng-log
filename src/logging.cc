@@ -52,6 +52,7 @@
 #include <utility>
 
 #include "config.h"
+#include "internal/lock_metrics.h"
 #include "internal/source_location.h"
 #include "internal/style_recorder.h"
 #include "internal/styled_output.h"
@@ -299,10 +300,10 @@ struct LogMessageData {
 // changing the destination file for log messages of a given severity) also
 // lock this mutex.  Please be sure that anybody who might possibly need to
 // lock it does so.
-static std::mutex log_mutex;
+static internal::LogMutex log_mutex;
 
 // Number of messages sent at each severity.  Under log_mutex.
-int64 LogMessage::num_messages_[NUM_SEVERITIES] = {0, 0, 0, 0};
+std::atomic<int64> LogMessage::num_messages_[NUM_SEVERITIES]{};
 
 // Globally disable log writing (if disk is full)
 static bool stop_writing = false;
@@ -444,6 +445,12 @@ class LogFileObject : public base::Logger {
                  timestamp,  // Timestamp for this entry
              const char* message, size_t message_len) override;
 
+  // Called while the global logging mutex serializes the default logger.
+  void WriteUnlocked(bool force_flush,
+                     const std::chrono::system_clock::time_point& timestamp,
+                     const char* message, size_t message_len,
+                     std::unique_lock<internal::FileMutex>* lock);
+
   // Configuration options
   void SetBasename(const char* basename);
   void SetExtension(const char* ext);
@@ -455,7 +462,7 @@ class LogFileObject : public base::Logger {
   // It is the actual file length for the system loggers,
   // i.e., INFO, ERROR, etc.
   uint32 LogSize() override {
-    std::lock_guard<std::mutex> l{mutex_};
+    std::lock_guard<internal::FileMutex> l{mutex_};
     return file_length_;
   }
 
@@ -467,7 +474,7 @@ class LogFileObject : public base::Logger {
  private:
   static const uint32 kRolloverAttemptFrequency = 0x20;
 
-  std::mutex mutex_;
+  internal::FileMutex mutex_;
   bool base_filename_selected_;
   string base_filename_;
   string symlink_basename_;
@@ -549,8 +556,8 @@ class LogCleaner {
   // All members are guarded by mutex_. Scans run on the cleaner thread
   // without any lock held so that logging threads registering new log files
   // are never blocked on directory I/O.
-  std::mutex mutex_;
-  std::condition_variable cond_;
+  internal::CleanerMutex mutex_;
+  internal::CleanerConditionVariable cond_;
   std::thread thread_;  // joinable while enabled_ is true
   bool enabled_{false};
   std::chrono::minutes overdue_{
@@ -595,16 +602,21 @@ class LogDestination {
   LogDestination(LogSeverity severity, const char* base_filename);
 
  private:
-#if defined(__cpp_lib_shared_mutex) && (__cpp_lib_shared_mutex >= 201505L)
+#ifdef NGLOG_ENABLE_LOCK_METRICS
+  using SinkMutex = internal::MetricsSharedMutex<internal::LockKind::kSink>;
+  using SinkLock = std::lock_guard<SinkMutex>;
+#else
+#  if defined(__cpp_lib_shared_mutex) && (__cpp_lib_shared_mutex >= 201505L)
   // Use untimed shared mutex
   using SinkMutex = std::shared_mutex;
   using SinkLock = std::lock_guard<SinkMutex>;
-#else   // !(defined(__cpp_lib_shared_mutex) && (__cpp_lib_shared_mutex >=
-        // 201505L)) Fallback to timed shared mutex
+#  else   // !(defined(__cpp_lib_shared_mutex) && (__cpp_lib_shared_mutex >=
+          // 201505L)) Fallback to timed shared mutex
   using SinkMutex = std::shared_timed_mutex;
   using SinkLock = std::unique_lock<SinkMutex>;
-#endif  // defined(__cpp_lib_shared_mutex) && (__cpp_lib_shared_mutex >=
-        // 201505L)
+#  endif  // defined(__cpp_lib_shared_mutex) && (__cpp_lib_shared_mutex >=
+          // 201505L)
+#endif    // NGLOG_ENABLE_LOCK_METRICS
 
   friend std::default_delete<LogDestination>;
   ~LogDestination();
@@ -623,10 +635,18 @@ class LogDestination {
       LogSeverity severity,
       const std::chrono::system_clock::time_point& timestamp,
       const char* message, size_t len);
+  static void MaybeLogToLogfileLocked(
+      LogSeverity severity,
+      const std::chrono::system_clock::time_point& timestamp,
+      const char* message, size_t len);
   // Take a log message of a particular severity and log it to the file
   // for that severity and also for all files with severity less than
   // this severity.
   static void LogToAllLogfiles(
+      LogSeverity severity,
+      const std::chrono::system_clock::time_point& timestamp,
+      const char* message, size_t len);
+  static void LogToAllLogfilesLocked(
       LogSeverity severity,
       const std::chrono::system_clock::time_point& timestamp,
       const char* message, size_t len);
@@ -636,6 +656,20 @@ class LogDestination {
                          const char* base_filename, int line,
                          const LogMessageTime& time, const char* message,
                          size_t message_len);
+
+  static std::shared_ptr<const std::vector<LogSink*>> GetSinksForCall();
+  static void EndSinkCall(LogSink* sink);
+  static void WaitForSinkCalls(LogSink* sink);
+  static void WaitForAllSinkCalls();
+
+  class SinkCallGuard {
+   public:
+    explicit SinkCallGuard(LogSink* sink) : sink_(sink) {}
+    ~SinkCallGuard() { LogDestination::EndSinkCall(sink_); }
+
+   private:
+    LogSink* sink_;
+  };
 
   // Wait for all registered sinks via WaitTillSent
   // including the optional one in "data".
@@ -656,11 +690,14 @@ class LogDestination {
   static string hostname_;
 
   // arbitrary global logging destinations.
-  static std::unique_ptr<vector<LogSink*>> sinks_;
+  static std::shared_ptr<const vector<LogSink*>> sinks_;
 
   // Protects the vector sinks_,
   // but not the LogSink objects its elements reference.
   static SinkMutex sink_mutex_;
+  static std::mutex sink_call_mutex_;
+  static std::condition_variable sink_call_cond_;
+  static std::unordered_map<LogSink*, size_t> sink_call_counts_;
 
   // Disallow
   LogDestination(const LogDestination&) = delete;
@@ -674,8 +711,11 @@ std::underlying_type_t<LogSeverity> LogDestination::email_logging_severity_ =
 string LogDestination::addresses_;
 string LogDestination::hostname_;
 
-std::unique_ptr<vector<LogSink*>> LogDestination::sinks_;
+std::shared_ptr<const vector<LogSink*>> LogDestination::sinks_;
 LogDestination::SinkMutex LogDestination::sink_mutex_;
+std::mutex LogDestination::sink_call_mutex_;
+std::condition_variable LogDestination::sink_call_cond_;
+std::unordered_map<LogSink*, size_t> LogDestination::sink_call_counts_;
 
 /* static */
 const string& LogDestination::hostname() {
@@ -724,7 +764,7 @@ inline void LogDestination::FlushLogFilesUnsafe(int min_severity) {
 inline void LogDestination::FlushLogFiles(int min_severity) {
   // Prevent any subtle race conditions by wrapping a mutex lock around
   // all this stuff.
-  std::lock_guard<std::mutex> l{log_mutex};
+  std::lock_guard<::nglog::internal::LogMutex> l{log_mutex};
   for (int i = min_severity; i < NUM_SEVERITIES; i++) {
     LogDestination* log = log_destination(static_cast<LogSeverity>(i));
     if (log != nullptr) {
@@ -737,7 +777,7 @@ inline void LogDestination::SetLogDestination(LogSeverity severity,
                                               const char* base_filename) {
   // Prevent any subtle race conditions by wrapping a mutex lock around
   // all this stuff.
-  std::lock_guard<std::mutex> l{log_mutex};
+  std::lock_guard<::nglog::internal::LogMutex> l{log_mutex};
   log_destination(severity)->fileobject_.SetBasename(base_filename);
 }
 
@@ -745,7 +785,7 @@ inline void LogDestination::SetLogSymlink(LogSeverity severity,
                                           const char* symlink_basename) {
   CHECK_GE(severity, 0);
   CHECK_LT(severity, NUM_SEVERITIES);
-  std::lock_guard<std::mutex> l{log_mutex};
+  std::lock_guard<::nglog::internal::LogMutex> l{log_mutex};
   log_destination(severity)->fileobject_.SetSymlinkBasename(symlink_basename);
 }
 
@@ -753,25 +793,31 @@ inline void LogDestination::AddLogSink(LogSink* destination) {
   // Prevent any subtle race conditions by wrapping a mutex lock around
   // all this stuff.
   SinkLock l{sink_mutex_};
-  if (sinks_ == nullptr) sinks_ = std::make_unique<std::vector<LogSink*>>();
-  sinks_->push_back(destination);
+  std::vector<LogSink*> sinks = sinks_ ? *sinks_ : std::vector<LogSink*>{};
+  sinks.push_back(destination);
+  sinks_ = std::make_shared<const std::vector<LogSink*>>(std::move(sinks));
 }
 
 inline void LogDestination::RemoveLogSink(LogSink* destination) {
   // Prevent any subtle race conditions by wrapping a mutex lock around
   // all this stuff.
-  SinkLock l{sink_mutex_};
-  // This doesn't keep the sinks in order, but who cares?
-  if (sinks_) {
-    sinks_->erase(std::remove(sinks_->begin(), sinks_->end(), destination),
-                  sinks_->end());
+  {
+    SinkLock l{sink_mutex_};
+    // This doesn't keep the sinks in order, but who cares?
+    if (sinks_) {
+      std::vector<LogSink*> sinks = *sinks_;
+      sinks.erase(std::remove(sinks.begin(), sinks.end(), destination),
+                  sinks.end());
+      sinks_ = std::make_shared<const std::vector<LogSink*>>(std::move(sinks));
+    }
   }
+  WaitForSinkCalls(destination);
 }
 
 inline void LogDestination::SetLogFilenameExtension(const char* ext) {
   // Prevent any subtle race conditions by wrapping a mutex lock around
   // all this stuff.
-  std::lock_guard<std::mutex> l{log_mutex};
+  std::lock_guard<::nglog::internal::LogMutex> l{log_mutex};
   for (int severity = 0; severity < NUM_SEVERITIES; ++severity) {
     log_destination(static_cast<LogSeverity>(severity))
         ->fileobject_.SetExtension(ext);
@@ -781,7 +827,7 @@ inline void LogDestination::SetLogFilenameExtension(const char* ext) {
 inline void LogDestination::SetStderrLogging(LogSeverity min_severity) {
   // Prevent any subtle race conditions by wrapping a mutex lock around
   // all this stuff.
-  std::lock_guard<std::mutex> l{log_mutex};
+  std::lock_guard<internal::LogMutex> l{log_mutex};
   FLAGS_stderrthreshold = min_severity;
 }
 
@@ -799,7 +845,7 @@ inline void LogDestination::SetEmailLogging(LogSeverity min_severity,
                                             const char* addresses) {
   // Prevent any subtle race conditions by wrapping a mutex lock around
   // all this stuff.
-  std::lock_guard<std::mutex> l{log_mutex};
+  std::lock_guard<internal::LogMutex> l{log_mutex};
   LogDestination::email_logging_severity_ = min_severity;
   LogDestination::addresses_ = addresses;
 }
@@ -1164,6 +1210,20 @@ inline void LogDestination::MaybeLogToLogfile(
   destination->logger_->Write(should_flush, timestamp, message, len);
 }
 
+inline void LogDestination::MaybeLogToLogfileLocked(
+    LogSeverity severity,
+    const std::chrono::system_clock::time_point& timestamp, const char* message,
+    size_t len) {
+  const bool should_flush = severity > FLAGS_logbuflevel;
+  LogDestination* destination = log_destination(severity);
+  if (destination->logger_ == &destination->fileobject_) {
+    destination->fileobject_.WriteUnlocked(should_flush, timestamp, message,
+                                           len, nullptr);
+  } else {
+    destination->logger_->Write(should_flush, timestamp, message, len);
+  }
+}
+
 inline void LogDestination::LogToAllLogfiles(
     LogSeverity severity,
     const std::chrono::system_clock::time_point& timestamp, const char* message,
@@ -1180,26 +1240,47 @@ inline void LogDestination::LogToAllLogfiles(
   }
 }
 
+inline void LogDestination::LogToAllLogfilesLocked(
+    LogSeverity severity,
+    const std::chrono::system_clock::time_point& timestamp, const char* message,
+    size_t len) {
+  if (FLAGS_logtostdout) {
+    ColoredWriteToStdout(severity, message, len);
+  } else if (FLAGS_logtostderr) {
+    ColoredWriteToStderr(severity, message, len);
+  } else {
+    for (int i = severity; i >= 0; --i) {
+      LogDestination::MaybeLogToLogfileLocked(static_cast<LogSeverity>(i),
+                                              timestamp, message, len);
+    }
+  }
+}
+
 inline void LogDestination::LogToSinks(LogSeverity severity,
                                        const char* full_filename,
                                        const char* base_filename, int line,
                                        const LogMessageTime& time,
                                        const char* message,
                                        size_t message_len) {
-  std::shared_lock<SinkMutex> l{sink_mutex_};
-  if (sinks_) {
-    for (size_t i = sinks_->size(); i-- > 0;) {
-      (*sinks_)[i]->send(severity, full_filename, base_filename, line, time,
-                         message, message_len);
-    }
+  const auto sinks = GetSinksForCall();
+  if (!sinks) {
+    return;
+  }
+  for (size_t i = sinks->size(); i-- > 0;) {
+    LogSink* sink = (*sinks)[i];
+    SinkCallGuard guard{sink};
+    sink->send(severity, full_filename, base_filename, line, time, message,
+               message_len);
   }
 }
 
 inline void LogDestination::WaitForSinks(internal::LogMessageData* data) {
-  std::shared_lock<SinkMutex> l{sink_mutex_};
-  if (sinks_) {
-    for (size_t i = sinks_->size(); i-- > 0;) {
-      (*sinks_)[i]->WaitTillSent();
+  const auto sinks = GetSinksForCall();
+  if (sinks) {
+    for (size_t i = sinks->size(); i-- > 0;) {
+      LogSink* sink = (*sinks)[i];
+      SinkCallGuard guard{sink};
+      sink->WaitTillSent();
     }
   }
   const bool send_to_sink =
@@ -1208,6 +1289,43 @@ inline void LogDestination::WaitForSinks(internal::LogMessageData* data) {
   if (send_to_sink && data->sink_ != nullptr) {
     data->sink_->WaitTillSent();
   }
+}
+
+std::shared_ptr<const std::vector<LogSink*>> LogDestination::GetSinksForCall() {
+  std::shared_lock<SinkMutex> l{sink_mutex_};
+  const auto sinks = sinks_;
+  if (sinks) {
+    std::lock_guard<std::mutex> call_lock{sink_call_mutex_};
+    for (size_t i = sinks->size(); i-- > 0;) {
+      LogSink* sink = (*sinks)[i];
+      ++sink_call_counts_[sink];
+    }
+  }
+  return sinks;
+}
+
+void LogDestination::EndSinkCall(LogSink* sink) {
+  std::lock_guard<std::mutex> l{sink_call_mutex_};
+  auto it = sink_call_counts_.find(sink);
+  CHECK(it != sink_call_counts_.end());
+  CHECK_GT(it->second, 0U);
+  --it->second;
+  if (it->second == 0) {
+    sink_call_counts_.erase(it);
+    sink_call_cond_.notify_all();
+  }
+}
+
+void LogDestination::WaitForSinkCalls(LogSink* sink) {
+  std::unique_lock<std::mutex> l{sink_call_mutex_};
+  sink_call_cond_.wait(l, [sink] {
+    return sink_call_counts_.find(sink) == sink_call_counts_.end();
+  });
+}
+
+void LogDestination::WaitForAllSinkCalls() {
+  std::unique_lock<std::mutex> l{sink_call_mutex_};
+  sink_call_cond_.wait(l, [] { return sink_call_counts_.empty(); });
 }
 
 std::unique_ptr<LogDestination>
@@ -1225,8 +1343,11 @@ void LogDestination::DeleteLogDestinations() {
   for (auto& log_destination : log_destinations_) {
     log_destination.reset();
   }
-  SinkLock l{sink_mutex_};
-  sinks_.reset();
+  {
+    SinkLock l{sink_mutex_};
+    sinks_.reset();
+  }
+  WaitForAllSinkCalls();
 }
 
 namespace {
@@ -1269,12 +1390,12 @@ LogFileObject::LogFileObject(LogSeverity severity, const char* base_filename)
       start_time_(std::chrono::system_clock::now()) {}
 
 LogFileObject::~LogFileObject() {
-  std::lock_guard<std::mutex> l{mutex_};
+  std::lock_guard<internal::FileMutex> l{mutex_};
   file_ = nullptr;
 }
 
 void LogFileObject::SetBasename(const char* basename) {
-  std::lock_guard<std::mutex> l{mutex_};
+  std::lock_guard<internal::FileMutex> l{mutex_};
   base_filename_selected_ = true;
   if (base_filename_ != basename) {
     // Get rid of old log file since we are changing names
@@ -1287,7 +1408,7 @@ void LogFileObject::SetBasename(const char* basename) {
 }
 
 void LogFileObject::SetExtension(const char* ext) {
-  std::lock_guard<std::mutex> l{mutex_};
+  std::lock_guard<internal::FileMutex> l{mutex_};
   if (filename_extension_ != ext) {
     // Get rid of old log file since we are changing names
     if (file_ != nullptr) {
@@ -1299,12 +1420,12 @@ void LogFileObject::SetExtension(const char* ext) {
 }
 
 void LogFileObject::SetSymlinkBasename(const char* symlink_basename) {
-  std::lock_guard<std::mutex> l{mutex_};
+  std::lock_guard<internal::FileMutex> l{mutex_};
   symlink_basename_ = symlink_basename;
 }
 
 void LogFileObject::Flush() {
-  std::lock_guard<std::mutex> l{mutex_};
+  std::lock_guard<internal::FileMutex> l{mutex_};
   FlushUnlocked(std::chrono::system_clock::now());
 }
 
@@ -1442,7 +1563,17 @@ bool LogFileObject::CreateLogfile(const string& time_pid_string) {
 void LogFileObject::Write(
     bool force_flush, const std::chrono::system_clock::time_point& timestamp,
     const char* message, size_t message_len) {
-  std::unique_lock<std::mutex> l{mutex_};
+  std::unique_lock<internal::FileMutex> l{mutex_};
+  WriteUnlocked(force_flush, timestamp, message, message_len, &l);
+}
+
+void LogFileObject::WriteUnlocked(
+    bool force_flush, const std::chrono::system_clock::time_point& timestamp,
+    const char* message, size_t message_len,
+    std::unique_lock<internal::FileMutex>* lock) {
+#if !defined(NGLOG_OS_LINUX) || !defined(HAVE_POSIX_FADVISE)
+  (void)lock;
+#endif
 
   // We don't log if the base_name_ is "" (which means "don't write")
   if (base_filename_selected_ && base_filename_.empty()) {
@@ -1641,9 +1772,13 @@ void LogFileObject::Write(
         // the original descriptor.
         FileDescriptor fd{fcntl(fileno(file_.get()), F_DUPFD_CLOEXEC, 0)};
         if (fd) {
-          l.unlock();
+          if (lock != nullptr) {
+            lock->unlock();
+          }
           posix_fadvise(fd.get(), offset, length, POSIX_FADV_DONTNEED);
-          l.lock();
+          if (lock != nullptr) {
+            lock->lock();
+          }
         } else {
           // Duplicating the descriptor failed. Fall back to advising while
           // holding the lock.
@@ -1664,7 +1799,7 @@ LogCleaner::~LogCleaner() { Stop(); }
 void LogCleaner::Stop() {
   std::thread cleaner;
   {
-    std::lock_guard<std::mutex> l{mutex_};
+    std::lock_guard<internal::CleanerMutex> l{mutex_};
     enabled_ = false;
     cleaner = std::move(thread_);
   }
@@ -1676,7 +1811,7 @@ void LogCleaner::Stop() {
 
 void LogCleaner::Enable(const std::chrono::minutes& overdue) {
   {
-    std::lock_guard<std::mutex> l{mutex_};
+    std::lock_guard<internal::CleanerMutex> l{mutex_};
     overdue_ = overdue;
     if (!std::exchange(enabled_, true)) {
       // Logs may have become overdue while the cleaner was disabled: make all
@@ -1701,7 +1836,7 @@ void LogCleaner::Disable() {
   std::unordered_map<std::string, LogFilePattern> patterns;
   std::chrono::minutes overdue;
   {
-    std::lock_guard<std::mutex> l{mutex_};
+    std::lock_guard<internal::CleanerMutex> l{mutex_};
     patterns = patterns_;
     overdue = overdue_;
   }
@@ -1724,7 +1859,7 @@ void LogCleaner::AddLogFilePattern(bool base_filename_selected,
   assert(!base_filename_selected || !base_filename.empty());
 
   {
-    std::lock_guard<std::mutex> l{mutex_};
+    std::lock_guard<internal::CleanerMutex> l{mutex_};
     LogFilePattern& pattern = patterns_[base_filename];
     pattern.base_filename_selected = base_filename_selected;
     pattern.filename_extension = filename_extension;
@@ -1744,7 +1879,7 @@ void LogCleaner::Worker() {
     std::chrono::minutes overdue{};
 
     {
-      std::unique_lock<std::mutex> l{mutex_};
+      std::unique_lock<internal::CleanerMutex> l{mutex_};
       if (!enabled_) {
         return;
       }
@@ -1980,7 +2115,7 @@ bool LogCleaner::IsLogLastModifiedOver(
 // the data from the first call, we allocate two sets of space.  One
 // for exclusive use by the first thread, and one for shared use by
 // all other threads.
-static std::mutex fatal_msg_lock;
+static internal::FatalMutex fatal_msg_lock;
 static internal::CrashReason crash_reason;
 static bool fatal_msg_exclusive = true;
 static internal::LogMessageData fatal_msg_data_exclusive;
@@ -2071,7 +2206,7 @@ void LogMessage::Init(const char* file, int line, LogSeverity severity,
 #endif  // defined(NGLOG_THREAD_LOCAL_STORAGE)
     data_->first_fatal_ = false;
   } else {
-    std::lock_guard<std::mutex> l{fatal_msg_lock};
+    std::lock_guard<internal::FatalMutex> l{fatal_msg_lock};
     if (fatal_msg_exclusive) {
       fatal_msg_exclusive = false;
       data_ = &fatal_msg_data_exclusive;
@@ -2241,7 +2376,7 @@ void LogMessage::Flush() {
   // Prevent any subtle race conditions by wrapping a mutex lock around
   // the actual logging action per se.
   {
-    std::lock_guard<std::mutex> l{log_mutex};
+    std::lock_guard<internal::LogMutex> l{log_mutex};
     (this->*(data_->send_method_))();
     ++num_messages_[static_cast<int>(data_->severity_)];
   }
@@ -2319,9 +2454,9 @@ void LogMessage::SendToLog() EXCLUSIVE_LOCKS_REQUIRED(log_mutex) {
         (data_->num_chars_to_log_ - data_->num_prefix_chars_ - 1));
   } else {
     // log this message to all log files of severity <= severity_
-    LogDestination::LogToAllLogfiles(data_->severity_, time_.when(),
-                                     data_->message_text_,
-                                     data_->num_chars_to_log_);
+    LogDestination::LogToAllLogfilesLocked(data_->severity_, time_.when(),
+                                           data_->message_text_,
+                                           data_->num_chars_to_log_);
 
     LogDestination::MaybeLogToStderr(*data_);
     LogDestination::MaybeLogToEmail(data_->severity_, data_->message_text_,
@@ -2471,19 +2606,18 @@ void LogMessage::SendToSyslogAndLog() {
 }
 
 base::Logger* base::GetLogger(LogSeverity severity) {
-  std::lock_guard<std::mutex> l{log_mutex};
+  std::lock_guard<internal::LogMutex> l{log_mutex};
   return LogDestination::log_destination(severity)->GetLoggerImpl();
 }
 
 void base::SetLogger(LogSeverity severity, base::Logger* logger) {
-  std::lock_guard<std::mutex> l{log_mutex};
+  std::lock_guard<internal::LogMutex> l{log_mutex};
   LogDestination::log_destination(severity)->SetLoggerImpl(logger);
 }
 
-// L < log_mutex.  Acquires and releases mutex_.
+// L < log_mutex.
 int64 LogMessage::num_messages(int severity) {
-  std::lock_guard<std::mutex> l{log_mutex};
-  return num_messages_[severity];
+  return num_messages_[severity].load(std::memory_order_relaxed);
 }
 
 // Output the COUNTER value. This is only valid if ostream is a
@@ -2586,7 +2720,7 @@ namespace internal {
 
 bool GetExitOnDFatal();
 bool GetExitOnDFatal() {
-  std::lock_guard<std::mutex> l{log_mutex};
+  std::lock_guard<::nglog::internal::LogMutex> l{log_mutex};
   return exit_on_dfatal;
 }
 
@@ -2602,7 +2736,7 @@ bool GetExitOnDFatal() {
 // these differences are acceptable.
 void SetExitOnDFatal(bool value);
 void SetExitOnDFatal(bool value) {
-  std::lock_guard<std::mutex> l{log_mutex};
+  std::lock_guard<::nglog::internal::LogMutex> l{log_mutex};
   exit_on_dfatal = value;
 }
 

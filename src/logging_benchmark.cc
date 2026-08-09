@@ -32,6 +32,10 @@
 
 #include <benchmark/benchmark.h>
 
+#include <cstdint>
+#include <cstdio>
+
+#include "internal/lock_metrics.h"
 #include "ng-log/logging.h"
 
 #ifdef NGLOG_USE_GFLAGS
@@ -42,6 +46,28 @@ using namespace GFLAGS_NAMESPACE;
 using namespace nglog;
 
 namespace {
+
+constexpr int kOneThread = 1;
+constexpr int kTwoThreads = 2;
+constexpr int kEightThreads = 8;
+constexpr int kSixteenThreads = 16;
+
+class NullLogger : public base::Logger {
+ public:
+  void Write(bool /* force_flush */,
+             const std::chrono::system_clock::time_point& /* timestamp */,
+             const char* /* message */, size_t /* length */) override {}
+  void Flush() override {}
+  uint32 LogSize() override { return 0; }
+};
+
+class NullSink : public LogSink {
+ public:
+  void send(LogSeverity /* severity */, const char* /* full_filename */,
+            const char* /* base_filename */, int /* line */,
+            const LogMessageTime& /* logmsgtime */, const char* /* message */,
+            size_t /* message_len */) override {}
+};
 
 // Non-constant so the compiler cannot fold the comparisons below away.
 int x = -1;
@@ -111,19 +137,98 @@ void BM_vlog(benchmark::State& state) {
 }
 BENCHMARK(BM_vlog);
 
+void BM_ConcurrentLog(benchmark::State& state) {
+  for (auto _ : state) {
+    LOG(INFO) << "test message";
+  }
+  state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations()));
+}
+BENCHMARK(BM_ConcurrentLog)
+    ->Threads(kOneThread)
+    ->Threads(kTwoThreads)
+    ->Threads(kEightThreads)
+    ->Threads(kSixteenThreads);
+
+void BM_ConcurrentLogToSink(benchmark::State& state) {
+  static NullSink sink;
+  for (auto _ : state) {
+    LOG_TO_SINK(&sink, INFO) << "test message";
+  }
+  state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations()));
+}
+BENCHMARK(BM_ConcurrentLogToSink)
+    ->Threads(kOneThread)
+    ->Threads(kTwoThreads)
+    ->Threads(kEightThreads)
+    ->Threads(kSixteenThreads);
+
+void BM_ConcurrentMessageCount(benchmark::State& state) {
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(LogMessage::num_messages(NGLOG_INFO));
+  }
+  state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations()));
+}
+BENCHMARK(BM_ConcurrentMessageCount)
+    ->Threads(kOneThread)
+    ->Threads(kTwoThreads)
+    ->Threads(kEightThreads)
+    ->Threads(kSixteenThreads);
+
+void BM_ConcurrentLoggerLookup(benchmark::State& state) {
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(base::GetLogger(NGLOG_INFO));
+  }
+  state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations()));
+}
+BENCHMARK(BM_ConcurrentLoggerLookup)
+    ->Threads(kOneThread)
+    ->Threads(kTwoThreads)
+    ->Threads(kEightThreads)
+    ->Threads(kSixteenThreads);
+
+void PrintLockMetrics() {
+#ifdef NGLOG_ENABLE_LOCK_METRICS
+  for (const internal::LockKind kind :
+       {internal::LockKind::kLog, internal::LockKind::kFile,
+        internal::LockKind::kCleaner, internal::LockKind::kFatal,
+        internal::LockKind::kSink}) {
+    const internal::LockMetrics metrics = internal::GetLockMetrics(kind);
+    std::fprintf(
+        stderr,
+        "lock kind %d acquisitions=%llu contended=%llu "
+        "wait_ns=%llu hold_ns=%llu\n",
+        static_cast<int>(kind),
+        static_cast<unsigned long long>(metrics.acquisitions),
+        static_cast<unsigned long long>(metrics.contended_acquisitions),
+        static_cast<unsigned long long>(metrics.wait_nanoseconds),
+        static_cast<unsigned long long>(metrics.hold_nanoseconds));
+  }
+#endif
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   InitializeLogging(argv[0]);
-#ifdef NGLOG_USE_GFLAGS
-  ParseCommandLineFlags(&argc, &argv, true);
-#endif
-
   benchmark::Initialize(&argc, argv);
   if (benchmark::ReportUnrecognizedArguments(argc, argv)) {
     return 1;
   }
+#ifdef NGLOG_USE_GFLAGS
+  ParseCommandLineFlags(&argc, &argv, true);
+#endif
+
+  FLAGS_logtostderr = false;
+  FLAGS_logtostdout = false;
+  base::Logger* old_logger = base::GetLogger(NGLOG_INFO);
+  base::SetLogger(NGLOG_INFO, new NullLogger);
+  NullSink registered_sink;
+  AddLogSink(&registered_sink);
+  internal::ResetLockMetrics();
   benchmark::RunSpecifiedBenchmarks();
   benchmark::Shutdown();
+  PrintLockMetrics();
+  RemoveLogSink(&registered_sink);
+  base::SetLogger(NGLOG_INFO, old_logger);
   return 0;
 }
