@@ -485,6 +485,8 @@ set (NGLOG_SRCS
   src/internal/attributes.h
   src/internal/checked_arithmetic.h
   src/internal/color_format.cc
+  src/internal/emscripten_console.cc
+  src/internal/emscripten_console.h
   src/internal/hyperlink.cc
   src/internal/lock_metrics.cc
   src/internal/lock_metrics.h

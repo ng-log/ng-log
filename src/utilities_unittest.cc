@@ -33,6 +33,7 @@
 
 #include <gtest/gtest.h>
 
+#include "internal/emscripten_console.h"
 #include "ng-log/logging.h"
 #include "testing_utilities.h"
 
@@ -75,6 +76,17 @@ TEST(utilities, MakeLogFilenameMatcherRequiresBaseFilename) {
   const std::regex regex =
       nglog::tools::MakeLogFilenameMatcher("", ".foo+", true);
   EXPECT_FALSE(std::regex_match("20260817-123456.42.foo+", regex));
+}
+
+TEST(EmscriptenConsole, MapsSeverityToConsoleLevel) {
+  EXPECT_EQ(internal::EmscriptenLogLevelForSeverity(NGLOG_INFO),
+            internal::EmscriptenLogLevel::kOut);
+  EXPECT_EQ(internal::EmscriptenLogLevelForSeverity(NGLOG_WARNING),
+            internal::EmscriptenLogLevel::kWarn);
+  EXPECT_EQ(internal::EmscriptenLogLevelForSeverity(NGLOG_ERROR),
+            internal::EmscriptenLogLevel::kError);
+  EXPECT_EQ(internal::EmscriptenLogLevelForSeverity(NGLOG_FATAL),
+            internal::EmscriptenLogLevel::kDbg);
 }
 
 TEST(utilities, TrimTrailingCRLFRemovesTrailingNewlines) {

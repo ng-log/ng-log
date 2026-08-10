@@ -44,6 +44,7 @@
 #include "addr2line.h"
 #include "config.h"
 #include "initializer.h"
+#include "internal/emscripten_console.h"
 #include "libbacktrace.h"
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
@@ -155,6 +156,10 @@ void AlsoErrorWrite(LogSeverity severity, const char* tag,
   };
 
   __android_log_write(android_log_levels[severity], tag, message);
+#elif defined(NGLOG_OS_EMSCRIPTEN)
+  (void)tag;
+  internal::WriteEmscriptenLog(
+      internal::EmscriptenLogLevelForSeverity(severity), message);
 #else
   (void)severity;
   (void)tag;
