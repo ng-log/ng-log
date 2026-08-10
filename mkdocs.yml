@@ -112,6 +112,8 @@ extra:
       as to measure the effectiveness of our documentation and whether users
       find what they're searching for. With your consent, you're helping us to
       make our documentation better.
+extra_javascript:
+  - assets/javascripts/feature-comparison.js
 nav:
   - Getting Started:
       - Overview: index.md
@@ -119,6 +121,7 @@ nav:
       - Building from Source: build.md
       - Installation using Package Managers: packages.md
       - Migration from glog: migration-from-glog.md
+      - Feature Comparison: feature-comparison.md
   - User Guide:
       - Logging:
           - logging/index.md
