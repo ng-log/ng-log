@@ -33,6 +33,7 @@
 #include <fcntl.h>
 
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -739,7 +740,7 @@ TEST(Logging, MaxLogSizeWhenNoTimestamp) {
       << ": failed to determine size of log file " << dest;
 
   // Verify file size is less than the max log size limit
-  CHECK_LT(static_cast<unsigned int>(statbuf.st_size),
+  CHECK_LT(static_cast<std::size_t>(statbuf.st_size),
            FLAGS_max_log_size << 20U);
 
   // Reset flag values to their original values
@@ -791,7 +792,7 @@ TEST(Logging, MaxLogSizeAboveCapNotFlooredToMinimum) {
       << ": failed to determine size of log file " << dest;
 
   // No rotation at 1MB should have happened, so the file exceeds 1MB.
-  CHECK_GT(static_cast<unsigned int>(statbuf.st_size), 1U << 20U);
+  CHECK_GT(static_cast<std::size_t>(statbuf.st_size), 1U << 20U);
 
   FLAGS_max_log_size = original_max_log_size;
   FLAGS_timestamp_in_logfile_name = original_timestamp_in_logfile_name;
@@ -1190,8 +1191,8 @@ namespace LogTimes {
 // between total running time of 100ms and the period of 10ms. The period is
 // large enough such that any CPU and OS scheduling variation shouldn't affect
 // the results from the ideal case by more than 5% (500us or 0.5ms)
-constexpr int64_t LOG_PERIOD_NS = 10000000;    // 10ms
-constexpr int64_t LOG_PERIOD_TOL_NS = 500000;  // 500us
+constexpr std::int64_t LOG_PERIOD_NS = 10000000;    // 10ms
+constexpr std::int64_t LOG_PERIOD_TOL_NS = 500000;  // 500us
 
 // Set an upper limit for the number of times the stream operator can be
 // called. Make sure not to exceed this number of times the stream operator is
@@ -1213,8 +1214,8 @@ std::ostream& operator<<(std::ostream& stream, LogTimeRecorder& t) {
   return stream;
 }
 // get elapsed time in nanoseconds
-int64 elapsedTime_ns(const std::chrono::steady_clock::time_point& begin,
-                     const std::chrono::steady_clock::time_point& end) {
+std::int64_t elapsedTime_ns(const std::chrono::steady_clock::time_point& begin,
+                            const std::chrono::steady_clock::time_point& end) {
   return std::chrono::duration_cast<std::chrono::nanoseconds>((end - begin))
       .count();
 }
@@ -1233,14 +1234,19 @@ TEST(Logging, LogPeriodically) {
 
   // Calculate time between each call in nanoseconds for higher resolution to
   // minimize error.
-  int64 nsBetweenCalls[LogTimes::MAX_CALLS - 1];
+  std::int64_t nsBetweenCalls[LogTimes::MAX_CALLS - 1];
   for (size_t i = 1; i < LogTimes::MAX_CALLS; ++i) {
     nsBetweenCalls[i - 1] = elapsedTime_ns(timeLogger.m_callTimes[i - 1],
                                            timeLogger.m_callTimes[i]);
   }
 
-  for (long time_ns : nsBetweenCalls) {
-    EXPECT_NEAR(time_ns, LogTimes::LOG_PERIOD_NS, LogTimes::LOG_PERIOD_TOL_NS);
+  constexpr std::int64_t kMinimumPeriod =
+      LogTimes::LOG_PERIOD_NS - LogTimes::LOG_PERIOD_TOL_NS;
+  constexpr std::int64_t kMaximumPeriod =
+      LogTimes::LOG_PERIOD_NS + LogTimes::LOG_PERIOD_TOL_NS;
+  for (const std::int64_t time_ns : nsBetweenCalls) {
+    EXPECT_GE(time_ns, kMinimumPeriod);
+    EXPECT_LE(time_ns, kMaximumPeriod);
   }
 }
 

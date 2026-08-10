@@ -719,9 +719,9 @@ if (BUILD_TESTING AND GTest_FOUND)
     target_link_libraries (signalhandler_unittest PRIVATE ng-log_test)
   endif (HAVE_STACKTRACE AND HAVE_SYMBOLIZE)
 
-  # FIXME: Skip flaky test. EXPECT_NEAR's own message, not a CHECK_xx one.
+  # FIXME: Skip flaky test. Match GoogleTest's bound assertion message.
   set (logging_unittest_SKIP_REGULAR_EXPRESSION
-    [=[The difference between time_ns and LogTimes::LOG_PERIOD_NS is [0-9]+, which exceeds LogTimes::LOG_PERIOD_TOL_NS]=])
+    [=[Expected: \(time_ns\) (>=|<=) \(k(Minimum|Maximum)Period\), actual: [0-9]+ vs [0-9]+]=])
 
   gtest_discover_tests (logging_unittest
     TEST_PREFIX logging.
