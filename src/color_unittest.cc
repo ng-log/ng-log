@@ -18,6 +18,7 @@
 #include "ng-log/internal/color_spec.h"
 #include "ng-log/internal/hyperlink.h"
 #include "ng-log/logging.h"
+#include "testing_utilities.h"
 
 #ifdef NGLOG_OS_WINDOWS
 #  include <windows.h>
@@ -573,6 +574,20 @@ TEST(SourceLocation, CachesHostAndWorkingDirectory) {
 TEST(StyledOutput, WritesRawText) {
   WriteRawToStderr("");
   SUCCEED();
+}
+
+TEST(StyledOutput, ResetsAttributesBeforeLineEndings) {
+  const std::string text = "first\nsecond";
+  const auto write_content = [](const char* value, std::size_t length) {
+    fwrite(value, length, 1, stderr);
+  };
+
+  CaptureTestStderr();
+  WriteStyledField(ColorSpec{Color::kCyan, TextStyle::kBold, Color::kDefault},
+                   ColorMode::kAnsi, write_content, text.data(), text.size());
+  const std::string output = GetCapturedTestStderr();
+
+  EXPECT_EQ(output, "\033[1;36mfirst\033[0m\n\033[1;36msecond\033[0m");
 }
 
 // Exercises the real environment-backed code path (as opposed to the pure

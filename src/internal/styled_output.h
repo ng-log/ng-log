@@ -6,6 +6,7 @@
 #ifndef NGLOG_INTERNAL_STYLED_OUTPUT_H
 #define NGLOG_INTERNAL_STYLED_OUTPUT_H
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <utility>
@@ -125,18 +126,45 @@ inline void WrapHyperlinkRaw(const Hyperlink& hyperlink, Body&& body) {
   WriteRawToStderr("\033]8;;\033\\");
 }
 
+template <typename WriteLine, typename WriteNewline>
+inline void WriteTextByLines(const char* text, std::size_t len,
+                             WriteLine&& write_line,
+                             WriteNewline&& write_newline) {
+  while (len != 0) {
+    const char* const line_end = std::find(text, text + len, '\n');
+    const std::size_t line_len = static_cast<std::size_t>(line_end - text);
+
+    if (line_len != 0) {
+      write_line(text, line_len);
+    }
+
+    if (line_end == text + len) {
+      return;
+    }
+    write_newline(line_end, 1);
+    text = line_end + 1;
+    len -= line_len + 1;
+  }
+}
+
 template <typename WriteContent>
 inline void WriteStyledField(const TextAttributes& attributes, ColorMode mode,
                              WriteContent&& write_content, const char* text,
                              std::size_t len) {
-  const auto write_colored = [&attributes, mode, &write_content, text, len] {
-    WriteColoredField(attributes.color, mode, write_content, text, len);
+  const auto write_line = [&attributes, mode, &write_content](
+                              const char* line_text, std::size_t line_len) {
+    const auto write_colored = [&attributes, mode, &write_content, line_text,
+                                line_len] {
+      WriteColoredField(attributes.color, mode, write_content, line_text,
+                        line_len);
+    };
+    if (mode == ColorMode::kAnsi && attributes.hyperlink.uri() != nullptr) {
+      WrapHyperlinkRaw(attributes.hyperlink, write_colored);
+    } else {
+      write_colored();
+    }
   };
-  if (mode == ColorMode::kAnsi && attributes.hyperlink.uri() != nullptr) {
-    WrapHyperlinkRaw(attributes.hyperlink, write_colored);
-    return;
-  }
-  write_colored();
+  WriteTextByLines(text, len, write_line, write_content);
 }
 
 template <typename WriteContent>

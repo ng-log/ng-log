@@ -827,14 +827,24 @@ static void WriteStyledLogField(FILE* output, FileFormatter& formatter,
                                 const TextAttributes& attributes,
                                 bool hyperlinks_enabled, const char* text,
                                 size_t len) {
-  const auto write_field = [&formatter, output, mode, &attributes, text, len] {
-    WriteTerminalField(output, formatter, mode, attributes.color, text, len);
+  const auto write_line = [&formatter, output, mode, &attributes,
+                           hyperlinks_enabled](const char* line_text,
+                                               size_t line_len) {
+    const auto write_colored = [&formatter, output, mode, &attributes,
+                                line_text, line_len] {
+      WriteTerminalField(output, formatter, mode, attributes.color, line_text,
+                         line_len);
+    };
+    if (hyperlinks_enabled && attributes.hyperlink.uri() != nullptr) {
+      attributes.hyperlink.Wrap(formatter, write_colored);
+    } else {
+      write_colored();
+    }
   };
-  if (hyperlinks_enabled && attributes.hyperlink.uri() != nullptr) {
-    attributes.hyperlink.Wrap(formatter, write_field);
-    return;
-  }
-  write_field();
+  const auto write_newline = [output](const char* newline, size_t newline_len) {
+    fwrite(newline, newline_len, 1, output);
+  };
+  WriteTextByLines(text, len, write_line, write_newline);
 }
 
 static void WriteStyledLogBody(FILE* output, FileFormatter& formatter,

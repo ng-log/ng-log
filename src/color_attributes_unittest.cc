@@ -288,6 +288,54 @@ TEST(ColorAttributes, RendersStyledSpansAndHyperlinksOnAnsiOutput) {
   EXPECT_THAT(output, HasSubstr("\033[2;39m: "));
   EXPECT_THAT(output, HasSubstr("\033[1;36m [2]\033[0m"));
 }
+
+TEST(ColorAttributes, ResetsAttributesBeforeTheLineEnding) {
+  ASSERT_EQ(setenv("CLICOLOR_FORCE", "1", 1), 0);
+  ASSERT_EQ(setenv("TERM", "xterm", 1), 0);
+  unsetenv("NO_COLOR");
+
+  const bool old_logtostderr = FLAGS_logtostderr;
+  const bool old_colorlogtostderr = FLAGS_colorlogtostderr;
+  const bool old_log_prefix = FLAGS_log_prefix;
+  FLAGS_logtostderr = true;
+  FLAGS_colorlogtostderr = true;
+  FLAGS_log_prefix = false;
+
+  CaptureTestStderr();
+  LOG(INFO) << "colored line";
+  const std::string output = GetCapturedTestStderr();
+
+  FLAGS_logtostderr = old_logtostderr;
+  FLAGS_colorlogtostderr = old_colorlogtostderr;
+  FLAGS_log_prefix = old_log_prefix;
+
+  EXPECT_THAT(output, HasSubstr("colored line\033[0m\n"));
+}
+
+TEST(ColorAttributes, ResetsAndReappliesAttributesForEachLine) {
+  ASSERT_EQ(setenv("CLICOLOR_FORCE", "1", 1), 0);
+  ASSERT_EQ(setenv("TERM", "xterm", 1), 0);
+  unsetenv("NO_COLOR");
+
+  const bool old_logtostderr = FLAGS_logtostderr;
+  const bool old_colorlogtostderr = FLAGS_colorlogtostderr;
+  const bool old_log_prefix = FLAGS_log_prefix;
+  FLAGS_logtostderr = true;
+  FLAGS_colorlogtostderr = true;
+  FLAGS_log_prefix = false;
+
+  CaptureTestStderr();
+  LOG(INFO) << Styled(
+      ColorSpec{Color::kCyan, TextStyle::kBold, Color::kDefault},
+      "first\nsecond");
+  const std::string output = GetCapturedTestStderr();
+
+  FLAGS_logtostderr = old_logtostderr;
+  FLAGS_colorlogtostderr = old_colorlogtostderr;
+  FLAGS_log_prefix = old_log_prefix;
+
+  EXPECT_THAT(output, HasSubstr("first\033[0m\n\033[1;36msecond\033[0m\n"));
+}
 #endif
 
 }  // namespace
