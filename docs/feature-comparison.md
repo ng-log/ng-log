@@ -16,20 +16,19 @@ The libraries are:
 
 ## Feature matrix
 
-Select a column heading to sort the matrix. Library columns sort by support
-status, while the feature column sorts alphabetically.
+Select a column heading in either table to sort that table. Library columns
+sort by support status, while the feature column sorts alphabetically.
 
 The matrix focuses on less common capabilities that distinguish the libraries.
 Common baseline features such as severity levels and console output are
 omitted.
 
+### Logging features
+
 | Feature | ng-log | spdlog | Abseil | Boost.Log | plog | Easylogging++ |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: |
 | Format-string log statements | ⚠️[^1] | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Wide-character text output | ❌ | ⚠️[^2] | ✅ | ✅ | ✅ | ⚠️[^3] |
-| Unicode-aware file paths | ❌ | ⚠️[^4] | ❌ | ✅ | ✅ | ❌ |
-| Explicit POSIX long-path handling | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Explicit Windows extended-path handling | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Per-file or module verbosity | ✅ | ❌ | ✅ | ⚠️[^5] | ❌ | ✅ |
 | Periodic or limited-count logging | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ |
 | Assertion and check macros | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ |
@@ -37,14 +36,27 @@ omitted.
 | Structured or key-value fields | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ |
 | Named loggers or channels | ❌ | ✅ | ❌ | ✅ | ⚠️[^6] | ✅ |
 | Asynchronous dispatch | ❌ | ✅ | ❌ | ✅ | ❌ | ✅ |
+
+### Output and sink features
+
+| Feature | ng-log | spdlog | Abseil | Boost.Log | plog | Easylogging++ |
+| --- | :---: | :---: | :---: | :---: | :---: | :---: |
+| Unicode-aware file paths | ❌ | ⚠️[^4] | ❌ | ✅ | ✅ | ❌ |
+| Explicit POSIX long-path handling | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Explicit Windows extended-path handling | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Syslog output | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ |
 | Platform-specific output sinks | ⚠️[^7] | ✅ | ⚠️[^8] | ✅ | ✅ | ❌ |
 | Network output sinks | ❌ | ✅ | ❌ | ⚠️[^9] | ❌ | ❌ |
 | Colorized terminal output | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
+| Email output | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+
+### Failure and diagnostic features
+
+| Feature | ng-log | spdlog | Abseil | Boost.Log | plog | Easylogging++ |
+| --- | :---: | :---: | :---: | :---: | :---: | :---: |
 | Targeted or buffered backtrace capture | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Stack trace on fatal failures | ✅ | ❌ | ✅ | ❌ | ❌ | ⚠️[^10] |
 | Raw low-level logging | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Email output | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 [^1]: ng-log provides printf-style varargs through `RAW_LOG`, while its
     regular log statements use C++ streams.

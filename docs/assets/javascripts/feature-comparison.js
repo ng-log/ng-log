@@ -72,13 +72,7 @@
     })
   }
 
-  function initializeFeatureMatrix() {
-    const namedElement = document.getElementById('feature-matrix')
-    const table = namedElement?.tagName === 'TABLE' ? namedElement :
-      Array.from(document.querySelectorAll('table')).find((candidate) => {
-        const firstHeader = candidate.tHead?.rows[0]?.cells[0]
-        return firstHeader?.textContent.trim() === 'Feature'
-      })
+  function initializeFeatureMatrix(table) {
     if (!table || table.dataset.sortable === 'true' || !table.tHead) {
       return
     }
@@ -110,17 +104,27 @@
     updateSortButtons(headers, activeColumn, ascending)
   }
 
-  initializeFeatureMatrix()
+  function initializeFeatureMatrices() {
+    const tables = Array.from(document.querySelectorAll('table')).filter(
+      (candidate) => {
+        const firstHeader = candidate.tHead?.rows[0]?.cells[0]
+        return firstHeader?.textContent.trim() === 'Feature'
+      },
+    )
+    tables.forEach(initializeFeatureMatrix)
+  }
+
+  initializeFeatureMatrices()
 
   if (typeof document$ !== 'undefined') {
-    document$.subscribe(initializeFeatureMatrix)
+    document$.subscribe(initializeFeatureMatrices)
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeFeatureMatrix)
+    document.addEventListener('DOMContentLoaded', initializeFeatureMatrices)
   } else {
-    initializeFeatureMatrix()
+    initializeFeatureMatrices()
   }
 
-  window.addEventListener('load', initializeFeatureMatrix)
+  window.addEventListener('load', initializeFeatureMatrices)
 })()
