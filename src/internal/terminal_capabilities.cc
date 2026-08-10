@@ -8,8 +8,34 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 #include "config.h"
+
+#ifdef NGLOG_OS_EMSCRIPTEN
+#  include <emscripten.h>
+
+// clang-format off
+// Emscripten does not expose Node's process.env through C getenv() by default,
+// so terminal capability detection reads those variables here without requiring
+// the NODE_HOST_ENV build option.
+EM_JS_DEPS(nglog_terminal_environment, "$UTF8ToString,$stringToUTF8");
+EM_JS(int, nglog_get_node_environment_variable,
+      (const char* name, char* value, int value_size), {
+  if (typeof process === 'undefined' || process.env === undefined) {
+    return 0;
+  }
+
+  const environment_value = process.env[UTF8ToString(name)];
+  if (environment_value === undefined) {
+    return 0;
+  }
+
+  stringToUTF8(environment_value, value, value_size);
+  return 1;
+});
+// clang-format on
+#endif
 
 #ifdef NGLOG_OS_WINDOWS
 #  include <windows.h>
@@ -24,6 +50,29 @@ namespace internal {
 
 namespace {
 
+struct EnvironmentVariable {
+  bool present;
+  std::string value;
+};
+
+EnvironmentVariable ReadEnvironmentVariable(const char* name) {
+  const char* const value = std::getenv(name);
+  if (value != nullptr) {
+    return {true, value};
+  }
+
+#ifdef NGLOG_OS_EMSCRIPTEN
+  constexpr int kEnvironmentValueBufferSize = 256;
+  char node_value[kEnvironmentValueBufferSize];
+  if (nglog_get_node_environment_variable(name, node_value,
+                                          kEnvironmentValueBufferSize) != 0) {
+    return {true, node_value};
+  }
+#endif
+
+  return {false, {}};
+}
+
 ColorMode ComputeStreamColorMode(FILE* stream) {
 #ifdef NGLOG_OS_WINDOWS
   const HANDLE handle =
@@ -35,8 +84,13 @@ ColorMode ComputeStreamColorMode(FILE* stream) {
     return ColorMode::kNone;
   }
 
-  if (!ShouldColorize(/*is_a_tty=*/true, /*term=*/nullptr,
-                      std::getenv("NO_COLOR"), std::getenv("CLICOLOR_FORCE"))) {
+  const EnvironmentVariable no_color = ReadEnvironmentVariable("NO_COLOR");
+  const EnvironmentVariable clicolor_force =
+      ReadEnvironmentVariable("CLICOLOR_FORCE");
+  if (!ShouldColorize(
+          /*is_a_tty=*/true, /*term=*/nullptr,
+          no_color.present ? no_color.value.c_str() : nullptr,
+          clicolor_force.present ? clicolor_force.value.c_str() : nullptr)) {
     return ColorMode::kNone;
   }
 
@@ -47,18 +101,33 @@ ColorMode ComputeStreamColorMode(FILE* stream) {
   return ColorMode::kLegacyConsole;
 #else
   const bool is_a_tty = isatty(fileno(stream)) != 0;
-  return ShouldColorize(is_a_tty, std::getenv("TERM"), std::getenv("NO_COLOR"),
-                        std::getenv("CLICOLOR_FORCE"))
+  const EnvironmentVariable term = ReadEnvironmentVariable("TERM");
+  const EnvironmentVariable no_color = ReadEnvironmentVariable("NO_COLOR");
+  const EnvironmentVariable clicolor_force =
+      ReadEnvironmentVariable("CLICOLOR_FORCE");
+  return ShouldColorize(
+             is_a_tty, term.present ? term.value.c_str() : nullptr,
+             no_color.present ? no_color.value.c_str() : nullptr,
+             clicolor_force.present ? clicolor_force.value.c_str() : nullptr)
              ? ColorMode::kAnsi
              : ColorMode::kNone;
 #endif
 }
 
 bool ComputeStreamSupportsHyperlinks(FILE* stream) {
+  const EnvironmentVariable wt_session = ReadEnvironmentVariable("WT_SESSION");
+  const EnvironmentVariable term_program =
+      ReadEnvironmentVariable("TERM_PROGRAM");
+  const EnvironmentVariable vte_version =
+      ReadEnvironmentVariable("VTE_VERSION");
+  const EnvironmentVariable konsole_version =
+      ReadEnvironmentVariable("KONSOLE_VERSION");
   return ShouldEnableHyperlinks(
       ComputeStreamColorMode(stream) == ColorMode::kAnsi,
-      std::getenv("WT_SESSION"), std::getenv("TERM_PROGRAM"),
-      std::getenv("VTE_VERSION"), std::getenv("KONSOLE_VERSION"));
+      wt_session.present ? wt_session.value.c_str() : nullptr,
+      term_program.present ? term_program.value.c_str() : nullptr,
+      vte_version.present ? vte_version.value.c_str() : nullptr,
+      konsole_version.present ? konsole_version.value.c_str() : nullptr);
 }
 
 }  // namespace

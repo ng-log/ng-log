@@ -24,6 +24,10 @@
 #  include <windows.h>
 #endif
 
+#ifdef NGLOG_OS_EMSCRIPTEN
+#  include <emscripten.h>
+#endif
+
 #ifdef NGLOG_USE_GFLAGS
 #  include <gflags/gflags.h>
 using namespace GFLAGS_NAMESPACE;
@@ -602,6 +606,16 @@ TEST(StreamSupportsColor, StableAcrossRepeatedCalls) {
   EXPECT_EQ(StreamSupportsHyperlinks(stdout), StreamSupportsHyperlinks(stdout));
   EXPECT_EQ(StreamSupportsHyperlinks(stderr), StreamSupportsHyperlinks(stderr));
 }
+
+#ifdef NGLOG_OS_EMSCRIPTEN
+TEST(Emscripten, ReadsNodeEnvironment) {
+  EM_ASM({
+    process.env.VTE_VERSION = "8401";
+    delete process.env.NO_COLOR;
+  });
+  EXPECT_TRUE(StreamSupportsHyperlinks(stderr));
+}
+#endif
 
 struct AppendOnlyFormatter {
   std::string text;
