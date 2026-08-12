@@ -469,13 +469,13 @@ endif (_ng-log_CMake_MODULES)
 
 set (NGLOG_PUBLIC_H
   ${ng-log_BINARY_DIR}/ng-log/export.h
+  src/ng-log/flags.h
   src/ng-log/log_severity.h
   src/ng-log/logging.h
   src/ng-log/platform.h
   src/ng-log/raw_logging.h
   src/ng-log/stl_logging.h
   src/ng-log/types.h
-  src/ng-log/flags.h
   src/ng-log/vlog_is_on.h
 )
 
@@ -484,26 +484,29 @@ set (NGLOG_SRCS
   src/addr2line.cc
   src/addr2line.h
   src/base/commandlineflags.h
-  src/internal/color_format.cc
-  src/internal/hyperlink.cc
-  src/internal/lock_metrics.cc
-  src/internal/log_cleaner.cc
-  src/internal/source_location.cc
-  src/internal/style_recorder.cc
-  src/internal/styled_output.cc
-  src/internal/terminal_capabilities.cc
-  src/internal/theme.cc
   src/demangle.cc
   src/demangle.h
   src/flags.cc
   src/initializer.h
+  src/internal/color_format.cc
+  src/internal/hyperlink.cc
+  src/internal/lock_metrics.cc
+  src/internal/lock_metrics.h
+  src/internal/log_cleaner.cc
+  src/internal/log_cleaner.h
+  src/internal/source_location.cc
+  src/internal/source_location.h
+  src/internal/style_recorder.cc
+  src/internal/style_recorder.h
+  src/internal/styled_output.cc
+  src/internal/styled_output.h
+  src/internal/terminal_capabilities.cc
+  src/internal/terminal_capabilities.h
+  src/internal/theme.cc
+  src/internal/theme.h
   src/libbacktrace.cc
   src/libbacktrace.h
   src/logging.cc
-  src/raw_logging.cc
-  src/signalhandler.cc
-  src/stacktrace.cc
-  src/stacktrace.h
   src/ng-log/internal/color.h
   src/ng-log/internal/color_spec.h
   src/ng-log/internal/hyperlink.h
@@ -511,13 +514,10 @@ set (NGLOG_SRCS
   src/ng-log/internal/styled_value.h
   src/ng-log/internal/text_attributes.h
   src/ng-log/internal/text_style.h
-  src/internal/source_location.h
-  src/internal/lock_metrics.h
-  src/internal/log_cleaner.h
-  src/internal/style_recorder.h
-  src/internal/styled_output.h
-  src/internal/terminal_capabilities.h
-  src/internal/theme.h
+  src/raw_logging.cc
+  src/signalhandler.cc
+  src/stacktrace.cc
+  src/stacktrace.h
   src/subprocess.cc
   src/subprocess.h
   src/symbolize.cc
