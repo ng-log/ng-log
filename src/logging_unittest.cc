@@ -180,17 +180,7 @@ int main(int argc, char** argv) {
 #endif
 
   // so that death tests run before we use threads
-  const int result = RUN_ALL_TESTS();
-  if (result != 0) {
-    // Return the failure normally rather than CHECK_EQ-aborting: ctest's
-    // SKIP_REGULAR_EXPRESSION/PASS_REGULAR_EXPRESSION test properties only
-    // consider a test's output when the process exits normally, not when
-    // it dies from a signal.
-    return result;
-  }
-
-  fprintf(stdout, "PASS\n");
-  return 0;
+  return RUN_ALL_TESTS();
 }
 
 void TestLogging(bool check_counts) {

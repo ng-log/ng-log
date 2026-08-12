@@ -378,10 +378,9 @@ static void ATTRIBUTE_NOINLINE TestWithPCInsideNonInlineFunction() {
   const char* symbol = TrySymbolize(pc);
 
 #      if !defined(_MSC_VER) || !defined(NDEBUG)
-  CHECK(symbol != nullptr);
-  CHECK_STREQ(symbol, "non_inline_func");
+  ASSERT_NE(symbol, nullptr);
+  ASSERT_STREQ(symbol, "non_inline_func");
 #      endif
-  cout << "Test case TestWithPCInsideNonInlineFunction passed." << endl;
 #    endif
 }
 
@@ -391,26 +390,42 @@ static void ATTRIBUTE_NOINLINE TestWithPCInsideInlineFunction() {
   const char* symbol = TrySymbolize(pc);
 
 #      if !defined(_MSC_VER) || !defined(NDEBUG)
-  CHECK(symbol != nullptr);
-  CHECK_STREQ(symbol, __FUNCTION__);
+  ASSERT_NE(symbol, nullptr);
+  ASSERT_STREQ(symbol, __FUNCTION__);
 #      endif
-  cout << "Test case TestWithPCInsideInlineFunction passed." << endl;
 #    endif
 }
 }
 
+TEST(Symbolize, PCInsideNonInlineFunction) {
+  TestWithPCInsideNonInlineFunction();
+#    if !defined(TEST_WITH_LABEL_ADDRESSES) || !defined(HAVE_ATTRIBUTE_NOINLINE)
+  GTEST_SKIP() << "the compiler does not support this symbolization test";
+#    endif
+}
+
+TEST(Symbolize, PCInsideInlineFunction) {
+  TestWithPCInsideInlineFunction();
+#    if !defined(TEST_WITH_LABEL_ADDRESSES) || !defined(HAVE_ALWAYS_INLINE)
+  GTEST_SKIP() << "the compiler does not support this symbolization test";
+#    endif
+}
+
 // Test with a return address.
-static void ATTRIBUTE_NOINLINE TestWithReturnAddress() {
+static const char* ATTRIBUTE_NOINLINE TestWithReturnAddress() {
 #    if defined(HAVE_ATTRIBUTE_NOINLINE)
   void* return_address = __builtin_return_address(0);
-  const char* symbol =
-      TrySymbolize(return_address, nglog::SymbolizeOptions::kNoLineNumbers);
+  return TrySymbolize(return_address, nglog::SymbolizeOptions::kNoLineNumbers);
+#    else
+  return nullptr;
+#    endif
+}
 
-#      if !defined(_MSC_VER) || !defined(NDEBUG)
-  CHECK(symbol != nullptr);
-  CHECK_STREQ(symbol, "main");
-#      endif
-  cout << "Test case TestWithReturnAddress passed." << endl;
+TEST(Symbolize, ReturnAddress) {
+#    if defined(HAVE_ATTRIBUTE_NOINLINE)
+  EXPECT_NE(TestWithReturnAddress(), nullptr);
+#    else
+  GTEST_SKIP() << "the compiler does not support this symbolization test";
 #    endif
 }
 
@@ -437,11 +452,14 @@ TEST(Symbolize, SymbolizeWithDemangling) {
   const char* ret = TrySymbolize((void*)(&Foo::func));
 
 #    if defined(HAVE_DBGHELP) && !defined(NDEBUG)
+  if (ret == nullptr) {
+    GTEST_SKIP() << "the Windows symbolization runtime is unavailable";
+  }
   EXPECT_STREQ("public: static void __cdecl Foo::func(int)", ret);
 #    endif
 }
 
-__declspec(noinline) void TestWithReturnAddress() {
+__declspec(noinline) const char* TestWithReturnAddress() {
   void* return_address =
 #    ifdef __GNUC__  // Cygwin and MinGW support
       __builtin_return_address(0)
@@ -449,16 +467,29 @@ __declspec(noinline) void TestWithReturnAddress() {
       _ReturnAddress()
 #    endif
       ;
-  const char* symbol =
-      TrySymbolize(return_address, nglog::SymbolizeOptions::kNoLineNumbers);
-#    if !defined(_MSC_VER) || !defined(NDEBUG)
-  CHECK(symbol != nullptr);
-  CHECK_STREQ(symbol, "main");
-#    endif
-  cout << "Test case TestWithReturnAddress passed." << endl;
+  return TrySymbolize(return_address, nglog::SymbolizeOptions::kNoLineNumbers);
+}
+
+TEST(Symbolize, ReturnAddress) {
+  const char* symbol = TestWithReturnAddress();
+  if (symbol == nullptr) {
+    GTEST_SKIP() << "the Windows symbolization runtime is unavailable";
+  }
+  EXPECT_NE(symbol, nullptr);
 }
 #  endif
 #endif  // HAVE_STACKTRACE
+
+#if !defined(HAVE_SYMBOLIZE) || !defined(HAVE_STACKTRACE)
+TEST(Symbolize, Unsupported) {
+  GTEST_SKIP() << "symbolization support is unavailable";
+}
+#elif !defined(HAVE_ELF_H) && !defined(HAVE_SYS_EXEC_ELF_H) && \
+    !defined(NGLOG_OS_WINDOWS) && !defined(NGLOG_OS_CYGWIN)
+TEST(Symbolize, Unsupported) {
+  GTEST_SKIP() << "the platform does not support this symbolization test";
+}
+#endif
 
 int main(int argc, char** argv) {
   FLAGS_logtostderr = true;
@@ -469,22 +500,10 @@ int main(int argc, char** argv) {
   // We don't want to get affected by the callback interface, that may be
   // used to install some callback function at InitGoogle() time.
   InstallSymbolizeCallback(nullptr);
-
-  TestWithPCInsideInlineFunction();
-  TestWithPCInsideNonInlineFunction();
-  TestWithReturnAddress();
-  return RUN_ALL_TESTS();
 #  elif defined(NGLOG_OS_WINDOWS) || defined(NGLOG_OS_CYGWIN)
-  TestWithReturnAddress();
-  return RUN_ALL_TESTS();
-#  else   // NGLOG_OS_WINDOWS
-  printf("PASS (no symbolize_unittest support)\n");
-  return 0;
 #  endif  // defined(HAVE_ELF_H) || defined(HAVE_SYS_EXEC_ELF_H)
-#else
-  printf("PASS (no symbolize support)\n");
-  return 0;
 #endif  // HAVE_SYMBOLIZE
+  return RUN_ALL_TESTS();
 }
 
 #if defined(__GNUG__)

@@ -33,7 +33,6 @@
 #include <gtest/gtest.h>
 
 #include <functional>
-#include <iostream>
 #include <map>
 #include <ostream>
 #include <string>
@@ -48,7 +47,7 @@ struct user_hash {
   size_t operator()(int x) const { return static_cast<size_t>(x); }
 };
 
-static void TestSTLLogging() {
+TEST(STLLogging, Basic) {
   {
     // Test a sequence.
     vector<int> v;
@@ -109,8 +108,7 @@ static void TestSTLLogging() {
   }
 }
 
-int main(int, char**) {
-  TestSTLLogging();
-  std::cout << "PASS\n";
-  return 0;
+int main(int argc, char** argv) {
+  testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
 }

@@ -1,4 +1,5 @@
 // Copyright (c) 2023, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -31,6 +32,9 @@
 
 // The common part of the striplog tests.
 
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -40,30 +44,57 @@
 #include "base/commandlineflags.h"
 #include "config.h"
 #include "ng-log/logging.h"
+#include "testing_utilities.h"
 
-NGLOG_DEFINE_bool(check_mode, false, "Prints 'opt' or 'dbg'");
+#ifndef NGLOG_STRIP_LOG
+#  define NGLOG_STRIP_LOG 0
+#endif
 
-using std::string;
 using namespace nglog;
-
-int CheckNoReturn(bool b) {
-  string s;
-  if (b) {
-    LOG(FATAL) << "Fatal";
-    return 0;  // Workaround for MSVC warning C4715
-  } else {
-    return 0;
-  }
-}
-
-struct A {};
-std::ostream& operator<<(std::ostream& str, const A&) { return str; }
+using testing::HasSubstr;
+using testing::Not;
 
 namespace {
 void handle_abort(int /*code*/) { std::exit(EXIT_FAILURE); }
+
+constexpr char kInfoMessage[] = "strip info";
+constexpr char kWarningMessage[] = "strip warning";
+constexpr char kErrorMessage[] = "strip error";
 }  // namespace
 
-int main(int, char* argv[]) {
+TEST(StripLog, LogsExpectedSeverities) {
+  CaptureTestStderr();
+  LOG(INFO) << kInfoMessage;
+  LOG(WARNING) << kWarningMessage;
+  LOG(ERROR) << kErrorMessage;
+  const std::string output = GetCapturedTestStderr();
+
+#if NGLOG_STRIP_LOG == 0
+  EXPECT_THAT(output, HasSubstr(kInfoMessage));
+  EXPECT_THAT(output, HasSubstr(kWarningMessage));
+  EXPECT_THAT(output, HasSubstr(kErrorMessage));
+#elif NGLOG_STRIP_LOG == 2
+  EXPECT_THAT(output, Not(HasSubstr(kInfoMessage)));
+  EXPECT_THAT(output, Not(HasSubstr(kWarningMessage)));
+  EXPECT_THAT(output, HasSubstr(kErrorMessage));
+#elif NGLOG_STRIP_LOG == 10
+  EXPECT_THAT(output, Not(HasSubstr(kInfoMessage)));
+  EXPECT_THAT(output, Not(HasSubstr(kWarningMessage)));
+  EXPECT_THAT(output, Not(HasSubstr(kErrorMessage)));
+#else
+#  error Unsupported NGLOG_STRIP_LOG value
+#endif
+}
+
+TEST(StripLog, FatalIsNotStripped) {
+#if NGLOG_STRIP_LOG <= 3
+  ASSERT_DEATH(LOG(FATAL) << "fatal log", "fatal log");
+#else
+  ASSERT_DEATH(LOG(FATAL) << "fatal log", "");
+#endif
+}
+
+int main(int argc, char* argv[]) {
 #if defined(_MSC_VER)
   // Avoid presenting an interactive dialog that will cause the test to time
   // out.
@@ -73,15 +104,7 @@ int main(int, char* argv[]) {
 
   FLAGS_logtostderr = true;
   InitializeLogging(argv[0]);
-  if (FLAGS_check_mode) {
-    printf("%s\n", DEBUG_MODE ? "dbg" : "opt");
-    return 0;
-  }
-  LOG(INFO) << "TESTMESSAGE INFO";
-  LOG(WARNING) << 2 << "something"
-               << "TESTMESSAGE WARNING" << 1 << 'c' << A() << std::endl;
-  LOG(ERROR) << "TESTMESSAGE ERROR";
-  bool flag = true;
-  (flag ? LOG(INFO) : LOG(ERROR)) << "TESTMESSAGE COND";
-  LOG(FATAL) << "TESTMESSAGE FATAL";
+  testing::InitGoogleTest(&argc, argv);
+  testing::InitGoogleMock(&argc, argv);
+  return RUN_ALL_TESTS();
 }

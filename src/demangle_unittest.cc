@@ -34,6 +34,7 @@
 
 #include "demangle.h"
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <fstream>
@@ -56,6 +57,8 @@ NGLOG_DEFINE_bool(demangle_filter, false,
 
 using namespace std;
 using namespace nglog;
+using testing::HasSubstr;
+using testing::Not;
 
 // A wrapper function for Demangle() to make the unit test simple.
 static const char* DemangleIt(const char* const mangled) {
@@ -99,11 +102,29 @@ TEST(Demangle, CornerCases) {
   EXPECT_FALSE(Demangle(mangled, nullptr, 0));  // Should not cause SEGV.
 }
 
+TEST(Demangle, CxxSymbols) {
+  const char* const mangled_symbols[] = {
+      "_Z6foobarv",
+      "_ZL3Foov",
+      "_ZN3Foo3BarC1Ev",
+      "_ZNSt6vectorIiSaIiEEC1Ev",
+  };
+
+  for (const char* mangled : mangled_symbols) {
+    const char* demangled = DemangleIt(mangled);
+    EXPECT_STRNE(mangled, demangled);
+    EXPECT_THAT(demangled, Not(HasSubstr("_Z")));
+  }
+}
+
 // Test handling of functions suffixed with .clone.N, which is used by GCC
 // 4.5.x, and .constprop.N and .isra.N, which are used by GCC 4.6.x.  These
 // suffixes are used to indicate functions which have been cloned during
 // optimization.  We ignore these suffixes.
 TEST(Demangle, Clones) {
+#  if defined(HAVE___CXA_DEMANGLE)
+  GTEST_SKIP() << "the system demangler does not support clone suffixes";
+#  endif
   char tmp[20];
   EXPECT_TRUE(Demangle("_ZL3Foov", tmp, sizeof(tmp)));
   EXPECT_STREQ("Foo()", tmp);
@@ -180,6 +201,9 @@ TEST(Demangle, LongNameTruncation) {
 }
 
 TEST(Demangle, FromFile) {
+#  if defined(HAVE___CXA_DEMANGLE)
+  GTEST_SKIP() << "the system demangler uses a different symbol spelling";
+#  endif
   string test_file = TestSrcDir() + "/src/demangle_unittest.txt";
   ifstream f(test_file.c_str());  // The file should exist.
   EXPECT_FALSE(f.fail());
