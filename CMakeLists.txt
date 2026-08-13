@@ -863,18 +863,6 @@ if (BUILD_TESTING AND GTest_FOUND)
 
   target_link_libraries (demangle_unittest PRIVATE ng-log_test)
 
-  add_executable (color_unittest
-    src/color_unittest.cc
-  )
-
-  target_link_libraries (color_unittest PRIVATE ng-log_test)
-
-  gtest_discover_tests (color_unittest
-    TEST_PREFIX color.
-    DISCOVERY_TIMEOUT 30
-    DISCOVERY_MODE PRE_TEST
-  )
-
   if (HAVE___CXA_DEMANGLE)
     # Demangle tests use a different (reduced) representation of symbols
     gtest_discover_tests (demangle_unittest
@@ -890,6 +878,18 @@ if (BUILD_TESTING AND GTest_FOUND)
       DISCOVERY_MODE PRE_TEST
     )
   endif (HAVE___CXA_DEMANGLE)
+
+  add_executable (color_unittest
+    src/color_unittest.cc
+  )
+
+  target_link_libraries (color_unittest PRIVATE ng-log_test)
+
+  gtest_discover_tests (color_unittest
+    TEST_PREFIX color.
+    DISCOVERY_TIMEOUT 30
+    DISCOVERY_MODE PRE_TEST
+  )
 
   if (HAVE_STACKTRACE)
     add_executable (stacktrace_unittest
@@ -919,15 +919,9 @@ if (BUILD_TESTING AND GTest_FOUND)
     target_link_libraries (signalhandler_unittest PRIVATE ng-log_test)
   endif (HAVE_STACKTRACE AND HAVE_SYMBOLIZE)
 
-  # FIXME: Skip flaky test. EXPECT_NEAR's own message, not a CHECK_xx one.
+  # FIXME: Skip flaky test. Match GoogleTest's bound assertion message.
   set (logging_unittest_SKIP_REGULAR_EXPRESSION
-    [=[The difference between time_ns and LogTimes::LOG_PERIOD_NS is [0-9]+, which exceeds LogTimes::LOG_PERIOD_TOL_NS]=])
-
-  if (APPLE)
-    # FIXME: Skip flaky test
-    list (APPEND logging_unittest_SKIP_REGULAR_EXPRESSION
-      "unexpected new.*PASS\nTest with golden file failed. We'll try to show the diff:")
-  endif (APPLE)
+    [=[Expected: \(time_ns\) (>=|<=) \(k(Minimum|Maximum)Period\), actual: [0-9]+ vs [0-9]+]=])
 
   gtest_discover_tests (logging_unittest
     TEST_PREFIX logging.
@@ -935,9 +929,6 @@ if (BUILD_TESTING AND GTest_FOUND)
     DISCOVERY_MODE PRE_TEST
     PROPERTIES
       TIMEOUT 30
-      # MacOS diff is not deterministic: use the output to determine
-      # whether the test passed.
-      PASS_REGULAR_EXPRESSION ".*\nPASS\n.*"
       SKIP_REGULAR_EXPRESSION "${logging_unittest_SKIP_REGULAR_EXPRESSION}"
       # CaptureTestStdout()/CaptureTestStderr() always write to the same
       # fixed path under TestTmpDir(), so tests using them must not run
@@ -977,17 +968,19 @@ if (BUILD_TESTING AND GTest_FOUND)
   endif (TARGET signalhandler_unittest)
 
   if (TARGET stacktrace_unittest)
-    add_test (NAME stacktrace COMMAND stacktrace_unittest)
-    set_tests_properties (stacktrace PROPERTIES TIMEOUT 30)
-
-    if (APPLE)
-      set_tests_properties (stacktrace PROPERTIES SKIP_REGULAR_EXPRESSION
-        [=[\(&expected_range[[]5[]]\)->start < \(&expected_range[[]5[]]\)->end \(0x1 vs\. 0x1\)]=]
-      )
-    endif (APPLE)
+    gtest_discover_tests (stacktrace_unittest
+      TEST_PREFIX stacktrace.
+      DISCOVERY_TIMEOUT 30
+      DISCOVERY_MODE PRE_TEST
+      PROPERTIES TIMEOUT 30
+    )
   endif (TARGET stacktrace_unittest)
 
-  add_test (NAME stl_logging COMMAND stl_logging_unittest)
+  gtest_discover_tests (stl_logging_unittest
+    TEST_PREFIX stl_logging.
+    DISCOVERY_TIMEOUT 30
+    DISCOVERY_MODE PRE_TEST
+  )
 
   if (TARGET symbolize_unittest)
     # FIXME: Skip flaky test when compiled in C++20 mode
@@ -1167,7 +1160,12 @@ if (BUILD_TESTING AND GTest_FOUND)
   target_compile_definitions (striplog0_unittest PRIVATE NGLOG_STRIP_LOG=0)
   target_link_libraries (striplog0_unittest PRIVATE ng-log_test)
 
-  add_test (NAME striplog0 COMMAND striplog0_unittest)
+  gtest_discover_tests (striplog0_unittest
+    TEST_PREFIX striplog0.
+    DISCOVERY_TIMEOUT 30
+    DISCOVERY_MODE PRE_TEST
+    PROPERTIES RESOURCE_LOCK captured_stream
+  )
 
   add_executable (striplog2_unittest
     src/striplog_unittest.cc
@@ -1175,7 +1173,12 @@ if (BUILD_TESTING AND GTest_FOUND)
   target_compile_definitions (striplog2_unittest PRIVATE NGLOG_STRIP_LOG=2)
   target_link_libraries (striplog2_unittest PRIVATE ng-log_test)
 
-  add_test (NAME striplog2 COMMAND striplog2_unittest)
+  gtest_discover_tests (striplog2_unittest
+    TEST_PREFIX striplog2.
+    DISCOVERY_TIMEOUT 30
+    DISCOVERY_MODE PRE_TEST
+    PROPERTIES RESOURCE_LOCK captured_stream
+  )
 
   add_executable (striplog10_unittest
     src/striplog_unittest.cc
@@ -1188,13 +1191,11 @@ if (BUILD_TESTING AND GTest_FOUND)
   )
   target_link_libraries (striplog10_unittest PRIVATE ng-log_test)
 
-  add_test (NAME striplog10 COMMAND striplog10_unittest)
-
-  set_tests_properties (
-    striplog0
-    striplog2
-    striplog10
-    PROPERTIES WILL_FAIL ON
+  gtest_discover_tests (striplog10_unittest
+    TEST_PREFIX striplog10.
+    DISCOVERY_TIMEOUT 30
+    DISCOVERY_MODE PRE_TEST
+    PROPERTIES RESOURCE_LOCK captured_stream
   )
 
   add_test (NAME log_severity_constants COMMAND ${CMAKE_CTEST_COMMAND}

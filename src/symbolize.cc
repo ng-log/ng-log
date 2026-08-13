@@ -417,7 +417,7 @@ static ATTRIBUTE_NOINLINE bool FindSymbol(uint64_t pc, const int fd, char* out,
     return false;
   }
   const size_t num_symbols = symtab->sh_size / symtab->sh_entsize;
-  for (unsigned i = 0; i < num_symbols;) {
+  for (std::size_t i = 0; i < num_symbols;) {
     size_t offset = symtab->sh_offset + i * symtab->sh_entsize;
 
     // If we are reading Elf64_Sym's, we want to limit this array to
@@ -437,7 +437,7 @@ static ATTRIBUTE_NOINLINE bool FindSymbol(uint64_t pc, const int fd, char* out,
     NGLOG_SAFE_ASSERT(static_cast<size_t>(len) % sizeof(buf[0]) == 0);
     const size_t num_symbols_in_buf = static_cast<size_t>(len) / sizeof(buf[0]);
     NGLOG_SAFE_ASSERT(num_symbols_in_buf <= num_symbols_to_read);
-    for (unsigned j = 0; j < num_symbols_in_buf; ++j) {
+    for (std::size_t j = 0; j < num_symbols_in_buf; ++j) {
       const ElfW(Sym)& symbol = buf[j];
       uint64_t start_address = symbol.st_value;
       start_address += symbol_offset;

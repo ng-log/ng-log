@@ -335,7 +335,6 @@ constexpr std::size_t kPrefixMinuteWidth = 2;
 constexpr std::size_t kPrefixSecondWidth = 2;
 constexpr std::size_t kPrefixMicrosecondWidth = 6;
 constexpr std::size_t kPrefixThreadIdWidth = 5;
-constexpr unsigned int kPrefixDecimalBase = 10;
 
 void AppendPrefixText(LogMessage::LogStream& stream, const char* text) {
   stream.append(text, std::strlen(text));
@@ -345,7 +344,8 @@ template <typename Integer>
 void AppendPrefixNumber(LogMessage::LogStream& stream, Integer value,
                         std::size_t width = 0) {
   std::array<char, kPrefixNumberBufferSize> number;
-  using UnsignedInteger = typename std::make_unsigned<Integer>::type;
+  using UnsignedInteger = std::make_unsigned_t<Integer>;
+  constexpr UnsignedInteger kPrefixDecimalBase = 10;
   const bool negative = value < 0;
   UnsignedInteger magnitude =
       negative ? static_cast<UnsignedInteger>(-(value + 1)) + 1
@@ -353,7 +353,7 @@ void AppendPrefixNumber(LogMessage::LogStream& stream, Integer value,
   char* end = number.data() + number.size();
   char* begin = end;
   do {
-    const unsigned int digit = magnitude % kPrefixDecimalBase;
+    const UnsignedInteger digit = magnitude % kPrefixDecimalBase;
     *--begin = static_cast<char>('0' + digit);
     magnitude /= kPrefixDecimalBase;
   } while (magnitude != 0);
@@ -463,7 +463,7 @@ class LogFileObject : public base::Logger {
   // i.e., INFO, ERROR, etc.
   uint32 LogSize() override {
     std::lock_guard<internal::FileMutex> l{mutex_};
-    return file_length_;
+    return static_cast<uint32>(file_length_);
   }
 
   // Internal flush routine.  Exposed so that FlushLogFilesUnsafe()
@@ -481,9 +481,9 @@ class LogFileObject : public base::Logger {
   string filename_extension_;  // option users can specify (eg to add port#)
   std::unique_ptr<FILE> file_;
   LogSeverity severity_;
-  uint32 bytes_since_flush_{0};
-  uint32 dropped_mem_length_{0};
-  uint32 file_length_{0};
+  std::size_t bytes_since_flush_{0};
+  std::size_t dropped_mem_length_{0};
+  std::size_t file_length_{0};
   unsigned int rollover_attempt_;
   std::chrono::system_clock::time_point
       next_flush_time_;  // cycle count at which to flush log
@@ -1433,12 +1433,12 @@ bool LogFileObject::CreateLogfile(const string& time_pid_string) {
     struct stat statbuf;
     if (stat(filename, &statbuf) == 0) {
       // truncate the file if it exceeds the max size
-      if ((static_cast<uint32>(statbuf.st_size) >> 20U) >= MaxLogSize()) {
+      if ((static_cast<std::size_t>(statbuf.st_size) >> 20U) >= MaxLogSize()) {
         flags |= O_TRUNC;
       }
 
       // update file length to sync file size
-      file_length_ = static_cast<uint32>(statbuf.st_size);
+      file_length_ = static_cast<std::size_t>(statbuf.st_size);
     }
   }
 
@@ -1720,9 +1720,9 @@ void LogFileObject::WriteUnlocked(
     if (FLAGS_drop_log_memory && file_length_ >= (3U << 20U)) {
       // Don't evict the most recent 1-2MiB so as not to impact a tailer
       // of the log file and to avoid page rounding issue on linux < 4.7
-      uint32 total_drop_length =
+      std::size_t total_drop_length =
           (file_length_ & ~((1U << 20U) - 1U)) - (1U << 20U);
-      uint32 this_drop_length = total_drop_length - dropped_mem_length_;
+      std::size_t this_drop_length = total_drop_length - dropped_mem_length_;
       if (this_drop_length >= (2U << 20U)) {
         // Only advise when >= 2MiB to drop
 #  if defined(HAVE_POSIX_FADVISE)

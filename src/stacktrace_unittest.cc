@@ -1,4 +1,5 @@
 // Copyright (c) 2004, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -28,6 +29,8 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "stacktrace.h"
+
+#include <gtest/gtest.h>
 
 #include <csignal>
 #include <cstdio>
@@ -61,12 +64,12 @@ AddressRange expected_range[BACKTRACE_STEPS];
 #  if __GNUC__
 // Using GCC extension: address of a label can be taken with '&&label'.
 // Start should be a label somewhere before recursive call, end somewhere
-// after it.
+// after it. Some compilers can initially assign both labels the same address.
+// The caller's return address extends the range before it is checked.
 #    define INIT_ADDRESS_RANGE(fn, start_label, end_label, prange) \
       do {                                                         \
         (prange)->start = &&start_label;                           \
         (prange)->end = &&end_label;                               \
-        CHECK_LT((prange)->start, (prange)->end);                  \
       } while (0)
 // This macro expands into "unmovable" code (opaque to GCC), and that
 // prevents GCC from moving a_label up or down in the code.
@@ -85,7 +88,7 @@ AddressRange expected_range[BACKTRACE_STEPS];
 #    define ADJUST_ADDRESS_RANGE_FROM_RA(prange)                             \
       do {                                                                   \
         void* ra = __builtin_return_address(0);                              \
-        CHECK_LT((prange)->start, ra);                                       \
+        ASSERT_LT((prange)->start, ra);                                      \
         if (ra > (prange)->end) {                                            \
           printf("Adjusting range from %p..%p to %p..%p\n", (prange)->start, \
                  (prange)->end, (prange)->start, ra);                        \
@@ -111,8 +114,8 @@ AddressRange expected_range[BACKTRACE_STEPS];
 
 static void CheckRetAddrIsInFunction(void* ret_addr,
                                      const AddressRange& range) {
-  CHECK_GE(ret_addr, range.start);
-  CHECK_LE(ret_addr, range.end);
+  ASSERT_GE(ret_addr, range.start);
+  ASSERT_LE(ret_addr, range.end);
 }
 
 //-----------------------------------------------------------------------//
@@ -126,18 +129,35 @@ static void CheckRetAddrIsInFunction(void* ret_addr,
 #  endif
 
 void ATTRIBUTE_NOINLINE CheckStackTrace(int);
+#  if __GNUC__
+static void* ATTRIBUTE_NOINLINE GetReturnAddress() {
+  return __builtin_return_address(0);
+}
+#  endif
+
 static void ATTRIBUTE_NOINLINE CheckStackTraceLeaf() {
   const int STACK_LEN = 10;
   void* stack[STACK_LEN];
   int size;
 
   ADJUST_ADDRESS_RANGE_FROM_RA(&expected_range[1]);
+#  if __GNUC__
+  union {
+    void (*function)();
+    const void* address;
+  } function_address = {&CheckStackTraceLeaf};
+  expected_range[0].start = function_address.address;
+#  else
   INIT_ADDRESS_RANGE(CheckStackTraceLeaf, start, end, &expected_range[0]);
   DECLARE_ADDRESS_LABEL(start);
+#  endif
   size = nglog::GetStackTrace(stack, STACK_LEN, 0);
+#  if __GNUC__
+  expected_range[0].end = GetReturnAddress();
+#  endif
   printf("Obtained %d stack frames.\n", size);
-  CHECK_GE(size, 1);
-  CHECK_LE(size, STACK_LEN);
+  ASSERT_GE(size, 1);
+  ASSERT_LE(size, STACK_LEN);
 
   if (true) {
 #  ifdef HAVE_EXECINFO_BACKTRACE_SYMBOLS
@@ -163,7 +183,9 @@ static void ATTRIBUTE_NOINLINE CheckStackTraceLeaf() {
     CheckRetAddrIsInFunction(stack[i], expected_range[i]);
     printf("OK\n");
   }
+#  ifndef __GNUC__
   DECLARE_ADDRESS_LABEL(end);
+#  endif
 }
 
 //-----------------------------------------------------------------------//
@@ -237,7 +259,9 @@ void handle_abort(int /*code*/) { std::exit(EXIT_FAILURE); }
 
 //-----------------------------------------------------------------------//
 
-int main(int, char** argv) {
+TEST(Stacktrace, StackTrace) { CheckStackTrace(0); }
+
+int main(int argc, char** argv) {
 #  if defined(_MSC_VER)
   // Avoid presenting an interactive dialog that will cause the test to time
   // out.
@@ -247,16 +271,17 @@ int main(int, char** argv) {
 
   FLAGS_logtostderr = true;
   nglog::InitializeLogging(argv[0]);
-
-  CheckStackTrace(0);
-
-  printf("PASS\n");
-  return 0;
+  testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
 }
 
 #else
-int main() {
-  printf("PASS (no stacktrace support)\n");
-  return 0;
+TEST(Stacktrace, Unsupported) {
+  GTEST_SKIP() << "stacktrace support is unavailable";
+}
+
+int main(int argc, char** argv) {
+  testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
 }
 #endif    // HAVE_STACKTRACE
