@@ -439,6 +439,14 @@ static ATTRIBUTE_NOINLINE bool FindSymbol(uint64_t pc, const int fd, char* out,
     NGLOG_SAFE_ASSERT(num_symbols_in_buf <= num_symbols_to_read);
     for (std::size_t j = 0; j < num_symbols_in_buf; ++j) {
       const ElfW(Sym)& symbol = buf[j];
+#    if defined(__WORDSIZE) && __WORDSIZE == 64
+      const unsigned char symbol_type = ELF64_ST_TYPE(symbol.st_info);
+#    else
+      const unsigned char symbol_type = ELF32_ST_TYPE(symbol.st_info);
+#    endif
+      if (symbol_type == STT_TLS) {
+        continue;
+      }
       uint64_t start_address = symbol.st_value;
       start_address += symbol_offset;
       uint64_t end_address = start_address + symbol.st_size;

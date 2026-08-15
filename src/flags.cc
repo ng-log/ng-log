@@ -160,8 +160,8 @@ NGLOG_DEFINE_string(
     vmodule, "",
     "per-module verbose level."
     " Argument is a comma-separated list of <module name>=<log level>."
-    " <module name> is a glob pattern, matched against the filename base"
-    " (that is, name ignoring .cc/.h./-inl.h)."
+    " <module name> is a glob pattern, matched against the source filename"
+    " base before the first period, with a trailing -inl suffix removed."
     " <log level> overrides any value given by --v.");
 
 NGLOG_DEFINE_bool(symbolize_stacktrace, true,

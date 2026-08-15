@@ -1331,7 +1331,7 @@ class NGLOG_EXPORT LogMessage {
   // Fully internal SendMethod cases:
   void SendToSinkAndLog();  // Send to sink if provided and dispatch to the logs
   void SendToSink();        // Send to sink if provided, do nothing otherwise.
-  void SendToRegisteredSinks();
+  bool SendToRegisteredSinks();
 
   // Write to string if provided and dispatch to the logs.
   void WriteToStringAndLog();

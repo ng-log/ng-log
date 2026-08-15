@@ -678,6 +678,31 @@ class ReentrantLogSink : public LogSink {
   std::shared_ptr<State> state_{std::make_shared<State>()};
 };
 
+class SelfRemovingLogSink : public LogSink {
+ public:
+  void send(LogSeverity, const char*, const char*, int, const LogMessageTime&,
+            const char*, size_t) override {
+    RemoveLogSink(this);
+  }
+};
+
+class ReentrantLogger : public base::Logger {
+ public:
+  void Write(bool, const std::chrono::system_clock::time_point&, const char*,
+             size_t) override {
+    if (!nested_) {
+      nested_ = true;
+      LOG(INFO) << "Nested custom logger message.";
+    }
+  }
+
+  void Flush() override {}
+  uint32 LogSize() override { return 0; }
+
+ private:
+  bool nested_{false};
+};
+
 constexpr std::chrono::seconds ReentrantLogSink::kSinkCallbackTimeout;
 
 void TestLogSink() {
@@ -735,6 +760,37 @@ TEST(Logging, RegisteredSinkCanLogDuringSend) {
   EXPECT_TRUE(sink.NestedCompletedDuringCallback());
 }
 
+TEST(Logging, RegisteredSinkCanRemoveItself) {
+#if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H)
+  constexpr unsigned kDeathTestTimeoutSeconds = 2;
+  ASSERT_EXIT(
+      {
+        alarm(kDeathTestTimeoutSeconds);
+        SelfRemovingLogSink sink;
+        AddLogSink(&sink);
+        LOG(INFO) << "Remove sink from callback.";
+        _exit(EXIT_SUCCESS);
+      },
+      testing::ExitedWithCode(EXIT_SUCCESS), "");
+#endif
+}
+
+TEST(Logging, CustomLoggerCanLogDuringWrite) {
+#if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H)
+  constexpr unsigned kDeathTestTimeoutSeconds = 2;
+  ASSERT_EXIT(
+      {
+        alarm(kDeathTestTimeoutSeconds);
+        FLAGS_logtostderr = false;
+        FLAGS_logtostdout = false;
+        base::SetLogger(NGLOG_INFO, new ReentrantLogger);
+        LOG(INFO) << "Log through a reentrant custom logger.";
+        _exit(EXIT_SUCCESS);
+      },
+      testing::ExitedWithCode(EXIT_SUCCESS), "");
+#endif
+}
+
 TEST(Logging, DirectSinkCanLogDuringSend) {
   FlagSaver saver;
   FLAGS_logtostderr = true;
@@ -760,8 +816,78 @@ TEST(Logging, DirectSinkWithoutRegisteredSinksDoesNotLockSinkRegistry) {
   const internal::LockMetrics metrics =
       internal::GetLockMetrics(internal::LockKind::kSink);
   EXPECT_EQ(metrics.acquisitions, 0U);
+  EXPECT_EQ(internal::GetLockMetrics(internal::LockKind::kLog).acquisitions,
+            0U);
+}
+
+TEST(Logging, RegisteredSinkDispatchUsesOneRegistrySnapshot) {
+  FlagSaver saver;
+  FLAGS_logtostderr = true;
+  TestLogSinkImpl sink;
+  AddLogSink(&sink);
+  internal::ResetLockMetrics();
+
+  LOG(INFO) << "Log to one registered sink.";
+
+  const internal::LockMetrics metrics =
+      internal::GetLockMetrics(internal::LockKind::kSink);
+  RemoveLogSink(&sink);
+  EXPECT_EQ(metrics.acquisitions, 1U);
 }
 #endif
+
+#if defined(NGLOG_OS_LINUX)
+TEST(Logging, ConcurrentFullDiskWrites) {
+  constexpr int kFullDiskWriteCount = 100;
+  FlagSaver saver;
+  FLAGS_logtostderr = false;
+  FLAGS_logtostdout = false;
+  FLAGS_log_file_header = false;
+  FLAGS_timestamp_in_logfile_name = false;
+  FLAGS_stop_logging_if_full_disk = true;
+  SetLogDestination(NGLOG_INFO, "/dev/full");
+  SetLogDestination(NGLOG_WARNING, "/dev/full");
+
+  base::Logger* info_logger = base::GetLogger(NGLOG_INFO);
+  base::Logger* warning_logger = base::GetLogger(NGLOG_WARNING);
+  const auto write_logs = [](base::Logger* logger) {
+    const auto timestamp = std::chrono::system_clock::now();
+    for (int i = 0; i < kFullDiskWriteCount; ++i) {
+      logger->Write(false, timestamp, "x", 1);
+    }
+  };
+  std::thread info_thread{write_logs, info_logger};
+  std::thread warning_thread{write_logs, warning_logger};
+  info_thread.join();
+  warning_thread.join();
+
+  LogToStderr();
+}
+#endif
+
+TEST(Logging, ConcurrentFatalMessages) {
+  constexpr int kFatalMessageCount = 20;
+  const logging_fail_func_t previous_failure_function =
+      InstallFailureFunction(&ThrowFatalLogFailure);
+  const bool previous_exit_on_dfatal = base::internal::GetExitOnDFatal();
+  base::internal::SetExitOnDFatal(true);
+
+  const auto write_fatal = [] {
+    for (int i = 0; i < kFatalMessageCount; ++i) {
+      try {
+        LOG(FATAL) << "Concurrent fatal message.";
+      } catch (const std::logic_error&) {
+      }
+    }
+  };
+  std::thread first{write_fatal};
+  std::thread second{write_fatal};
+  first.join();
+  second.join();
+
+  base::internal::SetExitOnDFatal(previous_exit_on_dfatal);
+  InstallFailureFunction(previous_failure_function);
+}
 
 // For testing using CHECK*() on anonymous enums.
 enum { CASE_A, CASE_B };
@@ -2466,3 +2592,29 @@ TEST(LoggingGoldenFile, Stdout) {
       MungeAndDiffTestStdout(TestSrcDir() + "/src/logging_unittest.out"));
   FLAGS_logtostdout = false;
 }
+
+#if defined(__GNUC__)
+TEST(VLOG, ConcurrentLevelUpdates) {
+  constexpr int kInitialLevel = 0;
+  constexpr int kUpdateCount = 1000000;
+  constexpr int kVlogTestLevel = 1;
+  constexpr int kVlogLevelPeriod = 2;
+  SetVLOGLevel("logging_unittest", kInitialLevel);
+  static_cast<void>(VLOG_IS_ON(kVlogTestLevel));
+  std::atomic<bool> stop{false};
+  std::thread reader([&stop] {
+    while (!stop.load(std::memory_order_relaxed)) {
+      static_cast<void>(VLOG_IS_ON(kVlogTestLevel));
+    }
+  });
+
+  for (int i = 0; i < kUpdateCount; ++i) {
+    SetVLOGLevel("logging_unittest", i % kVlogLevelPeriod);
+    std::this_thread::yield();
+  }
+
+  stop.store(true, std::memory_order_relaxed);
+  reader.join();
+  SetVLOGLevel("logging_unittest", kInitialLevel);
+}
+#endif

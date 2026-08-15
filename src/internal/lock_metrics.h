@@ -51,6 +51,22 @@ class InstrumentedMutex {
 };
 
 template <LockKind Kind>
+class InstrumentedRecursiveMutex {
+ public:
+  void lock();
+  void unlock();
+  bool try_lock();
+
+  InstrumentedRecursiveMutex() = default;
+  InstrumentedRecursiveMutex(const InstrumentedRecursiveMutex&) = delete;
+  InstrumentedRecursiveMutex& operator=(const InstrumentedRecursiveMutex&) =
+      delete;
+
+ private:
+  std::recursive_mutex mutex_;
+};
+
+template <LockKind Kind>
 class InstrumentedSharedMutex {
  public:
   void lock();
@@ -69,7 +85,7 @@ class InstrumentedSharedMutex {
 };
 
 #ifdef NGLOG_ENABLE_LOCK_METRICS
-using LogMutex = InstrumentedMutex<LockKind::kLog>;
+using LogMutex = InstrumentedRecursiveMutex<LockKind::kLog>;
 using FileMutex = InstrumentedMutex<LockKind::kFile>;
 using CleanerMutex = InstrumentedMutex<LockKind::kCleaner>;
 using FatalMutex = InstrumentedMutex<LockKind::kFatal>;
@@ -77,7 +93,7 @@ template <LockKind Kind>
 using MetricsSharedMutex = InstrumentedSharedMutex<Kind>;
 using CleanerConditionVariable = std::condition_variable_any;
 #else
-using LogMutex = std::mutex;
+using LogMutex = std::recursive_mutex;
 using FileMutex = std::mutex;
 using CleanerMutex = std::mutex;
 using FatalMutex = std::mutex;

@@ -56,7 +56,8 @@ The following flags are most commonly used:
 `v` (`int`, default=0)
 
 :   Show all `#!cpp VLOG(m)` messages for `m` less or equal the value of this
-    flag. Overridable by `#!bash --vmodule`. Refer to [verbose
+    flag. The applicable `#!bash --vmodule` entry overrides this value. Refer
+    to [verbose
     logging](logging.md#verbose-logging) for more detail.
 
 `vmodule` (`string`, default="")
@@ -64,8 +65,9 @@ The following flags are most commonly used:
 :   Per-module verbose level. The argument has to contain a
     comma-separated list of `<module name>=<log level>`. `<module name>` is a
     glob pattern (e.g., `gfs*` for all modules whose name starts with "gfs"),
-    matched against the filename base (that is, name ignoring .cc/.h./-inl.h).
-    `<log level>` overrides any value given by `--v`. See also [verbose
+    matched against the source filename base. The base is the part before the
+    first period, with a trailing `-inl` suffix removed. `<log level>`
+    overrides any value given by `--v`. See also [verbose
     logging](logging.md#verbose-logging) for more details.
 
 Additional flags are defined in

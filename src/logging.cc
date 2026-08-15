@@ -311,12 +311,12 @@ static internal::LogMutex log_mutex;
 std::atomic<int64> LogMessage::num_messages_[NUM_SEVERITIES]{};
 
 // Globally disable log writing (if disk is full)
-static bool stop_writing = false;
+static std::atomic<bool> stop_writing{false};
 
 const char* const LogSeverityNames[] = {"INFO", "WARNING", "ERROR", "FATAL"};
 
 // Has the user called SetExitOnDFatal(true)?
-static bool exit_on_dfatal = true;
+static std::atomic<bool> exit_on_dfatal{true};
 
 const char* GetLogSeverityName(LogSeverity severity) {
   return LogSeverityNames[severity];
@@ -612,7 +612,7 @@ class LogDestination {
       const char* message, size_t len);
 
   // Send logging info to all registered sinks.
-  static void LogToSinks(LogSeverity severity, const char* full_filename,
+  static bool LogToSinks(LogSeverity severity, const char* full_filename,
                          const char* base_filename, int line,
                          const LogMessageTime& time, const char* message,
                          size_t message_len);
@@ -633,7 +633,8 @@ class LogDestination {
 
   // Wait for all registered sinks via WaitTillSent
   // including the optional one in "data".
-  static void WaitForSinks(internal::LogMessageData* data);
+  static void WaitForSinks(internal::LogMessageData* data,
+                           bool wait_for_registered_sinks);
 
   static LogDestination* log_destination(LogSeverity severity);
 
@@ -648,6 +649,7 @@ class LogDestination {
   static std::underlying_type_t<LogSeverity> email_logging_severity_;
   static string addresses_;
   static string hostname_;
+  static std::once_flag hostname_once_;
 
   // arbitrary global logging destinations.
   static std::shared_ptr<const vector<LogSink*>> sinks_;
@@ -678,15 +680,17 @@ LogDestination::SinkMutex LogDestination::sink_mutex_;
 std::mutex LogDestination::sink_call_mutex_;
 std::condition_variable LogDestination::sink_call_cond_;
 std::unordered_map<LogSink*, size_t> LogDestination::sink_call_counts_;
+thread_local std::unordered_map<LogSink*, size_t> sink_call_counts_for_thread;
+std::once_flag LogDestination::hostname_once_;
 
 /* static */
 const string& LogDestination::hostname() {
-  if (hostname_.empty()) {
+  std::call_once(hostname_once_, [] {
     GetHostName(&hostname_);
     if (hostname_.empty()) {
       hostname_ = "(unknown)";
     }
-  }
+  });
   return hostname_;
 }
 
@@ -1295,7 +1299,7 @@ inline void LogDestination::LogToAllLogfilesLocked(
   }
 }
 
-inline void LogDestination::LogToSinks(LogSeverity severity,
+inline bool LogDestination::LogToSinks(LogSeverity severity,
                                        const char* full_filename,
                                        const char* base_filename, int line,
                                        const LogMessageTime& time,
@@ -1303,23 +1307,28 @@ inline void LogDestination::LogToSinks(LogSeverity severity,
                                        size_t message_len) {
   const auto sinks = GetSinksForCall();
   if (!sinks) {
-    return;
+    return false;
   }
   for (size_t i = sinks->size(); i-- > 0;) {
     LogSink* sink = (*sinks)[i];
     SinkCallGuard guard{sink};
     sink->send(severity, full_filename, base_filename, line, time, message,
                message_len);
+    sink->WaitTillSent();
   }
+  return true;
 }
 
-inline void LogDestination::WaitForSinks(internal::LogMessageData* data) {
-  const auto sinks = GetSinksForCall();
-  if (sinks) {
-    for (size_t i = sinks->size(); i-- > 0;) {
-      LogSink* sink = (*sinks)[i];
-      SinkCallGuard guard{sink};
-      sink->WaitTillSent();
+inline void LogDestination::WaitForSinks(internal::LogMessageData* data,
+                                         bool wait_for_registered_sinks) {
+  if (wait_for_registered_sinks) {
+    const auto sinks = GetSinksForCall();
+    if (sinks) {
+      for (size_t i = sinks->size(); i-- > 0;) {
+        LogSink* sink = (*sinks)[i];
+        SinkCallGuard guard{sink};
+        sink->WaitTillSent();
+      }
     }
   }
   const bool send_to_sink =
@@ -1342,6 +1351,7 @@ std::shared_ptr<const std::vector<LogSink*>> LogDestination::GetSinksForCall() {
     for (size_t i = sinks->size(); i-- > 0;) {
       LogSink* sink = (*sinks)[i];
       ++sink_call_counts_[sink];
+      ++sink_call_counts_for_thread[sink];
     }
   }
   return sinks;
@@ -1353,22 +1363,53 @@ void LogDestination::EndSinkCall(LogSink* sink) {
   CHECK(it != sink_call_counts_.end());
   CHECK_GT(it->second, 0U);
   --it->second;
+  auto thread_it = sink_call_counts_for_thread.find(sink);
+  CHECK(thread_it != sink_call_counts_for_thread.end());
+  CHECK_GT(thread_it->second, 0U);
+  --thread_it->second;
+  if (thread_it->second == 0) {
+    sink_call_counts_for_thread.erase(thread_it);
+  }
   if (it->second == 0) {
     sink_call_counts_.erase(it);
-    sink_call_cond_.notify_all();
   }
+  sink_call_cond_.notify_all();
 }
 
 void LogDestination::WaitForSinkCalls(LogSink* sink) {
   std::unique_lock<std::mutex> l{sink_call_mutex_};
   sink_call_cond_.wait(l, [sink] {
-    return sink_call_counts_.find(sink) == sink_call_counts_.end();
+    const auto global_it = sink_call_counts_.find(sink);
+    const auto thread_it = sink_call_counts_for_thread.find(sink);
+    const size_t thread_count =
+        thread_it == sink_call_counts_for_thread.end() ? 0 : thread_it->second;
+    const size_t global_count =
+        global_it == sink_call_counts_.end() ? 0 : global_it->second;
+    return global_count == thread_count;
   });
 }
 
 void LogDestination::WaitForAllSinkCalls() {
   std::unique_lock<std::mutex> l{sink_call_mutex_};
-  sink_call_cond_.wait(l, [] { return sink_call_counts_.empty(); });
+  sink_call_cond_.wait(l, [] {
+    for (const auto& entry : sink_call_counts_) {
+      const auto thread_it = sink_call_counts_for_thread.find(entry.first);
+      const size_t thread_count = thread_it == sink_call_counts_for_thread.end()
+                                      ? 0
+                                      : thread_it->second;
+      if (entry.second != thread_count) {
+        return false;
+      }
+    }
+    for (const auto& entry : sink_call_counts_for_thread) {
+      const auto global_it = sink_call_counts_.find(entry.first);
+      if (global_it == sink_call_counts_.end() ||
+          global_it->second != entry.second) {
+        return false;
+      }
+    }
+    return true;
+  });
 }
 
 std::unique_ptr<LogDestination>
@@ -1389,6 +1430,7 @@ void LogDestination::DeleteLogDestinations() {
   {
     SinkLock l{sink_mutex_};
     sinks_.reset();
+    sinks_present_.store(false, std::memory_order_release);
   }
   WaitForAllSinkCalls();
 }
@@ -1572,8 +1614,7 @@ bool LogFileObject::CreateLogfile(const string& time_pid_string) {
   // This will work after a fork as it is not inherited (not stored in the fd).
   // Lock will not be lost because the file is opened with exclusive lock
   // (write) and we will never read from it inside the process.
-  static struct flock w_lock;
-
+  struct flock w_lock = {};
   w_lock.l_type = F_WRLCK;
   w_lock.l_start = 0;
   w_lock.l_whence = SEEK_SET;
@@ -1816,7 +1857,7 @@ void LogFileObject::WriteUnlocked(
   }
 
   // Write to LOG file
-  if (!stop_writing) {
+  if (!stop_writing.load(std::memory_order_relaxed)) {
     // fwrite() doesn't return an error when the disk is full, for
     // messages that are less than 4096 bytes. When the disk is full,
     // it returns the message length for messages that are less than
@@ -1826,7 +1867,7 @@ void LogFileObject::WriteUnlocked(
     fwrite(message, 1, message_len, file_.get());
     if (FLAGS_stop_logging_if_full_disk &&
         errno == ENOSPC) {  // disk full, stop writing to disk
-      stop_writing = true;  // until the disk is
+      stop_writing.store(true, std::memory_order_relaxed);  // until the disk is
       return;
     } else {
       file_length_ += message_len;
@@ -1834,7 +1875,7 @@ void LogFileObject::WriteUnlocked(
     }
   } else {
     if (timestamp >= next_flush_time_) {
-      stop_writing = false;  // check to see if disk has free space.
+      stop_writing.store(false, std::memory_order_relaxed);
     }
     return;  // no need to flush
   }
@@ -1901,14 +1942,13 @@ void LogFileObject::WriteUnlocked(
 // Static log data space to avoid alloc failures in a LOG(FATAL)
 //
 // Since multiple threads may call LOG(FATAL), and we want to preserve
-// the data from the first call, we allocate two sets of space.  One
-// for exclusive use by the first thread, and one for shared use by
-// all other threads.
+// the data from the first call, we allocate one exclusive set of space
+// and one thread-local set for each concurrent caller.
 static internal::FatalMutex fatal_msg_lock;
 static internal::CrashReason crash_reason;
 static bool fatal_msg_exclusive = true;
 static internal::LogMessageData fatal_msg_data_exclusive;
-static internal::LogMessageData fatal_msg_data_shared;
+static thread_local internal::LogMessageData fatal_msg_data_shared;
 
 #ifdef NGLOG_THREAD_LOCAL_STORAGE
 // Static thread-local log data space to use, because typically at most one
@@ -1979,7 +2019,8 @@ LogMessage::LogMessage(const char* file, int line, LogSeverity severity,
 void LogMessage::Init(const char* file, int line, LogSeverity severity,
                       void (LogMessage::*send_method)()) {
   allocated_ = nullptr;
-  if (severity != NGLOG_FATAL || !exit_on_dfatal) {
+  if (severity != NGLOG_FATAL ||
+      !exit_on_dfatal.load(std::memory_order_relaxed)) {
 #ifdef NGLOG_THREAD_LOCAL_STORAGE
     // No need for locking, because this is thread local.
     if (thread_data_available) {
@@ -2072,7 +2113,8 @@ const LogMessageTime& LogMessage::time() const noexcept { return time_; }
 
 LogMessage::~LogMessage() noexcept(false) {
   Flush();
-  bool fail = data_->severity_ == NGLOG_FATAL && exit_on_dfatal;
+  const bool fail = data_->severity_ == NGLOG_FATAL &&
+                    exit_on_dfatal.load(std::memory_order_relaxed);
 #ifdef NGLOG_THREAD_LOCAL_STORAGE
   if (data_ == static_cast<void*>(&thread_msg_data)) {
     data_->~LogMessageData();
@@ -2172,34 +2214,35 @@ void LogMessage::Flush() {
       send_method == &LogMessage::WriteToStringAndLog ||
       (send_method == &LogMessage::SaveOrSendToLog &&
        data_->outvec_ == nullptr);
-  const bool wait_for_sinks_before_count = send_to_registered_sinks &&
-                                           data_->severity_ == NGLOG_FATAL &&
-                                           exit_on_dfatal;
+  const bool wait_for_sinks_before_count =
+      send_to_registered_sinks && data_->severity_ == NGLOG_FATAL &&
+      exit_on_dfatal.load(std::memory_order_relaxed);
 
   if (send_to_sink) {
     SendToSink();
   }
 
-  // Protect the shared logging destinations while dispatching the message.
-  {
+  if (send_method != &LogMessage::SendToSink) {
+    // Protect the shared logging destinations while dispatching the message.
     std::lock_guard<internal::LogMutex> l{log_mutex};
     if (send_method == &LogMessage::SendToSinkAndLog) {
       SendToLog();
-    } else if (send_method != &LogMessage::SendToSink) {
+    } else {
       (this->*send_method)();
     }
   }
 
+  bool registered_sinks_waited = false;
   if (send_to_registered_sinks) {
-    SendToRegisteredSinks();
+    registered_sinks_waited = SendToRegisteredSinks();
   }
 
   if (wait_for_sinks_before_count) {
-    LogDestination::WaitForSinks(data_);
+    LogDestination::WaitForSinks(data_, !registered_sinks_waited);
   }
   ++num_messages_[static_cast<int>(data_->severity_)];
   if (!wait_for_sinks_before_count) {
-    LogDestination::WaitForSinks(data_);
+    LogDestination::WaitForSinks(data_, !registered_sinks_waited);
   }
 
   if (append_newline) {
@@ -2279,7 +2322,8 @@ void LogMessage::SendToLog() EXCLUSIVE_LOCKS_REQUIRED(log_mutex) {
   // If we log a FATAL message, flush all the log destinations, then toss
   // a signal for others to catch. We leave the logs in a state that
   // someone else can use them (as long as they flush afterwards)
-  if (data_->severity_ == NGLOG_FATAL && exit_on_dfatal) {
+  if (data_->severity_ == NGLOG_FATAL &&
+      exit_on_dfatal.load(std::memory_order_relaxed)) {
     if (data_->first_fatal_) {
       // Store crash information so that it is accessible from within signal
       // handlers that may be invoked later.
@@ -2354,8 +2398,8 @@ void LogMessage::SendToSink() {
   }
 }
 
-void LogMessage::SendToRegisteredSinks() {
-  LogDestination::LogToSinks(
+bool LogMessage::SendToRegisteredSinks() {
+  return LogDestination::LogToSinks(
       data_->severity_, data_->fullname_, data_->basename_, data_->line_, time_,
       data_->message_text_ + data_->num_prefix_chars_,
       (data_->num_chars_to_log_ - data_->num_prefix_chars_ - 1));
@@ -2533,7 +2577,7 @@ namespace internal {
 bool GetExitOnDFatal();
 bool GetExitOnDFatal() {
   std::lock_guard<::nglog::internal::LogMutex> l{log_mutex};
-  return exit_on_dfatal;
+  return exit_on_dfatal.load(std::memory_order_relaxed);
 }
 
 // Determines whether we exit the program for a LOG(DFATAL) message in
@@ -2549,7 +2593,7 @@ bool GetExitOnDFatal() {
 void SetExitOnDFatal(bool value);
 void SetExitOnDFatal(bool value) {
   std::lock_guard<::nglog::internal::LogMutex> l{log_mutex};
-  exit_on_dfatal = value;
+  exit_on_dfatal.store(value, std::memory_order_relaxed);
 }
 
 }  // namespace internal

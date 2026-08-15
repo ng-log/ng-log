@@ -216,7 +216,7 @@ VLOG(2) << "I’m printed when you run the program with --v=2 or higher";
 ```
 
 With `VLOG`, the lower the verbose level, the more likely messages are to be
-logged. For example, if `#!bash --v==1`, `#!cpp VLOG(1)` will log, but `#!cpp
+logged. For example, if `#!bash --v=1`, `#!cpp VLOG(1)` will log, but `#!cpp
 VLOG(2)` will not log.
 
 !!! warning
@@ -238,17 +238,23 @@ Verbose logging can be controlled from the command line on a per-module basis:
 
 Specifying these options will specifically:
 
-1.  Print `#!cpp VLOG(2)` and lower messages from mapreduce.{h,cc}
-2.  Print `#!cpp VLOG(1)` and lower messages from file.{h,cc}
-3.  Print `#!cpp VLOG(3)` and lower messages from files prefixed with "gfs"
+1.  Print `#!cpp VLOG(2)` and lower messages from source files whose base is
+    `mapreduce`
+2.  Print `#!cpp VLOG(1)` and lower messages from source files whose base is
+    `file`
+3.  Print `#!cpp VLOG(3)` and lower messages from source files whose base
+    starts with `gfs`
 4.  Print `#!cpp VLOG(0)` and lower messages from elsewhere
 
-The wildcarding functionality 3. supports both `*` (matches 0 or more
-characters) and `?` (matches any single character) wildcards. Please also refer
-to [command line flags](flags.md) for more information.
+The module name is matched against the source filename base, which is the part
+before the first period. A trailing `-inl` suffix is removed before matching.
+The wildcard patterns support both `*` (matches 0 or more characters) and `?`
+(matches any single character). Please also refer to [command line
+flags](flags.md) for more information.
 
 There's also `#!cpp VLOG_IS_ON(n)` "verbose level" condition macro. This macro
-returns `#!cpp true` when the `--v` is equal to or greater than `n`. The macro can be
+returns `#!cpp true` when the effective verbose level from `--v` or the
+applicable `--vmodule` entry is equal to or greater than `n`. The macro can be
 used as follows:
 
 ``` cpp

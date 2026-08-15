@@ -33,7 +33,7 @@ MetricsStorage metrics;
 struct ThreadLockState {
   std::array<std::chrono::steady_clock::time_point, kLockKindCount>
       acquired_at{};
-  std::array<bool, kLockKindCount> owns{};
+  std::array<std::uint32_t, kLockKindCount> recursion_depth{};
 };
 
 thread_local ThreadLockState thread_lock_state;
@@ -93,14 +93,14 @@ void InstrumentedMutex<Kind>::lock() {
   const LockKindIndex index = static_cast<LockKindIndex>(Kind);
   RecordAcquisition(Kind, acquired - start);
   thread_lock_state.acquired_at[index] = acquired;
-  thread_lock_state.owns[index] = true;
+  thread_lock_state.recursion_depth[index] = 1;
 }
 
 template <LockKind Kind>
 void InstrumentedMutex<Kind>::unlock() {
   const LockKindIndex index = static_cast<LockKindIndex>(Kind);
 #ifdef NGLOG_ENABLE_LOCK_METRICS
-  if (thread_lock_state.owns[index]) {
+  if (thread_lock_state.recursion_depth[index] != 0) {
     const auto hold =
         std::chrono::steady_clock::now() - thread_lock_state.acquired_at[index];
     metrics.hold_nanoseconds[index].fetch_add(
@@ -109,7 +109,7 @@ void InstrumentedMutex<Kind>::unlock() {
         std::memory_order_relaxed);
   }
 #endif
-  thread_lock_state.owns[index] = false;
+  thread_lock_state.recursion_depth[index] = 0;
   mutex_.unlock();
 }
 
@@ -122,7 +122,53 @@ bool InstrumentedMutex<Kind>::try_lock() {
   RecordAcquisition(Kind, std::chrono::steady_clock::duration::zero());
   const LockKindIndex index = static_cast<LockKindIndex>(Kind);
   thread_lock_state.acquired_at[index] = acquired;
-  thread_lock_state.owns[index] = true;
+  thread_lock_state.recursion_depth[index] = 1;
+  return true;
+}
+
+template <LockKind Kind>
+void InstrumentedRecursiveMutex<Kind>::lock() {
+  const LockKindIndex index = static_cast<LockKindIndex>(Kind);
+  const bool recursive = thread_lock_state.recursion_depth[index] != 0;
+  const auto start = std::chrono::steady_clock::now();
+  mutex_.lock();
+  const auto acquired = std::chrono::steady_clock::now();
+  RecordAcquisition(Kind, acquired - start);
+  if (!recursive) {
+    thread_lock_state.acquired_at[index] = acquired;
+  }
+  ++thread_lock_state.recursion_depth[index];
+}
+
+template <LockKind Kind>
+void InstrumentedRecursiveMutex<Kind>::unlock() {
+  const LockKindIndex index = static_cast<LockKindIndex>(Kind);
+  if (thread_lock_state.recursion_depth[index] == 1) {
+#ifdef NGLOG_ENABLE_LOCK_METRICS
+    const auto hold =
+        std::chrono::steady_clock::now() - thread_lock_state.acquired_at[index];
+    metrics.hold_nanoseconds[index].fetch_add(
+        static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(hold).count()),
+        std::memory_order_relaxed);
+#endif
+  }
+  --thread_lock_state.recursion_depth[index];
+  mutex_.unlock();
+}
+
+template <LockKind Kind>
+bool InstrumentedRecursiveMutex<Kind>::try_lock() {
+  if (!mutex_.try_lock()) {
+    return false;
+  }
+  const LockKindIndex index = static_cast<LockKindIndex>(Kind);
+  const auto acquired = std::chrono::steady_clock::now();
+  RecordAcquisition(Kind, std::chrono::steady_clock::duration::zero());
+  if (thread_lock_state.recursion_depth[index] == 0) {
+    thread_lock_state.acquired_at[index] = acquired;
+  }
+  ++thread_lock_state.recursion_depth[index];
   return true;
 }
 
@@ -134,14 +180,14 @@ void InstrumentedSharedMutex<Kind>::lock() {
   const LockKindIndex index = static_cast<LockKindIndex>(Kind);
   RecordAcquisition(Kind, acquired - start);
   thread_lock_state.acquired_at[index] = acquired;
-  thread_lock_state.owns[index] = true;
+  thread_lock_state.recursion_depth[index] = 1;
 }
 
 template <LockKind Kind>
 void InstrumentedSharedMutex<Kind>::unlock() {
   const LockKindIndex index = static_cast<LockKindIndex>(Kind);
 #ifdef NGLOG_ENABLE_LOCK_METRICS
-  if (thread_lock_state.owns[index]) {
+  if (thread_lock_state.recursion_depth[index] != 0) {
     const auto hold =
         std::chrono::steady_clock::now() - thread_lock_state.acquired_at[index];
     metrics.hold_nanoseconds[index].fetch_add(
@@ -150,7 +196,7 @@ void InstrumentedSharedMutex<Kind>::unlock() {
         std::memory_order_relaxed);
   }
 #endif
-  thread_lock_state.owns[index] = false;
+  thread_lock_state.recursion_depth[index] = 0;
   mutex_.unlock();
 }
 
@@ -163,7 +209,7 @@ bool InstrumentedSharedMutex<Kind>::try_lock() {
   RecordAcquisition(Kind, std::chrono::steady_clock::duration::zero());
   const LockKindIndex index = static_cast<LockKindIndex>(Kind);
   thread_lock_state.acquired_at[index] = acquired;
-  thread_lock_state.owns[index] = true;
+  thread_lock_state.recursion_depth[index] = 1;
   return true;
 }
 
@@ -175,14 +221,14 @@ void InstrumentedSharedMutex<Kind>::lock_shared() {
   const LockKindIndex index = static_cast<LockKindIndex>(Kind);
   RecordAcquisition(Kind, acquired - start);
   thread_lock_state.acquired_at[index] = acquired;
-  thread_lock_state.owns[index] = true;
+  thread_lock_state.recursion_depth[index] = 1;
 }
 
 template <LockKind Kind>
 void InstrumentedSharedMutex<Kind>::unlock_shared() {
   const LockKindIndex index = static_cast<LockKindIndex>(Kind);
 #ifdef NGLOG_ENABLE_LOCK_METRICS
-  if (thread_lock_state.owns[index]) {
+  if (thread_lock_state.recursion_depth[index] != 0) {
     const auto hold =
         std::chrono::steady_clock::now() - thread_lock_state.acquired_at[index];
     metrics.hold_nanoseconds[index].fetch_add(
@@ -191,7 +237,7 @@ void InstrumentedSharedMutex<Kind>::unlock_shared() {
         std::memory_order_relaxed);
   }
 #endif
-  thread_lock_state.owns[index] = false;
+  thread_lock_state.recursion_depth[index] = 0;
   mutex_.unlock_shared();
 }
 
@@ -204,11 +250,12 @@ bool InstrumentedSharedMutex<Kind>::try_lock_shared() {
   RecordAcquisition(Kind, std::chrono::steady_clock::duration::zero());
   const LockKindIndex index = static_cast<LockKindIndex>(Kind);
   thread_lock_state.acquired_at[index] = acquired;
-  thread_lock_state.owns[index] = true;
+  thread_lock_state.recursion_depth[index] = 1;
   return true;
 }
 
 template class InstrumentedMutex<LockKind::kLog>;
+template class InstrumentedRecursiveMutex<LockKind::kLog>;
 template class InstrumentedMutex<LockKind::kFile>;
 template class InstrumentedMutex<LockKind::kCleaner>;
 template class InstrumentedMutex<LockKind::kFatal>;

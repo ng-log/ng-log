@@ -50,18 +50,19 @@
 //   --vmodule=<str>  Gives the per-module maximal V-logging levels to override
 //                    the value given by --v.
 //                    E.g. "my_module=2,foo*=3" would change the logging level
-//                    for all code in source files "my_module.*" and "foo*.*"
+//                    for source files whose bases are "my_module" and "foo*"
 //                    ("-inl" suffixes are also disregarded for this matching).
 //
 // SetVLOGLevel helper function is provided to do limited dynamic control over
 // V-logging by overriding the per-module settings given via --vmodule flag.
 //
-// CAVEAT: --vmodule functionality is not available in non gcc compilers.
+// CAVEAT: --vmodule functionality requires GNU C++ extensions.
 //
 
 #ifndef NGLOG_VLOG_IS_ON_H
 #define NGLOG_VLOG_IS_ON_H
 
+#include <atomic>
 #include <cstddef>
 
 #include "ng-log/export.h"
@@ -69,22 +70,26 @@
 #include "ng-log/types.h"
 
 #if defined(__GNUC__)
-// We emit an anonymous static int* variable at every VLOG_IS_ON(n) site.
+// We emit an anonymous static cache at every VLOG_IS_ON(n) site.
 // (Normally) the first time every VLOG_IS_ON(n) site is hit,
 // we determine what variable will dynamically control logging at this site:
 // it's either FLAGS_v or an appropriate internal variable
 // matching the current source file that represents results of
 // parsing of --vmodule flag and/or SetVLOGLevel calls.
-#  define VLOG_IS_ON(verboselevel)                                      \
-    __extension__({                                                     \
-      static nglog::SiteFlag vlocal__ = {nullptr, nullptr, 0, nullptr}; \
-      NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(             \
-          __FILE__, __LINE__, &vlocal__, sizeof(nglog::SiteFlag), "")); \
-      nglog::int32 verbose_level__ = (verboselevel);                    \
-      (vlocal__.level == nullptr                                        \
-           ? nglog::InitializeVLOG3(&vlocal__, &FLAGS_v, __FILE__,      \
-                                    verbose_level__)                    \
-           : *vlocal__.level >= verbose_level__);                       \
+#  define VLOG_IS_ON(verboselevel)                                         \
+    __extension__({                                                        \
+      static nglog::SiteFlag vlocal__;                                     \
+      nglog::int32 verbose_level__ = (verboselevel);                       \
+      ({                                                                   \
+        std::atomic<nglog::int32>* level =                                 \
+            vlocal__.level.load(std::memory_order_acquire);                \
+        level == nullptr                                                   \
+            ? (vlocal__.initialized.load(std::memory_order_acquire)        \
+                   ? *vlocal__.default_level >= verbose_level__            \
+                   : nglog::InitializeVLOG3(&vlocal__, &FLAGS_v, __FILE__, \
+                                            verbose_level__))              \
+            : level->load(std::memory_order_relaxed) >= verbose_level__;   \
+      });                                                                  \
     })
 #else
 // GNU extensions not available, so we do not support --vmodule.
@@ -107,20 +112,22 @@ extern NGLOG_EXPORT int SetVLOGLevel(const char* module_pattern, int log_level);
 // Various declarations needed for VLOG_IS_ON above: =========================
 
 struct SiteFlag {
-  int32* level;
+  // The pointer selects either the default or the module-specific level.
+  std::atomic<std::atomic<int32>*> level;
+  int32* default_level;
+  std::atomic<bool> initialized;
   const char* base_name;
   std::size_t base_len;
   SiteFlag* next;
 };
 
 // Helper routine which determines the logging info for a particular VLOG site.
-//   site_flag     is the address of the site-local pointer to the controlling
-//                 verbosity level
-//   site_default  is the default to use for *site_flag
+//   site_flag     is the address of the site-local verbosity cache
+//   site_default  is the default verbosity level
 //   fname         is the current source file name
 //   verbose_level is the argument to VLOG_IS_ON
 // We will return the return value for VLOG_IS_ON
-// and if possible set *site_flag appropriately.
+// and if possible set the site cache appropriately.
 extern NGLOG_EXPORT bool InitializeVLOG3(SiteFlag* site_flag,
                                          int32* site_default, const char* fname,
                                          int32 verbose_level);

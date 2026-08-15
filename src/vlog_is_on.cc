@@ -41,9 +41,6 @@
 
 #include "ng-log/raw_logging.h"
 
-// glog doesn't have annotation
-#define ANNOTATE_BENIGN_RACE(address, description)
-
 using std::string;
 
 namespace nglog {
@@ -87,17 +84,14 @@ NGLOG_NO_EXPORT bool SafeFNMatch_(const char* pattern, size_t patt_len,
 using tools::SafeFNMatch_;
 
 // List of per-module log levels from FLAGS_vmodule.
-// Once created each element is never deleted/modified
-// except for the vlog_level: other threads will read VModuleInfo blobs
-// w/o locks and we'll store pointers to vlog_level at VLOG locations
-// that will never go away.
+// Once created, each element is never deleted or modified except for its
+// atomic vlog_level. Other threads read VModuleInfo blobs without locks and
+// store pointers to vlog_level at VLOG locations that never go away.
 // We can't use an STL struct here as we wouldn't know
 // when it's safe to delete/update it: other threads need to use it w/o locks.
 struct VModuleInfo {
   string module_pattern;
-  mutable int32 vlog_level;  // Conceptually this is an AtomicWord, but it's
-                             // too much work to use AtomicWord type here
-                             // w/o much actual benefit.
+  mutable std::atomic<int32> vlog_level{0};
   const VModuleInfo* next;
 };
 
@@ -126,7 +120,7 @@ static void VLOG2Initializer() {
     if (sscanf(sep, "=%d", &module_level) == 1) {
       auto* info = new VModuleInfo;
       info->module_pattern = pattern;
-      info->vlog_level = module_level;
+      info->vlog_level.store(module_level, std::memory_order_relaxed);
       if (head) {
         tail->next = info;
       } else {
@@ -158,21 +152,21 @@ int SetVLOGLevel(const char* module_pattern, int log_level) {
          info = info->next) {
       if (info->module_pattern == module_pattern) {
         if (!found) {
-          result = info->vlog_level;
+          result = info->vlog_level.load(std::memory_order_relaxed);
           found = true;
         }
-        info->vlog_level = log_level;
+        info->vlog_level.store(log_level, std::memory_order_relaxed);
       } else if (!found && SafeFNMatch_(info->module_pattern.c_str(),
                                         info->module_pattern.size(),
                                         module_pattern, pattern_len)) {
-        result = info->vlog_level;
+        result = info->vlog_level.load(std::memory_order_relaxed);
         found = true;
       }
     }
     if (!found) {
       auto* info = new VModuleInfo;
       info->module_pattern = module_pattern;
-      info->vlog_level = log_level;
+      info->vlog_level.store(log_level, std::memory_order_relaxed);
       info->next = vmodule_list;
       vmodule_list = info;
 
@@ -185,7 +179,7 @@ int SetVLOGLevel(const char* module_pattern, int log_level) {
         if (SafeFNMatch_(module_pattern, pattern_len, item->base_name,
                          item->base_len)) {
           // Redirect the cached value to its module override.
-          item->level = &info->vlog_level;
+          item->level.store(&info->vlog_level, std::memory_order_release);
           *item_ptr = item->next;  // Remove the item from the list.
         } else {
           item_ptr = &item->next;
@@ -213,7 +207,7 @@ bool InitializeVLOG3(SiteFlag* site_flag, int32* level_default,
   int old_errno = errno;
 
   // site_default normally points to FLAGS_v
-  int32* site_flag_value = level_default;
+  std::atomic<int32>* site_flag_value = nullptr;
 
   // Get basename for file
   const char* base = strrchr(fname, '/');
@@ -251,28 +245,31 @@ bool InitializeVLOG3(SiteFlag* site_flag, int32* level_default,
   }
 
   // Cache the vlog value pointer if --vmodule flag has been parsed.
-  ANNOTATE_BENIGN_RACE(site_flag,
-                       "*site_flag may be written by several threads,"
-                       " but the value will be the same");
   if (read_vmodule_flag) {
-    site_flag->level = site_flag_value;
+    site_flag->default_level =
+        site_flag_value == nullptr ? level_default : nullptr;
+    site_flag->level.store(site_flag_value, std::memory_order_release);
     // If VLOG flag has been cached to the default site pointer,
     // we want to add to the cached list in order to invalidate in case
     // SetVModule is called afterwards with new modules.
     // The performance penalty here is negligible, because InitializeVLOG3 is
     // called once per site.
-    if (site_flag_value == level_default && !site_flag->base_name) {
+    if (site_flag_value == nullptr && !site_flag->base_name) {
       site_flag->base_name = base;
       site_flag->base_len = base_length;
       site_flag->next = cached_site_list;
       cached_site_list = site_flag;
     }
+    site_flag->initialized.store(true, std::memory_order_release);
   }
 
   // restore the errno in case something recoverable went wrong during
   // the initialization of the VLOG mechanism (see above note "protect the..")
   errno = old_errno;
-  return *site_flag_value >= verbose_level;
+  return site_flag_value == nullptr
+             ? *level_default >= verbose_level
+             : site_flag_value->load(std::memory_order_relaxed) >=
+                   verbose_level;
 }
 
 }  // namespace nglog
