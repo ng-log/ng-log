@@ -45,6 +45,7 @@
 #include "config.h"
 #include "initializer.h"
 #include "internal/emscripten_console.h"
+#include "internal/source_location.h"
 #include "libbacktrace.h"
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
@@ -202,13 +203,28 @@ static void DebugWriteToString(const char* data, void* arg) {
 // Print a program counter and its symbol name.
 static void DumpPCAndSymbol(DebugWriter* writerfn, void* arg, void* pc,
                             const char* const prefix) {
+  if (writerfn == &DebugWriteToStderr) {
+    DumpStackFrameInfo(prefix, pc);
+    return;
+  }
+
   char tmp[1024];
   const char* symbol = "(unknown)";
+  SymbolizedFrame frame;
   // Symbolizes the previous address of pc because pc may be in the
   // next function.  The overrun happens when the function ends with
   // a call to a function annotated noreturn (e.g. CHECK).
-  if (Symbolize(reinterpret_cast<char*>(pc) - 1, tmp, sizeof(tmp))) {
+  if (Symbolize(reinterpret_cast<char*>(pc) - 1, tmp, sizeof(tmp),
+                SymbolizeOptions::kNone, &frame)) {
     symbol = tmp;
+  }
+  char formatted_symbol[sizeof(tmp)];
+  if (frame.file_line_length > 0) {
+    internal::FormatSymbolizedFrame(
+        symbol, std::strlen(symbol), frame.file_line_offset,
+        frame.file_line_length, internal::CachedCwd().c_str(), formatted_symbol,
+        sizeof(formatted_symbol));
+    symbol = formatted_symbol;
   }
   char buf[1024];
   std::snprintf(buf, sizeof(buf), "%s@ %*p  %s\n", prefix,

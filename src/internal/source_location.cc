@@ -329,6 +329,76 @@ void FormatDisplayPath(const char* path, std::size_t path_length,
   write_leading_ellipsis_and_tail(suffix_start, suffix_len);
 }
 
+void FormatSymbolizedFrame(const char* symbol, std::size_t symbol_length,
+                           std::size_t file_line_offset,
+                           std::size_t file_line_length, const char* cwd,
+                           char* out, std::size_t out_size) {
+  if (out_size == 0) {
+    return;
+  }
+
+  std::size_t written = 0;
+  out[0] = '\0';
+  const auto append = [&written, out, out_size](const char* text,
+                                                std::size_t length) {
+    const std::size_t available = out_size - 1 - written;
+    const std::size_t count = std::min(length, available);
+    std::copy_n(text, count, out + written);
+    written += count;
+    out[written] = '\0';
+  };
+
+  const bool has_file_line =
+      file_line_length > 0 && file_line_offset <= symbol_length &&
+      file_line_length <= symbol_length - file_line_offset;
+  if (!has_file_line) {
+    append(symbol, symbol_length);
+    return;
+  }
+
+  const char* const file_line_span = symbol + file_line_offset;
+  const char* display_path;
+  std::size_t display_path_length;
+  const char* line;
+  std::size_t line_length;
+  if (SplitFileLineSpan(file_line_span, file_line_length, &display_path,
+                        &display_path_length, &line, &line_length)) {
+    constexpr std::size_t kDisplayPathPrefixComponents = 2;
+    constexpr std::size_t kDisplayPathSuffixComponents = 2;
+    char short_path[128];
+    FormatDisplayPath(
+        display_path, display_path_length, cwd, kDisplayPathPrefixComponents,
+        kDisplayPathSuffixComponents, short_path, sizeof(short_path));
+    append(short_path, std::strlen(short_path));
+    append(":", 1);
+    append(line, line_length);
+  } else {
+    append(file_line_span, file_line_length);
+  }
+
+  if (file_line_offset > 0) {
+    std::size_t function_length = file_line_offset;
+    if (function_length >= 2 && symbol[function_length - 2] == ' ' &&
+        symbol[function_length - 1] == '(') {
+      function_length -= 2;
+    }
+    if (function_length > 0) {
+      append(" ", 1);
+      append(symbol, function_length);
+    }
+    return;
+  }
+
+  const char* const tail = symbol + file_line_length;
+  const std::size_t tail_length = symbol_length - file_line_length;
+  if (tail_length > 0 && tail[0] == ' ') {
+    append(" ", 1);
+    append(tail + 1, tail_length - 1);
+  } else {
+    append(tail, tail_length);
+  }
+}
+
 const std::string& CachedHostname() {
   static const std::string hostname = [] {
     char buf[256] = "";

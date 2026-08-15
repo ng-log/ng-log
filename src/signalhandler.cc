@@ -503,7 +503,7 @@ void DumpSignalInfo(int signal_number, siginfo_t* siginfo) {
 
 // Dumps information about the stack frame to STDERR.
 #if !defined(NGLOG_OS_WINDOWS) || defined(HAVE_STACKTRACE)
-void DumpStackFrameInfo(const char* prefix, void* pc) {
+void DumpStackFrameInfoImpl(const char* prefix, void* pc) {
   // Get the symbol name.
   const char* symbol = "(unknown)";
   bool symbol_resolved = false;
@@ -726,7 +726,7 @@ static void HandleSignal(int signal_number
 #if !defined(NGLOG_OS_WINDOWS)
   // Get the program counter from ucontext.
   void* pc = GetPC(ucontext);
-  DumpStackFrameInfo("PC: ", pc);
+  DumpStackFrameInfoImpl("PC: ", pc);
 #endif
 
 #ifdef HAVE_STACKTRACE
@@ -736,7 +736,7 @@ static void HandleSignal(int signal_number
   const int depth = GetStackTrace(stack, ARRAYSIZE(stack), 1);
   // Dump the stack traces.
   for (int i = 0; i < depth; ++i) {
-    DumpStackFrameInfo("    ", stack[i]);
+    DumpStackFrameInfoImpl("    ", stack[i]);
   }
 #endif
 
@@ -807,6 +807,10 @@ void FailureSignalHandler(int signal_number, siginfo_t* signal_info,
 }
 
 }  // namespace
+
+void DumpStackFrameInfo(const char* prefix, void* pc) {
+  DumpStackFrameInfoImpl(prefix, pc);
+}
 
 bool IsFailureSignalHandlerInstalled() {
 #ifdef HAVE_SIGACTION

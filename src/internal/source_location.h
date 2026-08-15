@@ -35,6 +35,13 @@ NGLOG_NO_EXPORT void FormatDisplayPath(const char* path,
                                        std::size_t suffix_components, char* out,
                                        std::size_t out_size);
 
+NGLOG_NO_EXPORT void FormatSymbolizedFrame(const char* symbol,
+                                           std::size_t symbol_length,
+                                           std::size_t file_line_offset,
+                                           std::size_t file_line_length,
+                                           const char* cwd, char* out,
+                                           std::size_t out_size);
+
 }  // namespace internal
 }  // namespace nglog
 

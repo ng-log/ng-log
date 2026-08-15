@@ -1789,7 +1789,6 @@ static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
 
     // Symbolization succeeded.  Now we try to demangle the symbol.
     DemangleInplace(out, out_size);
-    out_size -= std::strlen(out);
 
     if (found) {
       std::size_t fnlen = std::strlen(line.FileName);
@@ -1798,26 +1797,23 @@ static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
       std::size_t digits = 1;  // At least one digit required
       for (DWORD value = line.LineNumber; (value /= 10) != 0; ++digits) {
       }
-      constexpr std::size_t extralen = 4;  // space + parens () + :
-      const std::size_t suffixlen = fnlen + extralen + fnlen + digits;
+      constexpr std::size_t kColonLength = 1;
+      constexpr std::size_t kSeparatorLength = 1;
+      const std::size_t file_line_length = fnlen + kColonLength + digits;
+      const std::size_t function_length = std::strlen(out);
+      const std::size_t required_length =
+          file_line_length + kSeparatorLength + function_length + 1;
 
-      if (suffixlen < out_size) {
-        // Written as " (<file>:<line>)". The span reported via "frame"
-        // excludes the leading " (" and trailing ")" so it covers just
-        // "<file>:<line>", matching the other backends.
-        constexpr std::size_t kLeadingDecorationLen = 2;   // " ("
-        constexpr std::size_t kTrailingDecorationLen = 1;  // ")"
-        const int written = std::snprintf(out + namelen, out_size, " (%s:%lu)",
+      if (required_length <= out_size) {
+        std::memmove(out + file_line_length + kSeparatorLength, out,
+                     function_length + 1);
+        const int written = std::snprintf(out, out_size, "%s:%lu ",
                                           line.FileName, line.LineNumber);
         if (frame != nullptr &&
-            written > static_cast<int>(kLeadingDecorationLen +
-                                       kTrailingDecorationLen)) {
-          frame->file_line_offset = namelen + kLeadingDecorationLen;
-          frame->file_line_length = static_cast<size_t>(written) -
-                                    kLeadingDecorationLen -
-                                    kTrailingDecorationLen;
+            written == static_cast<int>(file_line_length + kSeparatorLength)) {
+          frame->file_line_offset = 0;
+          frame->file_line_length = file_line_length;
         }
-        out_size -= static_cast<size_t>(written);
       }
     }
 

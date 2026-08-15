@@ -811,6 +811,20 @@ TEST(Symbolize, FindsSectionHeaderByName) {
 }
 #    endif
 
+#    if defined(NGLOG_OS_WINDOWS) && defined(_MSC_VER)
+TEST(Symbolize, DbgHelpUsesCanonicalFrameOrder) {
+  char symbol[4096];
+  SymbolizedFrame frame;
+  ASSERT_TRUE(Symbolize(reinterpret_cast<void*>(&nonstatic_func), symbol,
+                        sizeof(symbol), SymbolizeOptions::kNone, &frame));
+  ASSERT_GT(frame.file_line_length, 0U);
+  ASSERT_LT(frame.file_line_length, sizeof(symbol));
+
+  EXPECT_EQ(0U, frame.file_line_offset);
+  EXPECT_EQ(' ', symbol[frame.file_line_length]);
+}
+#    endif
+
 struct Foo {
   static void func(int x);
 };

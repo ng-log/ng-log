@@ -580,6 +580,34 @@ TEST(FormatDisplayPath, TruncatesToFitSmallBuffer) {
   EXPECT_LT(std::strlen(out), sizeof(out));
 }
 
+TEST(FormatSymbolizedFrame, PlacesWindowsFileLineBeforeFunction) {
+  constexpr char kFunction[] = "nglog::LogMessage::Fail";
+  constexpr char kPath[] = "D:\\a\\ng-log\\ng-log\\src\\logging.cc:2224";
+  constexpr char kSymbol[] =
+      "nglog::LogMessage::Fail (D:\\a\\ng-log\\ng-log\\src\\logging.cc:2224)";
+  char out[128];
+  const std::size_t file_line_offset = sizeof(kFunction) + 1;
+  const std::size_t file_line_length = sizeof(kPath) - 1;
+
+  FormatSymbolizedFrame(kSymbol, sizeof(kSymbol) - 1, file_line_offset,
+                        file_line_length, "D:\\a\\ng-log\\ng-log", out,
+                        sizeof(out));
+
+  EXPECT_STREQ("src\\logging.cc:2224 nglog::LogMessage::Fail", out);
+}
+
+TEST(FormatSymbolizedFrame, KeepsPosixFileLineBeforeFunction) {
+  constexpr char kSymbol[] = "/home/project/src/logging.cc:2224 function()";
+  char out[128];
+  constexpr std::size_t kFileLineLength =
+      sizeof("/home/project/src/logging.cc:2224") - 1;
+
+  FormatSymbolizedFrame(kSymbol, sizeof(kSymbol) - 1, /*file_line_offset=*/0,
+                        kFileLineLength, "/home/project", out, sizeof(out));
+
+  EXPECT_STREQ("src/logging.cc:2224 function()", out);
+}
+
 TEST(FormatDisplayPath, LeavesZeroSizedOutputUntouched) {
   char out[1] = {'x'};
   const std::string path = "/a/very/long/path/to/file.cc";
