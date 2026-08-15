@@ -8,4 +8,4 @@ Description: C++ logging framework
 Version: @VERSION@
 Libs: -L${libdir} -lng-log
 Libs.private: @ng-log_libraries_options_for_static_linking@
-Cflags: -I${includedir}
+Cflags: -I${includedir} @ng-log_pkgconfig_compile_options@

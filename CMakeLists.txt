@@ -21,7 +21,6 @@ include (CheckCXXSymbolExists)
 include (CheckIncludeFileCXX)
 include (CheckStructHasMember)
 include (CheckTypeSize)
-include (CMakeDependentOption)
 include (CMakePackageConfigHelpers)
 include (CMakePushCheckState)
 include (CPack)
@@ -89,17 +88,18 @@ if (NOT _ng-log_try_libbacktrace)
   set (CMAKE_DISABLE_FIND_PACKAGE_Libbacktrace ON)
 endif (NOT _ng-log_try_libbacktrace)
 
-set (CMAKE_C_VISIBILITY_PRESET hidden)
 set (CMAKE_CXX_VISIBILITY_PRESET hidden)
 set (CMAKE_POSITION_INDEPENDENT_CODE ON)
 set (CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
 set (CMAKE_DEBUG_POSTFIX d)
 
-# Tests always use the system-provided GTest/GMock. When unavailable, the
-# unit test section below is skipped entirely rather than falling back to a
-# bundled reimplementation.
-find_package (GTest 1.11 COMPONENTS GTest GMock NO_MODULE)
+if (BUILD_TESTING)
+  # Tests always use the system-provided GTest/GMock. When unavailable, the
+  # unit test section below is skipped entirely rather than falling back to a
+  # bundled reimplementation.
+  find_package (GTest 1.11 COMPONENTS GTest GMock NO_MODULE)
+endif (BUILD_TESTING)
 
 # Benchmarks are optional and are skipped when Google Benchmark is not
 # available.
@@ -195,8 +195,8 @@ check_cxx_symbol_exists (pread unistd.h HAVE_PREAD)
 check_cxx_symbol_exists (pthread_getname_np pthread.h HAVE_PTHREAD_GETNAME_NP)
 check_cxx_symbol_exists (pwrite unistd.h HAVE_PWRITE)
 check_cxx_symbol_exists (sched_yield sched.h HAVE_SCHED_YIELD)
-check_cxx_symbol_exists (sigaction csignal HAVE_SIGACTION)
-check_cxx_symbol_exists (sigaltstack csignal HAVE_SIGALTSTACK)
+check_cxx_symbol_exists (sigaction signal.h HAVE_SIGACTION)
+check_cxx_symbol_exists (sigaltstack signal.h HAVE_SIGALTSTACK)
 check_cxx_symbol_exists (waitpid sys/wait.h HAVE_WAITPID)
 
 if (WIN32)
@@ -432,10 +432,10 @@ set (_ng-log_BINARY_CMake_DATADIR
 # Add additional CMake find modules here.
 set (_ng-log_CMake_MODULES)
 
-if (Unwind_FOUND)
+if (HAVE_UNWIND OR HAVE_LIBUNWIND)
   # Copy the module only if libunwind is actually used.
   list (APPEND _ng-log_CMake_MODULES ${ng-log_SOURCE_DIR}/cmake/FindUnwind.cmake)
-endif (Unwind_FOUND)
+endif (HAVE_UNWIND OR HAVE_LIBUNWIND)
 
 if (HAVE_LIBBACKTRACE)
   # Copy the module only if libbacktrace is actually used.
@@ -560,6 +560,7 @@ target_compile_features (ng-log PUBLIC cxx_std_14)
 add_library (ng-log::ng-log ALIAS ng-log)
 
 set (ng-log_libraries_options_for_static_linking)
+set (ng-log_pkgconfig_compile_options)
 
 if (_ng-log_USE_WINDOWS_PORT)
   target_compile_definitions (ng-log PRIVATE NGLOG_USE_WINDOWS_PORT)
@@ -576,13 +577,14 @@ endif (WIN32)
 
 if (HAVE_LIB_GFLAGS)
   target_compile_definitions (ng-log PUBLIC NGLOG_USE_GFLAGS)
+  set (ng-log_pkgconfig_compile_options -DNGLOG_USE_GFLAGS)
 endif (HAVE_LIB_GFLAGS)
 
-if (Unwind_FOUND)
+if (HAVE_UNWIND OR HAVE_LIBUNWIND)
   target_link_libraries (ng-log PRIVATE unwind::unwind)
   set (ng-log_libraries_options_for_static_linking "${ng-log_libraries_options_for_static_linking} -lunwind")
   set (Unwind_DEPENDENCY "find_dependency (Unwind ${Unwind_VERSION})")
-endif (Unwind_FOUND)
+endif (HAVE_UNWIND OR HAVE_LIBUNWIND)
 
 if (HAVE_LIBBACKTRACE)
   target_link_libraries (ng-log PRIVATE libbacktrace::libbacktrace)
@@ -1139,17 +1141,24 @@ if (BUILD_TESTING AND GTest_FOUND)
   ## Fixtures cleanup
   set_tests_properties (cleanup_logdir PROPERTIES FIXTURES_CLEANUP logcleanuptest)
   # Fixture requirements
-  set_tests_properties (cleanup_immediately PROPERTIES FIXTURES_REQUIRED logcleanuptest)
-  set_tests_properties (cleanup_with_absolute_prefix PROPERTIES FIXTURES_REQUIRED logcleanuptest)
-  set_tests_properties (cleanup_with_relative_prefix PROPERTIES FIXTURES_REQUIRED logcleanuptest)
-  set_tests_properties (cleanup_with_non_ascii_prefix PROPERTIES FIXTURES_REQUIRED logcleanuptest)
+  set_tests_properties (
+    cleanup_immediately
+    cleanup_with_absolute_prefix
+    cleanup_with_non_ascii_prefix
+    cleanup_with_relative_prefix
+    PROPERTIES FIXTURES_REQUIRED logcleanuptest
+  )
 
   # These use CaptureTestStderr(), which always writes to the same fixed
   # path under TestTmpDir(): they must not run concurrently with each
   # other or with the logging_unittest tests above.
-  set_tests_properties (cleanup_immediately cleanup_with_absolute_prefix
-    cleanup_with_relative_prefix cleanup_with_non_ascii_prefix
-    PROPERTIES RESOURCE_LOCK captured_stream)
+  set_tests_properties (
+    cleanup_immediately
+    cleanup_with_absolute_prefix
+    cleanup_with_non_ascii_prefix
+    cleanup_with_relative_prefix
+    PROPERTIES RESOURCE_LOCK captured_stream
+  )
 
   add_executable (striplog0_unittest
     src/striplog_unittest.cc
@@ -1230,7 +1239,7 @@ if (BUILD_TESTING AND GTest_FOUND)
     -Dng-log_DIR=${ng-log_BINARY_DIR}
   )
 
-  if (CMAKE_COMPILER_IS_GNUCXX)
+  if (CMAKE_CXX_COMPILER_ID STREQUAL GNU)
     set_tests_properties (log_severity_conversion PROPERTIES
       PASS_REGULAR_EXPRESSION "error: invalid conversion from (‘|')int(’|')"
     )
@@ -1242,13 +1251,13 @@ if (BUILD_TESTING AND GTest_FOUND)
     set_tests_properties (log_severity_conversion PROPERTIES
       PASS_REGULAR_EXPRESSION "error C2440"
     )
-  else (CMAKE_COMPILER_IS_GNUCXX)
+  else (CMAKE_CXX_COMPILER_ID STREQUAL GNU)
     message (AUTHOR_WARNING
       "Unsupported C++ compiler ${CMAKE_CXX_COMPILER_ID}: "
       "log_severity_conversion test will be disabled"
     )
     set_tests_properties (log_severity_conversion DISABLED ON)
-  endif (CMAKE_COMPILER_IS_GNUCXX)
+  endif (CMAKE_CXX_COMPILER_ID STREQUAL GNU)
 
   add_test (NAME log_severity_qualified COMMAND ${CMAKE_CTEST_COMMAND}
     --build-config $<CONFIG>
@@ -1265,7 +1274,7 @@ if (BUILD_TESTING AND GTest_FOUND)
     -DCMAKE_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}
     -Dng-log_DIR=${ng-log_BINARY_DIR}
   )
-  if (CMAKE_COMPILER_IS_GNUCXX)
+  if (CMAKE_CXX_COMPILER_ID STREQUAL GNU)
     set_tests_properties (log_severity_qualified PROPERTIES
       PASS_REGULAR_EXPRESSION "NGLOG_INFO.*is not a member.*nglog"
     )
@@ -1277,13 +1286,13 @@ if (BUILD_TESTING AND GTest_FOUND)
     set_tests_properties (log_severity_qualified PROPERTIES
       PASS_REGULAR_EXPRESSION "NGLOG_INFO.*is not a member of 'nglog'"
     )
-  else (CMAKE_COMPILER_IS_GNUCXX)
+  else (CMAKE_CXX_COMPILER_ID STREQUAL GNU)
     message (AUTHOR_WARNING
       "Unsupported C++ compiler ${CMAKE_CXX_COMPILER_ID}: "
       "log_severity_qualified test will be disabled"
     )
     set_tests_properties (log_severity_qualified DISABLED ON)
-  endif (CMAKE_COMPILER_IS_GNUCXX)
+  endif (CMAKE_CXX_COMPILER_ID STREQUAL GNU)
 
   add_test (NAME includes_logging COMMAND ${CMAKE_CTEST_COMMAND}
     --build-config $<CONFIG>
@@ -1439,19 +1448,19 @@ if (WITH_PKGCONFIG)
   )
 endif (WITH_PKGCONFIG)
 
-set (ng-log_CMake_VERSION 3.0)
+set (ng-log_CMake_VERSION ${CMAKE_MINIMUM_REQUIRED_VERSION})
 
 if (gflags_FOUND)
   # Ensure clients locate only the package config and not third party find
   # modules having the same name. This avoid cmake_policy PUSH/POP errors.
-  if (CMAKE_VERSION VERSION_LESS 3.9)
-    set (gflags_DEPENDENCY "find_dependency (gflags ${gflags_VERSION})")
-  else (CMAKE_VERSION VERSION_LESS 3.9)
-    # Passing additional find_package arguments to find_dependency is possible
-    # starting with CMake 3.9.
-    set (ng-log_CMake_VERSION 3.9)
-    set (gflags_DEPENDENCY "find_dependency (gflags ${gflags_VERSION} NO_MODULE)")
-  endif (CMAKE_VERSION VERSION_LESS 3.9)
+  set (gflags_DEPENDENCY
+    "find_dependency (gflags ${gflags_VERSION} NO_MODULE)")
+  if (TARGET gflags::gflags)
+    string (CONCAT gflags_DEPENDENCY
+      "set (GFLAGS_USE_TARGET_NAMESPACE TRUE)\n"
+      "${gflags_DEPENDENCY}\n"
+      "unset (GFLAGS_USE_TARGET_NAMESPACE)")
+  endif (TARGET gflags::gflags)
 endif (gflags_FOUND)
 
 configure_package_config_file (ng-log-config.cmake.in
