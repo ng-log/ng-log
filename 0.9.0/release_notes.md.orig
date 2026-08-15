@@ -2,33 +2,45 @@
 
 ## ng-log
 
+<<<<<<< HEAD
 ### 0.9.0 <small>TBD</small> { id="0.9.0" }
 
 - Resolve source file names and line numbers in stack traces via
-<<<<<<< HEAD
-  [addr2line](failures.md#resolving-file-names-and-line-numbers)
-||||||| parent of 4fb1a6c (feat(symbolize): add libbacktrace as an optional stacktrace backend)
-  `addr2line` (`WITH_LINE_INFO`, `symbolize_line_info`)
-=======
   [`addr2line` or `libbacktrace`](failures.md#resolving-file-names-and-line-numbers)
->>>>>>> 4fb1a6c (feat(symbolize): add libbacktrace as an optional stacktrace backend)
+- [Colorize](flags.md#colorizing-output) log output and crash stack traces on
+  a terminal by default, with hyperlinked `file:line` references
 - Remove the glog compatibility layer
 - Remove Bazel build support
 - Prevent concurrent log writers from blocking during memory-drop maintenance
 - Make log cleanup work with non-ASCII Windows directories
 - Omit the default header format when a custom prefix formatter is installed
+- Improve suppressed logging performance by avoiding message construction and
+  reduce overhead when formatting default prefixes
+- Improve logging throughput for applications that log from multiple threads
+- Allow sink callbacks to run concurrently and safely perform nested logging
+- Include the current thread name in failure signal reports when available
 
 !!! warning "Compatibility"
     If your application depends on glog compatibility, use the 0.8.x series.
     It will receive updates until 0.10.0 is released.
 
 ### 0.8.4 <small>TBD</small> { id="0.8.4" }
+||||||| 638e496
+### 0.8.4 <small>TBD</small> { id="0.8.4" }
+=======
+### 0.8.4 <small>August 15, 2026</small> { id="0.8.4" }
+>>>>>>> 0.8.x
 
 - Prevent `drop_log_memory` from blocking concurrent log writers
 - Prevent failure-signal handling from deadlocking when reentered
 - Make crash-trace demangling safe when symbol names exceed the output buffer
 - Use the ng-log version in CMake package compatibility errors
 - Restore Linux LWP identifiers in crash signal reports
+- Arrange signal headers before program counters in crash reports after the
+  signal handler emitted the header after the PC
+- Prevent stale signal-handler state when a handler returns
+- Honor `logbuflevel` when logging to stdout
+- Make `NGLOG_*` severity constants available in the global namespace
 - Report sub-hour UTC offsets through `LogMessageTime::gmtoffset`
 - Cap oversized `max_log_size` values instead of using the 1 MB minimum
 

@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="zensical-0.0.53">
+      <meta name="generator" content="zensical-0.0.54">
     
     
       
@@ -887,11 +887,11 @@ be used to write the log output to arbitrary locations.</p>
 </span></code></pre></div>
 <p>The user must implement <code class="language-cpp highlight"><span class="n">nglog</span><span class="o">::</span><span class="n">LogSink</span><span class="o">::</span><span class="n">send</span></code>, which is called by the
 library every time a message is logged.</p>
-<div class="admonition warning">
-<p class="admonition-title">Possible deadlock due to nested logging</p>
-<p>This method can't use <code>LOG()</code> or <code>CHECK()</code> as logging system mutex(s) are
-held during this call.</p>
-</div>
+<p>Sink callbacks may run concurrently for different messages. They must be
+thread-safe and may use <code>LOG()</code> or <code>CHECK()</code> for nested logging.</p>
+<p>Callbacks for the sinks associated with one message retain the library's
+existing sink order. No ordering is guaranteed between callbacks for different
+messages.</p>
 <h2 id="registering-log-sinks">Registering Log Sinks<a class="headerlink" href="#registering-log-sinks" title="Permanent link">&para;</a></h2>
 <p>To use the custom sink and instance of the above interface implementation must
 be registered using <code>nglog::AddLogSink</code> which expects a pointer to the
@@ -1107,7 +1107,7 @@ will produce</p>
       <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["content.action.edit","content.code.annotate","content.code.copy","content.code.select","header.autohide","navigation.expand","navigation.instant.preview","navigation.instant.progress","navigation.prune","navigation.indexes","toc.follow","navigation.top","navigation.path","navigation.tracking","search.highlight","search.share","search.suggest"],"search":"../assets/javascripts/workers/search.7d14d953.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"default":["dev","stable"],"provider":"mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.69c251d7.min.js"></script>
+      <script src="../assets/javascripts/bundle.e886cdf1.min.js"></script>
       
     
   </body>

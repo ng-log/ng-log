@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="zensical-0.0.53">
+      <meta name="generator" content="zensical-0.0.54">
     
     
       
@@ -477,7 +477,7 @@
   <a href="#0.8.4" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        0.8.4 <small>TBD</small>
+        0.8.4 <small>August 15, 2026</small>
       </span>
     </span>
   </a>
@@ -853,7 +853,7 @@
   <a href="#0.8.4" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        0.8.4 <small>TBD</small>
+        0.8.4 <small>August 15, 2026</small>
       </span>
     </span>
   </a>
@@ -1144,6 +1144,10 @@
 <li>Prevent concurrent log writers from blocking during memory-drop maintenance</li>
 <li>Make log cleanup work with non-ASCII Windows directories</li>
 <li>Omit the default header format when a custom prefix formatter is installed</li>
+<li>Improve suppressed logging performance by avoiding message construction and
+  reduce overhead when formatting default prefixes</li>
+<li>Improve logging throughput for applications that log from multiple threads</li>
+<li>Allow sink callbacks to run concurrently and safely perform nested logging</li>
 <li>Include the current thread name in failure signal reports when available</li>
 </ul>
 <div class="admonition warning">
@@ -1151,7 +1155,7 @@
 <p>If your application depends on glog compatibility, use the 0.8.x series.
 It will receive updates until 0.10.0 is released.</p>
 </div>
-<h3 id="0.8.4">0.8.4 <small>TBD</small><a class="headerlink" href="#0.8.4" title="Permanent link">&para;</a></h3>
+<h3 id="0.8.4">0.8.4 <small>August 15, 2026</small><a class="headerlink" href="#0.8.4" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Prevent <code>drop_log_memory</code> from blocking concurrent log writers</li>
 <li>Prevent failure-signal handling from deadlocking when reentered</li>
@@ -1160,6 +1164,9 @@ It will receive updates until 0.10.0 is released.</p>
 <li>Restore Linux LWP identifiers in crash signal reports</li>
 <li>Arrange signal headers before program counters in crash reports after the
   signal handler emitted the header after the PC</li>
+<li>Prevent stale signal-handler state when a handler returns</li>
+<li>Honor <code>logbuflevel</code> when logging to stdout</li>
+<li>Make <code>NGLOG_*</code> severity constants available in the global namespace</li>
 <li>Report sub-hour UTC offsets through <code>LogMessageTime::gmtoffset</code></li>
 <li>Cap oversized <code>max_log_size</code> values instead of using the 1 MB minimum</li>
 </ul>
@@ -1498,7 +1505,7 @@ logging APIs based on C++-style streams and various helper macros.</p>
       <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["content.action.edit","content.code.annotate","content.code.copy","content.code.select","header.autohide","navigation.expand","navigation.instant.preview","navigation.instant.progress","navigation.prune","navigation.indexes","toc.follow","navigation.top","navigation.path","navigation.tracking","search.highlight","search.share","search.suggest"],"search":"../assets/javascripts/workers/search.7d14d953.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"default":["dev","stable"],"provider":"mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.69c251d7.min.js"></script>
+      <script src="../assets/javascripts/bundle.e886cdf1.min.js"></script>
       
     
   </body>
