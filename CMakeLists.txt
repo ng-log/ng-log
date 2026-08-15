@@ -40,7 +40,6 @@ option (PRINT_UNSYMBOLIZED_STACK_TRACES
 option (WITH_GFLAGS "Use gflags" ON)
 option (WITH_PKGCONFIG "Enable pkg-config support" OFF)
 option (WITH_SYMBOLIZE "Enable symbolize module" ON)
-option (WITH_TLS "Enable Thread Local Storage (TLS) support" ON)
 
 set (WITH_UNWIND libunwind CACHE STRING "unwind driver")
 set_property (CACHE WITH_UNWIND PROPERTY STRINGS none unwind libunwind)
@@ -224,10 +223,6 @@ check_cxx_source_compiles ([=[
 extern char* __progname;
 int main() { return __progname != nullptr ? EXIT_SUCCESS : EXIT_FAILURE; }
 ]=] HAVE___PROGNAME)
-
-if (WITH_TLS)
-  set (NGLOG_THREAD_LOCAL_STORAGE 1)
-endif (WITH_TLS)
 
 set (_PC_FIELDS
   "uc_mcontext.gregs[REG_PC]"          # Solaris x86 (32 + 64 bit)

@@ -1950,22 +1950,20 @@ static bool fatal_msg_exclusive = true;
 static internal::LogMessageData fatal_msg_data_exclusive;
 static thread_local internal::LogMessageData fatal_msg_data_shared;
 
-#ifdef NGLOG_THREAD_LOCAL_STORAGE
 // Static thread-local log data space to use, because typically at most one
 // LogMessageData object exists (in this case glog makes zero heap memory
 // allocations).
 static thread_local bool thread_data_available = true;
 
-#  if defined(__cpp_lib_byte) && __cpp_lib_byte >= 201603L
+#if defined(__cpp_lib_byte) && __cpp_lib_byte >= 201603L
 // std::aligned_storage is deprecated in C++23
 alignas(internal::LogMessageData) static thread_local std::byte
     thread_msg_data[sizeof(internal::LogMessageData)];
-#  else   // !(defined(__cpp_lib_byte) && __cpp_lib_byte >= 201603L)
+#else   // !(defined(__cpp_lib_byte) && __cpp_lib_byte >= 201603L)
 static thread_local std::aligned_storage<
     sizeof(internal::LogMessageData), alignof(internal::LogMessageData)>::type
     thread_msg_data;
-#  endif  // defined(__cpp_lib_byte) && __cpp_lib_byte >= 201603L
-#endif    // defined(NGLOG_THREAD_LOCAL_STORAGE)
+#endif  // defined(__cpp_lib_byte) && __cpp_lib_byte >= 201603L
 
 internal::LogMessageData::LogMessageData()
     : stream_(message_text_, LogMessage::kMaxLogMessageLen, 0), styles_() {}
@@ -2021,7 +2019,6 @@ void LogMessage::Init(const char* file, int line, LogSeverity severity,
   allocated_ = nullptr;
   if (severity != NGLOG_FATAL ||
       !exit_on_dfatal.load(std::memory_order_relaxed)) {
-#ifdef NGLOG_THREAD_LOCAL_STORAGE
     // No need for locking, because this is thread local.
     if (thread_data_available) {
       thread_data_available = false;
@@ -2030,10 +2027,6 @@ void LogMessage::Init(const char* file, int line, LogSeverity severity,
       allocated_ = new internal::LogMessageData();
       data_ = allocated_;
     }
-#else   // !defined(NGLOG_THREAD_LOCAL_STORAGE)
-    allocated_ = new internal::LogMessageData();
-    data_ = allocated_;
-#endif  // defined(NGLOG_THREAD_LOCAL_STORAGE)
     data_->first_fatal_ = false;
   } else {
     std::lock_guard<internal::FatalMutex> l{fatal_msg_lock};
@@ -2115,17 +2108,12 @@ LogMessage::~LogMessage() noexcept(false) {
   Flush();
   const bool fail = data_->severity_ == NGLOG_FATAL &&
                     exit_on_dfatal.load(std::memory_order_relaxed);
-#ifdef NGLOG_THREAD_LOCAL_STORAGE
   if (data_ == static_cast<void*>(&thread_msg_data)) {
     data_->~LogMessageData();
     thread_data_available = true;
   } else {
     delete allocated_;
   }
-#else   // !defined(NGLOG_THREAD_LOCAL_STORAGE)
-  delete allocated_;
-#endif  // defined(NGLOG_THREAD_LOCAL_STORAGE)
-        //
 
   if (fail) {
     const char* message = "*** Check failure stack trace: ***\n";

@@ -162,9 +162,6 @@
 /* location of source code */
 #cmakedefine TEST_SRC_DIR ${TEST_SRC_DIR}
 
-/* Define if thread-local storage is enabled. */
-#cmakedefine NGLOG_THREAD_LOCAL_STORAGE
-
 /* define if abi::__cxa_demangle is available in cxxabi.h */
 #cmakedefine HAVE___CXA_DEMANGLE
 
