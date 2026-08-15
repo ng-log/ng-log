@@ -20,11 +20,6 @@
 
 using testing::HasSubstr;
 
-#ifdef NGLOG_USE_GFLAGS
-#  include <gflags/gflags.h>
-using namespace GFLAGS_NAMESPACE;
-#endif
-
 using namespace nglog;
 using namespace nglog::internal;
 
@@ -189,8 +184,8 @@ TEST(ColorAttributes, ExcessiveStyleSpansFallBackToPlainText) {
 }
 
 TEST(ColorAttributes, TruncatedStyledTextRemainsBounded) {
-  const bool old_log_prefix = FLAGS_log_prefix;
-  FLAGS_log_prefix = false;
+  const bool old_log_prefix = nglog::GetFlag(FLAGS_log_prefix);
+  nglog::SetFlag(FLAGS_log_prefix, false);
   std::string message;
   const std::string text(LogMessage::kMaxLogMessageLen + 1, 'x');
 
@@ -199,7 +194,7 @@ TEST(ColorAttributes, TruncatedStyledTextRemainsBounded) {
     log.AppendText(text.data(), text.size(), TextAttributes{});
   }
 
-  FLAGS_log_prefix = old_log_prefix;
+  nglog::SetFlag(FLAGS_log_prefix, old_log_prefix);
   EXPECT_EQ(message.size(), LogMessage::kMaxLogMessageLen - 2);
   EXPECT_EQ(message.back(), 'x');
 }
@@ -219,26 +214,27 @@ TEST(ColorAttributes, DefaultPrefixRetainsPerFieldColors) {
   ASSERT_EQ(setenv("TERM", "xterm", 1), 0);
   unsetenv("NO_COLOR");
 
-  const bool old_logtostderr = FLAGS_logtostderr;
-  const bool old_colorlogtostderr = FLAGS_colorlogtostderr;
-  const bool old_log_prefix = FLAGS_log_prefix;
-  const int old_minloglevel = FLAGS_minloglevel;
-  const bool old_symbolize_hyperlinks = FLAGS_symbolize_hyperlinks;
-  FLAGS_logtostderr = true;
-  FLAGS_colorlogtostderr = true;
-  FLAGS_log_prefix = true;
-  FLAGS_minloglevel = NGLOG_INFO;
-  FLAGS_symbolize_hyperlinks = false;
+  const bool old_logtostderr = nglog::GetFlag(FLAGS_logtostderr);
+  const bool old_colorlogtostderr = nglog::GetFlag(FLAGS_colorlogtostderr);
+  const bool old_log_prefix = nglog::GetFlag(FLAGS_log_prefix);
+  const int old_minloglevel = nglog::GetFlag(FLAGS_minloglevel);
+  const bool old_symbolize_hyperlinks =
+      nglog::GetFlag(FLAGS_symbolize_hyperlinks);
+  nglog::SetFlag(FLAGS_logtostderr, true);
+  nglog::SetFlag(FLAGS_colorlogtostderr, true);
+  nglog::SetFlag(FLAGS_log_prefix, true);
+  nglog::SetFlag(FLAGS_minloglevel, static_cast<std::int32_t>(NGLOG_INFO));
+  nglog::SetFlag(FLAGS_symbolize_hyperlinks, false);
 
   CaptureTestStderr();
   LOG(INFO) << "colored default prefix";
   const std::string output = GetCapturedTestStderr();
 
-  FLAGS_logtostderr = old_logtostderr;
-  FLAGS_colorlogtostderr = old_colorlogtostderr;
-  FLAGS_log_prefix = old_log_prefix;
-  FLAGS_minloglevel = old_minloglevel;
-  FLAGS_symbolize_hyperlinks = old_symbolize_hyperlinks;
+  nglog::SetFlag(FLAGS_logtostderr, old_logtostderr);
+  nglog::SetFlag(FLAGS_colorlogtostderr, old_colorlogtostderr);
+  nglog::SetFlag(FLAGS_log_prefix, old_log_prefix);
+  nglog::SetFlag(FLAGS_minloglevel, old_minloglevel);
+  nglog::SetFlag(FLAGS_symbolize_hyperlinks, old_symbolize_hyperlinks);
 
   EXPECT_THAT(output, HasSubstr("\033[34m"));
   EXPECT_THAT(output, HasSubstr("\033[35m"));
@@ -252,14 +248,15 @@ TEST(ColorAttributes, RendersStyledSpansAndHyperlinksOnAnsiOutput) {
   ASSERT_EQ(setenv("TERM_PROGRAM", "iTerm.app", 1), 0);
   unsetenv("NO_COLOR");
 
-  const bool old_logtostderr = FLAGS_logtostderr;
-  const bool old_colorlogtostderr = FLAGS_colorlogtostderr;
-  const bool old_log_prefix = FLAGS_log_prefix;
-  const bool old_symbolize_hyperlinks = FLAGS_symbolize_hyperlinks;
-  FLAGS_logtostderr = true;
-  FLAGS_colorlogtostderr = true;
-  FLAGS_log_prefix = false;
-  FLAGS_symbolize_hyperlinks = true;
+  const bool old_logtostderr = nglog::GetFlag(FLAGS_logtostderr);
+  const bool old_colorlogtostderr = nglog::GetFlag(FLAGS_colorlogtostderr);
+  const bool old_log_prefix = nglog::GetFlag(FLAGS_log_prefix);
+  const bool old_symbolize_hyperlinks =
+      nglog::GetFlag(FLAGS_symbolize_hyperlinks);
+  nglog::SetFlag(FLAGS_logtostderr, true);
+  nglog::SetFlag(FLAGS_colorlogtostderr, true);
+  nglog::SetFlag(FLAGS_log_prefix, false);
+  nglog::SetFlag(FLAGS_symbolize_hyperlinks, true);
 
   CaptureTestStderr();
   {
@@ -276,10 +273,10 @@ TEST(ColorAttributes, RendersStyledSpansAndHyperlinksOnAnsiOutput) {
   PLOG(INFO) << "plog";
   const std::string output = GetCapturedTestStderr();
 
-  FLAGS_logtostderr = old_logtostderr;
-  FLAGS_colorlogtostderr = old_colorlogtostderr;
-  FLAGS_log_prefix = old_log_prefix;
-  FLAGS_symbolize_hyperlinks = old_symbolize_hyperlinks;
+  nglog::SetFlag(FLAGS_logtostderr, old_logtostderr);
+  nglog::SetFlag(FLAGS_colorlogtostderr, old_colorlogtostderr);
+  nglog::SetFlag(FLAGS_log_prefix, old_log_prefix);
+  nglog::SetFlag(FLAGS_symbolize_hyperlinks, old_symbolize_hyperlinks);
 
   EXPECT_THAT(
       output,
@@ -296,20 +293,20 @@ TEST(ColorAttributes, ResetsAttributesBeforeTheLineEnding) {
   ASSERT_EQ(setenv("TERM", "xterm", 1), 0);
   unsetenv("NO_COLOR");
 
-  const bool old_logtostderr = FLAGS_logtostderr;
-  const bool old_colorlogtostderr = FLAGS_colorlogtostderr;
-  const bool old_log_prefix = FLAGS_log_prefix;
-  FLAGS_logtostderr = true;
-  FLAGS_colorlogtostderr = true;
-  FLAGS_log_prefix = false;
+  const bool old_logtostderr = nglog::GetFlag(FLAGS_logtostderr);
+  const bool old_colorlogtostderr = nglog::GetFlag(FLAGS_colorlogtostderr);
+  const bool old_log_prefix = nglog::GetFlag(FLAGS_log_prefix);
+  nglog::SetFlag(FLAGS_logtostderr, true);
+  nglog::SetFlag(FLAGS_colorlogtostderr, true);
+  nglog::SetFlag(FLAGS_log_prefix, false);
 
   CaptureTestStderr();
   LOG(INFO) << "colored line";
   const std::string output = GetCapturedTestStderr();
 
-  FLAGS_logtostderr = old_logtostderr;
-  FLAGS_colorlogtostderr = old_colorlogtostderr;
-  FLAGS_log_prefix = old_log_prefix;
+  nglog::SetFlag(FLAGS_logtostderr, old_logtostderr);
+  nglog::SetFlag(FLAGS_colorlogtostderr, old_colorlogtostderr);
+  nglog::SetFlag(FLAGS_log_prefix, old_log_prefix);
 
   EXPECT_THAT(output, HasSubstr("colored line\033[0m\n"));
 }
@@ -319,12 +316,12 @@ TEST(ColorAttributes, ResetsAndReappliesAttributesForEachLine) {
   ASSERT_EQ(setenv("TERM", "xterm", 1), 0);
   unsetenv("NO_COLOR");
 
-  const bool old_logtostderr = FLAGS_logtostderr;
-  const bool old_colorlogtostderr = FLAGS_colorlogtostderr;
-  const bool old_log_prefix = FLAGS_log_prefix;
-  FLAGS_logtostderr = true;
-  FLAGS_colorlogtostderr = true;
-  FLAGS_log_prefix = false;
+  const bool old_logtostderr = nglog::GetFlag(FLAGS_logtostderr);
+  const bool old_colorlogtostderr = nglog::GetFlag(FLAGS_colorlogtostderr);
+  const bool old_log_prefix = nglog::GetFlag(FLAGS_log_prefix);
+  nglog::SetFlag(FLAGS_logtostderr, true);
+  nglog::SetFlag(FLAGS_colorlogtostderr, true);
+  nglog::SetFlag(FLAGS_log_prefix, false);
 
   CaptureTestStderr();
   LOG(INFO) << Styled(
@@ -332,9 +329,9 @@ TEST(ColorAttributes, ResetsAndReappliesAttributesForEachLine) {
       "first\nsecond");
   const std::string output = GetCapturedTestStderr();
 
-  FLAGS_logtostderr = old_logtostderr;
-  FLAGS_colorlogtostderr = old_colorlogtostderr;
-  FLAGS_log_prefix = old_log_prefix;
+  nglog::SetFlag(FLAGS_logtostderr, old_logtostderr);
+  nglog::SetFlag(FLAGS_colorlogtostderr, old_colorlogtostderr);
+  nglog::SetFlag(FLAGS_log_prefix, old_log_prefix);
 
   EXPECT_THAT(output, HasSubstr("first\033[0m\n\033[1;36msecond\033[0m\n"));
 }
@@ -345,8 +342,7 @@ TEST(ColorAttributes, ResetsAndReappliesAttributesForEachLine) {
 int main(int argc, char** argv) {
   InitializeLogging(argv[0]);
   testing::InitGoogleTest(&argc, argv);
-#ifdef NGLOG_USE_GFLAGS
-  ParseCommandLineFlags(&argc, &argv, true);
-#endif
+  nglog::ParseCommandLineFlags(&argc, &argv,
+                               nglog::FlagParsingMode::kRemoveFlags);
   return RUN_ALL_TESTS();
 }

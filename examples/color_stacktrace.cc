@@ -55,25 +55,44 @@ void CrashThroughFewFrames(int depth) {
   LOG(FATAL) << "fatal messages are colored bold red, then abort";
 }
 
+void WriteUsage(nglog::HelpWriter& help) {
+  help.Write(nglog::HelpTextStyle::kHeading, "Usage:");
+  help.Write(" ");
+  help.Write(nglog::HelpTextStyle::kExecutable, "color_stacktrace_example");
+  help.Write(" ");
+  help.Write(nglog::HelpTextStyle::kUsageOptions, "[options]");
+  help.Write("\n\nLog messages are colorized when ");
+  help.Write(nglog::HelpTextStyle::kStream, "stderr");
+  help.Write(" is an interactive terminal. Use ");
+  help.Write(nglog::HelpTextStyle::kOptionPrefix, "--");
+  help.Write(nglog::HelpTextStyle::kOption, "colorlogtostderr");
+  help.Write("=");
+  help.Write(nglog::HelpTextStyle::kConstant, "false");
+  help.Write(" to disable coloring.\n\n");
+}
+
 }  // namespace
 
-int main(int /*argc*/, char** argv) {
+int main(int argc, char** argv) {
+  // Set the example defaults before parsing so command-line values override
+  // them while retaining the example's useful output by default.
+  nglog::SetFlag(FLAGS_logtostderr, true);
+  nglog::SetFlag(FLAGS_v, 1);
+  nglog::SetUsageMessage(WriteUsage);
+  nglog::ParseCommandLineFlags(&argc, &argv,
+                               nglog::FlagParsingMode::kRemoveFlags);
+
   DisableCoreDumps();
   nglog::InitializeLogging(argv[0]);
 
   // Both default to true: colorizing is opt-out, not opt-in. Uncomment
   // either line to see the difference.
-  // FLAGS_colorlogtostderr = false;
-  // FLAGS_symbolize_hyperlinks = false;
+  // nglog::SetFlag(FLAGS_colorlogtostderr, false);
+  // nglog::SetFlag(FLAGS_symbolize_hyperlinks, false);
 
   // FLAGS_stderrthreshold defaults to ERROR, so INFO/WARNING messages
   // would otherwise go only to a log file, never to the terminal this
   // example colorizes.
-  FLAGS_logtostderr = true;
-
-  // Lets the VLOG(1) call below actually produce output.
-  FLAGS_v = 1;
-
   // Regular log lines are colorized by severity when writing to a
   // terminal: INFO is left uncolored, WARNING is yellow, ERROR is red,
   // and FATAL is bold red. This coloring is applied uniformly across

@@ -10,9 +10,11 @@
 #include <algorithm>
 #include <atomic>
 #include <csignal>
+#include <cstddef>
 #include <cstring>
 #include <ctime>
 #include <sstream>
+#include <string>
 #include <thread>
 
 #include "config.h"
@@ -252,6 +254,26 @@ bool g_stderr_hyperlinks = false;
 // since gethostname() is not async-signal-safe.
 char g_hostname[256] = "";
 
+// The value of --symbolize_file_base_path, used to resolve relative source
+// paths in stack trace hyperlinks. Copied once by InstallFailureSignalHandler()
+// because reading a string flag locks a mutex and allocates memory, neither of
+// which is async-signal-safe.
+constexpr std::size_t kSymbolizeFileBasePathSize = 1024;
+char g_symbolize_file_base_path[kSymbolizeFileBasePathSize] = "";
+
+// Returns false if the base path does not fit into its buffer. Hyperlinks are
+// disabled in that case because they would point to a truncated path.
+bool ComputeSymbolizeFileBasePath() {
+  const std::string base_path = nglog::GetFlag(FLAGS_symbolize_file_base_path);
+  if (base_path.size() >= sizeof(g_symbolize_file_base_path)) {
+    g_symbolize_file_base_path[0] = '\0';
+    return false;
+  }
+  std::memcpy(g_symbolize_file_base_path, base_path.c_str(),
+              base_path.size() + 1);
+  return true;
+}
+
 void ComputeHostname() {
 #ifdef NGLOG_OS_WINDOWS
   char buf[MAX_COMPUTERNAME_LENGTH + 1];
@@ -434,7 +456,7 @@ void DumpSignalInfo(int signal_number, siginfo_t* siginfo) {
     WriteStyledField(theme.Get(Role::kMetaIdentifier), mode, g_failure_writer,
                      buf, formatter.num_bytes_written());
   }
-#  endif  // GLOG_OS_LINUX && HAVE_SYS_SYSCALL_H && HAVE_SYS_TYPES_H
+#  endif  // NGLOG_OS_LINUX && HAVE_SYS_SYSCALL_H && HAVE_SYS_TYPES_H
 
   char thread_name[kThreadNameBufferSize];
   if (GetThreadName(thread_name, sizeof(thread_name))) {
@@ -505,14 +527,13 @@ void DumpStackFrameInfoImpl(const char* prefix, void* pc) {
                              : ColorMode::kNone;
 #if defined(HAVE_SYMBOLIZE)
   const bool hyperlink = mode == ColorMode::kAnsi &&
-                         FLAGS_symbolize_hyperlinks && g_stderr_hyperlinks &&
-                         frame.file_line_length > 0;
+                         nglog::GetFlag(FLAGS_symbolize_hyperlinks) &&
+                         g_stderr_hyperlinks && frame.file_line_length > 0;
   char uri[1024];
   const char* uri_pointer = nullptr;
   if (hyperlink &&
       BuildFileUri(symbol + frame.file_line_offset, frame.file_line_length,
-                   FLAGS_symbolize_file_base_path.c_str(), g_hostname, uri,
-                   sizeof(uri))) {
+                   g_symbolize_file_base_path, g_hostname, uri, sizeof(uri))) {
     uri_pointer = uri;
   }
 #endif  // defined(HAVE_SYMBOLIZE)
@@ -805,13 +826,15 @@ bool IsFailureSignalHandlerInstalled() {
 
 void InstallFailureSignalHandler() {
   // Decide once, now, whether/how stack frames dumped to stderr may be
-  // colorized/hyperlinked, and resolve the local hostname and current
-  // directory: getenv(), isatty(), gethostname(), and getcwd() are not
-  // async-signal-safe, so none of them can be called once a signal has
-  // actually fired.
-  g_stderr_color_mode =
-      FLAGS_colorlogtostderr ? StreamColorMode(stderr) : ColorMode::kNone;
-  g_stderr_hyperlinks = StreamSupportsHyperlinks(stderr);
+  // colorized/hyperlinked, and resolve the hyperlink base path, the local
+  // hostname, and the current directory: reading a string flag, getenv(),
+  // isatty(), gethostname(), and getcwd() are not async-signal-safe, so none
+  // of them can be called once a signal has actually fired.
+  g_stderr_color_mode = nglog::GetFlag(FLAGS_colorlogtostderr)
+                            ? StreamColorMode(stderr)
+                            : ColorMode::kNone;
+  g_stderr_hyperlinks =
+      ComputeSymbolizeFileBasePath() && StreamSupportsHyperlinks(stderr);
   ComputeHostname();
   ComputeCwd();
 #ifdef HAVE_SIGACTION

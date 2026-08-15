@@ -71,40 +71,10 @@ jobs:
                 --config ${{matrix.build_type}} `
                 --target install
 
-      - name: Cache gflags
-        id: cache-gflags
-        uses: actions/cache@v6
-        with:
-          path: gflags/
-          key: ${{matrix.msvc}}-gflags-2.2.2-C++${{matrix.std}}-${{matrix.lib}}-${{matrix.arch}}-${{matrix.build_type}}
-
-      - name: Download gflags
-        if: steps.cache-gflags.outputs.cache-hit != 'true'
-        run: |
-          (New-Object System.Net.WebClient).DownloadFile("https://github.com/gflags/gflags/archive/refs/tags/v2.2.2.zip", "v2.2.2.zip")
-          Expand-Archive v2.2.2.zip .
-
-      - name: Build gflags
-        if: steps.cache-gflags.outputs.cache-hit != 'true'
-        run: |
-          cmake -S gflags-2.2.2 -B build-gflags `
-                -A ${{matrix.arch}} `
-                -DBUILD_SHARED_LIBS=${{matrix.lib == 'shared'}} `
-                -DCMAKE_CXX_STANDARD=${{matrix.std}} `
-                -DCMAKE_CXX_STANDARD_REQUIRED=ON `
-                -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/gflags `
-                -DCMAKE_POLICY_VERSION_MINIMUM="3.22" `
-                -G "${{matrix.generator}}"
-          cmake --build build-gflags `
-                --config ${{matrix.build_type}} `
-                --target install
-
       - name: Setup Environment
         run: |
           echo "GTest_ROOT=$((Get-Item .).FullName)/gtest" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "gflags_ROOT=$((Get-Item .).FullName)/gflags" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           echo "${{github.workspace}}/gtest/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          echo "${{github.workspace}}/gflags/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Setup Release Environment
         if: matrix.build_type != 'Debug'
@@ -187,7 +157,6 @@ jobs:
             mingw-w64-${{matrix.env}}-benchmark
             mingw-w64-${{matrix.env}}-cmake
             mingw-w64-${{matrix.env}}-gcc
-            mingw-w64-${{matrix.env}}-gflags
             mingw-w64-${{matrix.env}}-gtest
             mingw-w64-${{matrix.env}}-ninja
             mingw-w64-${{matrix.env}}-python-jinja

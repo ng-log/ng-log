@@ -29,11 +29,6 @@
 #  include <emscripten.h>
 #endif
 
-#ifdef NGLOG_USE_GFLAGS
-#  include <gflags/gflags.h>
-using namespace GFLAGS_NAMESPACE;
-#endif
-
 using namespace nglog;
 using namespace nglog::internal;
 using testing::HasSubstr;
@@ -48,7 +43,7 @@ using testing::StrEq;
 namespace {
 
 TEST(Flags, SymbolizeFileBasePathIgnoresEnvironment) {
-  EXPECT_THAT(FLAGS_symbolize_file_base_path, IsEmpty());
+  EXPECT_THAT(nglog::GetFlag(FLAGS_symbolize_file_base_path), IsEmpty());
 }
 
 TEST(ShouldColorize, NoColorEnvWins) {
@@ -259,6 +254,14 @@ TEST(Theme, DefaultThemeUsesDistinctThreadNameColor) {
   EXPECT_EQ(theme.Get(Role::kMetaThreadName).foreground, Color::kCyan);
   EXPECT_NE(theme.Get(Role::kMetaThreadName).foreground,
             theme.Get(Role::kMetaIdentifier).foreground);
+}
+
+TEST(Theme, DefaultThemeUsesWhiteModuleHelpRoles) {
+  const Theme& theme = DefaultTheme();
+  EXPECT_EQ(theme.Get(Role::kHelpModuleHeader).foreground, Color::kWhite);
+  EXPECT_EQ(theme.Get(Role::kHelpModuleHeader).style, TextStyle::kNone);
+  EXPECT_EQ(theme.Get(Role::kHelpModuleName).foreground, Color::kWhite);
+  EXPECT_EQ(theme.Get(Role::kHelpModuleName).style, TextStyle::kBold);
 }
 
 TEST(Theme, SetAndGetRoundTrip) {
@@ -718,9 +721,8 @@ TEST(Hyperlink, UriReflectsConstructorArguments) {
 int main(int argc, char** argv) {
   InitializeLogging(argv[0]);
   testing::InitGoogleTest(&argc, argv);
-#ifdef NGLOG_USE_GFLAGS
-  ParseCommandLineFlags(&argc, &argv, true);
-#endif
+  nglog::ParseCommandLineFlags(&argc, &argv,
+                               nglog::FlagParsingMode::kRemoveFlags);
 
   return RUN_ALL_TESTS();
 }

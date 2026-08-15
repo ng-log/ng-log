@@ -6,6 +6,7 @@
 // Author: Sergiu Deitsch
 //
 
+#include <ng-log/flags.h>
 #include <ng-log/logging.h>
 
 #include <algorithm>
@@ -28,9 +29,30 @@ struct MyLogSink : nglog::LogSink {  // (1)!
   }
 };
 
+void WriteUsage(nglog::HelpWriter& help) {
+  help.Write(nglog::HelpTextStyle::kHeading, "Usage:");
+  help.Write(" ");
+  help.Write(nglog::HelpTextStyle::kExecutable, "custom_sink_example");
+  help.Write(" ");
+  help.Write(nglog::HelpTextStyle::kUsageOptions, "[options]");
+  help.Write("\n\nWrites log messages to ");
+  help.Write(nglog::HelpTextStyle::kStream, "stdout");
+  help.Write(" through a custom sink. Use ");
+  help.Write(nglog::HelpTextStyle::kOptionPrefix, "--");
+  help.Write(nglog::HelpTextStyle::kOption, "logtostderr");
+  help.Write("=");
+  help.Write(nglog::HelpTextStyle::kConstant, "true");
+  help.Write(" to route ng-log output to ");
+  help.Write(nglog::HelpTextStyle::kStream, "stderr");
+  help.Write(".\n");
+}
+
 }  // namespace
 
-int main(int /*argc*/, char** argv) {
+int main(int argc, char** argv) {
+  nglog::SetUsageMessage(WriteUsage);
+  nglog::ParseCommandLineFlags(&argc, &argv,
+                               nglog::FlagParsingMode::kRemoveFlags);
   nglog::InitializeLogging(argv[0]);
 
   MyLogSink sink;

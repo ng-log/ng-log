@@ -16,6 +16,12 @@ SPDX-License-Identifier: BSD-3-Clause
 - [Colorize](flags.md#colorizing-output) log output and crash stack traces on
   a terminal by default, with hyperlinked `file:line` references
 - Remove the glog compatibility layer
+- Replace the optional gflags dependency with a built-in typed
+  [flag registry](flags.md#public-flags-api). `FLAGS_name` is now a
+  synchronized flag object that is read with `nglog::GetFlag` and updated with
+  `nglog::SetFlag`. Flags can be used before `main` and during program
+  termination. Options must start with two dashes, and `logfile_mode` is an
+  `nglog::FileMode` written in octal
 - Remove Bazel build support
 - Prevent concurrent log writers from blocking during memory-drop maintenance
 - Prevent concurrent logfile writes on Windows

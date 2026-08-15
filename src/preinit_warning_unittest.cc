@@ -19,7 +19,7 @@ TEST(Logging, PreInitializationWarningUsesFieldColors) {
   ASSERT_EQ(setenv("TERM", "xterm", 1), 0);
   unsetenv("NO_COLOR");
 
-  FLAGS_colorlogtostderr = true;
+  nglog::SetFlag(FLAGS_colorlogtostderr, true);
   ASSERT_EXIT(
       {
         LOG(INFO) << "before initialization";
@@ -38,7 +38,7 @@ TEST(Logging, PreInitializationWarningHonorsColorFlag) {
 
   ASSERT_EXIT(
       {
-        FLAGS_colorlogtostderr = false;
+        nglog::SetFlag(FLAGS_colorlogtostderr, false);
         LOG(INFO) << "before initialization";
         std::exit(0);
       },

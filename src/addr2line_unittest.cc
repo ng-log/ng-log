@@ -32,11 +32,6 @@
 #include "symbolize.h"
 #include "utilities.h"
 
-#ifdef NGLOG_USE_GFLAGS
-#  include <gflags/gflags.h>
-using namespace GFLAGS_NAMESPACE;
-#endif  // NGLOG_USE_GFLAGS
-
 using namespace nglog;
 
 namespace {
@@ -378,7 +373,7 @@ const char* TrySymbolize(void* pc) {
 // rather than a hard failure.
 
 TEST(Addr2LineSymbolizeCallback, ResolvesFileAndLine) {
-  FLAGS_symbolize_line_info = true;
+  nglog::SetFlag(FLAGS_symbolize_line_info, true);
   EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
 
   const char* symbol = TrySymbolize(
@@ -393,12 +388,12 @@ TEST(Addr2LineSymbolizeCallback, ResolvesFileAndLine) {
 }
 
 TEST(Addr2LineSymbolizeCallback, DisabledByFlag) {
-  FLAGS_symbolize_line_info = false;
+  nglog::SetFlag(FLAGS_symbolize_line_info, false);
   EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
 
   const char* symbol = TrySymbolize(
       reinterpret_cast<void*>(&FunctionSymbolizedForAddr2LineTest));
-  FLAGS_symbolize_line_info = true;
+  nglog::SetFlag(FLAGS_symbolize_line_info, true);
   InstallSymbolizeCallback(nullptr);
 
   if (symbol == nullptr ||
@@ -411,7 +406,7 @@ TEST(Addr2LineSymbolizeCallback, DisabledByFlag) {
 TEST(Addr2LineSymbolizeCallback, SkipsGracefullyWhenUnavailable) {
   ScopedPathOverride scoped_path("/nonexistent/directory/for/testing");
 
-  FLAGS_symbolize_line_info = true;
+  nglog::SetFlag(FLAGS_symbolize_line_info, true);
   EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
 
   const char* symbol = TrySymbolize(
@@ -438,16 +433,17 @@ TEST(Addr2LineSymbolizeCallback, DoesNotHangOnAnUnresponsiveAddr2Line) {
 
     // Short enough to keep this test fast, while still giving the helper
     // plenty of time to be seen as unresponsive.
-    const nglog::int32 previous_timeout_ms = FLAGS_addr2line_timeout_ms;
-    FLAGS_addr2line_timeout_ms = 50;
-    FLAGS_symbolize_line_info = true;
+    const nglog::int32 previous_timeout_ms =
+        nglog::GetFlag(FLAGS_addr2line_timeout_ms);
+    nglog::SetFlag(FLAGS_addr2line_timeout_ms, 50);
+    nglog::SetFlag(FLAGS_symbolize_line_info, true);
     EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
 
     symbol = TrySymbolize(
         reinterpret_cast<void*>(&FunctionSymbolizedForAddr2LineTest));
 
     InstallSymbolizeCallback(nullptr);
-    FLAGS_addr2line_timeout_ms = previous_timeout_ms;
+    nglog::SetFlag(FLAGS_addr2line_timeout_ms, previous_timeout_ms);
   }
 
   RemoveFakeAddr2Line(fake_executable);
@@ -467,8 +463,9 @@ TEST(Addr2LineSymbolizeCallback, UsesOneTimeoutForSlowOutput) {
 
   {
     ScopedPathOverride scoped_path(dir.c_str());
-    const nglog::int32 previous_timeout_ms = FLAGS_addr2line_timeout_ms;
-    FLAGS_addr2line_timeout_ms = 40;
+    const nglog::int32 previous_timeout_ms =
+        nglog::GetFlag(FLAGS_addr2line_timeout_ms);
+    nglog::SetFlag(FLAGS_addr2line_timeout_ms, 40);
     EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
 
     char symbol[4096];
@@ -478,7 +475,7 @@ TEST(Addr2LineSymbolizeCallback, UsesOneTimeoutForSlowOutput) {
         SymbolizeOptions::kNone, nullptr);
     const auto elapsed = std::chrono::steady_clock::now() - start;
 
-    FLAGS_addr2line_timeout_ms = previous_timeout_ms;
+    nglog::SetFlag(FLAGS_addr2line_timeout_ms, previous_timeout_ms);
     EXPECT_FALSE(resolved);
     EXPECT_GE(elapsed, std::chrono::milliseconds{20});
     EXPECT_LT(elapsed, std::chrono::milliseconds{160});
@@ -548,7 +545,7 @@ TEST(Addr2LineSymbolizeCallback, SkipsGracefullyWhenAddr2LineProducesNoOutput) {
   {
     ScopedPathOverride scoped_path(dir.c_str());
 
-    FLAGS_symbolize_line_info = true;
+    nglog::SetFlag(FLAGS_symbolize_line_info, true);
     EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
 
     symbol = TrySymbolize(
@@ -568,7 +565,7 @@ TEST(Addr2LineSymbolizeCallback, SkipsGracefullyWhenAddr2LineProducesNoOutput) {
 }
 
 int main(int argc, char** argv) {
-  FLAGS_logtostderr = true;
+  nglog::SetFlag(FLAGS_logtostderr, true);
   InitializeLogging(argv[0]);
   testing::InitGoogleTest(&argc, argv);
   // Independent from whatever InitializeLogging() may have installed via

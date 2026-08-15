@@ -86,7 +86,8 @@ static void VLOG2Initializer() {
   // Can now parse --vmodule flag and initialize mapping of module-specific
   // logging levels.
   inited_vmodule = false;
-  const char* vmodule = FLAGS_vmodule.c_str();
+  const std::string vmodule_value = nglog::GetFlag(FLAGS_vmodule);
+  const char* vmodule = vmodule_value.c_str();
   const char* sep;
   VModuleInfo* head = nullptr;
   VModuleInfo* tail = nullptr;
@@ -118,7 +119,7 @@ static void VLOG2Initializer() {
 
 // This can be called very early, so we use SpinLock and RAW_VLOG here.
 int SetVLOGLevel(const char* module_pattern, int log_level) {
-  int result = FLAGS_v;
+  int result = nglog::GetFlag(FLAGS_v);
   size_t const pattern_len = strlen(module_pattern);
   bool found = false;
   {
@@ -170,8 +171,9 @@ int SetVLOGLevel(const char* module_pattern, int log_level) {
 
 // NOTE: Individual VLOG statements cache the integer log level pointers.
 // NOTE: This function must not allocate memory or require any locks.
-bool InitializeVLOG3(SiteFlag* site_flag, int32* level_default,
-                     const char* fname, int32 verbose_level) {
+bool InitializeVLOG3(SiteFlag& site_flag,
+                     const Flag<std::int32_t>& level_default, const char* fname,
+                     int32 verbose_level) {
   std::lock_guard<std::mutex> l(vmodule_mutex);
   bool read_vmodule_flag = inited_vmodule;
   if (!read_vmodule_flag) {
@@ -222,28 +224,28 @@ bool InitializeVLOG3(SiteFlag* site_flag, int32* level_default,
 
   // Cache the vlog value pointer if --vmodule flag has been parsed.
   if (read_vmodule_flag) {
-    site_flag->default_level =
-        site_flag_value == nullptr ? level_default : nullptr;
-    site_flag->level.store(site_flag_value, std::memory_order_release);
+    site_flag.default_level =
+        site_flag_value == nullptr ? &level_default : nullptr;
+    site_flag.level.store(site_flag_value, std::memory_order_release);
     // If VLOG flag has been cached to the default site pointer,
     // we want to add to the cached list in order to invalidate in case
     // SetVModule is called afterwards with new modules.
     // The performance penalty here is negligible, because InitializeVLOG3 is
     // called once per site.
-    if (site_flag_value == nullptr && !site_flag->base_name) {
-      site_flag->base_name = base;
-      site_flag->base_len = base_length;
-      site_flag->next = cached_site_list;
-      cached_site_list = site_flag;
+    if (site_flag_value == nullptr && !site_flag.base_name) {
+      site_flag.base_name = base;
+      site_flag.base_len = base_length;
+      site_flag.next = cached_site_list;
+      cached_site_list = &site_flag;
     }
-    site_flag->initialized.store(true, std::memory_order_release);
+    site_flag.initialized.store(true, std::memory_order_release);
   }
 
   // restore the errno in case something recoverable went wrong during
   // the initialization of the VLOG mechanism (see above note "protect the..")
   errno = old_errno;
   return site_flag_value == nullptr
-             ? *level_default >= verbose_level
+             ? GetFlag(level_default) >= verbose_level
              : site_flag_value->load(std::memory_order_relaxed) >=
                    verbose_level;
 }

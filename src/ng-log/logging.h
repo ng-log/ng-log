@@ -415,7 +415,7 @@ struct NGLOG_EXPORT LogMessageTime {
 #define NGLOG_LOG_SEVERITY(severity) NGLOG_LOG_SEVERITY_##severity
 #define NGLOG_LOG_SEVERITY_ENABLED(severity)      \
   (NGLOG_LOG_SEVERITY(severity) == NGLOG_FATAL || \
-   FLAGS_minloglevel <= NGLOG_LOG_SEVERITY(severity))
+   nglog::GetFlag(FLAGS_minloglevel) <= NGLOG_LOG_SEVERITY(severity))
 
 #define NGLOG_LOG_IF(severity, condition) \
   static_cast<void>(0),                   \
@@ -1539,7 +1539,7 @@ NGLOG_EXPORT void ReprintFatalMessage();
 NGLOG_EXPORT void TruncateLogFile(const char* path, uint64 limit, uint64 keep);
 
 // Truncate stdout and stderr if they are over the value specified by
-// --max_log_size; keep the final 1MB.  This function has the same
+// --max_log_size. Keep the final 1 MiB. This function has the same
 // race condition as TruncateLogFile.
 NGLOG_EXPORT void TruncateStdoutStderr();
 

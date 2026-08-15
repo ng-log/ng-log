@@ -223,7 +223,8 @@ std::size_t RunAddr2Line(char* const argv[], char* out, std::size_t out_size) {
   // signal-safe mode uses execv(), which necessarily inherits the environment.
   char* envp[] = {nullptr};
 
-  const std::chrono::milliseconds timeout{FLAGS_addr2line_timeout_ms};
+  const std::chrono::milliseconds timeout{
+      nglog::GetFlag(FLAGS_addr2line_timeout_ms)};
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   Addr2LineSubprocess process;
 
@@ -273,7 +274,7 @@ std::size_t RunAddr2Line(char* const argv[], char* out, std::size_t out_size) {
 
 int Addr2LineSymbolizeCallback(int /*fd*/, void* pc, char* out,
                                std::size_t out_size, uint64_t relocation) {
-  if (!FLAGS_symbolize_line_info) {
+  if (!nglog::GetFlag(FLAGS_symbolize_line_info)) {
     return 0;
   }
 
@@ -438,7 +439,7 @@ bool ResolveFunctionAndLine(const char* object_path, void* pc,
   // symbol names, so the name below is always resolved regardless of their
   // values.
   const std::size_t prefix_len =
-      FLAGS_symbolize_line_info &&
+      nglog::GetFlag(FLAGS_symbolize_line_info) &&
               (options & SymbolizeOptions::kNoLineNumbers) ==
                   SymbolizeOptions::kNone
           ? FormatAddr2LineOutput(result.file_line, result.file_line_len,

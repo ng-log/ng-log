@@ -49,10 +49,9 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include "base/commandlineflags.h"
-#include "internal/flags_scope.h"
 #include "internal/lock_metrics.h"
 #include "mock-log.h"
+#include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "ng-log/platform.h"
 #include "ng-log/raw_logging.h"
@@ -62,11 +61,6 @@
 #endif
 #include "testing_utilities.h"
 #include "utilities.h"
-
-#ifdef NGLOG_USE_GFLAGS
-#  include <gflags/gflags.h>
-using namespace GFLAGS_NAMESPACE;
-#endif
 
 #ifdef NGLOG_OS_WINDOWS
 struct WindowsHandleDeleter {
@@ -178,9 +172,9 @@ int RunSlowMailerScenario(const char* program, const char* marker_path,
   if (!SetMailerMarkerEnvironment(marker_path)) {
     return EXIT_FAILURE;
   }
-  FLAGS_logtostderr = false;
-  FLAGS_logtostdout = false;
-  FLAGS_logmailer = EMAIL_TEST_HELPER_PATH;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+  nglog::SetFlag(FLAGS_logtostdout, false);
+  nglog::SetFlag(FLAGS_logmailer, EMAIL_TEST_HELPER_PATH);
   InitializeLogging(program);
   SetEmailLogging(NGLOG_WARNING, "example@example.com");
   SetLogDestination(NGLOG_INFO, log_path);
@@ -257,9 +251,9 @@ int main(int argc, char** argv) {
 
   if ((argc == 3 || argc == 4) &&
       std::strcmp(argv[1], "--nglog-log-child") == 0) {
-    FLAGS_colorlogtostderr = false;
-    FLAGS_logtostderr = false;
-    FLAGS_timestamp_in_logfile_name = false;
+    nglog::SetFlag(FLAGS_colorlogtostderr, false);
+    nglog::SetFlag(FLAGS_logtostderr, false);
+    nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
     InitializeLogging(argv[0]);
     SetLogDestination(NGLOG_INFO, argv[2]);
     LOG(INFO) << "message to new base, child - should only appear on STDERR "
@@ -277,8 +271,8 @@ int main(int argc, char** argv) {
   }
 #endif
 
-  FLAGS_colorlogtostderr = false;
-  FLAGS_timestamp_in_logfile_name = true;
+  nglog::SetFlag(FLAGS_colorlogtostderr, false);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, true);
 
   // Make sure stderr is not buffered as stderr seems to be buffered
   // on recent windows.
@@ -286,8 +280,9 @@ int main(int argc, char** argv) {
 
   // Test some basics before InitializeLogging:
   CaptureTestStderr();
-  LogWithLevels(FLAGS_v, FLAGS_stderrthreshold, FLAGS_logtostderr,
-                FLAGS_alsologtostderr);
+  LogWithLevels(nglog::GetFlag(FLAGS_v), nglog::GetFlag(FLAGS_stderrthreshold),
+                nglog::GetFlag(FLAGS_logtostderr),
+                nglog::GetFlag(FLAGS_alsologtostderr));
   LogWithLevels(0, 0, false, false);  // simulate "before global c-tors"
   early_stderr = GetCapturedTestStderr();
 
@@ -301,14 +296,13 @@ int main(int argc, char** argv) {
 
   EXPECT_TRUE(IsLoggingInitialized());
 
-  FLAGS_logtostderr = true;
+  nglog::SetFlag(FLAGS_logtostderr, true);
 
   testing::InitGoogleTest(&argc, argv);
   InitGoogleMock(&argc, argv);
 
-#ifdef NGLOG_USE_GFLAGS
-  ParseCommandLineFlags(&argc, &argv, true);
-#endif
+  nglog::ParseCommandLineFlags(&argc, &argv,
+                               nglog::FlagParsingMode::kRemoveFlags);
 
   // so that death tests run before we use threads
   return RUN_ALL_TESTS();
@@ -409,7 +403,7 @@ void TestRawLogging() {
   auto foo = std::make_unique<string>("foo ");
   string huge_str(50000, 'a');
 
-  FlagSaver saver;
+  nglog::ScopedFlags<> save;
 
   // Check that RAW logging does not use mallocs.
   NewHook new_hook;
@@ -437,13 +431,13 @@ void TestRawLogging() {
   RAW_LOG(WARNING, "Huge string: %s", huge_str.c_str());
   RAW_VLOG(0, "Huge string: %s", huge_str.c_str());
 
-  FLAGS_v = 0;
+  nglog::SetFlag(FLAGS_v, 0);
   RAW_LOG(INFO, "log");
   RAW_VLOG(0, "vlog 0 on");
   RAW_VLOG(1, "vlog 1 off");
   RAW_VLOG(2, "vlog 2 off");
   RAW_VLOG(3, "vlog 3 off");
-  FLAGS_v = 2;
+  nglog::SetFlag(FLAGS_v, 2);
   RAW_LOG(INFO, "log");
   RAW_VLOG(1, "vlog 1 on");
   RAW_VLOG(2, "vlog 2 on");
@@ -462,12 +456,12 @@ void LogWithLevels(int v, int severity, bool err, bool alsoerr) {
           "Test: v=%d stderrthreshold=%d logtostderr=%d alsologtostderr=%d", v,
           severity, err, alsoerr);
 
-  FlagSaver saver;
+  nglog::ScopedFlags<> save;
 
-  FLAGS_v = v;
-  FLAGS_stderrthreshold = severity;
-  FLAGS_logtostderr = err;
-  FLAGS_alsologtostderr = alsoerr;
+  nglog::SetFlag(FLAGS_v, v);
+  nglog::SetFlag(FLAGS_stderrthreshold, severity);
+  nglog::SetFlag(FLAGS_logtostderr, err);
+  nglog::SetFlag(FLAGS_alsologtostderr, alsoerr);
 
   RAW_VLOG(-1, "vlog -1");
   RAW_VLOG(0, "vlog 0");
@@ -799,8 +793,8 @@ TEST(Logging, CustomLoggerCanLogDuringWrite) {
   ASSERT_EXIT(
       {
         alarm(kDeathTestTimeoutSeconds);
-        FLAGS_logtostderr = false;
-        FLAGS_logtostdout = false;
+        nglog::SetFlag(FLAGS_logtostderr, false);
+        nglog::SetFlag(FLAGS_logtostdout, false);
         auto logger = std::make_unique<ReentrantLogger>();
         base::SetLogger(NGLOG_INFO, logger.release());
         LOG(INFO) << "Log through a reentrant custom logger.";
@@ -811,8 +805,8 @@ TEST(Logging, CustomLoggerCanLogDuringWrite) {
 }
 
 TEST(Logging, DirectSinkCanLogDuringSend) {
-  FlagSaver saver;
-  FLAGS_logtostderr = true;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, true);
 
   ReentrantLogSink sink;
   LOG_TO_SINK_BUT_NOT_TO_LOGFILE(&sink, INFO)
@@ -823,8 +817,8 @@ TEST(Logging, DirectSinkCanLogDuringSend) {
 
 #ifdef NGLOG_ENABLE_LOCK_METRICS
 TEST(Logging, DirectSinkWithoutRegisteredSinksDoesNotLockSinkRegistry) {
-  FlagSaver saver;
-  FLAGS_logtostderr = true;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, true);
   internal::ResetLockMetrics();
 
   TestLogSinkImpl sink;
@@ -839,8 +833,8 @@ TEST(Logging, DirectSinkWithoutRegisteredSinksDoesNotLockSinkRegistry) {
 }
 
 TEST(Logging, RegisteredSinkDispatchUsesOneRegistrySnapshot) {
-  FlagSaver saver;
-  FLAGS_logtostderr = true;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, true);
   TestLogSinkImpl sink;
   AddLogSink(&sink);
   internal::ResetLockMetrics();
@@ -857,12 +851,12 @@ TEST(Logging, RegisteredSinkDispatchUsesOneRegistrySnapshot) {
 #if defined(NGLOG_OS_LINUX)
 TEST(Logging, ConcurrentFullDiskWrites) {
   constexpr int kFullDiskWriteCount = 100;
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
-  FLAGS_logtostdout = false;
-  FLAGS_log_file_header = false;
-  FLAGS_timestamp_in_logfile_name = false;
-  FLAGS_stop_logging_if_full_disk = true;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+  nglog::SetFlag(FLAGS_logtostdout, false);
+  nglog::SetFlag(FLAGS_log_file_header, false);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
+  nglog::SetFlag(FLAGS_stop_logging_if_full_disk, true);
   SetLogDestination(NGLOG_INFO, "/dev/full");
   SetLogDestination(NGLOG_WARNING, "/dev/full");
 
@@ -910,10 +904,10 @@ TEST(Logging, ReprintFatalMessageDoesNotColorStderr) {
   ASSERT_EQ(setenv("CLICOLOR_FORCE", "1", 1), 0);
   unsetenv("NO_COLOR");
 
-  auto flags = internal::MakeFlagsScope(
-      internal::MakeFlagsScopePair(FLAGS_logtostderr, true),
-      internal::MakeFlagsScopePair(FLAGS_logtostdout, false),
-      internal::MakeFlagsScopePair(FLAGS_colorlogtostderr, true));
+  auto flags = nglog::MakeScopedFlags(
+      nglog::MakeScopedFlag(FLAGS_logtostderr, true),
+      nglog::MakeScopedFlag(FLAGS_logtostdout, false),
+      nglog::MakeScopedFlag(FLAGS_colorlogtostderr, true));
   const bool previous_exit_on_dfatal = base::internal::GetExitOnDFatal();
   base::internal::SetExitOnDFatal(true);
   auto restore_exit_on_dfatal = [previous_exit_on_dfatal] {
@@ -1136,47 +1130,46 @@ static void CheckNotInFile(const string& name, const string& unexpected) {
       << ": found " << unexpected << " in " << files[0];
 }
 
-TEST(FlagsScope, RestoresFlags) {
-  bool bool_flag = false;
-  std::string string_flag = "old";
+TEST(ScopedFlags, MoveTransfersRestoration) {
+  const bool original = nglog::GetFlag(FLAGS_logtostderr);
 
   {
-    auto flags = internal::MakeFlagsScope(
-        internal::MakeFlagsScopePair(bool_flag, true),
-        internal::MakeFlagsScopePair(string_flag, "new"));
-    EXPECT_TRUE(bool_flag);
-    EXPECT_EQ(string_flag, "new");
+    auto save = nglog::MakeScopedFlags(
+        nglog::MakeScopedFlag(FLAGS_logtostderr, !original));
+    auto moved_save = std::move(save);
+    EXPECT_EQ(!original, nglog::GetFlag(FLAGS_logtostderr));
   }
 
-  EXPECT_FALSE(bool_flag);
-  EXPECT_EQ(string_flag, "old");
+  EXPECT_EQ(original, nglog::GetFlag(FLAGS_logtostderr));
 }
 
-TEST(FlagsScope, MoveTransfersRestoration) {
-  int flag = 1;
+TEST(ScopedFlags, EmptyScopeRestoresAllFlags) {
+  const bool original = nglog::GetFlag(FLAGS_logtostderr);
 
   {
-    auto flags = internal::MakeFlagsScope(internal::MakeFlagsScopePair(flag, 2));
-    auto moved_flags = std::move(flags);
-    EXPECT_EQ(flag, 2);
+    nglog::ScopedFlags<> save;
+    nglog::SetFlag(FLAGS_logtostderr, !original);
+    EXPECT_EQ(!original, nglog::GetFlag(FLAGS_logtostderr));
   }
 
-  EXPECT_EQ(flag, 1);
+  EXPECT_EQ(original, nglog::GetFlag(FLAGS_logtostderr));
 }
 
 TEST(Logging, MaxLogSizeWhenNoTimestamp) {
   // SetLogDestination() is a no-op while FLAGS_logtostderr is true.
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
   fprintf(stderr, "==== Test setting max log size without timestamp\n");
   const string dest = TestTmpDir() + "/logging_test_max_log_size";
   DeleteFiles(dest + "*");
 
   // Set max log size to 1MB.
-  auto original_max_log_size = std::exchange(FLAGS_max_log_size, 1);
-  auto original_timestamp_in_logfile_name =
-      std::exchange(FLAGS_timestamp_in_logfile_name, false);
+  const auto original_max_log_size = nglog::GetFlag(FLAGS_max_log_size);
+  nglog::SetFlag(FLAGS_max_log_size, 1U);
+  const auto original_timestamp_in_logfile_name =
+      nglog::GetFlag(FLAGS_timestamp_in_logfile_name);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
 
   // Set log destination
   SetLogDestination(NGLOG_INFO, dest.c_str());
@@ -1203,19 +1196,20 @@ TEST(Logging, MaxLogSizeWhenNoTimestamp) {
 
   // Verify file size is less than the max log size limit
   CHECK_LT(static_cast<std::size_t>(statbuf.st_size),
-           FLAGS_max_log_size << 20U);
+           nglog::GetFlag(FLAGS_max_log_size) << 20U);
 
   // Reset flag values to their original values
-  FLAGS_max_log_size = original_max_log_size;
-  FLAGS_timestamp_in_logfile_name = original_timestamp_in_logfile_name;
+  nglog::SetFlag(FLAGS_max_log_size, original_max_log_size);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name,
+                 original_timestamp_in_logfile_name);
 
   DeleteFiles(dest + "*");
 }
 
 TEST(Logging, MaxLogSizeAboveCapNotFlooredToMinimum) {
   // SetLogDestination() is a no-op while FLAGS_logtostderr is true.
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
   fprintf(stderr,
           "==== Test max log size above the cap is not floored to 1MB\n");
@@ -1225,14 +1219,15 @@ TEST(Logging, MaxLogSizeAboveCapNotFlooredToMinimum) {
   const string dest = TestTmpDir() + "/logging_test_uncapped_max_log_size";
   DeleteFiles(dest + "*");
 
-  auto original_max_log_size = FLAGS_max_log_size;
-  auto original_timestamp_in_logfile_name = FLAGS_timestamp_in_logfile_name;
+  const auto original_max_log_size = nglog::GetFlag(FLAGS_max_log_size);
+  const auto original_timestamp_in_logfile_name =
+      nglog::GetFlag(FLAGS_timestamp_in_logfile_name);
 
   // A value larger than the 4095MB cap used to be clamped to the 1MB minimum,
   // which would rotate the file after ~1MB. It must instead be capped to the
   // maximum, so the file is allowed to grow past 1MB without rotating.
-  FLAGS_max_log_size = 8000;
-  FLAGS_timestamp_in_logfile_name = false;
+  nglog::SetFlag(FLAGS_max_log_size, 8000U);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
 
   SetLogDestination(NGLOG_INFO, dest.c_str());
 
@@ -1257,15 +1252,16 @@ TEST(Logging, MaxLogSizeAboveCapNotFlooredToMinimum) {
   // No rotation at 1MB should have happened, so the file exceeds 1MB.
   CHECK_GT(static_cast<std::size_t>(statbuf.st_size), 1U << 20U);
 
-  FLAGS_max_log_size = original_max_log_size;
-  FLAGS_timestamp_in_logfile_name = original_timestamp_in_logfile_name;
+  nglog::SetFlag(FLAGS_max_log_size, original_max_log_size);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name,
+                 original_timestamp_in_logfile_name);
 
   DeleteFiles(dest + "*");
 }
 
 TEST(Logging, Basename) {
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
   fprintf(stderr, "==== Test setting log file basename\n");
   const string dest = TestTmpDir() + "/logging_test_basename";
@@ -1283,8 +1279,8 @@ TEST(Logging, Basename) {
 }
 
 TEST(Logging, BasenameAppendWhenNoTimestamp) {
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
   fprintf(stderr,
           "==== Test setting log file basename without timestamp and appending "
@@ -1299,11 +1295,11 @@ TEST(Logging, BasenameAppendWhenNoTimestamp) {
 
   CheckFile(dest, "test preexisting content");
 
-  FLAGS_timestamp_in_logfile_name = false;
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
   SetLogDestination(NGLOG_INFO, dest.c_str());
   LOG(INFO) << "message to new base, appending to preexisting file";
   FlushLogFiles(NGLOG_INFO);
-  FLAGS_timestamp_in_logfile_name = true;
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, true);
 
   // if the logging overwrites the file instead of appending it will fail.
   CheckFile(dest, "test preexisting content");
@@ -1316,15 +1312,16 @@ TEST(Logging, BasenameAppendWhenNoTimestamp) {
 
 TEST(Logging, HeaderFormatLineWithCustomPrefixFormatter) {
   // SetLogDestination() is a no-op while FLAGS_logtostderr is true.
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
   fprintf(stderr, "==== Test log file header format line\n");
   const string dest = TestTmpDir() + "/logging_test_header_format_line";
   DeleteFiles(dest + "*");
 
-  const bool saved_timestamp_in_logfile_name = FLAGS_timestamp_in_logfile_name;
-  FLAGS_timestamp_in_logfile_name = false;
+  const bool saved_timestamp_in_logfile_name =
+      nglog::GetFlag(FLAGS_timestamp_in_logfile_name);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
 
   // A custom prefix formatter is installed (see main). It determines the
   // actual log line format, so the header must not advertise the default
@@ -1351,7 +1348,8 @@ TEST(Logging, HeaderFormatLineWithCustomPrefixFormatter) {
   static string prefix_attacher_data = "good data";
   InstallPrefixFormatter(&PrefixAttacher, &prefix_attacher_data);
 
-  FLAGS_timestamp_in_logfile_name = saved_timestamp_in_logfile_name;
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name,
+                 saved_timestamp_in_logfile_name);
 
   // Release file handle for the destination file to unlock the file in Windows.
   LogToStderr();
@@ -1362,8 +1360,8 @@ TEST(Logging, TwoProcessesWrite) {
 // The implementation relies on advisory file locking. Emscripten cannot fork.
 #if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && \
     defined(HAVE_FCNTL) && !defined(NGLOG_OS_EMSCRIPTEN)
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
   fprintf(stderr,
           "==== Test setting log file basename and two processes writing - "
@@ -1373,7 +1371,7 @@ TEST(Logging, TwoProcessesWrite) {
   DeleteFiles(dest + "*");
 
   // make both processes write into the same file (easier test)
-  FLAGS_timestamp_in_logfile_name = false;
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
   SetLogDestination(NGLOG_INFO, dest.c_str());
   LOG(INFO) << "message to new base, parent";
   FlushLogFiles(NGLOG_INFO);
@@ -1397,7 +1395,7 @@ TEST(Logging, TwoProcessesWrite) {
   EXPECT_FALSE(std::getline(stderr_stream, extra_line));
   EXPECT_THAT(error_line,
               testing::ContainsRegex("^Could not create log file '[^']+': "));
-  FLAGS_timestamp_in_logfile_name = true;
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, true);
 
   CheckFile(dest, "message to new base, parent");
   CheckFile(dest,
@@ -1409,8 +1407,8 @@ TEST(Logging, TwoProcessesWrite) {
   LogToStderr();
   DeleteFiles(dest + "*");
 #elif defined(NGLOG_OS_WINDOWS)
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
   fprintf(stderr,
           "==== Test setting log file basename and two processes writing - "
@@ -1419,7 +1417,7 @@ TEST(Logging, TwoProcessesWrite) {
       TestTmpDir() + "/logging_test_basename_two_processes_writing";
   DeleteFiles(dest + "*");
 
-  FLAGS_timestamp_in_logfile_name = false;
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
   SetLogDestination(NGLOG_INFO, dest.c_str());
   LOG(INFO) << "message to new base, parent";
   FlushLogFiles(NGLOG_INFO);
@@ -1446,7 +1444,7 @@ TEST(Logging, TwoProcessesWrite) {
   EXPECT_TRUE(GetExitCodeProcess(process_handle.get(), &exit_code));
   EXPECT_EQ(exit_code, 0U);
 
-  FLAGS_timestamp_in_logfile_name = true;
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, true);
   CheckFile(dest, "message to new base, parent");
   CheckFile(dest,
             "message to new base, child - should only appear on STDERR not on "
@@ -1460,15 +1458,15 @@ TEST(Logging, TwoProcessesWrite) {
 
 TEST(Logging, FileLockIsHeldAcrossProcesses) {
 #ifdef NGLOG_OS_WINDOWS
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
   const std::string dest =
       TestTmpDir() + "/logging_test_file_lock_across_processes";
   const std::string ready = dest + ".ready";
   DeleteFiles(dest + "*");
 
-  FLAGS_timestamp_in_logfile_name = false;
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
   SetLogDestination(NGLOG_INFO, dest.c_str());
 
   std::string command = '"' + std::string(g_argv0) + "\" --nglog-log-child \"" +
@@ -1521,7 +1519,7 @@ TEST(Logging, FileLockIsHeldAcrossProcesses) {
   EXPECT_EQ(WaitForSingleObject(process_handle.get(), kReadyWaitMilliseconds),
             WAIT_OBJECT_0);
 
-  FLAGS_timestamp_in_logfile_name = true;
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, true);
   file_handle.reset();
   LogToStderr();
   DeleteFiles(dest + "*");
@@ -1530,12 +1528,10 @@ TEST(Logging, FileLockIsHeldAcrossProcesses) {
 
 TEST(Logging, LockedOversizedFileIsNotTruncated) {
 #ifdef NGLOG_OS_WINDOWS
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
-  auto flags =
-      internal::MakeFlagsScope(
-          internal::MakeFlagsScopePair(FLAGS_timestamp_in_logfile_name, false),
-          internal::MakeFlagsScopePair(FLAGS_max_log_size, 1U));
+  auto save = nglog::MakeScopedFlags(
+      nglog::MakeScopedFlag(FLAGS_logtostderr, false),
+      nglog::MakeScopedFlag(FLAGS_timestamp_in_logfile_name, false),
+      nglog::MakeScopedFlag(FLAGS_max_log_size, 1U));
 
   const std::string dest = TestTmpDir() + "/logging_test_locked_oversized_file";
   const std::string ready = dest + ".ready";
@@ -1607,10 +1603,9 @@ TEST(Logging, LogFileIsNotInheritedByChildProcesses) {
   using namespace std::chrono_literals;
   constexpr auto kChildTimeout = 10s;
 
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
-  auto flags = internal::MakeFlagsScope(
-      internal::MakeFlagsScopePair(FLAGS_timestamp_in_logfile_name, false));
+  nglog::ScopedFlags<> saver;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
 
   const std::string dest = TestTmpDir() + "/logging_test_uninherited_file";
   DeleteFiles(dest + "*");
@@ -1646,11 +1641,9 @@ TEST(Logging, LogFileIsNotInheritedByChildProcesses) {
 
 TEST(Logging, FileLockFailureReportsWindowsError) {
 #ifdef NGLOG_OS_WINDOWS
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
-  auto flags =
-      internal::MakeFlagsScope(
-          internal::MakeFlagsScopePair(FLAGS_timestamp_in_logfile_name, false));
+  auto save = nglog::MakeScopedFlags(
+      nglog::MakeScopedFlag(FLAGS_logtostderr, false),
+      nglog::MakeScopedFlag(FLAGS_timestamp_in_logfile_name, false));
 
   const std::string dest = TestTmpDir() + "/logging_test_lock_error";
   const std::string ready = dest + ".ready";
@@ -1712,8 +1705,8 @@ TEST(Logging, FileLockFailureReportsWindowsError) {
 
 TEST(Logging, Symlink) {
 #ifndef NGLOG_OS_WINDOWS
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
   fprintf(stderr, "==== Test setting log file symlink\n");
   string dest = TestTmpDir() + "/logging_test_symlink";
@@ -1735,8 +1728,8 @@ TEST(Logging, Symlink) {
 }
 
 TEST(Logging, Extension) {
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
   fprintf(stderr, "==== Test setting log file extension\n");
   string dest = TestTmpDir() + "/logging_test_extension";
@@ -1783,8 +1776,8 @@ struct MyLogger : public base::Logger {
 
 TEST(Logging, Wrapper) {
   // The configured logger is bypassed while FLAGS_logtostderr is true.
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
   fprintf(stderr, "==== Test log wrapper\n");
 
@@ -1903,8 +1896,8 @@ TEST(Logging, Truncate) {
 
 TEST(Logging, DropLogMemoryConcurrentWriters) {
 #if defined(NGLOG_OS_LINUX) && defined(HAVE_POSIX_FADVISE)
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
   fprintf(stderr,
           "==== Test concurrent writers while drop_log_memory triggers "
@@ -1915,8 +1908,10 @@ TEST(Logging, DropLogMemoryConcurrentWriters) {
   // Force every write to flush and re-evaluate the drop_log_memory
   // threshold, so that posix_fadvise() is exercised multiple times while
   // other threads are concurrently appending to the same log file.
-  const bool old_drop_log_memory = std::exchange(FLAGS_drop_log_memory, true);
-  const int32 old_logbufsecs = std::exchange(FLAGS_logbufsecs, 0);
+  const bool old_drop_log_memory = nglog::GetFlag(FLAGS_drop_log_memory);
+  nglog::SetFlag(FLAGS_drop_log_memory, true);
+  const int32 old_logbufsecs = nglog::GetFlag(FLAGS_logbufsecs);
+  nglog::SetFlag(FLAGS_logbufsecs, 0);
 
   SetLogDestination(NGLOG_INFO, dest.c_str());
 
@@ -1962,15 +1957,15 @@ TEST(Logging, DropLogMemoryConcurrentWriters) {
   // Windows.
   LogToStderr();
   DeleteFiles(dest + "*");
-  FLAGS_drop_log_memory = old_drop_log_memory;
-  FLAGS_logbufsecs = old_logbufsecs;
+  nglog::SetFlag(FLAGS_drop_log_memory, old_drop_log_memory);
+  nglog::SetFlag(FLAGS_logbufsecs, old_logbufsecs);
 #endif
 }
 
 TEST(Logging, MessageCountDoesNotWaitForLogger) {
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
-  FLAGS_logtostdout = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+  nglog::SetFlag(FLAGS_logtostdout, false);
 
   base::Logger* old_logger = base::GetLogger(NGLOG_INFO);
   auto logger_owner = std::make_unique<BlockingLogger>();
@@ -1989,10 +1984,10 @@ TEST(Logging, MessageCountDoesNotWaitForLogger) {
 }
 
 TEST(Logging, DefaultFileDispatchDoesNotRelockFile) {
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
-  FLAGS_logtostdout = false;
-  FLAGS_timestamp_in_logfile_name = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+  nglog::SetFlag(FLAGS_logtostdout, false);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
 
   const std::string destination =
       TestTmpDir() + "/logging_test_default_file_dispatch";
@@ -2356,7 +2351,7 @@ TEST(DVLog, Basic) {
   EXPECT_CALL(log, Log(NGLOG_INFO, StrEq(__FILE__), StrEq("debug log")));
 #endif
 
-  FLAGS_v = 1;
+  nglog::SetFlag(FLAGS_v, 1);
   DVLOG(1) << "debug log";
 }
 
@@ -2366,7 +2361,7 @@ TEST(DVLog, V0) {
   // We are expecting that nothing is logged.
   EXPECT_CALL(log, Log(_, _, _)).Times(0);
 
-  FLAGS_v = 0;
+  nglog::SetFlag(FLAGS_v, 0);
   DVLOG(1) << "debug log";
 }
 
@@ -2387,23 +2382,23 @@ TEST(LogAtLevel, Basic) {
 }
 
 TEST(Logging, DisabledConditionalLogDoesNotEvaluateArguments) {
-  const int saved_min_log_level = FLAGS_minloglevel;
-  FLAGS_minloglevel = NGLOG_ERROR;
+  const int saved_min_log_level = nglog::GetFlag(FLAGS_minloglevel);
+  nglog::SetFlag(FLAGS_minloglevel, static_cast<std::int32_t>(NGLOG_ERROR));
   testing::MockFunction<int()> disabled_log_argument;
   EXPECT_CALL(disabled_log_argument, Call()).Times(0);
 
   LOG_IF(INFO, true) << disabled_log_argument.AsStdFunction()();
 
-  FLAGS_minloglevel = saved_min_log_level;
+  nglog::SetFlag(FLAGS_minloglevel, saved_min_log_level);
 }
 
 TEST(Logging, FatalIgnoresMinimumLogLevel) {
-  const int saved_min_log_level = FLAGS_minloglevel;
-  FLAGS_minloglevel = NGLOG_FATAL + 1;
+  const int saved_min_log_level = nglog::GetFlag(FLAGS_minloglevel);
+  nglog::SetFlag(FLAGS_minloglevel, NGLOG_FATAL + 1);
   auto const fail_func = InstallFailureFunction(&ThrowFatalLogFailure);
   auto restore = [fail_func, saved_min_log_level] {
     InstallFailureFunction(fail_func);
-    FLAGS_minloglevel = saved_min_log_level;
+    nglog::SetFlag(FLAGS_minloglevel, saved_min_log_level);
   };
   ScopedExit<decltype(restore)> restore_state{restore};
 
@@ -2413,15 +2408,15 @@ TEST(Logging, FatalIgnoresMinimumLogLevel) {
 }
 
 TEST(Logging, DefaultPrefixFormatting) {
-  const bool saved_log_to_stderr = FLAGS_logtostderr;
-  const int saved_stderr_threshold = FLAGS_stderrthreshold;
-  const bool saved_log_prefix = FLAGS_log_prefix;
-  const int saved_min_log_level = FLAGS_minloglevel;
+  const bool saved_log_to_stderr = nglog::GetFlag(FLAGS_logtostderr);
+  const int saved_stderr_threshold = nglog::GetFlag(FLAGS_stderrthreshold);
+  const bool saved_log_prefix = nglog::GetFlag(FLAGS_log_prefix);
+  const int saved_min_log_level = nglog::GetFlag(FLAGS_minloglevel);
 
-  FLAGS_logtostderr = true;
-  FLAGS_stderrthreshold = NGLOG_INFO;
-  FLAGS_log_prefix = true;
-  FLAGS_minloglevel = NGLOG_INFO;
+  nglog::SetFlag(FLAGS_logtostderr, true);
+  nglog::SetFlag(FLAGS_stderrthreshold, static_cast<std::int32_t>(NGLOG_INFO));
+  nglog::SetFlag(FLAGS_log_prefix, true);
+  nglog::SetFlag(FLAGS_minloglevel, static_cast<std::int32_t>(NGLOG_INFO));
   InstallPrefixFormatter(nullptr);
 
   CaptureTestStderr();
@@ -2429,10 +2424,10 @@ TEST(Logging, DefaultPrefixFormatting) {
   const std::string output = GetCapturedTestStderr();
 
   InstallPrefixFormatter(&PrefixAttacher, &g_prefix_attacher_data);
-  FLAGS_logtostderr = saved_log_to_stderr;
-  FLAGS_stderrthreshold = saved_stderr_threshold;
-  FLAGS_log_prefix = saved_log_prefix;
-  FLAGS_minloglevel = saved_min_log_level;
+  nglog::SetFlag(FLAGS_logtostderr, saved_log_to_stderr);
+  nglog::SetFlag(FLAGS_stderrthreshold, saved_stderr_threshold);
+  nglog::SetFlag(FLAGS_log_prefix, saved_log_prefix);
+  nglog::SetFlag(FLAGS_minloglevel, saved_min_log_level);
 
   EXPECT_THAT(output, HasSubstr("] default prefix formatting\n"));
   EXPECT_THAT(output, testing::Not(HasSubstr("good data")));
@@ -2490,7 +2485,7 @@ static int kBacktraceAtLine = __LINE__ - 3;  // The line of the LOG(INFO) above
 TEST(LogBacktraceAt, DoesNotBacktraceWhenDisabled) {
   StrictMock<ScopedMockLog> log;
 
-  FLAGS_log_backtrace_at = "";
+  nglog::SetFlag(FLAGS_log_backtrace_at, std::string());
 
   EXPECT_CALL(log, Log(_, _, StrEq("Backtrace me")));
   EXPECT_CALL(log, Log(_, _, StrEq("Not me")));
@@ -2509,7 +2504,7 @@ TEST(LogBacktraceAt, DoesBacktraceAtRightLineWhenEnabled) {
   char where[100];
   std::snprintf(where, 100, "%s:%d", const_basename(__FILE__),
                 kBacktraceAtLine);
-  FLAGS_log_backtrace_at = where;
+  nglog::SetFlag(FLAGS_log_backtrace_at, std::string(where));
 
   // The LOG at the specified line should include a stacktrace which
   // includes the name of the containing function, followed by the log
@@ -2612,16 +2607,16 @@ TEST(LogMsgTime, gmtoffSubHour) {
 // Emscripten cannot run a mailer.
 #ifndef NGLOG_OS_EMSCRIPTEN
 TEST(EmailLogging, ValidAddress) {
-  FlagSaver saver;
-  FLAGS_logmailer = EMAIL_TEST_HELPER_PATH;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logmailer, EMAIL_TEST_HELPER_PATH);
 
   EXPECT_TRUE(
       SendEmail("example@example.com", "Example subject", "Example body"));
 }
 
 TEST(EmailLogging, MultipleAddresses) {
-  FlagSaver saver;
-  FLAGS_logmailer = EMAIL_TEST_HELPER_PATH;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logmailer, EMAIL_TEST_HELPER_PATH);
 
   EXPECT_TRUE(SendEmail("example@example.com,foo@bar.com", "Example subject",
                         "Example body"));
@@ -2629,15 +2624,15 @@ TEST(EmailLogging, MultipleAddresses) {
 #endif  // !NGLOG_OS_EMSCRIPTEN
 
 TEST(EmailLogging, InvalidAddress) {
-  FlagSaver saver;
-  FLAGS_logmailer = EMAIL_TEST_HELPER_PATH;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logmailer, EMAIL_TEST_HELPER_PATH);
 
   EXPECT_FALSE(SendEmail("hello world@foo", "Example subject", "Example body"));
 }
 
 TEST(EmailLogging, MaliciousAddress) {
-  FlagSaver saver;
-  FLAGS_logmailer = EMAIL_TEST_HELPER_PATH;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logmailer, EMAIL_TEST_HELPER_PATH);
 
   EXPECT_FALSE(
       SendEmail("!/bin/true@example.com", "Example subject", "Example body"));
@@ -2726,12 +2721,12 @@ TEST(LoggingGoldenFile, Stderr) {
   EXPECT_TRUE(
       MungeAndDiffTestStderr(TestSrcDir() + "/src/logging_unittest.err"));
 
-  FLAGS_logtostderr = false;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 }
 
 TEST(LoggingGoldenFile, Stdout) {
-  FLAGS_logtostdout = true;
-  FLAGS_stderrthreshold = NUM_SEVERITIES;
+  nglog::SetFlag(FLAGS_logtostdout, true);
+  nglog::SetFlag(FLAGS_stderrthreshold, NUM_SEVERITIES);
   CaptureTestStdout();
   TestRawLogging();
   TestLoggingLevels();
@@ -2750,7 +2745,7 @@ TEST(LoggingGoldenFile, Stdout) {
   TestSTREQ();
   EXPECT_TRUE(
       MungeAndDiffTestStdout(TestSrcDir() + "/src/logging_unittest.out"));
-  FLAGS_logtostdout = false;
+  nglog::SetFlag(FLAGS_logtostdout, false);
 }
 
 #if defined(__GNUC__)

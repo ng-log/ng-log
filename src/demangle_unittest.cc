@@ -16,18 +16,13 @@
 #include <iostream>
 #include <string>
 
-#include "base/commandlineflags.h"
 #include "config.h"
+#include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "utilities.h"
 
-#ifdef NGLOG_USE_GFLAGS
-#  include <gflags/gflags.h>
-using namespace GFLAGS_NAMESPACE;
-#endif
-
-NGLOG_DEFINE_bool(demangle_filter, false,
-                  "Run demangle_unittest in filter mode");
+NGLOG_DEFINE(bool, demangle_filter, false,
+             "Run demangle_unittest in filter mode");
 
 using namespace nglog;
 using testing::Eq;
@@ -776,13 +771,12 @@ TEST(Demangle, LongNameTruncation) {
 
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
-#ifdef NGLOG_USE_GFLAGS
-  ParseCommandLineFlags(&argc, &argv, true);
-#endif
+  nglog::ParseCommandLineFlags(&argc, &argv,
+                               nglog::FlagParsingMode::kRemoveFlags);
 
-  FLAGS_logtostderr = true;
+  nglog::SetFlag(FLAGS_logtostderr, true);
   InitializeLogging(argv[0]);
-  if (FLAGS_demangle_filter) {
+  if (nglog::GetFlag(FLAGS_demangle_filter)) {
     // Read from cin and write to cout.
     std::string line;
     while (std::getline(std::cin, line, '\n')) {

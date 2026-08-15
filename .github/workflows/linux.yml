@@ -40,7 +40,6 @@ jobs:
             g++ \
             cmake \
             libbenchmark-dev \
-            libgflags-dev \
             libgmock-dev \
             libgtest-dev \
             libunwind-dev \

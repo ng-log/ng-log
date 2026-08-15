@@ -117,9 +117,10 @@ class StaticStringBuf : public std::streambuf {
 NGLOG_ATTRIBUTE_FORMAT(printf, 4, 5)
 void RawLog(LogSeverity severity, const char* file, int line,
             const char* format, ...) {
-  if (!(FLAGS_logtostdout || FLAGS_logtostderr ||
-        severity >= FLAGS_stderrthreshold || FLAGS_alsologtostderr ||
-        !IsLoggingInitialized())) {
+  if (!(nglog::GetFlag(FLAGS_logtostdout) ||
+        nglog::GetFlag(FLAGS_logtostderr) ||
+        severity >= nglog::GetFlag(FLAGS_stderrthreshold) ||
+        nglog::GetFlag(FLAGS_alsologtostderr) || !IsLoggingInitialized())) {
     return;  // this stderr log message is suppressed
   }
 

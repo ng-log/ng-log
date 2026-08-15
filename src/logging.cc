@@ -3,6 +3,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+#include "ng-log/flags.h"
 #define _GNU_SOURCE 1  // needed for O_NOFOLLOW and pread()/pwrite()
 
 #include "ng-log/logging.h"
@@ -181,17 +182,17 @@ static Role SeverityToRole(LogSeverity severity) {
   NGLOG_UNREACHABLE;
 }
 
-// Safely get max_log_size. A value of 0 is overridden to the 1 MB minimum.
+// Safely get max_log_size. A value of 0 is overridden to the 1 MiB minimum.
 // Values large enough to overflow the "MaxLogSize() << 20" byte computation
-// are capped to the 4095 MB maximum instead of being silently reduced to the
+// are capped to the 4095 MiB maximum instead of being silently reduced to the
 // minimum, which would produce surprisingly tiny log files.
 static uint32 MaxLogSize() {
   constexpr uint32 max_megabytes = 4095;  // 4095 << 20 fits in a uint32.
-  if (FLAGS_max_log_size == 0) {
+  const uint32 max_log_size = nglog::GetFlag(FLAGS_max_log_size);
+  if (max_log_size == 0) {
     return 1;
   }
-  return FLAGS_max_log_size < max_megabytes ? FLAGS_max_log_size
-                                            : max_megabytes;
+  return max_log_size < max_megabytes ? max_log_size : max_megabytes;
 }
 
 // An arbitrary limit on the length of a single log message.  This
@@ -348,7 +349,7 @@ void AppendDefaultPrefix(internal::LogMessageData& data, LogSeverity severity,
   LogMessage::LogStream& stream = data.stream_;
   stream.append(LogSeverityNames[severity], 1);
   data.prefix_severity_len_ = stream.pcount();
-  if (FLAGS_log_year_in_prefix) {
+  if (nglog::GetFlag(FLAGS_log_year_in_prefix)) {
     AppendPrefixNumber(stream, 1900 + time.year(), kPrefixYearWidth);
   }
   AppendPrefixNumber(stream, 1 + time.month(), kPrefixMonthWidth);
@@ -738,7 +739,8 @@ inline void LogDestination::SetStderrLogging(LogSeverity min_severity) {
   // Prevent any subtle race conditions by wrapping a mutex lock around
   // all this stuff.
   std::lock_guard<internal::LogMutex> l{log_mutex};
-  FLAGS_stderrthreshold = min_severity;
+  nglog::SetFlag(FLAGS_stderrthreshold,
+                 static_cast<std::int32_t>(min_severity));
 }
 
 inline void LogDestination::LogToStderr() {
@@ -831,17 +833,18 @@ constexpr std::size_t kLogFileUriBufferSize = 1024;
 
 static void WriteLogFileCreationError(const std::string& filename,
                                       const std::string& error_message) {
-  const ColorMode mode =
-      FLAGS_colorlogtostderr ? StreamColorMode(stderr) : ColorMode::kNone;
+  const ColorMode mode = nglog::GetFlag(FLAGS_colorlogtostderr)
+                             ? StreamColorMode(stderr)
+                             : ColorMode::kNone;
   const bool hyperlinks_enabled = mode == ColorMode::kAnsi &&
-                                  FLAGS_symbolize_hyperlinks &&
+                                  nglog::GetFlag(FLAGS_symbolize_hyperlinks) &&
                                   StreamSupportsHyperlinks(stderr);
 
   char uri[kLogFileUriBufferSize];
   const char* uri_pointer = nullptr;
   if (hyperlinks_enabled &&
       BuildFileUri(filename.c_str(), filename.size(),
-                   FLAGS_symbolize_file_base_path.c_str(),
+                   nglog::GetFlag(FLAGS_symbolize_file_base_path).c_str(),
                    CachedHostname().c_str(), uri, kLogFileUriBufferSize)) {
     uri_pointer = uri;
   }
@@ -905,7 +908,7 @@ static void WriteStyledLogBody(FILE* output, FileFormatter& formatter,
 // held back indefinitely even with buffering disabled
 // (--logbuflevel=-1).
 static void MaybeFlushStdout(FILE* output, LogSeverity severity) {
-  if (output == stdout && severity > FLAGS_logbuflevel) {
+  if (output == stdout && severity > nglog::GetFlag(FLAGS_logbuflevel)) {
     fflush(output);
   }
 }
@@ -921,8 +924,9 @@ static void MaybeFlushStdout(FILE* output, LogSeverity severity) {
 static void ColoredWriteToStderrOrStdout(FILE* output, LogSeverity severity,
                                          const char* message, size_t len) {
   const bool is_stdout = (output == stdout);
-  const bool want_color = (!is_stdout && FLAGS_colorlogtostderr) ||
-                          (is_stdout && FLAGS_colorlogtostdout);
+  const bool want_color =
+      (!is_stdout && nglog::GetFlag(FLAGS_colorlogtostderr)) ||
+      (is_stdout && nglog::GetFlag(FLAGS_colorlogtostdout));
   const ColorMode mode =
       want_color ? StreamColorMode(output) : ColorMode::kNone;
 
@@ -954,7 +958,7 @@ static void ColoredWriteToStdout(LogSeverity severity, const char* message,
   FILE* output = stdout;
   // We also need to send logs to the stderr when the severity is
   // higher or equal to the stderr threshold.
-  if (severity >= FLAGS_stderrthreshold) {
+  if (severity >= nglog::GetFlag(FLAGS_stderrthreshold)) {
     output = stderr;
   }
   ColoredWriteToStderrOrStdout(output, severity, message, len);
@@ -978,8 +982,9 @@ static void ColoredWriteToStderrOrStdoutWithFields(
     FILE* output, const internal::LogMessageData& data) {
   if (!data.has_default_prefix_) {
     const bool is_stdout = (output == stdout);
-    const bool want_color = (!is_stdout && FLAGS_colorlogtostderr) ||
-                            (is_stdout && FLAGS_colorlogtostdout);
+    const bool want_color =
+        (!is_stdout && nglog::GetFlag(FLAGS_colorlogtostderr)) ||
+        (is_stdout && nglog::GetFlag(FLAGS_colorlogtostdout));
     const ColorMode mode =
         want_color ? StreamColorMode(output) : ColorMode::kNone;
     if (mode == ColorMode::kNone) {
@@ -991,9 +996,10 @@ static void ColoredWriteToStderrOrStdoutWithFields(
     const Theme& theme = DefaultTheme();
     const ColorSpec text_spec = theme.Get(SeverityToRole(data.severity_));
     FileFormatter formatter{output};
-    const bool hyperlinks_enabled = mode == ColorMode::kAnsi &&
-                                    FLAGS_symbolize_hyperlinks &&
-                                    StreamSupportsHyperlinks(output);
+    const bool hyperlinks_enabled =
+        mode == ColorMode::kAnsi &&
+        nglog::GetFlag(FLAGS_symbolize_hyperlinks) &&
+        StreamSupportsHyperlinks(output);
     if (data.styles_.size() == 0) {
       WriteStyledLogField(output, formatter, mode,
                           TextAttributes{text_spec, Hyperlink()}, false,
@@ -1008,8 +1014,9 @@ static void ColoredWriteToStderrOrStdoutWithFields(
   }
 
   const bool is_stdout = (output == stdout);
-  const bool want_color = (!is_stdout && FLAGS_colorlogtostderr) ||
-                          (is_stdout && FLAGS_colorlogtostdout);
+  const bool want_color =
+      (!is_stdout && nglog::GetFlag(FLAGS_colorlogtostderr)) ||
+      (is_stdout && nglog::GetFlag(FLAGS_colorlogtostdout));
   const char* const message = data.message_text_;
   const size_t len = data.num_chars_to_log_;
   const ColorMode mode =
@@ -1060,15 +1067,16 @@ static void ColoredWriteToStderrOrStdoutWithFields(
   char uri[1024];
   const char* uri_pointer = nullptr;
 
-  if (mode == ColorMode::kAnsi && FLAGS_symbolize_hyperlinks &&
+  if (mode == ColorMode::kAnsi && nglog::GetFlag(FLAGS_symbolize_hyperlinks) &&
       StreamSupportsHyperlinks(output)) {
     char span[600];
     const int span_len =
         std::snprintf(span, sizeof(span), "%s:%d", data.fullname_, data.line_);
     if (span_len > 0 && static_cast<size_t>(span_len) < sizeof(span)) {
-      if (BuildFileLineUri(span, static_cast<size_t>(span_len),
-                           FLAGS_symbolize_file_base_path.c_str(),
-                           CachedHostname().c_str(), uri, sizeof(uri))) {
+      if (BuildFileLineUri(
+              span, static_cast<size_t>(span_len),
+              nglog::GetFlag(FLAGS_symbolize_file_base_path).c_str(),
+              CachedHostname().c_str(), uri, sizeof(uri))) {
         uri_pointer = uri;
       }
     }
@@ -1096,7 +1104,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
   }
 
   const bool hyperlinks_enabled = mode == ColorMode::kAnsi &&
-                                  FLAGS_symbolize_hyperlinks &&
+                                  nglog::GetFlag(FLAGS_symbolize_hyperlinks) &&
                                   StreamSupportsHyperlinks(output);
   WriteStyledLogBody(output, formatter, mode, data.styles_, text_spec,
                      hyperlinks_enabled, message, pos, len);
@@ -1108,7 +1116,7 @@ static void ColoredWriteToStdoutWithFields(
   FILE* output = stdout;
   // We also need to send logs to the stderr when the severity is
   // higher or equal to the stderr threshold.
-  if (data.severity_ >= FLAGS_stderrthreshold) {
+  if (data.severity_ >= nglog::GetFlag(FLAGS_stderrthreshold)) {
     output = stderr;
   }
   ColoredWriteToStderrOrStdoutWithFields(output, data);
@@ -1133,8 +1141,9 @@ static void WritePreInitializationWarning() {
   constexpr char kStream[] = "STDERR";
   constexpr char kNewline[] = "\n";
 
-  const ColorMode mode =
-      FLAGS_colorlogtostderr ? StreamColorMode(stderr) : ColorMode::kNone;
+  const ColorMode mode = nglog::GetFlag(FLAGS_colorlogtostderr)
+                             ? StreamColorMode(stderr)
+                             : ColorMode::kNone;
   const Theme& theme = DefaultTheme();
   const auto write_content = [](const char* text, size_t) {
     WriteRawToStderr(text);
@@ -1155,7 +1164,8 @@ static void WritePreInitializationWarning() {
 
 inline void LogDestination::MaybeLogToStderr(
     const internal::LogMessageData& data) {
-  if ((data.severity_ >= FLAGS_stderrthreshold) || FLAGS_alsologtostderr) {
+  if ((data.severity_ >= nglog::GetFlag(FLAGS_stderrthreshold)) ||
+      nglog::GetFlag(FLAGS_alsologtostderr)) {
     ColoredWriteToStderrWithFields(data);
     AlsoErrorWrite(data.severity_, tools::ProgramInvocationShortName(),
                    data.message_text_ + data.num_prefix_chars_);
@@ -1177,7 +1187,7 @@ inline void LogDestination::MaybeLogToLogfile(
     LogSeverity severity,
     const std::chrono::system_clock::time_point& timestamp, const char* message,
     size_t len) {
-  const bool should_flush = severity > FLAGS_logbuflevel;
+  const bool should_flush = severity > nglog::GetFlag(FLAGS_logbuflevel);
   LogDestination* destination = log_destination(severity);
   destination->logger_->Write(should_flush, timestamp, message, len);
 }
@@ -1186,7 +1196,7 @@ inline void LogDestination::MaybeLogToLogfileLocked(
     LogSeverity severity,
     const std::chrono::system_clock::time_point& timestamp, const char* message,
     size_t len) {
-  const bool should_flush = severity > FLAGS_logbuflevel;
+  const bool should_flush = severity > nglog::GetFlag(FLAGS_logbuflevel);
   LogDestination* destination = log_destination(severity);
   if (destination->logger_ == &destination->fileobject_) {
     destination->fileobject_.WriteUnlocked(should_flush, timestamp, message,
@@ -1200,9 +1210,10 @@ inline void LogDestination::LogToAllLogfiles(
     LogSeverity severity,
     const std::chrono::system_clock::time_point& timestamp, const char* message,
     size_t len) {
-  if (FLAGS_logtostdout) {  // global flag: never log to file
+  if (nglog::GetFlag(FLAGS_logtostdout)) {  // global flag: never log to file
     ColoredWriteToStdout(severity, message, len);
-  } else if (FLAGS_logtostderr) {  // global flag: never log to file
+  } else if (nglog::GetFlag(
+                 FLAGS_logtostderr)) {  // global flag: never log to file
     ColoredWriteToStderr(severity, message, len);
   } else {
     for (int i = severity; i >= 0; --i) {
@@ -1216,9 +1227,9 @@ inline void LogDestination::LogToAllLogfilesLocked(
     LogSeverity severity,
     const std::chrono::system_clock::time_point& timestamp, const char* message,
     size_t len) {
-  if (FLAGS_logtostdout) {
+  if (nglog::GetFlag(FLAGS_logtostdout)) {
     ColoredWriteToStdout(severity, message, len);
-  } else if (FLAGS_logtostderr) {
+  } else if (nglog::GetFlag(FLAGS_logtostderr)) {
     ColoredWriteToStderr(severity, message, len);
   } else {
     for (int i = severity; i >= 0; --i) {
@@ -1456,7 +1467,7 @@ void LogFileObject::FlushUnlocked(
   // Figure out when we are due for another flush.
   next_flush_time_ =
       now + std::chrono::duration_cast<std::chrono::system_clock::duration>(
-                std::chrono::duration<int32>{FLAGS_logbufsecs});
+                std::chrono::duration<int32>{nglog::GetFlag(FLAGS_logbufsecs)});
 }
 
 bool LogFileObject::CreateLogfile(const std::string& filename) {
@@ -1475,7 +1486,7 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
   flags |= O_NOINHERIT;
   bool truncate_file = false;
 #endif
-  if (FLAGS_timestamp_in_logfile_name) {
+  if (nglog::GetFlag(FLAGS_timestamp_in_logfile_name)) {
     // demand that the file is unique for our timestamp (fail if it exists).
     flags = flags | O_EXCL;
   } else {
@@ -1498,8 +1509,8 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
     }
   }
 
-  FileDescriptor fd{
-      open(filename.c_str(), flags, static_cast<mode_t>(FLAGS_logfile_mode))};
+  FileDescriptor fd{open(filename.c_str(), flags,
+                         nglog::GetFlag(FLAGS_logfile_mode).value())};
   if (!fd) {
 #ifdef NGLOG_OS_WINDOWS
     create_error_message_ = StrError(errno);
@@ -1561,7 +1572,7 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
 #ifdef NGLOG_OS_WINDOWS
     create_error_message_ = StrError(errno);
 #endif
-    if (FLAGS_timestamp_in_logfile_name) {
+    if (nglog::GetFlag(FLAGS_timestamp_in_logfile_name)) {
       unlink(filename.c_str());  // Erase the half-baked evidence: an unusable
                                  // log file, only if we just created it.
     }
@@ -1570,7 +1581,7 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
 #ifdef NGLOG_OS_WINDOWS
   // https://github.com/golang/go/issues/27638 - make sure we seek to the end to
   // append empirically replicated with wine over mingw build
-  if (!FLAGS_timestamp_in_logfile_name) {
+  if (!nglog::GetFlag(FLAGS_timestamp_in_logfile_name)) {
     if (fseek(file_.get(), 0, SEEK_END) != 0) {
 #  ifdef NGLOG_OS_WINDOWS
       create_error_message_ = StrError(errno);
@@ -1612,8 +1623,9 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
 
     // Make an additional link to the log file in a place specified by
     // FLAGS_log_link, if indicated
-    if (!FLAGS_log_link.empty()) {
-      linkpath = FLAGS_log_link + "/" + linkname;
+    const std::string log_link = nglog::GetFlag(FLAGS_log_link);
+    if (!log_link.empty()) {
+      linkpath = log_link + "/" + linkname;
       unlink(linkpath.c_str());  // delete old one if it exists
       if (symlink(filename.c_str(), linkpath.c_str()) != 0) {
         // silently ignore failures
@@ -1663,7 +1675,7 @@ void LogFileObject::WriteUnlocked(
     struct ::tm tm_time;
     std::time_t t = std::chrono::system_clock::to_time_t(timestamp);
 
-    if (FLAGS_log_utc_time) {
+    if (nglog::GetFlag(FLAGS_log_utc_time)) {
       gmtime_r(&t, &tm_time);
     } else {
       localtime_r(&t, &tm_time);
@@ -1680,9 +1692,9 @@ void LogFileObject::WriteUnlocked(
 
     std::string filename;
     if (filename_source_ == internal::LogFilenameSource::kSelected) {
-      filename = tools::MakeLogFilename(base_filename_, time_pid_string,
-                                        filename_extension_,
-                                        FLAGS_timestamp_in_logfile_name);
+      filename = tools::MakeLogFilename(
+          base_filename_, time_pid_string, filename_extension_,
+          GetFlag(FLAGS_timestamp_in_logfile_name));
       if (!CreateLogfile(filename)) {
 #ifdef NGLOG_OS_WINDOWS
         const std::string& error_message = create_error_message_;
@@ -1727,16 +1739,16 @@ void LogFileObject::WriteUnlocked(
       bool success = false;
       for (const auto& log_dir : log_dirs) {
         base_filename_ = log_dir + stripped_filename;
-        filename = tools::MakeLogFilename(base_filename_, time_pid_string,
-                                          filename_extension_,
-                                          FLAGS_timestamp_in_logfile_name);
+        filename = tools::MakeLogFilename(
+            base_filename_, time_pid_string, filename_extension_,
+            GetFlag(FLAGS_timestamp_in_logfile_name));
         if (CreateLogfile(filename)) {
           success = true;
           break;
         }
       }
       // If we never succeeded, we have to give up
-      if (success == false) {
+      if (!success) {
 #ifdef NGLOG_OS_WINDOWS
         const std::string& error_message = create_error_message_;
         WriteLogFileCreationError(create_filename_, error_message);
@@ -1755,10 +1767,10 @@ void LogFileObject::WriteUnlocked(
         filename_source_, base_filename_, filename,
         tools::MakeLogFilenameMatcher(
             tools::const_basename(base_filename_.c_str()), filename_extension_,
-            FLAGS_timestamp_in_logfile_name));
+            GetFlag(FLAGS_timestamp_in_logfile_name)));
 
     // Write a header message into the log file
-    if (FLAGS_log_file_header) {
+    if (nglog::GetFlag(FLAGS_log_file_header)) {
       ostringstream file_header_stream;
       file_header_stream.fill('0');
       file_header_stream << "Log file created at: " << 1900 + tm_time.tm_year
@@ -1766,7 +1778,8 @@ void LogFileObject::WriteUnlocked(
                          << setw(2) << tm_time.tm_mday << ' ' << setw(2)
                          << tm_time.tm_hour << ':' << setw(2) << tm_time.tm_min
                          << ':' << setw(2) << tm_time.tm_sec
-                         << (FLAGS_log_utc_time ? " UTC\n" : "\n")
+                         << (nglog::GetFlag(FLAGS_log_utc_time) ? " UTC\n"
+                                                                : "\n")
                          << "Running on machine: " << LogDestination::hostname()
                          << '\n';
 
@@ -1784,9 +1797,10 @@ void LogFileObject::WriteUnlocked(
       // user-installed prefix formatter the actual line format is unknown
       // here, so advertising the default one would be wrong.
       if (g_prefix_formatter == nullptr) {
-        const char* const date_time_format = FLAGS_log_year_in_prefix
-                                                 ? "yyyymmdd hh:mm:ss.uuuuuu"
-                                                 : "mmdd hh:mm:ss.uuuuuu";
+        const char* const date_time_format =
+            nglog::GetFlag(FLAGS_log_year_in_prefix)
+                ? "yyyymmdd hh:mm:ss.uuuuuu"
+                : "mmdd hh:mm:ss.uuuuuu";
         file_header_stream << "Log line format: [IWEF]" << date_time_format
                            << " threadid file:line] msg" << '\n';
       }
@@ -1808,7 +1822,7 @@ void LogFileObject::WriteUnlocked(
     // greater than 4096, thereby indicating an error.
     errno = 0;
     fwrite(message, 1, message_len, file_.get());
-    if (FLAGS_stop_logging_if_full_disk &&
+    if (nglog::GetFlag(FLAGS_stop_logging_if_full_disk) &&
         errno == ENOSPC) {  // disk full, stop writing to disk
       stop_writing.store(true, std::memory_order_relaxed);  // until the disk is
       return;
@@ -1830,7 +1844,7 @@ void LogFileObject::WriteUnlocked(
     FlushUnlocked(timestamp);
 #ifdef NGLOG_OS_LINUX
     // Only consider files >= 3MiB
-    if (FLAGS_drop_log_memory && file_length_ >= (3U << 20U)) {
+    if (nglog::GetFlag(FLAGS_drop_log_memory) && file_length_ >= (3U << 20U)) {
       // Don't evict the most recent 1-2MiB so as not to impact a tailer
       // of the log file and to avoid page rounding issue on linux < 4.7
       std::size_t total_drop_length =
@@ -2008,7 +2022,7 @@ void LogMessage::Init(const char* file, int line, LogSeverity severity,
   //    I20201018 160715 f5d4fbb0 logging.cc:1153]
   //    (log level, GMT year, month, date, time, thread_id, file basename, line)
   // We exclude the thread_id for the default thread.
-  if (FLAGS_log_prefix && (line != kNoLogPrefix)) {
+  if (nglog::GetFlag(FLAGS_log_prefix) && (line != kNoLogPrefix)) {
     if (g_prefix_formatter == nullptr) {
       AppendDefaultPrefix(*data_, severity, time_);
     } else {
@@ -2023,13 +2037,15 @@ void LogMessage::Init(const char* file, int line, LogSeverity severity,
   data_->num_prefix_chars_ = data_->stream_.pcount();
 
 #ifdef HAVE_STACKTRACE
-  if (!FLAGS_log_backtrace_at.empty()) {
+  // Checking emptiness first avoids locking the flag for every message.
+  if (!internal::FlagValueAccess::Empty(FLAGS_log_backtrace_at)) {
+    const std::string log_backtrace_at = nglog::GetFlag(FLAGS_log_backtrace_at);
     char fileline[128];
     const int fileline_len = std::snprintf(fileline, sizeof(fileline), "%s:%d",
                                            data_->basename_, line);
     if (fileline_len >= 0 &&
         static_cast<std::size_t>(fileline_len) < sizeof(fileline) &&
-        FLAGS_log_backtrace_at == fileline) {
+        log_backtrace_at == fileline) {
       string stacktrace = GetStackTrace();
       stream() << " (stacktrace:\n" << stacktrace << ") ";
     }
@@ -2110,7 +2126,8 @@ void LogMessage::AppendText(const char* text, std::size_t length,
 // Flush buffered message, called by the destructor, or any other function
 // that needs to synchronize the log.
 void LogMessage::Flush() {
-  if (data_->has_been_flushed_ || data_->severity_ < FLAGS_minloglevel) {
+  if (data_->has_been_flushed_ ||
+      data_->severity_ < nglog::GetFlag(FLAGS_minloglevel)) {
     return;
   }
 
@@ -2160,12 +2177,12 @@ void LogMessage::Flush() {
   if (send_method != &LogMessage::SendToSink) {
     // Protect the shared logging destinations while dispatching the message.
     std::lock_guard<internal::LogMutex> l{log_mutex};
-    if (send_to_registered_sinks && !FLAGS_logtostderr && !FLAGS_logtostdout &&
-        IsLoggingInitialized() &&
+    if (send_to_registered_sinks && !nglog::GetFlag(FLAGS_logtostderr) &&
+        !nglog::GetFlag(FLAGS_logtostdout) && IsLoggingInitialized() &&
         (data_->severity_ >= LogDestination::email_logging_severity_ ||
-         data_->severity_ >= FLAGS_logemaillevel)) {
+         data_->severity_ >= nglog::GetFlag(FLAGS_logemaillevel))) {
       should_send_email = true;
-      email_to = FLAGS_alsologtoemail;
+      email_to = nglog::GetFlag(FLAGS_alsologtoemail);
       if (!LogDestination::addresses_.empty()) {
         if (!email_to.empty()) {
           email_to += ",";
@@ -2173,7 +2190,7 @@ void LogMessage::Flush() {
         email_to += LogDestination::addresses_;
       }
       email_host = LogDestination::hostname();
-      email_mailer = FLAGS_logmailer;
+      email_mailer = nglog::GetFlag(FLAGS_logmailer);
     }
     if (send_method == &LogMessage::SendToSinkAndLog) {
       SendToLog();
@@ -2232,7 +2249,7 @@ void ReprintFatalMessage() {
     const size_t n = strlen(fatal_message);
     // Also write to stderr without color.
     WriteToStderr(fatal_message, n);
-    if (!FLAGS_logtostderr) {
+    if (!nglog::GetFlag(FLAGS_logtostderr)) {
       LogDestination::LogToAllLogfiles(NGLOG_ERROR, fatal_time, fatal_message,
                                        n);
     }
@@ -2255,10 +2272,11 @@ void LogMessage::SendToLog() NGLOG_LOCKS_REQUIRED(log_mutex) {
   }
 
   // global flag: never log to file if set.  Also -- don't log to a
-  // file if we haven't parsed the command line flags to get the
+  // file if we haven't parsed the command-line options to get the
   // program name.
-  if (FLAGS_logtostderr || FLAGS_logtostdout || !IsLoggingInitialized()) {
-    if (FLAGS_logtostdout) {
+  if (nglog::GetFlag(FLAGS_logtostderr) || nglog::GetFlag(FLAGS_logtostdout) ||
+      !IsLoggingInitialized()) {
+    if (nglog::GetFlag(FLAGS_logtostdout)) {
       ColoredWriteToStdoutWithFields(*data_);
     } else {
       ColoredWriteToStderrWithFields(*data_);
@@ -2293,7 +2311,8 @@ void LogMessage::SendToLog() NGLOG_LOCKS_REQUIRED(log_mutex) {
       fatal_time = time_.when();
     }
 
-    if (!FLAGS_logtostderr && !FLAGS_logtostdout) {
+    if (!nglog::GetFlag(FLAGS_logtostderr) &&
+        !nglog::GetFlag(FLAGS_logtostdout)) {
       for (auto& log_destination : LogDestination::log_destinations_) {
         if (log_destination) {
           log_destination->logger_->Write(
@@ -2489,7 +2508,7 @@ string LogSink::ToString(LogSeverity severity, const char* file, int line,
   stream.fill('0');
 
   stream << LogSeverityNames[severity][0];
-  if (FLAGS_log_year_in_prefix) {
+  if (nglog::GetFlag(FLAGS_log_year_in_prefix)) {
     stream << setw(4) << 1900 + time.year();
   }
   stream << setw(2) << 1 + time.month() << setw(2) << time.day() << ' '
@@ -2650,7 +2669,7 @@ static bool SendEmailInternal(const char* dest, const char* subject,
       // expression that HTML5 uses[1], except that we require the address to
       // start with an alpha-numeric character. This is because we don't want to
       // allow email addresses that start with a special character, such as a
-      // pipe or dash, which could be misunderstood as a command-line flag by
+      // pipe or dash, which could be misunderstood as a command-line option by
       // certain versions of `mail` that are vulnerable to command injection.[2]
       // [1]
       // https://html.spec.whatwg.org/multipage/input.html#valid-e-mail-address
@@ -2740,7 +2759,7 @@ static bool SendEmailInternal(const char* dest, const char* subject,
 }
 
 bool SendEmail(const char* dest, const char* subject, const char* body) {
-  const std::string mailer = FLAGS_logmailer;
+  const std::string mailer = nglog::GetFlag(FLAGS_logmailer);
   return SendEmailInternal(dest, subject, body, true, mailer);
 }
 
@@ -2796,13 +2815,13 @@ const vector<string>& GetLoggingDirectories() {
   if (logging_directories_list == nullptr) {
     logging_directories_list = std::make_unique<std::vector<std::string>>();
 
-    if (!FLAGS_log_dir.empty()) {
+    const std::string log_dir = nglog::GetFlag(FLAGS_log_dir);
+    if (!log_dir.empty()) {
       // Ensure the specified path ends with a directory delimiter.
-      if (FLAGS_log_dir.find_last_of(possible_dir_delim) !=
-          FLAGS_log_dir.size() - 1) {
-        logging_directories_list->push_back(FLAGS_log_dir + "/");
+      if (log_dir.find_last_of(possible_dir_delim) != log_dir.size() - 1) {
+        logging_directories_list->push_back(log_dir + "/");
       } else {
-        logging_directories_list->push_back(FLAGS_log_dir);
+        logging_directories_list->push_back(log_dir);
       }
     } else {
       GetTempDirectories(*logging_directories_list);
@@ -3157,7 +3176,7 @@ struct BreakdownImpl {
     std::tm tm_utc;
     int isdst = 0;
 
-    if (FLAGS_log_utc_time) {
+    if (nglog::GetFlag(FLAGS_log_utc_time)) {
       gmtime_r(&timestamp, &tm_local);
       localtime_r(&timestamp, &tm_utc);
       isdst = tm_utc.tm_isdst;
@@ -3188,7 +3207,7 @@ struct BreakdownImpl<T, true> {
     std::time_t timestamp = std::chrono::system_clock::to_time_t(now);
     T tm;
 
-    if (FLAGS_log_utc_time) {
+    if (nglog::GetFlag(FLAGS_log_utc_time)) {
       gmtime_r(&timestamp, &tm);
     } else {
       localtime_r(&timestamp, &tm);

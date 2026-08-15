@@ -29,6 +29,7 @@
 #include "ng-log/platform.h"
 #include "stacktrace.h"
 #include "symbolize.h"
+#include "testing_utilities.h"
 #include "utilities.h"
 
 #if defined(HAVE_UNISTD_H)
@@ -41,15 +42,26 @@
 #if !defined(NGLOG_OS_WINDOWS)
 #  include <sys/wait.h>
 #endif
-#ifdef NGLOG_USE_GFLAGS
-#  include <gflags/gflags.h>
-using namespace GFLAGS_NAMESPACE;
-#endif
 #if defined(_MSC_VER)
 #  include <io.h>  // write
 #endif
 
 using namespace nglog;
+
+#if defined(NGLOG_OS_LINUX) && defined(HAVE_STACKTRACE) && \
+    defined(HAVE_SYMBOLIZE) &&                             \
+    (defined(HAVE_ADDR2LINE) || defined(HAVE_LIBBACKTRACE))
+constexpr std::size_t kSignalBasePathLength = 173;
+constexpr int kAllocationInSignalHandler = 42;
+
+// The failure signal handler must not allocate memory.
+static void ReportSignalHandlerAllocation() {
+  constexpr char kMessage[] = "allocation in signal handler\n";
+  const ssize_t ignored = write(STDERR_FILENO, kMessage, sizeof(kMessage) - 1);
+  static_cast<void>(ignored);
+  _exit(kAllocationInSignalHandler);
+}
+#endif
 
 #if defined(NGLOG_OS_LINUX)
 static volatile sig_atomic_t g_suppress_default_sigterm = 0;
@@ -65,13 +77,12 @@ extern "C" int kill(pid_t pid, int signal_number) noexcept {
 }
 #endif  // defined(NGLOG_OS_LINUX)
 
-static void DieInThread(int* a) {
+static void DieInThread() {
   std::ostringstream oss;
   oss << std::showbase << std::hex << std::this_thread::get_id();
 
   fprintf(stderr, "%s is dying\n", oss.str().c_str());
-  int b = 1 / *a;
-  fprintf(stderr, "We should have died: b=%d\n", b);
+  raise(SIGFPE);
 }
 
 static void WriteToStdout(const char* data, size_t size) {
@@ -319,6 +330,26 @@ TEST(SignalHandler, ColorlogtostderrDisablesAnsi) {
   EXPECT_THAT(result.output, testing::Not(testing::HasSubstr("\033[")));
 }
 
+#  if defined(HAVE_STACKTRACE) && defined(HAVE_SYMBOLIZE) && \
+      (defined(HAVE_ADDR2LINE) || defined(HAVE_LIBBACKTRACE))
+TEST(SignalHandler, HyperlinkedStackFramesDoNotAllocate) {
+  EXPECT_EXIT(
+      {
+        unsetenv("NO_COLOR");
+        setenv("CLICOLOR_FORCE", "1", 1);
+        setenv("VTE_VERSION", "1", 1);
+        nglog::SetFlag(FLAGS_colorlogtostderr, true);
+        nglog::SetFlag(FLAGS_symbolize_hyperlinks, true);
+        nglog::SetFlag(FLAGS_symbolize_file_base_path,
+                       std::string(kSignalBasePathLength, 'b'));
+        InstallFailureSignalHandler();
+        nglog::g_new_hook = &ReportSignalHandlerAllocation;
+        raise(SIGSEGV);
+      },
+      testing::KilledBySignal(SIGSEGV), "");
+}
+#  endif
+
 TEST(SignalHandler, ThreadNameInFailureDump) {
   constexpr char kThreadName[] = "named-crash";
   ASSERT_EQ(pthread_setname_np(pthread_self(), kThreadName), 0);
@@ -334,12 +365,11 @@ int main(int argc, char** argv) {
   InitializeLogging(argv[0]);
   testing::InitGoogleTest(&argc, argv);
   testing::InitGoogleMock(&argc, argv);
-#  ifdef NGLOG_USE_GFLAGS
-  ParseCommandLineFlags(&argc, &argv, true);
-#  endif
+  nglog::ParseCommandLineFlags(&argc, &argv,
+                               nglog::FlagParsingMode::kRemoveFlags);
   const std::string command = argc > 1 ? argv[1] : "none";
   if (command == "colorlogtostderr_off") {
-    FLAGS_colorlogtostderr = false;
+    nglog::SetFlag(FLAGS_colorlogtostderr, false);
     InstallFailureSignalHandler();
     abort();
   }
@@ -349,12 +379,14 @@ int main(int argc, char** argv) {
     // We'll check if this is outputted.
     LOG(INFO) << "create the log file";
     LOG(INFO) << "a message before segv";
+    // Raise the signal directly so this test does not rely on undefined
+    // behavior to exercise the failure handler.
     raise(SIGSEGV);
   } else if (command == "loop") {
     fprintf(stderr, "looping\n");
     while (true);
   } else if (command == "die_in_thread") {
-    std::thread t{&DieInThread, nullptr};
+    std::thread t{&DieInThread};
     t.join();
   } else if (command == "dump_to_stdout") {
     InstallFailureWriter(WriteToStdout);

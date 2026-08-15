@@ -76,18 +76,23 @@ EnvironmentVariable ReadEnvironmentVariable(const char* name) {
 
 ColorMode ComputeStreamColorMode(FILE* stream) {
 #ifdef NGLOG_OS_WINDOWS
+  const EnvironmentVariable no_color = ReadEnvironmentVariable("NO_COLOR");
+  const EnvironmentVariable clicolor_force =
+      ReadEnvironmentVariable("CLICOLOR_FORCE");
   const HANDLE handle =
       GetStdHandle(stream == stdout ? STD_OUTPUT_HANDLE : STD_ERROR_HANDLE);
   DWORD mode = 0;
 
   if (handle == INVALID_HANDLE_VALUE || handle == nullptr ||
       !GetConsoleMode(handle, &mode)) {
-    return ColorMode::kNone;
+    return ShouldColorize(
+               /*is_a_tty=*/false, /*term=*/nullptr,
+               no_color.present ? no_color.value.c_str() : nullptr,
+               clicolor_force.present ? clicolor_force.value.c_str() : nullptr)
+               ? ColorMode::kAnsi
+               : ColorMode::kNone;
   }
 
-  const EnvironmentVariable no_color = ReadEnvironmentVariable("NO_COLOR");
-  const EnvironmentVariable clicolor_force =
-      ReadEnvironmentVariable("CLICOLOR_FORCE");
   if (!ShouldColorize(
           /*is_a_tty=*/true, /*term=*/nullptr,
           no_color.present ? no_color.value.c_str() : nullptr,
@@ -186,9 +191,7 @@ bool ShouldEnableHyperlinks(bool colorize, const char* wt_session_env,
 }
 
 ColorMode StreamColorMode(FILE* stream) {
-  static const ColorMode stdout_mode = ComputeStreamColorMode(stdout);
-  static const ColorMode stderr_mode = ComputeStreamColorMode(stderr);
-  return stream == stdout ? stdout_mode : stderr_mode;
+  return ComputeStreamColorMode(stream);
 }
 
 bool StreamSupportsColor(FILE* stream) {
@@ -196,9 +199,7 @@ bool StreamSupportsColor(FILE* stream) {
 }
 
 bool StreamSupportsHyperlinks(FILE* stream) {
-  static const bool stdout_supports = ComputeStreamSupportsHyperlinks(stdout);
-  static const bool stderr_supports = ComputeStreamSupportsHyperlinks(stderr);
-  return stream == stdout ? stdout_supports : stderr_supports;
+  return ComputeStreamSupportsHyperlinks(stream);
 }
 
 #ifdef NGLOG_OS_WINDOWS

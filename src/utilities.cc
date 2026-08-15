@@ -185,7 +185,7 @@ void SetThreadName(const char* name) {
 // The following APIs are all internal.
 #ifdef HAVE_STACKTRACE
 
-#  include "base/commandlineflags.h"
+#  include "ng-log/flags.h"
 #  include "stacktrace.h"
 #  include "symbolize.h"
 
@@ -258,7 +258,7 @@ static void DumpStackTrace(int skip_count, DebugWriter* writerfn, void* arg) {
   int depth = GetStackTrace(stack, ARRAYSIZE(stack), skip_count + 1);
   for (int i = 0; i < depth; i++) {
 #  if defined(HAVE_SYMBOLIZE)
-    if (FLAGS_symbolize_stacktrace) {
+    if (nglog::GetFlag(FLAGS_symbolize_stacktrace)) {
       DumpPCAndSymbol(writerfn, arg, stack[i], "    ");
     } else {
       DumpPC(writerfn, arg, stack[i], "    ");
@@ -399,11 +399,11 @@ void InitializeLoggingUtilities(const char* argv0) {
   InstallFailureFunction(&DumpStackTraceAndExit);
 #endif
 #ifdef HAVE_LIBBACKTRACE
-  if (FLAGS_symbolize_line_info) {
+  if (nglog::GetFlag(FLAGS_symbolize_line_info)) {
     InstallLibbacktraceSymbolizeCallback();
   }
 #elif defined(HAVE_ADDR2LINE)
-  if (FLAGS_symbolize_line_info) {
+  if (nglog::GetFlag(FLAGS_symbolize_line_info)) {
     InstallAddr2LineSymbolizeCallback();
   }
 #endif

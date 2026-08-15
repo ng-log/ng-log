@@ -34,11 +34,6 @@
 #  include <iterator>
 #endif
 
-#ifdef NGLOG_USE_GFLAGS
-#  include <gflags/gflags.h>
-using namespace GFLAGS_NAMESPACE;
-#endif
-
 using namespace std;
 using namespace nglog;
 
@@ -1153,7 +1148,7 @@ TEST(Symbolize, Unsupported) {
 #endif
 
 int main(int argc, char** argv) {
-  FLAGS_logtostderr = true;
+  nglog::SetFlag(FLAGS_logtostderr, true);
   InitializeLogging(argv[0]);
   testing::InitGoogleTest(&argc, argv);
 #if defined(HAVE_SYMBOLIZE) && defined(HAVE_STACKTRACE)

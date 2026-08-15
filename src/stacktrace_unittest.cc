@@ -12,8 +12,8 @@
 #include <cstdlib>
 #include <memory>
 
-#include "base/commandlineflags.h"
 #include "config.h"
+#include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "utilities.h"
 
@@ -252,7 +252,7 @@ int main(int argc, char** argv) {
 #  endif  // defined(_MSC_VER)
   std::signal(SIGABRT, handle_abort);
 
-  FLAGS_logtostderr = true;
+  nglog::SetFlag(FLAGS_logtostderr, true);
   nglog::InitializeLogging(argv[0]);
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
