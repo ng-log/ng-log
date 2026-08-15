@@ -49,6 +49,9 @@ SPDX-License-Identifier: BSD-3-Clause
 - Use UTF-8 Windows user names in log file names
 - Look up the user name from the system when the `USER` or `USERNAME`
   environment variable is empty
+- `IsFailureSignalHandlerInstalled` reports whether
+  `InstallFailureSignalHandler` was called, regardless of later changes to the
+  signal dispositions
 
 !!! warning "Compatibility"
     If your application depends on glog compatibility, use the 0.8.x series.

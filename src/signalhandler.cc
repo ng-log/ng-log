@@ -78,9 +78,7 @@ const struct {
     {SIGTERM, "SIGTERM"},
 };
 
-#if defined(NGLOG_OS_WINDOWS)
-static bool kFailureSignalHandlerInstalled = false;
-#endif  // defined(NGLOG_OS_WINDOWS)
+static bool g_failure_signal_handler_installed = false;
 
 #if !defined(NGLOG_OS_WINDOWS)
 // Returns the program counter from signal context, nullptr if unknown.
@@ -366,8 +364,10 @@ void DumpTimeInfo() {
   g_failure_writer(plain_buf, plain.num_bytes_written());
 }
 
-// TODO(hamaji): Use signal instead of sigaction?
 #if defined(HAVE_STACKTRACE) && defined(HAVE_SIGACTION)
+
+// sigaction is required here because signal() cannot provide siginfo_t or the
+// interrupted execution context used by the failure report.
 
 // Dumps information about the signal to STDERR. The crash address and the
 // PID/TID/LWP identifiers are colorized separately from the surrounding
@@ -715,10 +715,11 @@ static void HandleSignal(int signal_number
 #endif
 ) {
 
-  // This is the first time we enter the signal handler.  We are going to
-  // do some interesting stuff from here.
-  // TODO(satorux): We might want to set timeout here using alarm(), but
-  // mixing alarm() and sleep() can be a bad idea.
+  // This is the first time we enter the signal handler. We are going to do
+  // some interesting stuff from here.
+  // A timeout is intentionally not installed here. alarm() uses a
+  // process-wide timer and would interfere with application timers. It would
+  // also interrupt the sleep-based fallback in RelinquishTimeSlice().
 
   // First dump time info.
   DumpTimeInfo();
@@ -821,17 +822,7 @@ void DumpStackFrameInfo(const char* prefix, void* pc) {
 #endif
 
 bool IsFailureSignalHandlerInstalled() {
-#ifdef HAVE_SIGACTION
-  // TODO(andschwa): Return kFailureSignalHandlerInstalled?
-  struct sigaction sig_action;
-  memset(&sig_action, 0, sizeof(sig_action));
-  sigemptyset(&sig_action.sa_mask);
-  sigaction(SIGABRT, nullptr, &sig_action);
-  return sig_action.sa_sigaction == &FailureSignalHandler;
-#elif defined(NGLOG_OS_WINDOWS)
-  return kFailureSignalHandlerInstalled;
-#endif  // HAVE_SIGACTION
-  return false;
+  return g_failure_signal_handler_installed;
 }
 
 void InstallFailureSignalHandler() {
@@ -858,11 +849,12 @@ void InstallFailureSignalHandler() {
   for (auto kFailureSignal : kFailureSignals) {
     CHECK_ERR(sigaction(kFailureSignal.number, &sig_action, nullptr));
   }
+  g_failure_signal_handler_installed = true;
 #elif defined(NGLOG_OS_WINDOWS)
   for (size_t i = 0; i < ARRAYSIZE(kFailureSignals); ++i) {
     CHECK_NE(signal(kFailureSignals[i].number, &FailureSignalHandler), SIG_ERR);
   }
-  kFailureSignalHandlerInstalled = true;
+  g_failure_signal_handler_installed = true;
 #endif  // HAVE_SIGACTION
 }
 

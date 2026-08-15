@@ -303,6 +303,28 @@ TEST(SignalHandler, Installed) {
 }
 
 #  if defined(HAVE_SIGACTION) && !defined(NGLOG_OS_WINDOWS)
+namespace {
+
+void ReplacementSignalHandler(int) {}
+
+}  // namespace
+
+TEST(SignalHandler, InstalledStateIsIndependentOfSignalDisposition) {
+  struct sigaction original_action;
+  ASSERT_EQ(sigaction(SIGABRT, nullptr, &original_action), 0);
+
+  struct sigaction replacement_action;
+  memset(&replacement_action, 0, sizeof(replacement_action));
+  sigemptyset(&replacement_action.sa_mask);
+  replacement_action.sa_handler = &ReplacementSignalHandler;
+  ASSERT_EQ(sigaction(SIGABRT, &replacement_action, nullptr), 0);
+
+  EXPECT_TRUE(IsFailureSignalHandlerInstalled());
+  ASSERT_EQ(sigaction(SIGABRT, &original_action, nullptr), 0);
+}
+#  endif  // defined(HAVE_SIGACTION) && !defined(NGLOG_OS_WINDOWS)
+
+#  if defined(HAVE_SIGACTION) && !defined(NGLOG_OS_WINDOWS)
 TEST(SignalHandler, FailureDumpOrder) {
   ASSERT_DEATH(CrashInThread(),
                "\\*\\*\\* Aborted at [^\n]*\n"

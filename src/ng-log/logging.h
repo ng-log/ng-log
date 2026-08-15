@@ -1661,7 +1661,9 @@ class NGLOG_EXPORT NullStreamFatal : public NullStream {
 // words, stack traces of other threads won't be shown.
 NGLOG_EXPORT void InstallFailureSignalHandler();
 
-// Returns true if FailureSignalHandler is installed.
+// Returns true if InstallFailureSignalHandler() has installed the failure
+// signal handler. Signal dispositions changed afterwards do not affect the
+// result.
 NGLOG_EXPORT bool IsFailureSignalHandlerInstalled();
 
 // Installs a function that is used for writing the failure dump.  "data"
