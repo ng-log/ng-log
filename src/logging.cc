@@ -60,6 +60,9 @@
 #  include <io.h>  // for truncate log file
 #endif
 #ifdef NGLOG_OS_WINDOWS
+#  include <objbase.h>
+#  include <shlguid.h>
+#  include <shobjidl.h>
 #  include <windows.h>
 #endif
 #ifdef HAVE_PWD_H
@@ -294,6 +297,79 @@ std::string WindowsErrorMessage(DWORD error) {
   }
 
   return TrimTrailingCRLF(std::move(result));
+}
+
+template <typename Interface>
+struct ComInterfaceReleaser {
+  void operator()(Interface* pointer) const noexcept {
+    if (pointer != nullptr) pointer->Release();
+  }
+};
+
+// Converts a UTF-8 path into the absolute form the shell link API expects.
+// The API copies paths into buffers of MAX_PATH characters and does not
+// accept extended-length paths, so longer paths are rejected.
+bool GetShellLinkPath(const std::string& path, std::wstring* result) {
+  std::wstring wide_path;
+  if (!internal::Utf8ToWide(path.data(), path.size(), &wide_path) ||
+      wide_path.empty()) {
+    return false;
+  }
+
+  std::array<wchar_t, MAX_PATH> buffer;
+  const DWORD length =
+      GetFullPathNameW(wide_path.c_str(), static_cast<DWORD>(buffer.size()),
+                       buffer.data(), nullptr);
+  if (length == 0 || length >= buffer.size()) {
+    return false;
+  }
+  result->assign(buffer.data(), length);
+  return true;
+}
+
+bool CreateWindowsShortcut(const std::string& target,
+                           const std::string& shortcut) {
+  std::wstring wide_target;
+  std::wstring wide_shortcut;
+  if (!GetShellLinkPath(target, &wide_target) ||
+      !GetShellLinkPath(shortcut, &wide_shortcut)) {
+    return false;
+  }
+
+  const HRESULT initialization =
+      CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  if (FAILED(initialization) && initialization != RPC_E_CHANGED_MODE) {
+    return false;
+  }
+  const bool uninitialize = SUCCEEDED(initialization);
+
+  IShellLinkW* shell_link_raw = nullptr;
+  HRESULT result = CoCreateInstance(CLSID_ShellLink, nullptr,
+                                    CLSCTX_INPROC_SERVER, IID_IShellLinkW,
+                                    reinterpret_cast<void**>(&shell_link_raw));
+  std::unique_ptr<IShellLinkW, ComInterfaceReleaser<IShellLinkW>> shell_link{
+      shell_link_raw};
+  if (SUCCEEDED(result)) {
+    result = shell_link->SetPath(wide_target.c_str());
+  }
+  if (SUCCEEDED(result)) {
+    result = shell_link->SetRelativePath(wide_shortcut.c_str(), 0);
+  }
+
+  IPersistFile* persist_file_raw = nullptr;
+  std::unique_ptr<IPersistFile, ComInterfaceReleaser<IPersistFile>>
+      persist_file{nullptr};
+  if (SUCCEEDED(result)) {
+    result = shell_link->QueryInterface(
+        IID_IPersistFile, reinterpret_cast<void**>(&persist_file_raw));
+    persist_file.reset(persist_file_raw);
+  }
+  if (SUCCEEDED(result)) {
+    result = persist_file->Save(wide_shortcut.c_str(), TRUE);
+  }
+
+  if (uninitialize) CoUninitialize();
+  return SUCCEEDED(result);
 }
 #endif
 
@@ -1610,7 +1686,20 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
     internal::UnlinkPath(linkpath);  // delete old one if it exists
 
 #if defined(NGLOG_OS_WINDOWS)
-    // TODO(hamaji): Create lnk file on Windows?
+    const string shortcut_path = linkpath + ".lnk";
+    internal::UnlinkPath(shortcut_path);
+    if (!CreateWindowsShortcut(filename, shortcut_path)) {
+      internal::UnlinkPath(shortcut_path);
+    }
+
+    const std::string log_link = nglog::GetFlag(FLAGS_log_link);
+    if (!log_link.empty()) {
+      const string external_linkpath = log_link + "/" + linkname + ".lnk";
+      internal::UnlinkPath(external_linkpath);
+      if (!CreateWindowsShortcut(filename, external_linkpath)) {
+        internal::UnlinkPath(external_linkpath);
+      }
+    }
 #elif defined(HAVE_UNISTD_H)
     // We must have unistd.h.
     // Make the symlink be relative (in the same dir) so that if the
@@ -2867,47 +2956,13 @@ void GetExistingTempDirectories(vector<string>& list) {
   }
 }
 
-void TruncateLogFile(const char* path, uint64 limit, uint64 keep) {
 #if defined(HAVE_UNISTD_H) || defined(HAVE__CHSIZE_S)
+static void TruncateLogFileDescriptor(FileDescriptor fd, const char* path,
+                                      uint64 limit, uint64 keep) {
   struct stat statbuf;
   const int kCopyBlockSize = 8 << 10;
   char copybuf[kCopyBlockSize];
   off_t read_offset, write_offset;
-  // Don't follow symlinks unless they're our own fd symlinks in /proc
-  int flags = O_RDWR;
-#  ifdef O_BINARY
-  // Offsets are byte offsets, so text-mode translation would corrupt the copy.
-  flags |= O_BINARY;
-#  endif
-  // TODO(hamaji): Support other environments.
-#  ifdef NGLOG_OS_LINUX
-  const char* procfd_prefix = "/proc/self/fd/";
-  if (strncmp(procfd_prefix, path, strlen(procfd_prefix))) flags |= O_NOFOLLOW;
-#  endif
-
-  const string path_string(path);
-  FileDescriptor fd{internal::OpenPath(path_string, flags, 0)};
-  if (!fd) {
-    if (errno == EFBIG) {
-      // The log file in question has got too big for us to open. The
-      // real fix for this would be to compile logging.cc (or probably
-      // all of base/...) with -D_FILE_OFFSET_BITS=64 but that's
-      // rather scary.
-      // Instead just truncate the file to something we can manage
-#  ifdef HAVE__CHSIZE_S
-      if (_chsize_s(fd.get(), 0) != 0) {
-#  else
-      if (internal::TruncatePosixPath(path_string) == -1) {
-#  endif
-        PLOG(ERROR) << "Unable to truncate " << path;
-      } else {
-        LOG(ERROR) << "Truncated " << path << " due to EFBIG error";
-      }
-    } else {
-      PLOG(ERROR) << "Unable to open " << path;
-    }
-    return;
-  }
 
   if (fstat(fd.get(), &statbuf) == -1) {
     PLOG(ERROR) << "Unable to fstat()";
@@ -2954,6 +3009,100 @@ void TruncateLogFile(const char* path, uint64 limit, uint64 keep) {
 #  endif
     PLOG(ERROR) << "Unable to truncate " << path;
   }
+}
+
+#  ifdef NGLOG_OS_WINDOWS
+static bool TruncateWindowsFile(const std::string& path, uint64 size) {
+  std::wstring wide_path;
+  std::wstring prepared_path;
+  if (!internal::Utf8ToWide(path.data(), path.size(), &wide_path) ||
+      !internal::PrepareWindowsPath(wide_path.data(), wide_path.size(),
+                                    &prepared_path)) {
+    return false;
+  }
+  HANDLE handle =
+      CreateFileW(prepared_path.c_str(), GENERIC_WRITE,
+                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                  nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (handle == INVALID_HANDLE_VALUE) return false;
+
+  LARGE_INTEGER file_size;
+  file_size.QuadPart = static_cast<LONGLONG>(size);
+  const bool success =
+      SetFilePointerEx(handle, file_size, nullptr, FILE_BEGIN) != FALSE &&
+      SetEndOfFile(handle) != FALSE;
+  CloseHandle(handle);
+  return success;
+}
+
+static bool GetWindowsFilePath(HANDLE handle, std::string* path) {
+  constexpr DWORD kInitialPathBufferSize = MAX_PATH;
+  std::vector<wchar_t> buffer(kInitialPathBufferSize);
+  while (true) {
+    const DWORD length = GetFinalPathNameByHandleW(
+        handle, buffer.data(), static_cast<DWORD>(buffer.size()),
+        FILE_NAME_NORMALIZED);
+    if (length == 0) return false;
+    if (length < buffer.size()) {
+      if (!internal::WideToUtf8(buffer.data(), length, path)) return false;
+      break;
+    }
+    buffer.resize(static_cast<std::size_t>(length) + 1);
+  }
+
+  constexpr char kExtendedPathPrefix[] = "\\\\?\\";
+  constexpr char kExtendedUncPrefix[] = "\\\\?\\UNC\\";
+  if (path->compare(0, sizeof(kExtendedUncPrefix) - 1, kExtendedUncPrefix) ==
+      0) {
+    *path = "\\\\" + path->substr(sizeof(kExtendedUncPrefix) - 1);
+  } else if (path->compare(0, sizeof(kExtendedPathPrefix) - 1,
+                           kExtendedPathPrefix) == 0) {
+    path->erase(0, sizeof(kExtendedPathPrefix) - 1);
+  }
+  return true;
+}
+#  endif
+#endif
+
+void TruncateLogFile(const char* path, uint64 limit, uint64 keep) {
+#if defined(HAVE_UNISTD_H) || defined(HAVE__CHSIZE_S)
+  // Do not follow symlinks unless they are the process file descriptors used
+  // by TruncateStdoutStderr on Linux.
+  int flags = O_RDWR;
+#  ifdef O_BINARY
+  // Offsets are byte offsets, so text-mode translation would corrupt the copy.
+  flags |= O_BINARY;
+#  endif
+#  ifdef NGLOG_OS_LINUX
+  const char* procfd_prefix = "/proc/self/fd/";
+  if (strncmp(procfd_prefix, path, strlen(procfd_prefix))) flags |= O_NOFOLLOW;
+#  endif
+
+  const string path_string(path);
+  FileDescriptor fd{internal::OpenPath(path_string, flags, 0)};
+  if (!fd) {
+    if (errno == EFBIG) {
+      // The log file may be too large for the platform's regular open path.
+#  ifdef NGLOG_OS_WINDOWS
+      if (!TruncateWindowsFile(path_string, 0)) {
+        LOG(ERROR) << "Unable to truncate " << path;
+      } else {
+        LOG(ERROR) << "Truncated " << path << " due to EFBIG error";
+      }
+#  else
+      if (internal::TruncatePosixPath(path_string) == -1) {
+        PLOG(ERROR) << "Unable to truncate " << path;
+      } else {
+        LOG(ERROR) << "Truncated " << path << " due to EFBIG error";
+      }
+#  endif
+    } else {
+      PLOG(ERROR) << "Unable to open " << path;
+    }
+    return;
+  }
+
+  TruncateLogFileDescriptor(std::move(fd), path, limit, keep);
 
 #else
   LOG(ERROR) << "No log truncation support.";
@@ -2961,9 +3110,40 @@ void TruncateLogFile(const char* path, uint64 limit, uint64 keep) {
 }
 
 void TruncateStdoutStderr() {
-#ifdef HAVE_UNISTD_H
   uint64 limit = MaxLogSize() << 20U;
   uint64 keep = 1U << 20U;
+#ifdef NGLOG_OS_WINDOWS
+#  if defined(HAVE_UNISTD_H) || defined(HAVE__CHSIZE_S)
+  const std::array<FILE*, 2> outputs = {stdout, stderr};
+  for (FILE* output : outputs) {
+    const intptr_t native_handle = _get_osfhandle(_fileno(output));
+    if (native_handle == -1) {
+      PLOG(ERROR) << "Unable to get the handle for "
+                  << (output == stdout ? "stdout" : "stderr");
+      continue;
+    }
+    const HANDLE handle = reinterpret_cast<HANDLE>(native_handle);
+    if (GetFileType(handle) != FILE_TYPE_DISK) continue;
+    std::string path;
+    if (!GetWindowsFilePath(handle, &path)) {
+      LOG(ERROR) << "Unable to get the path for "
+                 << (output == stdout ? "stdout" : "stderr");
+      continue;
+    }
+    // Truncation uses another descriptor. Buffered output must reach the file
+    // first, and the stream must continue at the new end of the file instead
+    // of leaving a gap at its old position.
+    std::fflush(output);
+    TruncateLogFile(path.c_str(), limit, keep);
+    if (std::fseek(output, 0, SEEK_END) != 0) {
+      PLOG(ERROR) << "Unable to seek to the end of "
+                  << (output == stdout ? "stdout" : "stderr");
+    }
+  }
+#  else
+  LOG(ERROR) << "No log truncation support.";
+#  endif
+#elif defined(HAVE_UNISTD_H)
   TruncateLogFile("/proc/self/fd/1", limit, keep);
   TruncateLogFile("/proc/self/fd/2", limit, keep);
 #else

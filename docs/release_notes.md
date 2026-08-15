@@ -46,6 +46,10 @@ SPDX-License-Identifier: BSD-3-Clause
 - Include the current thread name in failure signal reports when available
 - Use the signal-safe Itanium parser by default and expose complete system
   demangling on demand
+- Create shell shortcuts named `<basename>.<severity>.lnk` that point to the
+  latest log files on Windows, also in the `log_link` directory
+- Support `TruncateStdoutStderr` on Windows when standard output or standard
+  error is redirected to a file
 - Use UTF-8 Windows user names in log file names
 - Look up the user name from the system when the `USER` or `USERNAME`
   environment variable is empty

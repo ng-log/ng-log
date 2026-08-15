@@ -2050,10 +2050,50 @@ TEST(Logging, FileLockFailureReportsWindowsError) {
 }
 
 TEST(Logging, Symlink) {
-#ifndef NGLOG_OS_WINDOWS
   nglog::ScopedFlags<> save;
   nglog::SetFlag(FLAGS_logtostderr, false);
 
+#ifdef NGLOG_OS_WINDOWS
+  fprintf(stderr, "==== Test setting Windows log file shortcut\n");
+  const string dest = TestTmpDir() + "\\logging_test_shortcut";
+  const string sym = TestTmpDir() + "\\symlinkbase";
+  const string link_dir = TestTmpDir() + "\\logging_links";
+  const string shortcut = sym + ".INFO.lnk";
+  const string external_shortcut = link_dir + "\\symlinkbase.INFO.lnk";
+  ASSERT_TRUE(CreateDirectoryA(link_dir.c_str(), nullptr) ||
+              GetLastError() == ERROR_ALREADY_EXISTS);
+  DeleteFiles(dest + "*");
+  ASSERT_TRUE(DeleteFileA(shortcut.c_str()) ||
+              GetLastError() == ERROR_FILE_NOT_FOUND);
+  ASSERT_TRUE(DeleteFileA(external_shortcut.c_str()) ||
+              GetLastError() == ERROR_FILE_NOT_FOUND);
+
+  nglog::SetFlag(FLAGS_log_link, link_dir);
+  SetLogSymlink(NGLOG_INFO, "symlinkbase");
+  SetLogDestination(NGLOG_INFO, dest.c_str());
+  LOG(INFO) << "message to new shortcut";
+  FlushLogFiles(NGLOG_INFO);
+
+  for (const string& path : {shortcut, external_shortcut}) {
+    std::ifstream file(path, std::ios::binary);
+    ASSERT_TRUE(file.is_open()) << path;
+    unsigned char header[4] = {};
+    file.read(reinterpret_cast<char*>(header), sizeof(header));
+    ASSERT_EQ(file.gcount(), static_cast<std::streamsize>(sizeof(header)));
+    EXPECT_EQ(header[0], 0x4c);
+    EXPECT_EQ(header[1], 0x00);
+    EXPECT_EQ(header[2], 0x00);
+    EXPECT_EQ(header[3], 0x00);
+  }
+
+  LogToStderr();
+  DeleteFiles(dest + "*");
+  ASSERT_TRUE(DeleteFileA(shortcut.c_str()) ||
+              GetLastError() == ERROR_FILE_NOT_FOUND);
+  ASSERT_TRUE(DeleteFileA(external_shortcut.c_str()) ||
+              GetLastError() == ERROR_FILE_NOT_FOUND);
+  ASSERT_TRUE(RemoveDirectoryA(link_dir.c_str()));
+#else
   fprintf(stderr, "==== Test setting log file symlink\n");
   string dest = TestTmpDir() + "/logging_test_symlink";
   string sym = TestTmpDir() + "/symlinkbase";
@@ -2444,6 +2484,37 @@ TEST(Logging, Truncate) {
 
 #endif
 }
+
+#ifdef NGLOG_OS_WINDOWS
+TEST(Logging, TruncateStdoutStderr) {
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_max_log_size, 1U);
+
+  constexpr std::size_t kKeptSize = 1U << 20U;
+  constexpr char kPending[] = "pending";
+  constexpr char kTail[] = "tail";
+
+  CaptureTestStdout();
+  const string message(2U << 20U, 'x');
+  ASSERT_EQ(fwrite(message.data(), message.size(), 1, stdout), 1U);
+  ASSERT_EQ(fflush(stdout), 0);
+  // Buffered output must be part of the kept data.
+  ASSERT_GE(fputs(kPending, stdout), 0);
+
+  TruncateStdoutStderr();
+  // Output after the truncation must continue at the new end of the file.
+  ASSERT_GE(fputs(kTail, stdout), 0);
+  ASSERT_EQ(fflush(stdout), 0);
+  const string output = GetCapturedTestStdout();
+
+  const string written = message + kPending;
+  const string expected = written.substr(written.size() - kKeptSize) + kTail;
+  // Avoid printing megabytes of output on failure.
+  ASSERT_EQ(output.size(), expected.size());
+  EXPECT_EQ(output.find('\0'), string::npos);
+  EXPECT_TRUE(output == expected);
+}
+#endif
 
 TEST(Logging, DropLogMemoryConcurrentWriters) {
 #if defined(NGLOG_OS_LINUX) && defined(HAVE_POSIX_FADVISE)

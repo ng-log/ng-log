@@ -1440,7 +1440,8 @@ NGLOG_EXPORT void SetLogDestination(LogSeverity severity,
 // Set the basename of the symlink to the latest log file at a given
 // severity.  If symlink_basename is empty, do not make a symlink.  If
 // you don't call this function, the symlink basename is the
-// invocation name of the program.  Thread-safe.
+// invocation name of the program.  On Windows, the link is a shell
+// shortcut whose name ends in ".lnk".  Thread-safe.
 //
 NGLOG_EXPORT void SetLogSymlink(LogSeverity severity,
                                 const char* symlink_basename);

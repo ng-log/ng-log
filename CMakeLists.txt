@@ -719,9 +719,9 @@ if (HAVE_DBGHELP)
 endif (HAVE_DBGHELP)
 
 if (WIN32)
-  target_link_libraries (ng-log PRIVATE advapi32 pathcch)
+  target_link_libraries (ng-log PRIVATE advapi32 ole32 pathcch shell32 uuid)
   set (ng-log_libraries_options_for_static_linking
-    "${ng-log_libraries_options_for_static_linking} -ladvapi32 -lpathcch")
+    "${ng-log_libraries_options_for_static_linking} -ladvapi32 -lole32 -lpathcch -lshell32 -luuid")
 endif (WIN32)
 
 target_link_libraries (ng-log PRIVATE Threads::Threads)

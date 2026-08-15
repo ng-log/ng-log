@@ -80,6 +80,14 @@ CRLF sequences exactly like the application's own output. Ill-formed UTF-8
 sequences are replaced with U+FFFD when writing to the console or the debugger.
 Debugger output uses the corresponding Unicode debugger API.
 
+## Log file links
+
+On other platforms, ng-log creates a symbolic link to the latest log file of
+each severity. On Windows, it creates a shell shortcut named
+`<basename>.<severity>.lnk` instead, because creating symbolic links requires
+elevated privileges or developer mode. The `log_link` flag places an
+additional shortcut in the given directory.
+
 ## Severity levels
 
 ng-log defines the severity level `ERROR`, which is also defined by `windows.h`.
