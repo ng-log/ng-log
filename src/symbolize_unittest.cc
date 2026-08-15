@@ -38,12 +38,22 @@
 #include <gtest/gtest.h>
 
 #include <csignal>
+#include <cstdint>
+#include <cstring>
 #include <iostream>
+#include <vector>
 
 #include "config.h"
 #include "ng-log/logging.h"
 #include "stacktrace.h"
 #include "utilities.h"
+
+#if defined(HAVE_LINK_H)
+#  include <fcntl.h>
+#  include <unistd.h>
+
+#  include <iterator>
+#endif
 
 #ifdef NGLOG_USE_GFLAGS
 #  include <gflags/gflags.h>
@@ -118,6 +128,141 @@ static void static_func() {
 }
 }
 
+#    if defined(HAVE_LINK_H)
+namespace {
+
+constexpr std::uint64_t kSyntheticProgramCounter = 0x1000U;
+constexpr std::size_t kNullSymbolIndex = 0;
+constexpr std::size_t kTlsSymbolIndex = 1;
+constexpr std::size_t kFunctionSymbolIndex = 2;
+constexpr std::size_t kSymbolCount = 3;
+constexpr std::size_t kNullSectionIndex = 0;
+constexpr std::size_t kTextSectionIndex = 1;
+constexpr std::size_t kSymbolTableSectionIndex = 2;
+constexpr std::size_t kStringTableSectionIndex = 3;
+constexpr std::size_t kSectionCount = 4;
+constexpr std::size_t kFirstGlobalSymbolIndex = kTlsSymbolIndex;
+constexpr std::size_t kSymbolSize = 1;
+constexpr char kSymbolStrings[] = "\0thread_msg_data\0expected_function";
+constexpr std::size_t kTlsNameOffset = 1;
+constexpr std::size_t kFunctionNameOffset =
+    kTlsNameOffset + sizeof("thread_msg_data");
+
+int g_synthetic_elf_file = -1;
+
+int OpenSyntheticElf(std::uint64_t /*pc*/, std::uint64_t& start_address,
+                     std::uint64_t& base_address, char* out_file_name,
+                     std::size_t out_file_name_size) {
+  start_address = 0;
+  base_address = 0;
+  std::strncpy(out_file_name, "synthetic-elf", out_file_name_size);
+  out_file_name[out_file_name_size - 1] = '\0';
+  return dup(g_synthetic_elf_file);
+}
+
+template <typename T>
+void AppendObject(std::vector<char>& data, const T& object) {
+  const auto* bytes = reinterpret_cast<const char*>(&object);
+  data.insert(data.end(), bytes, bytes + sizeof(object));
+}
+
+int CreateSyntheticElf() {
+  using ElfHeader = ElfW(Ehdr);
+  using SectionHeader = ElfW(Shdr);
+  using Symbol = ElfW(Sym);
+
+  std::vector<Symbol> symbols(kSymbolCount);
+  symbols[kTlsSymbolIndex].st_name = kTlsNameOffset;
+  symbols[kTlsSymbolIndex].st_info = sizeof(void*) == sizeof(std::uint64_t)
+                                         ? ELF64_ST_INFO(STB_GLOBAL, STT_TLS)
+                                         : ELF32_ST_INFO(STB_GLOBAL, STT_TLS);
+  symbols[kTlsSymbolIndex].st_value = kSyntheticProgramCounter;
+  symbols[kTlsSymbolIndex].st_size = kSymbolSize;
+  symbols[kTlsSymbolIndex].st_shndx = kTextSectionIndex;
+  symbols[kFunctionSymbolIndex].st_name = kFunctionNameOffset;
+  symbols[kFunctionSymbolIndex].st_info =
+      sizeof(void*) == sizeof(std::uint64_t)
+          ? ELF64_ST_INFO(STB_GLOBAL, STT_FUNC)
+          : ELF32_ST_INFO(STB_GLOBAL, STT_FUNC);
+  symbols[kFunctionSymbolIndex].st_value = kSyntheticProgramCounter;
+  symbols[kFunctionSymbolIndex].st_size = kSymbolSize;
+  symbols[kFunctionSymbolIndex].st_shndx = kTextSectionIndex;
+
+  std::vector<char> data(sizeof(ElfHeader));
+  const auto append_section = [&data](const auto& object) {
+    const std::size_t alignment = alignof(decltype(object));
+    data.resize((data.size() + alignment - 1) / alignment * alignment);
+    AppendObject(data, object);
+    return data.size() - sizeof(object);
+  };
+  const std::size_t text_offset = append_section(std::uint32_t{0});
+  const std::size_t symbol_offset = append_section(symbols[kNullSymbolIndex]);
+  for (std::size_t i = kTlsSymbolIndex; i < symbols.size(); ++i) {
+    AppendObject(data, symbols[i]);
+  }
+  const std::size_t symbol_string_offset = data.size();
+  data.insert(data.end(), std::begin(kSymbolStrings), std::end(kSymbolStrings));
+
+  const std::size_t section_header_offset =
+      (data.size() + alignof(SectionHeader) - 1) / alignof(SectionHeader) *
+      alignof(SectionHeader);
+  data.resize(section_header_offset);
+  std::vector<SectionHeader> sections(kSectionCount);
+  sections[kTextSectionIndex].sh_type = SHT_PROGBITS;
+  sections[kTextSectionIndex].sh_offset = text_offset;
+  sections[kTextSectionIndex].sh_size = sizeof(std::uint32_t);
+  sections[kSymbolTableSectionIndex].sh_type = SHT_SYMTAB;
+  sections[kSymbolTableSectionIndex].sh_offset = symbol_offset;
+  sections[kSymbolTableSectionIndex].sh_size = symbols.size() * sizeof(Symbol);
+  sections[kSymbolTableSectionIndex].sh_link = kStringTableSectionIndex;
+  sections[kSymbolTableSectionIndex].sh_info = kFirstGlobalSymbolIndex;
+  sections[kSymbolTableSectionIndex].sh_addralign = alignof(Symbol);
+  sections[kSymbolTableSectionIndex].sh_entsize = sizeof(Symbol);
+  sections[kStringTableSectionIndex].sh_type = SHT_STRTAB;
+  sections[kStringTableSectionIndex].sh_offset = symbol_string_offset;
+  sections[kStringTableSectionIndex].sh_size = sizeof(kSymbolStrings);
+  for (const SectionHeader& section : sections) {
+    AppendObject(data, section);
+  }
+
+  ElfHeader header{};
+  std::memcpy(header.e_ident, ELFMAG, SELFMAG);
+  header.e_ident[EI_CLASS] =
+      sizeof(void*) == sizeof(std::uint64_t) ? ELFCLASS64 : ELFCLASS32;
+  header.e_ident[EI_DATA] = ELFDATA2LSB;
+  header.e_ident[EI_VERSION] = EV_CURRENT;
+  header.e_type = ET_EXEC;
+  header.e_machine = EM_NONE;
+  header.e_version = EV_CURRENT;
+  header.e_ehsize = sizeof(ElfHeader);
+  header.e_shentsize = sizeof(SectionHeader);
+  header.e_shnum = static_cast<decltype(header.e_shnum)>(sections.size());
+  header.e_shstrndx = kNullSectionIndex;
+  header.e_shoff = section_header_offset;
+  std::memcpy(data.data(), &header, sizeof(header));
+
+  char file_name[] = "/tmp/nglog-symbolize-XXXXXX";
+  const int file = mkstemp(file_name);
+  unlink(file_name);
+  if (file == -1) {
+    return -1;
+  }
+  std::size_t written = 0;
+  while (written != data.size()) {
+    const ssize_t result =
+        write(file, data.data() + written, data.size() - written);
+    if (result <= 0) {
+      close(file);
+      return -1;
+    }
+    written += static_cast<std::size_t>(result);
+  }
+  return file;
+}
+
+}  // namespace
+#    endif
+
 TEST(Symbolize, Symbolize) {
   // We do C-style cast since GCC 2.95.3 doesn't allow
   // reinterpret_cast<void *>(&func).
@@ -138,6 +283,24 @@ TEST(Symbolize, Symbolize) {
 
   EXPECT_THAT(TrySymbolize(nullptr), IsNull());
 }
+
+#    if defined(HAVE_LINK_H)
+TEST(Symbolize, IgnoresTlsSymbols) {
+  g_synthetic_elf_file = CreateSyntheticElf();
+  ASSERT_NE(g_synthetic_elf_file, -1);
+  InstallSymbolizeOpenObjectFileCallback(OpenSyntheticElf);
+
+  char symbol[64];
+  EXPECT_TRUE(Symbolize(reinterpret_cast<void*>(kSyntheticProgramCounter),
+                        symbol, sizeof(symbol),
+                        nglog::SymbolizeOptions::kNoLineNumbers));
+  EXPECT_STREQ("expected_function", symbol);
+
+  InstallSymbolizeOpenObjectFileCallback(nullptr);
+  close(g_synthetic_elf_file);
+  g_synthetic_elf_file = -1;
+}
+#    endif
 
 struct Foo {
   static void func(int x);
