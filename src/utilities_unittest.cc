@@ -58,7 +58,207 @@ std::wstring MakeExtendedPath(const std::wstring& path);
 }  // namespace
 #endif
 
+#if defined(HAVE_PWD_H) && defined(HAVE_UNISTD_H) && !defined(NGLOG_OS_WINDOWS)
+#  include <pwd.h>
+#  include <sys/wait.h>
+#  include <unistd.h>
+#endif
+
+#ifdef NGLOG_OS_LINUX
+#  include <fcntl.h>
+#  include <sched.h>
+#endif
+
 using namespace nglog;
+
+namespace {
+
+constexpr char kPrintUserName[] = "--print-user-name";
+
+}  // namespace
+
+#if defined(HAVE_PWD_H) && defined(HAVE_UNISTD_H) && \
+    !defined(NGLOG_OS_WINDOWS) && !defined(NGLOG_OS_EMSCRIPTEN)
+namespace {
+
+const char* g_self_path = nullptr;
+
+//! Exit status of a child whose environment does not support the test.
+constexpr int kChildUnsupportedExitCode = 77;
+
+using ChildSetup = bool (*)();
+
+bool NoChildSetup() { return true; }
+
+std::string ExpectedUserName() {
+  const uid_t uid = geteuid();
+  struct passwd* user = getpwuid(uid);
+  return user != nullptr ? user->pw_name : "uid" + std::to_string(uid);
+}
+
+/**
+ * Runs this test binary with an empty @c USER variable and captures the user
+ * name it reports.
+ *
+ * @param setup Runs in the child before the binary is executed. The child
+ *   exits with @ref kChildUnsupportedExitCode if it returns @c false.
+ * @param output Receives the reported user name without the line break.
+ * @return The exit status of the child, or -1 if it did not exit normally.
+ */
+int RunPrintUserName(ChildSetup setup, std::string* output) {
+  constexpr char kEmptyUserName[] = "";
+  constexpr std::size_t kReadBufferSize = 256;
+
+  int pipe_fds[2];
+  if (pipe(pipe_fds) != 0) {
+    return -1;
+  }
+
+  const pid_t child_pid = fork();
+  if (child_pid == -1) {
+    close(pipe_fds[0]);
+    close(pipe_fds[1]);
+    return -1;
+  }
+  if (child_pid == 0) {
+    close(pipe_fds[0]);
+    if (dup2(pipe_fds[1], STDOUT_FILENO) != STDOUT_FILENO) {
+      _exit(EXIT_FAILURE);
+    }
+    close(pipe_fds[1]);
+    if (!setup()) {
+      _exit(kChildUnsupportedExitCode);
+    }
+    if (setenv("USER", kEmptyUserName, 1) != 0) {
+      _exit(EXIT_FAILURE);
+    }
+    execl(g_self_path, g_self_path, kPrintUserName,
+          static_cast<char*>(nullptr));
+    _exit(EXIT_FAILURE);
+  }
+
+  close(pipe_fds[1]);
+  output->clear();
+  std::array<char, kReadBufferSize> buffer;
+  ssize_t bytes_read;
+  while ((bytes_read = read(pipe_fds[0], buffer.data(), buffer.size())) > 0) {
+    output->append(buffer.data(), static_cast<std::size_t>(bytes_read));
+  }
+  close(pipe_fds[0]);
+  if (!output->empty() && output->back() == '\n') {
+    output->pop_back();
+  }
+
+  int child_status;
+  if (waitpid(child_pid, &child_status, 0) != child_pid ||
+      !WIFEXITED(child_status)) {
+    return -1;
+  }
+  return WEXITSTATUS(child_status);
+}
+
+}  // namespace
+
+TEST(utilities, EmptyUserEnvironmentUsesSystemUserName) {
+  std::string output;
+  ASSERT_EQ(RunPrintUserName(&NoChildSetup, &output), EXIT_SUCCESS);
+  EXPECT_EQ(output, ExpectedUserName());
+}
+
+#  ifdef NGLOG_OS_LINUX
+namespace {
+
+//! User ID inside the namespace. It must not have a passwd entry.
+constexpr uid_t kUnknownUserId = 54321;
+
+bool WriteProcFile(const char* path, const std::string& contents) {
+  const int fd = open(path, O_WRONLY | O_CLOEXEC);
+  if (fd == -1) {
+    return false;
+  }
+  const ssize_t written = write(fd, contents.data(), contents.size());
+  close(fd);
+  return written == static_cast<ssize_t>(contents.size());
+}
+
+bool EnterUserNamespaceAsUnknownUser() {
+  const uid_t outer_uid = geteuid();
+  if (unshare(CLONE_NEWUSER) != 0) {
+    return false;
+  }
+  return WriteProcFile("/proc/self/uid_map",
+                       std::to_string(kUnknownUserId) + " " +
+                           std::to_string(outer_uid) + " 1\n");
+}
+
+}  // namespace
+
+TEST(utilities, UserWithoutPasswdEntryUsesUserId) {
+  if (getpwuid(kUnknownUserId) != nullptr) {
+    GTEST_SKIP() << "User ID " << kUnknownUserId << " has a passwd entry";
+  }
+
+  std::string output;
+  const int status =
+      RunPrintUserName(&EnterUserNamespaceAsUnknownUser, &output);
+  if (status == kChildUnsupportedExitCode) {
+    GTEST_SKIP() << "Unprivileged user namespaces are unavailable";
+  }
+  ASSERT_EQ(status, EXIT_SUCCESS);
+  EXPECT_EQ(output, "uid" + std::to_string(kUnknownUserId));
+}
+#  endif  // NGLOG_OS_LINUX
+#endif
+
+#ifdef NGLOG_OS_WINDOWS
+TEST(utilities, NonAsciiUserEnvironmentIsUtf8) {
+  constexpr wchar_t kUserVariable[] = L"USERNAME";
+  constexpr wchar_t kNonAsciiUserName[] = L"J\u00fcrgen";
+  constexpr char kExpectedUserName[] = "J\xc3\xbcrgen";
+  constexpr std::size_t kReadBufferSize = 256;
+
+  std::vector<wchar_t> self_path(MAX_PATH);
+  for (;;) {
+    const DWORD length = GetModuleFileNameW(
+        nullptr, self_path.data(), static_cast<DWORD>(self_path.size()));
+    ASSERT_NE(length, 0U);
+    if (length < self_path.size()) {
+      self_path.resize(length);
+      break;
+    }
+    self_path.resize(self_path.size() * 2);
+  }
+
+  const wchar_t* original_user = _wgetenv(kUserVariable);
+  const std::wstring saved_user =
+      original_user != nullptr ? original_user : L"";
+  ASSERT_EQ(_wputenv_s(kUserVariable, kNonAsciiUserName), 0);
+
+  // cmd.exe strips the outer quotes and keeps the quoted executable path.
+  const std::wstring command =
+      L"\"\"" + std::wstring(self_path.begin(), self_path.end()) + L"\" " +
+      std::wstring(kPrintUserName,
+                   kPrintUserName + sizeof(kPrintUserName) - 1) +
+      L"\"";
+  FILE* child = _wpopen(command.c_str(), L"rb");
+  ASSERT_EQ(_wputenv_s(kUserVariable, saved_user.c_str()), 0);
+  ASSERT_NE(child, nullptr);
+
+  std::string output;
+  std::array<char, kReadBufferSize> buffer;
+  std::size_t bytes_read;
+  while ((bytes_read = std::fread(buffer.data(), 1, buffer.size(), child)) >
+         0) {
+    output.append(buffer.data(), bytes_read);
+  }
+  ASSERT_EQ(_pclose(child), EXIT_SUCCESS);
+  while (!output.empty() && (output.back() == '\n' || output.back() == '\r')) {
+    output.pop_back();
+  }
+
+  EXPECT_EQ(output, kExpectedUserName);
+}
+#endif
 
 #ifdef GTEST_HAS_DEATH_TEST
 TEST(utilities, InitializeLoggingDeathTest) {
@@ -1035,7 +1235,15 @@ TEST(Utf8Output, WritesUnicodeToConsole) {
 #endif
 
 int main(int argc, char** argv) {
+#if defined(HAVE_PWD_H) && defined(HAVE_UNISTD_H) && \
+    !defined(NGLOG_OS_WINDOWS) && !defined(NGLOG_OS_EMSCRIPTEN)
+  g_self_path = argv[0];
+#endif
   InitializeLogging(argv[0]);
+  if (argc == 2 && std::strcmp(argv[1], kPrintUserName) == 0) {
+    std::puts(MyUserName().c_str());
+    return 0;
+  }
   testing::InitGoogleTest(&argc, argv);
 
   CHECK_EQ(RUN_ALL_TESTS(), 0);

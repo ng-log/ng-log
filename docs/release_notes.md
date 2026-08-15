@@ -46,6 +46,9 @@ SPDX-License-Identifier: BSD-3-Clause
 - Include the current thread name in failure signal reports when available
 - Use the signal-safe Itanium parser by default and expose complete system
   demangling on demand
+- Use UTF-8 Windows user names in log file names
+- Look up the user name from the system when the `USER` or `USERNAME`
+  environment variable is empty
 
 !!! warning "Compatibility"
     If your application depends on glog compatibility, use the 0.8.x series.

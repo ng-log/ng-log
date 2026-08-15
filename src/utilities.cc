@@ -17,6 +17,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cwchar>
+#include <limits>
+#include <string>
+#include <vector>
 
 #include "addr2line.h"
 #include "config.h"
@@ -30,6 +34,10 @@
 #include "stacktrace.h"
 #include "symbolize.h"
 
+#ifdef NGLOG_OS_WINDOWS
+#  include <lmcons.h>
+#  include <windows.h>
+#endif
 #ifdef NGLOG_OS_ANDROID
 #  include <android/log.h>
 #endif
@@ -113,8 +121,6 @@ std::string EscapeRegexCharacters(const std::string& input) {
 }
 
 }  // namespace
-
-using std::string;
 
 namespace nglog {
 
@@ -251,7 +257,7 @@ static void DebugWriteToStderr(const char* data, void*) {
 }
 
 static void DebugWriteToString(const char* data, void* arg) {
-  reinterpret_cast<string*>(arg)->append(data);
+  reinterpret_cast<std::string*>(arg)->append(data);
 }
 
 #  ifdef HAVE_SYMBOLIZE
@@ -317,19 +323,10 @@ static void DumpStackTrace(int skip_count, DebugWriter* writerfn, void* arg) {
 [[noreturn]] static void DumpStackTraceAndExit() {
   DumpStackTrace(1, DebugWriteToStderr, nullptr);
 
-  // TODO(hamaji): Use signal instead of sigaction?
   if (IsFailureSignalHandlerInstalled()) {
     // Set the default signal handler for SIGABRT, to avoid invoking our
     // own signal handler installed by InstallFailureSignalHandler().
-#  ifdef HAVE_SIGACTION
-    struct sigaction sig_action;
-    memset(&sig_action, 0, sizeof(sig_action));
-    sigemptyset(&sig_action.sa_mask);
-    sig_action.sa_handler = SIG_DFL;
-    sigaction(SIGABRT, &sig_action, nullptr);
-#  elif defined(NGLOG_OS_WINDOWS)
     signal(SIGABRT, SIG_DFL);
-#  endif  // HAVE_SIGACTION
   }
 
   abort();
@@ -395,36 +392,93 @@ bool PidHasChanged() {
   return true;
 }
 
-static string g_my_user_name;
-const string& MyUserName() { return g_my_user_name; }
-static void MyUserNameInitializer() {
-  // TODO(hamaji): Probably this is not portable.
+static std::string g_my_user_name;
+const std::string& MyUserName() { return g_my_user_name; }
+
+namespace {
+
+std::string GetSystemUserName() {
 #if defined(NGLOG_OS_WINDOWS)
-  const char* user = getenv("USERNAME");
-#else
-  const char* user = getenv("USER");
-#endif
-  if (user != nullptr) {
-    g_my_user_name = user;
-  } else {
-#if defined(HAVE_PWD_H) && defined(HAVE_UNISTD_H)
+  constexpr std::size_t kNullTerminatorSize = 1;
+  constexpr DWORD kUserNameBufferSize = UNLEN + kNullTerminatorSize;
+  wchar_t user_name[kUserNameBufferSize];
+  DWORD user_name_size = ARRAYSIZE(user_name);
+  std::string result;
+  if (GetUserNameW(user_name, &user_name_size) != 0 && user_name_size > 0 &&
+      internal::WideToUtf8(user_name, user_name_size - kNullTerminatorSize,
+                           &result)) {
+    return result;
+  }
+  return std::string{};
+#elif defined(HAVE_PWD_H) && defined(HAVE_UNISTD_H)
+  constexpr std::size_t kInitialPasswordBufferSize = 1024;
+  constexpr std::size_t kPasswordBufferGrowthFactor = 2;
+  const uid_t uid = geteuid();
+  std::size_t buffer_size = kInitialPasswordBufferSize;
+#  if defined(_SC_GETPW_R_SIZE_MAX)
+  const long configured_buffer_size = sysconf(_SC_GETPW_R_SIZE_MAX);
+  if (configured_buffer_size > 0) {
+    buffer_size = static_cast<std::size_t>(configured_buffer_size);
+  }
+#  endif
+
+  for (;;) {
     struct passwd pwd;
     struct passwd* result = nullptr;
-    char buffer[1024] = {'\0'};
-    uid_t uid = geteuid();
-    int pwuid_res = getpwuid_r(uid, &pwd, buffer, sizeof(buffer), &result);
-    if (pwuid_res == 0 && result) {
-      g_my_user_name = pwd.pw_name;
-    } else {
-      std::snprintf(buffer, sizeof(buffer), "uid%d", uid);
-      g_my_user_name = buffer;
+    std::vector<char> buffer(buffer_size);
+    const int error =
+        getpwuid_r(uid, &pwd, buffer.data(), buffer.size(), &result);
+    if (error == 0 && result != nullptr) {
+      return result->pw_name;
     }
-#endif
-    if (g_my_user_name.empty()) {
-      g_my_user_name = "invalid-user";
+    if (error != ERANGE ||
+        buffer_size > std::numeric_limits<std::size_t>::max() /
+                          kPasswordBufferGrowthFactor) {
+      break;
     }
+    buffer_size *= kPasswordBufferGrowthFactor;
   }
+  // Users without a passwd entry, such as in containers, still get distinct
+  // log file names.
+  return "uid" + std::to_string(uid);
+#else
+  return std::string{};
+#endif
 }
+
+std::string GetEnvironmentUserName() {
+#if defined(NGLOG_OS_WINDOWS)
+  // The narrow environment uses the ANSI code page, but ng-log requires UTF-8
+  // because the user name becomes part of log file names.
+  const wchar_t* user = _wgetenv(L"USERNAME");
+  std::string result;
+  if (user != nullptr &&
+      internal::WideToUtf8(user, std::wcslen(user), &result)) {
+    return result;
+  }
+  return std::string{};
+#else
+  const char* user = std::getenv("USER");
+  return user != nullptr ? user : std::string{};
+#endif
+}
+
+std::string GetMyUserName() {
+  std::string user_name = GetEnvironmentUserName();
+  if (!user_name.empty()) {
+    return user_name;
+  }
+
+  user_name = GetSystemUserName();
+  if (user_name.empty()) {
+    user_name = "invalid-user";
+  }
+  return user_name;
+}
+
+}  // namespace
+
+static void MyUserNameInitializer() { g_my_user_name = GetMyUserName(); }
 REGISTER_MODULE_INITIALIZER(utilities, MyUserNameInitializer())
 
 // We use an atomic operation to prevent problems with calling CrashReason
