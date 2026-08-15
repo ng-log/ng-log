@@ -268,113 +268,130 @@ TEST(Theme, SetAndGetRoundTrip) {
   EXPECT_EQ(theme.Get(Role::kStackFunction).foreground, spec.foreground);
 }
 
-TEST(BuildFileUri, AcceptsPosixAbsolutePath) {
+TEST(BuildFileLineUri, AcceptsPosixAbsolutePath) {
   char uri[256];
   const std::string span = "/src/foo.cc:42";
-  EXPECT_TRUE(BuildFileUri(span.c_str(), span.size(), /*base_path=*/nullptr,
+  EXPECT_TRUE(BuildFileLineUri(span.c_str(), span.size(),
+                               /*base_path=*/nullptr, /*host=*/nullptr, uri,
+                               sizeof(uri)));
+  EXPECT_STREQ("file://localhost/src/foo.cc", uri);
+}
+
+TEST(BuildFileUriWithoutLine, AcceptsPosixAbsolutePath) {
+  char uri[256];
+  const std::string path = "/src/foo.cc";
+  EXPECT_TRUE(BuildFileUri(path.c_str(), path.size(), /*base_path=*/nullptr,
                            /*host=*/nullptr, uri, sizeof(uri)));
   EXPECT_STREQ("file://localhost/src/foo.cc", uri);
 }
 
-TEST(BuildFileUri, AcceptsWindowsAbsolutePath) {
+TEST(BuildFileLineUri, AcceptsWindowsAbsolutePath) {
   char uri[256];
   const std::string span = "C:\\src\\foo.cc:42";
-  EXPECT_TRUE(BuildFileUri(span.c_str(), span.size(), /*base_path=*/nullptr,
-                           /*host=*/nullptr, uri, sizeof(uri)));
+  EXPECT_TRUE(BuildFileLineUri(span.c_str(), span.size(),
+                               /*base_path=*/nullptr, /*host=*/nullptr, uri,
+                               sizeof(uri)));
   EXPECT_STREQ("file://localhost/C:/src/foo.cc", uri);
 }
 
-TEST(BuildFileUri, EncodesPathCharactersReservedByUris) {
+TEST(BuildFileLineUri, EncodesPathCharactersReservedByUris) {
   char uri[256];
   const std::string span = "/src/a file#part?.cc:42";
-  EXPECT_TRUE(BuildFileUri(span.c_str(), span.size(), /*base_path=*/nullptr,
-                           /*host=*/nullptr, uri, sizeof(uri)));
+  EXPECT_TRUE(BuildFileLineUri(span.c_str(), span.size(),
+                               /*base_path=*/nullptr, /*host=*/nullptr, uri,
+                               sizeof(uri)));
   EXPECT_STREQ("file://localhost/src/a%20file%23part%3F.cc", uri);
 }
 
-TEST(BuildFileUri, EncodesWindowsPathSeparators) {
+TEST(BuildFileLineUri, EncodesWindowsPathSeparators) {
   char uri[256];
   const std::string span = "C:\\src\\a file.cc:42";
-  EXPECT_TRUE(BuildFileUri(span.c_str(), span.size(), /*base_path=*/nullptr,
-                           /*host=*/nullptr, uri, sizeof(uri)));
+  EXPECT_TRUE(BuildFileLineUri(span.c_str(), span.size(),
+                               /*base_path=*/nullptr, /*host=*/nullptr, uri,
+                               sizeof(uri)));
   EXPECT_STREQ("file://localhost/C:/src/a%20file.cc", uri);
 }
 
-TEST(BuildFileUri, NormalizesWindowsBasePathSeparators) {
+TEST(BuildFileLineUri, NormalizesWindowsBasePathSeparators) {
   char uri[256];
   const std::string span = "src\\foo.cc:42";
-  EXPECT_TRUE(BuildFileUri(span.c_str(), span.size(), "C:\\build",
-                           /*host=*/nullptr, uri, sizeof(uri)));
+  EXPECT_TRUE(BuildFileLineUri(span.c_str(), span.size(), "C:\\build",
+                               /*host=*/nullptr, uri, sizeof(uri)));
   EXPECT_STREQ("file://localhost/C:/build/src/foo.cc", uri);
 }
 
-TEST(BuildFileUri, UsesSuppliedHost) {
+TEST(BuildFileLineUri, UsesSuppliedHost) {
   char uri[256];
   const std::string span = "/src/foo.cc:42";
-  EXPECT_TRUE(BuildFileUri(span.c_str(), span.size(), /*base_path=*/nullptr,
-                           "my-host", uri, sizeof(uri)));
+  EXPECT_TRUE(BuildFileLineUri(span.c_str(), span.size(),
+                               /*base_path=*/nullptr, "my-host", uri,
+                               sizeof(uri)));
   EXPECT_STREQ("file://my-host/src/foo.cc", uri);
 }
 
-TEST(BuildFileUri, ResolvesRelativePathAgainstBasePath) {
+TEST(BuildFileLineUri, ResolvesRelativePathAgainstBasePath) {
   char uri[256];
   const std::string span = "src/foo.cc:42";
-  EXPECT_TRUE(BuildFileUri(span.c_str(), span.size(), "/build",
-                           /*host=*/nullptr, uri, sizeof(uri)));
+  EXPECT_TRUE(BuildFileLineUri(span.c_str(), span.size(), "/build",
+                               /*host=*/nullptr, uri, sizeof(uri)));
   EXPECT_STREQ("file://localhost/build/src/foo.cc", uri);
 }
 
-TEST(BuildFileUri, DoesNotDuplicateSeparatorWhenJoiningBasePath) {
+TEST(BuildFileLineUri, DoesNotDuplicateSeparatorWhenJoiningBasePath) {
   char uri[256];
   const std::string span = "src/foo.cc:42";
-  EXPECT_TRUE(BuildFileUri(span.c_str(), span.size(), "/build/",
-                           /*host=*/nullptr, uri, sizeof(uri)));
+  EXPECT_TRUE(BuildFileLineUri(span.c_str(), span.size(), "/build/",
+                               /*host=*/nullptr, uri, sizeof(uri)));
   EXPECT_STREQ("file://localhost/build/src/foo.cc", uri);
 }
 
-TEST(BuildFileUri, IgnoresBasePathWhenSpanIsAlreadyAbsolute) {
+TEST(BuildFileLineUri, IgnoresBasePathWhenSpanIsAlreadyAbsolute) {
   char uri[256];
   const std::string span = "/src/foo.cc:42";
-  EXPECT_TRUE(BuildFileUri(span.c_str(), span.size(), "/build",
-                           /*host=*/nullptr, uri, sizeof(uri)));
+  EXPECT_TRUE(BuildFileLineUri(span.c_str(), span.size(), "/build",
+                               /*host=*/nullptr, uri, sizeof(uri)));
   EXPECT_STREQ("file://localhost/src/foo.cc", uri);
 }
 
-TEST(BuildFileUri, RejectsRelativePathWithoutBasePath) {
+TEST(BuildFileLineUri, RejectsRelativePathWithoutBasePath) {
   char uri[256];
   const std::string span = "src/foo.cc:42";
-  EXPECT_FALSE(BuildFileUri(span.c_str(), span.size(), /*base_path=*/nullptr,
-                            /*host=*/nullptr, uri, sizeof(uri)));
-  EXPECT_FALSE(BuildFileUri(span.c_str(), span.size(), /*base_path=*/"",
-                            /*host=*/nullptr, uri, sizeof(uri)));
+  EXPECT_FALSE(BuildFileLineUri(span.c_str(), span.size(),
+                                /*base_path=*/nullptr, /*host=*/nullptr, uri,
+                                sizeof(uri)));
+  EXPECT_FALSE(BuildFileLineUri(span.c_str(), span.size(), /*base_path=*/"",
+                                /*host=*/nullptr, uri, sizeof(uri)));
 }
 
-TEST(BuildFileUri, RejectsRelativeBasePath) {
+TEST(BuildFileLineUri, RejectsRelativeBasePath) {
   char uri[256];
   const std::string span = "src/foo.cc:42";
-  EXPECT_FALSE(BuildFileUri(span.c_str(), span.size(), "relative/build",
-                            /*host=*/nullptr, uri, sizeof(uri)));
+  EXPECT_FALSE(BuildFileLineUri(span.c_str(), span.size(), "relative/build",
+                                /*host=*/nullptr, uri, sizeof(uri)));
 }
 
-TEST(BuildFileUri, RejectsMissingLineNumber) {
+TEST(BuildFileLineUri, RejectsMissingLineNumber) {
   char uri[256];
   const std::string span = "/src/foo.cc";
-  EXPECT_FALSE(BuildFileUri(span.c_str(), span.size(), /*base_path=*/nullptr,
-                            /*host=*/nullptr, uri, sizeof(uri)));
+  EXPECT_FALSE(BuildFileLineUri(span.c_str(), span.size(),
+                                /*base_path=*/nullptr, /*host=*/nullptr, uri,
+                                sizeof(uri)));
 }
 
-TEST(BuildFileUri, RejectsTooSmallBuffer) {
+TEST(BuildFileLineUri, RejectsTooSmallBuffer) {
   char uri[4];
   const std::string span = "/src/foo.cc:42";
-  EXPECT_FALSE(BuildFileUri(span.c_str(), span.size(), /*base_path=*/nullptr,
-                            /*host=*/nullptr, uri, sizeof(uri)));
+  EXPECT_FALSE(BuildFileLineUri(span.c_str(), span.size(),
+                                /*base_path=*/nullptr, /*host=*/nullptr, uri,
+                                sizeof(uri)));
 }
 
-TEST(BuildFileUri, HandlesRepeatedSeparatorsInAPath) {
+TEST(BuildFileLineUri, HandlesRepeatedSeparatorsInAPath) {
   char uri[256];
   const std::string span = "/src//nested/foo.cc:42";
-  EXPECT_TRUE(BuildFileUri(span.c_str(), span.size(), /*base_path=*/nullptr,
-                           /*host=*/nullptr, uri, sizeof(uri)));
+  EXPECT_TRUE(BuildFileLineUri(span.c_str(), span.size(),
+                               /*base_path=*/nullptr, /*host=*/nullptr, uri,
+                               sizeof(uri)));
   EXPECT_STREQ("file://localhost/src//nested/foo.cc", uri);
 }
 
@@ -384,11 +401,12 @@ TEST(BuildFileUri, HandlesRepeatedSeparatorsInAPath) {
 // DumpStackFrameInfo() in signalhandler.cc). The line number must not
 // leak into the URI just because of that trailing ':', or the link opens
 // a nonexistent "foo.cc:42" path instead of "foo.cc".
-TEST(BuildFileUri, IgnoresTrailingDecorativeColonAfterLineNumber) {
+TEST(BuildFileLineUri, IgnoresTrailingDecorativeColonAfterLineNumber) {
   char uri[256];
   const std::string span = "/src/foo.cc:42:";
-  EXPECT_TRUE(BuildFileUri(span.c_str(), span.size(), /*base_path=*/nullptr,
-                           /*host=*/nullptr, uri, sizeof(uri)));
+  EXPECT_TRUE(BuildFileLineUri(span.c_str(), span.size(),
+                               /*base_path=*/nullptr, /*host=*/nullptr, uri,
+                               sizeof(uri)));
   EXPECT_STREQ("file://localhost/src/foo.cc", uri);
 }
 

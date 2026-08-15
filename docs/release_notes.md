@@ -11,6 +11,7 @@
 - Remove the glog compatibility layer
 - Remove Bazel build support
 - Prevent concurrent log writers from blocking during memory-drop maintenance
+- Prevent concurrent logfile writes on Windows
 - Make log cleanup work with non-ASCII Windows directories
 - Omit the default header format when a custom prefix formatter is installed
 - Improve suppressed logging performance by avoiding message construction and

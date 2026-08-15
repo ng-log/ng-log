@@ -38,10 +38,12 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <future>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -49,6 +51,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -63,11 +66,15 @@
 #ifdef HAVE_SYS_WAIT_H
 #  include <sys/wait.h>
 #endif
+#ifdef NGLOG_OS_WINDOWS
+#  include <windows.h>
+#endif
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include "base/commandlineflags.h"
+#include "internal/flags_scope.h"
 #include "internal/lock_metrics.h"
 #include "mock-log.h"
 #include "ng-log/logging.h"
@@ -79,6 +86,24 @@
 #ifdef NGLOG_USE_GFLAGS
 #  include <gflags/gflags.h>
 using namespace GFLAGS_NAMESPACE;
+#endif
+
+#ifdef NGLOG_OS_WINDOWS
+struct WindowsHandleDeleter {
+  void operator()(HANDLE handle) const noexcept {
+    if (handle != nullptr && handle != INVALID_HANDLE_VALUE) {
+      CloseHandle(handle);
+    }
+  }
+};
+
+using WindowsHandle =
+    std::unique_ptr<std::remove_pointer_t<HANDLE>, WindowsHandleDeleter>;
+
+constexpr std::uint64_t kWindowsDwordBits = std::numeric_limits<DWORD>::digits;
+constexpr std::uint64_t kLogFileLockOffset = std::uint64_t{1}
+                                             << kWindowsDwordBits;
+constexpr DWORD kLogFileLockLength = 1;
 #endif
 
 // Introduce several symbols from gmock.
@@ -155,6 +180,54 @@ std::string g_prefix_attacher_data;
 
 int main(int argc, char** argv) {
   g_argv0 = argv[0];
+
+#ifdef NGLOG_OS_WINDOWS
+  if (argc == 4 && std::strcmp(argv[1], "--nglog-hold-log-lock") == 0) {
+    WindowsHandle file_handle{
+        CreateFileA(argv[2], GENERIC_READ | GENERIC_WRITE,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)};
+    if (file_handle.get() == INVALID_HANDLE_VALUE) return EXIT_FAILURE;
+
+    OVERLAPPED overlapped = {};
+    overlapped.Offset = static_cast<DWORD>(kLogFileLockOffset);
+    overlapped.OffsetHigh =
+        static_cast<DWORD>(kLogFileLockOffset >> kWindowsDwordBits);
+    if (!LockFileEx(file_handle.get(),
+                    LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0,
+                    kLogFileLockLength, 0, &overlapped)) {
+      return EXIT_FAILURE;
+    }
+
+    std::ofstream ready_file{argv[3]};
+    ready_file << "ready";
+    ready_file.close();
+    constexpr DWORD kChildLockHoldMilliseconds = 10'000;
+    Sleep(kChildLockHoldMilliseconds);
+    return EXIT_SUCCESS;
+  }
+
+  if ((argc == 3 || argc == 4) &&
+      std::strcmp(argv[1], "--nglog-log-child") == 0) {
+    FLAGS_colorlogtostderr = false;
+    FLAGS_logtostderr = false;
+    FLAGS_timestamp_in_logfile_name = false;
+    InitializeLogging(argv[0]);
+    SetLogDestination(NGLOG_INFO, argv[2]);
+    LOG(INFO) << "message to new base, child - should only appear on STDERR "
+                 "not on the file";
+    FlushLogFiles(NGLOG_INFO);
+    if (argc == 4) {
+      std::ofstream ready_file{argv[3]};
+      ready_file << "ready";
+      ready_file.close();
+      constexpr DWORD kChildLockHoldMilliseconds = 10'000;
+      Sleep(kChildLockHoldMilliseconds);
+    }
+    LogToStderr();
+    return 0;
+  }
+#endif
 
   FLAGS_colorlogtostderr = false;
   FLAGS_timestamp_in_logfile_name = true;
@@ -855,6 +928,34 @@ static void CheckNotInFile(const string& name, const string& unexpected) {
       << ": found " << unexpected << " in " << files[0];
 }
 
+TEST(FlagsScope, RestoresFlags) {
+  bool bool_flag = false;
+  std::string string_flag = "old";
+
+  {
+    auto flags = internal::MakeFlagsScope(
+        internal::MakeFlagsScopePair(bool_flag, true),
+        internal::MakeFlagsScopePair(string_flag, "new"));
+    EXPECT_TRUE(bool_flag);
+    EXPECT_EQ(string_flag, "new");
+  }
+
+  EXPECT_FALSE(bool_flag);
+  EXPECT_EQ(string_flag, "old");
+}
+
+TEST(FlagsScope, MoveTransfersRestoration) {
+  int flag = 1;
+
+  {
+    auto flags = internal::MakeFlagsScope(internal::MakeFlagsScopePair(flag, 2));
+    auto moved_flags = std::move(flags);
+    EXPECT_EQ(flag, 2);
+  }
+
+  EXPECT_EQ(flag, 1);
+}
+
 TEST(Logging, MaxLogSizeWhenNoTimestamp) {
   // SetLogDestination() is a no-op while FLAGS_logtostderr is true.
   FlagSaver saver;
@@ -1050,8 +1151,7 @@ TEST(Logging, HeaderFormatLineWithCustomPrefixFormatter) {
 }
 
 TEST(Logging, TwoProcessesWrite) {
-// test only implemented for platforms with fork & wait; the actual
-// implementation relies on flock
+// The implementation relies on advisory file locking.
 #if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && defined(HAVE_FCNTL)
   FlagSaver saver;
   FLAGS_logtostderr = false;
@@ -1059,7 +1159,7 @@ TEST(Logging, TwoProcessesWrite) {
   fprintf(stderr,
           "==== Test setting log file basename and two processes writing - "
           "second should fail\n");
-  const string dest =
+  const std::string dest =
       TestTmpDir() + "/logging_test_basename_two_processes_writing";
   DeleteFiles(dest + "*");
 
@@ -1069,6 +1169,7 @@ TEST(Logging, TwoProcessesWrite) {
   LOG(INFO) << "message to new base, parent";
   FlushLogFiles(NGLOG_INFO);
 
+  CaptureTestStderr();
   pid_t pid = fork();
   CHECK_ERR(pid);
   if (pid == 0) {
@@ -1079,6 +1180,14 @@ TEST(Logging, TwoProcessesWrite) {
   } else if (pid > 0) {
     wait(nullptr);
   }
+  const std::string stderr_output = GetCapturedTestStderr();
+  std::istringstream stderr_stream{stderr_output};
+  std::string error_line;
+  ASSERT_TRUE(std::getline(stderr_stream, error_line));
+  std::string extra_line;
+  EXPECT_FALSE(std::getline(stderr_stream, extra_line));
+  EXPECT_THAT(error_line,
+              testing::ContainsRegex("^Could not create log file '[^']+': "));
   FLAGS_timestamp_in_logfile_name = true;
 
   CheckFile(dest, "message to new base, parent");
@@ -1088,6 +1197,270 @@ TEST(Logging, TwoProcessesWrite) {
             false);
 
   // Release
+  LogToStderr();
+  DeleteFiles(dest + "*");
+#elif defined(NGLOG_OS_WINDOWS)
+  FlagSaver saver;
+  FLAGS_logtostderr = false;
+
+  fprintf(stderr,
+          "==== Test setting log file basename and two processes writing - "
+          "second should fail\n");
+  const std::string dest =
+      TestTmpDir() + "/logging_test_basename_two_processes_writing";
+  DeleteFiles(dest + "*");
+
+  FLAGS_timestamp_in_logfile_name = false;
+  SetLogDestination(NGLOG_INFO, dest.c_str());
+  LOG(INFO) << "message to new base, parent";
+  FlushLogFiles(NGLOG_INFO);
+
+  std::string command =
+      '"' + std::string(g_argv0) + "\" --nglog-log-child \"" + dest + '"';
+  std::vector<char> command_line(command.begin(), command.end());
+  command_line.push_back('\0');
+
+  STARTUPINFOA startup_info = {};
+  startup_info.cb = sizeof(startup_info);
+  PROCESS_INFORMATION process_info = {};
+  ASSERT_TRUE(CreateProcessA(nullptr, command_line.data(), nullptr, nullptr,
+                             FALSE, CREATE_NO_WINDOW, nullptr, nullptr,
+                             &startup_info, &process_info));
+  WindowsHandle process_handle{process_info.hProcess};
+  WindowsHandle thread_handle{process_info.hThread};
+
+  constexpr DWORD kProcessWaitTimeoutMilliseconds = 10'000;
+  EXPECT_EQ(WaitForSingleObject(process_handle.get(),
+                                kProcessWaitTimeoutMilliseconds),
+            WAIT_OBJECT_0);
+  DWORD exit_code = 0;
+  EXPECT_TRUE(GetExitCodeProcess(process_handle.get(), &exit_code));
+  EXPECT_EQ(exit_code, 0U);
+
+  FLAGS_timestamp_in_logfile_name = true;
+  CheckFile(dest, "message to new base, parent");
+  CheckFile(dest,
+            "message to new base, child - should only appear on STDERR not on "
+            "the file",
+            false);
+
+  LogToStderr();
+  DeleteFiles(dest + "*");
+#endif
+}
+
+TEST(Logging, FileLockIsHeldAcrossProcesses) {
+#ifdef NGLOG_OS_WINDOWS
+  FlagSaver saver;
+  FLAGS_logtostderr = false;
+
+  const std::string dest =
+      TestTmpDir() + "/logging_test_file_lock_across_processes";
+  const std::string ready = dest + ".ready";
+  DeleteFiles(dest + "*");
+
+  FLAGS_timestamp_in_logfile_name = false;
+  SetLogDestination(NGLOG_INFO, dest.c_str());
+
+  std::string command = '"' + std::string(g_argv0) + "\" --nglog-log-child \"" +
+                        dest + "\" \"" + ready + '"';
+  std::vector<char> command_line(command.begin(), command.end());
+  command_line.push_back('\0');
+
+  STARTUPINFOA startup_info = {};
+  startup_info.cb = sizeof(startup_info);
+  PROCESS_INFORMATION process_info = {};
+  ASSERT_TRUE(CreateProcessA(nullptr, command_line.data(), nullptr, nullptr,
+                             FALSE, CREATE_NO_WINDOW, nullptr, nullptr,
+                             &startup_info, &process_info));
+  WindowsHandle process_handle{process_info.hProcess};
+  WindowsHandle thread_handle{process_info.hThread};
+
+  constexpr DWORD kReadyWaitMilliseconds = 10'000;
+  constexpr DWORD kReadyPollMilliseconds = 10;
+  bool ready_seen = false;
+  for (DWORD waited = 0; waited < kReadyWaitMilliseconds;
+       waited += kReadyPollMilliseconds) {
+    if (GetFileAttributesA(ready.c_str()) != INVALID_FILE_ATTRIBUTES) {
+      ready_seen = true;
+      break;
+    }
+    Sleep(kReadyPollMilliseconds);
+  }
+  ASSERT_TRUE(ready_seen);
+
+  WindowsHandle file_handle{
+      CreateFileA(dest.c_str(), GENERIC_WRITE,
+                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                  nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)};
+  ASSERT_NE(file_handle.get(), INVALID_HANDLE_VALUE);
+
+  OVERLAPPED overlapped = {};
+  overlapped.Offset = static_cast<DWORD>(kLogFileLockOffset);
+  overlapped.OffsetHigh =
+      static_cast<DWORD>(kLogFileLockOffset >> kWindowsDwordBits);
+  const BOOL lock_succeeded = LockFileEx(
+      file_handle.get(), LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0,
+      kLogFileLockLength, 0, &overlapped);
+  EXPECT_FALSE(lock_succeeded);
+  if (lock_succeeded) {
+    EXPECT_TRUE(
+        UnlockFileEx(file_handle.get(), 0, kLogFileLockLength, 0, &overlapped));
+  }
+
+  EXPECT_TRUE(TerminateProcess(process_handle.get(), 0));
+  EXPECT_EQ(WaitForSingleObject(process_handle.get(), kReadyWaitMilliseconds),
+            WAIT_OBJECT_0);
+
+  FLAGS_timestamp_in_logfile_name = true;
+  file_handle.reset();
+  LogToStderr();
+  DeleteFiles(dest + "*");
+#endif
+}
+
+TEST(Logging, LockedOversizedFileIsNotTruncated) {
+#ifdef NGLOG_OS_WINDOWS
+  FlagSaver saver;
+  FLAGS_logtostderr = false;
+  auto flags =
+      internal::MakeFlagsScope(
+          internal::MakeFlagsScopePair(FLAGS_timestamp_in_logfile_name, false),
+          internal::MakeFlagsScopePair(FLAGS_max_log_size, 1U));
+
+  const std::string dest = TestTmpDir() + "/logging_test_locked_oversized_file";
+  const std::string ready = dest + ".ready";
+  const std::string preserved_prefix = "preserved logfile contents";
+  constexpr std::size_t kMegabyte = 1U << 20U;
+  constexpr std::size_t kOversizedFileSize = kMegabyte + 1U;
+  DeleteFiles(dest + "*");
+
+  std::string original_contents(kOversizedFileSize, 'x');
+  original_contents.replace(0, preserved_prefix.size(), preserved_prefix);
+  std::ofstream output{dest, std::ios::binary};
+  output.write(original_contents.data(),
+               static_cast<std::streamsize>(original_contents.size()));
+  output.close();
+
+  std::string command = '"' + std::string(g_argv0) +
+                        "\" --nglog-hold-log-lock \"" + dest + "\" \"" + ready +
+                        '"';
+  std::vector<char> command_line(command.begin(), command.end());
+  command_line.push_back('\0');
+
+  STARTUPINFOA startup_info = {};
+  startup_info.cb = sizeof(startup_info);
+  PROCESS_INFORMATION process_info = {};
+  ASSERT_TRUE(CreateProcessA(nullptr, command_line.data(), nullptr, nullptr,
+                             FALSE, CREATE_NO_WINDOW, nullptr, nullptr,
+                             &startup_info, &process_info));
+  WindowsHandle process_handle{process_info.hProcess};
+  WindowsHandle thread_handle{process_info.hThread};
+
+  constexpr DWORD kReadyWaitMilliseconds = 10'000;
+  constexpr DWORD kReadyPollMilliseconds = 10;
+  bool ready_seen = false;
+  for (DWORD waited = 0; waited < kReadyWaitMilliseconds;
+       waited += kReadyPollMilliseconds) {
+    if (GetFileAttributesA(ready.c_str()) != INVALID_FILE_ATTRIBUTES) {
+      ready_seen = true;
+      break;
+    }
+    Sleep(kReadyPollMilliseconds);
+  }
+  ASSERT_TRUE(ready_seen);
+
+  SetLogDestination(NGLOG_INFO, dest.c_str());
+  CaptureTestStderr();
+  LOG(INFO) << "message that cannot be written while the file is locked";
+  const std::string stderr_output = GetCapturedTestStderr();
+  EXPECT_THAT(stderr_output, HasSubstr("Could not create log file '"));
+
+  EXPECT_TRUE(TerminateProcess(process_handle.get(), 0));
+  EXPECT_EQ(WaitForSingleObject(process_handle.get(), kReadyWaitMilliseconds),
+            WAIT_OBJECT_0);
+  constexpr DWORD kLockReleaseWaitMilliseconds = 100;
+  Sleep(kLockReleaseWaitMilliseconds);
+
+  std::ifstream input{dest, std::ios::binary};
+  const std::string contents{std::istreambuf_iterator<char>{input},
+                             std::istreambuf_iterator<char>{}};
+  input.close();
+  EXPECT_EQ(contents, original_contents);
+
+  LogToStderr();
+  DeleteFiles(dest + "*");
+#endif
+}
+
+TEST(Logging, FileLockFailureReportsWindowsError) {
+#ifdef NGLOG_OS_WINDOWS
+  FlagSaver saver;
+  FLAGS_logtostderr = false;
+  auto flags =
+      internal::MakeFlagsScope(
+          internal::MakeFlagsScopePair(FLAGS_timestamp_in_logfile_name, false));
+
+  const std::string dest = TestTmpDir() + "/logging_test_lock_error";
+  const std::string ready = dest + ".ready";
+  DeleteFiles(dest + "*");
+
+  std::ofstream output{dest};
+  output << "existing logfile contents";
+  output.close();
+
+  std::string command = '"' + std::string(g_argv0) +
+                        "\" --nglog-hold-log-lock \"" + dest + "\" \"" + ready +
+                        '"';
+  std::vector<char> command_line(command.begin(), command.end());
+  command_line.push_back('\0');
+
+  STARTUPINFOA startup_info = {};
+  startup_info.cb = sizeof(startup_info);
+  PROCESS_INFORMATION process_info = {};
+  ASSERT_TRUE(CreateProcessA(nullptr, command_line.data(), nullptr, nullptr,
+                             FALSE, CREATE_NO_WINDOW, nullptr, nullptr,
+                             &startup_info, &process_info));
+  WindowsHandle process_handle{process_info.hProcess};
+  WindowsHandle thread_handle{process_info.hThread};
+
+  constexpr DWORD kReadyWaitMilliseconds = 10'000;
+  constexpr DWORD kReadyPollMilliseconds = 10;
+  bool ready_seen = false;
+  for (DWORD waited = 0; waited < kReadyWaitMilliseconds;
+       waited += kReadyPollMilliseconds) {
+    if (GetFileAttributesA(ready.c_str()) != INVALID_FILE_ATTRIBUTES) {
+      ready_seen = true;
+      break;
+    }
+    Sleep(kReadyPollMilliseconds);
+  }
+  ASSERT_TRUE(ready_seen);
+
+  SetLogDestination(NGLOG_WARNING, dest.c_str());
+  CaptureTestStderr();
+  LOG(WARNING) << "message that cannot be written while the file is locked";
+  const std::string stderr_output = GetCapturedTestStderr();
+  EXPECT_THAT(stderr_output, HasSubstr("Could not create log file '"));
+  EXPECT_THAT(stderr_output, HasSubstr(dest));
+  char error_message[256];
+  const DWORD error_message_length = FormatMessageA(
+      FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr,
+      ERROR_LOCK_VIOLATION, 0, error_message, sizeof(error_message), nullptr);
+  ASSERT_GT(error_message_length, 0U);
+  std::string expected_error(error_message, error_message_length);
+  while (!expected_error.empty() &&
+         (expected_error.back() == '\r' || expected_error.back() == '\n')) {
+    expected_error.pop_back();
+  }
+  EXPECT_THAT(stderr_output, HasSubstr(expected_error));
+
+  EXPECT_TRUE(TerminateProcess(process_handle.get(), 0));
+  EXPECT_EQ(WaitForSingleObject(process_handle.get(), kReadyWaitMilliseconds),
+            WAIT_OBJECT_0);
+  constexpr DWORD kLockReleaseWaitMilliseconds = 100;
+  Sleep(kLockReleaseWaitMilliseconds);
+
   LogToStderr();
   DeleteFiles(dest + "*");
 #endif

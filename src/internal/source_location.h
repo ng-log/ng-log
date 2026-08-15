@@ -14,9 +14,13 @@
 namespace nglog {
 namespace internal {
 
-NGLOG_NO_EXPORT bool BuildFileUri(const char* span, std::size_t span_length,
+NGLOG_NO_EXPORT bool BuildFileUri(const char* path, std::size_t path_length,
                                   const char* base_path, const char* host,
                                   char* out, std::size_t out_size);
+
+NGLOG_NO_EXPORT bool BuildFileLineUri(const char* span, std::size_t span_length,
+                                      const char* base_path, const char* host,
+                                      char* out, std::size_t out_size);
 
 NGLOG_NO_EXPORT const std::string& CachedHostname();
 NGLOG_NO_EXPORT const std::string& CachedCwd();

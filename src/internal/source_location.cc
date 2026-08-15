@@ -155,9 +155,9 @@ bool SplitFileLineSpan(const char* span, std::size_t span_length,
   return true;
 }
 
-bool BuildFileUri(const char* span, std::size_t span_length,
-                  const char* base_path, const char* host, char* out,
-                  std::size_t out_size) {
+bool BuildFileLineUri(const char* span, std::size_t span_length,
+                      const char* base_path, const char* host, char* out,
+                      std::size_t out_size) {
   const char* path;
   std::size_t path_len;
   const char* line;
@@ -169,6 +169,11 @@ bool BuildFileUri(const char* span, std::size_t span_length,
 
   (void)line;
   (void)line_len;
+  return BuildFileUri(path, path_len, base_path, host, out, out_size);
+}
+
+bool BuildFileUri(const char* path, std::size_t path_len, const char* base_path,
+                  const char* host, char* out, std::size_t out_size) {
   const bool path_is_absolute = IsAbsolutePath(path, path_len);
   const std::size_t base_len =
       (!path_is_absolute && base_path != nullptr) ? std::strlen(base_path) : 0;

@@ -52,6 +52,7 @@
 #include <ctime>
 #include <iomanip>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <regex>
@@ -84,8 +85,11 @@
 #  include <dirent.h>  // for automatic removal of old logs
 #endif
 
-#ifdef HAVE__CHSIZE_S
+#if defined(HAVE__CHSIZE_S) || defined(NGLOG_OS_WINDOWS)
 #  include <io.h>  // for truncate log file
+#endif
+#ifdef NGLOG_OS_WINDOWS
+#  include <windows.h>
 #endif
 #ifdef HAVE_PWD_H
 #  include <pwd.h>
@@ -336,6 +340,31 @@ constexpr std::size_t kPrefixSecondWidth = 2;
 constexpr std::size_t kPrefixMicrosecondWidth = 6;
 constexpr std::size_t kPrefixThreadIdWidth = 5;
 
+#ifdef NGLOG_OS_WINDOWS
+constexpr std::uint64_t kWindowsDwordBits = std::numeric_limits<DWORD>::digits;
+constexpr std::uint64_t kLogFileLockOffset = std::uint64_t{1}
+                                             << kWindowsDwordBits;
+constexpr DWORD kLogFileLockLength = 1;
+
+std::string WindowsErrorMessage(DWORD error) {
+  LPSTR message = nullptr;
+  const DWORD message_length = FormatMessageA(
+      FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+          FORMAT_MESSAGE_IGNORE_INSERTS,
+      nullptr, error, 0, reinterpret_cast<LPSTR>(&message), 0, nullptr);
+  if (message_length == 0) {
+    return "Windows error " + std::to_string(error);
+  }
+
+  std::string result(message, message_length);
+  LocalFree(message);
+  while (!result.empty() && (result.back() == '\r' || result.back() == '\n')) {
+    result.pop_back();
+  }
+  return result;
+}
+#endif
+
 void AppendPrefixText(LogMessage::LogStream& stream, const char* text) {
   stream.append(text, std::strlen(text));
 }
@@ -488,6 +517,10 @@ class LogFileObject : public base::Logger {
   std::chrono::system_clock::time_point
       next_flush_time_;  // cycle count at which to flush log
   std::chrono::system_clock::time_point start_time_;
+#ifdef NGLOG_OS_WINDOWS
+  std::string create_error_message_;
+  std::string create_filename_;
+#endif
 
   // Actually create a logfile using the value of base_filename_ and the
   // optional argument time_pid_string
@@ -847,6 +880,43 @@ static void WriteStyledLogField(FILE* output, FileFormatter& formatter,
   WriteTextByLines(text, len, write_line, write_newline);
 }
 
+#ifdef NGLOG_OS_WINDOWS
+constexpr std::size_t kLogFileUriBufferSize = 1024;
+
+static void WriteLogFileCreationError(const std::string& filename,
+                                      const std::string& error_message) {
+  const ColorMode mode =
+      FLAGS_colorlogtostderr ? StreamColorMode(stderr) : ColorMode::kNone;
+  const bool hyperlinks_enabled = mode == ColorMode::kAnsi &&
+                                  FLAGS_symbolize_hyperlinks &&
+                                  StreamSupportsHyperlinks(stderr);
+
+  char uri[kLogFileUriBufferSize];
+  const char* uri_pointer = nullptr;
+  if (hyperlinks_enabled &&
+      BuildFileUri(filename.c_str(), filename.size(),
+                   FLAGS_symbolize_file_base_path.c_str(),
+                   CachedHostname().c_str(), uri, kLogFileUriBufferSize)) {
+    uri_pointer = uri;
+  }
+
+  FileFormatter formatter{stderr};
+  constexpr char kPrefix[] = "Could not create log file '";
+  constexpr char kSeparator[] = "': ";
+  std::fwrite(kPrefix, sizeof(kPrefix) - 1, 1, stderr);
+  WriteStyledLogField(stderr, formatter, mode,
+                      TextAttributes{DefaultTheme().Get(Role::kStackFile),
+                                     Hyperlink(uri_pointer)},
+                      hyperlinks_enabled, filename.c_str(), filename.size());
+  std::fwrite(kSeparator, sizeof(kSeparator) - 1, 1, stderr);
+  WriteStyledLogField(
+      stderr, formatter, mode,
+      TextAttributes{DefaultTheme().Get(Role::kErrnoMessage), Hyperlink()},
+      false, error_message.c_str(), error_message.size());
+  std::fputc('\n', stderr);
+}
+#endif
+
 static void WriteStyledLogBody(FILE* output, FileFormatter& formatter,
                                ColorMode mode,
                                const internal::StyleRecorder& styles,
@@ -1050,9 +1120,9 @@ static void ColoredWriteToStderrOrStdoutWithFields(
     const int span_len =
         std::snprintf(span, sizeof(span), "%s:%d", data.fullname_, data.line_);
     if (span_len > 0 && static_cast<size_t>(span_len) < sizeof(span)) {
-      if (BuildFileUri(span, static_cast<size_t>(span_len),
-                       FLAGS_symbolize_file_base_path.c_str(),
-                       CachedHostname().c_str(), uri, sizeof(uri))) {
+      if (BuildFileLineUri(span, static_cast<size_t>(span_len),
+                           FLAGS_symbolize_file_base_path.c_str(),
+                           CachedHostname().c_str(), uri, sizeof(uri))) {
         uri_pointer = uri;
       }
     }
@@ -1374,8 +1444,9 @@ void LogFileObject::SetBasename(const char* basename) {
     // Get rid of old log file since we are changing names
     if (file_ != nullptr) {
       file_ = nullptr;
-      rollover_attempt_ = kRolloverAttemptFrequency - 1;
     }
+    file_length_ = bytes_since_flush_ = dropped_mem_length_ = 0;
+    rollover_attempt_ = kRolloverAttemptFrequency - 1;
     base_filename_ = basename;
   }
 }
@@ -1386,8 +1457,9 @@ void LogFileObject::SetExtension(const char* ext) {
     // Get rid of old log file since we are changing names
     if (file_ != nullptr) {
       file_ = nullptr;
-      rollover_attempt_ = kRolloverAttemptFrequency - 1;
     }
+    file_length_ = bytes_since_flush_ = dropped_mem_length_ = 0;
+    rollover_attempt_ = kRolloverAttemptFrequency - 1;
     filename_extension_ = ext;
   }
 }
@@ -1415,14 +1487,23 @@ void LogFileObject::FlushUnlocked(
 }
 
 bool LogFileObject::CreateLogfile(const string& time_pid_string) {
+#ifdef NGLOG_OS_WINDOWS
+  create_error_message_.clear();
+#endif
   string string_filename = base_filename_;
   if (FLAGS_timestamp_in_logfile_name) {
     string_filename += time_pid_string;
   }
   string_filename += filename_extension_;
+#ifdef NGLOG_OS_WINDOWS
+  create_filename_ = string_filename;
+#endif
   const char* filename = string_filename.c_str();
   // only write to files, create if non-existent.
   int flags = O_WRONLY | O_CREAT;
+#if defined(NGLOG_OS_WINDOWS)
+  bool truncate_file = false;
+#endif
   if (FLAGS_timestamp_in_logfile_name) {
     // demand that the file is unique for our timestamp (fail if it exists).
     flags = flags | O_EXCL;
@@ -1434,7 +1515,11 @@ bool LogFileObject::CreateLogfile(const string& time_pid_string) {
     if (stat(filename, &statbuf) == 0) {
       // truncate the file if it exceeds the max size
       if ((static_cast<std::size_t>(statbuf.st_size) >> 20U) >= MaxLogSize()) {
+#if defined(NGLOG_OS_WINDOWS)
+        truncate_file = true;
+#else
         flags |= O_TRUNC;
+#endif
       }
 
       // update file length to sync file size
@@ -1444,21 +1529,49 @@ bool LogFileObject::CreateLogfile(const string& time_pid_string) {
 
   FileDescriptor fd{
       open(filename, flags, static_cast<mode_t>(FLAGS_logfile_mode))};
-  if (!fd) return false;
-#ifdef HAVE_FCNTL
+  if (!fd) {
+#ifdef NGLOG_OS_WINDOWS
+    create_error_message_ = StrError(errno);
+#endif
+    return false;
+  }
+  // Mark the file as exclusive write access to avoid two clients logging to
+  // the same file. This applies particularly when
+  // !FLAGS_timestamp_in_logfile_name, because timestamped files are opened
+  // with O_EXCL.
+  // Locks are released automatically when the file descriptor is closed.
+#if defined(NGLOG_OS_WINDOWS)
+  const HANDLE file_handle = reinterpret_cast<HANDLE>(_get_osfhandle(fd.get()));
+  if (file_handle == INVALID_HANDLE_VALUE) {
+    create_error_message_ = StrError(errno);
+    return false;
+  }
+
+  OVERLAPPED lock_offset = {};
+  lock_offset.Offset = static_cast<DWORD>(kLogFileLockOffset);
+  lock_offset.OffsetHigh =
+      static_cast<DWORD>(kLogFileLockOffset >> kWindowsDwordBits);
+  const DWORD lock_flags = LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY;
+  if (!LockFileEx(file_handle, lock_flags, 0, kLogFileLockLength, 0,
+                  &lock_offset)) {
+    create_error_message_ = WindowsErrorMessage(GetLastError());
+    return false;
+  }
+  if (truncate_file) {
+    const LARGE_INTEGER file_offset = {};
+    if (!SetFilePointerEx(file_handle, file_offset, nullptr, FILE_BEGIN) ||
+        !SetEndOfFile(file_handle)) {
+      create_error_message_ = WindowsErrorMessage(GetLastError());
+      return false;
+    }
+    file_length_ = 0;
+  }
+#elif defined(HAVE_FCNTL)
   // Mark the file close-on-exec. We don't really care if this fails
   fcntl(fd.get(), F_SETFD, FD_CLOEXEC);
-
-  // Mark the file as exclusive write access to avoid two clients logging to the
-  // same file. This applies particularly when !FLAGS_timestamp_in_logfile_name
-  // (otherwise open would fail because the O_EXCL flag on similar filename).
-  // locks are released on unlock or close() automatically, only after log is
-  // released.
   // This will work after a fork as it is not inherited (not stored in the fd).
   // Lock will not be lost because the file is opened with exclusive lock
   // (write) and we will never read from it inside the process.
-  // TODO: windows implementation of this (as flock is not available on
-  // mingw).
   static struct flock w_lock;
 
   w_lock.l_type = F_WRLCK;
@@ -1475,6 +1588,9 @@ bool LogFileObject::CreateLogfile(const string& time_pid_string) {
   // fdopen in append mode so if the file exists it will fseek to the end
   file_.reset(fdopen(fd.release(), "a"));  // Make a FILE*.
   if (file_ == nullptr) {                  // Man, we're screwed!
+#ifdef NGLOG_OS_WINDOWS
+    create_error_message_ = StrError(errno);
+#endif
     if (FLAGS_timestamp_in_logfile_name) {
       unlink(filename);  // Erase the half-baked evidence: an unusable log file,
                          // only if we just created it.
@@ -1486,6 +1602,9 @@ bool LogFileObject::CreateLogfile(const string& time_pid_string) {
   // append empirically replicated with wine over mingw build
   if (!FLAGS_timestamp_in_logfile_name) {
     if (fseek(file_.get(), 0, SEEK_END) != 0) {
+#  ifdef NGLOG_OS_WINDOWS
+      create_error_message_ = StrError(errno);
+#  endif
       return false;
     }
   }
@@ -1587,9 +1706,14 @@ void LogFileObject::WriteUnlocked(
 
     if (base_filename_selected_) {
       if (!CreateLogfile(time_pid_string)) {
-        perror("Could not create log file");
-        fprintf(stderr, "COULD NOT CREATE LOGFILE '%s'!\n",
-                time_pid_string.c_str());
+#ifdef NGLOG_OS_WINDOWS
+        const std::string& error_message = create_error_message_;
+        WriteLogFileCreationError(create_filename_, error_message);
+#else
+        const int error_number = errno;
+        fprintf(stderr, "Could not create log file '%s': %s\n",
+                time_pid_string.c_str(), StrError(error_number).c_str());
+#endif
         return;
       }
     } else {
@@ -1632,9 +1756,14 @@ void LogFileObject::WriteUnlocked(
       }
       // If we never succeeded, we have to give up
       if (success == false) {
-        perror("Could not create logging file");
-        fprintf(stderr, "COULD NOT CREATE A LOGGINGFILE %s!",
-                time_pid_string.c_str());
+#ifdef NGLOG_OS_WINDOWS
+        const std::string& error_message = create_error_message_;
+        WriteLogFileCreationError(create_filename_, error_message);
+#else
+        const int error_number = errno;
+        fprintf(stderr, "Could not create log file '%s': %s\n",
+                time_pid_string.c_str(), StrError(error_number).c_str());
+#endif
         return;
       }
     }
