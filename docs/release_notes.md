@@ -2,7 +2,7 @@
 
 ## ng-log
 
-### 0.8.4 <small>TBD</small> { id="0.8.4" }
+### 0.8.4 <small>August 15, 2026</small> { id="0.8.4" }
 
 - Prevent `drop_log_memory` from blocking concurrent log writers
 - Prevent failure-signal handling from deadlocking when reentered
@@ -11,6 +11,9 @@
 - Restore Linux LWP identifiers in crash signal reports
 - Arrange signal headers before program counters in crash reports after the
   signal handler emitted the header after the PC
+- Prevent stale signal-handler state when a handler returns
+- Honor `logbuflevel` when logging to stdout
+- Make `NGLOG_*` severity constants available in the global namespace
 - Report sub-hour UTC offsets through `LogMessageTime::gmtoffset`
 - Cap oversized `max_log_size` values instead of using the 1 MB minimum
 
