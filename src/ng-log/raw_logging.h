@@ -39,6 +39,7 @@
 
 #include "ng-log/export.h"
 #include "ng-log/log_severity.h"
+#include "ng-log/platform.h"
 #include "ng-log/vlog_is_on.h"
 
 namespace nglog {
@@ -158,14 +159,9 @@ static inline void RawLogStub(int /* ignored */, ...) {}
 // Logs format... at "severity" level, reporting it
 // as called from file:line.
 // This does not allocate memory or acquire locks.
+NGLOG_ATTRIBUTE_FORMAT(printf, 4, 5)
 NGLOG_EXPORT void RawLog(LogSeverity severity, const char* file, int line,
-                         const char* format, ...)
-#if defined(__has_attribute)
-#  if __has_attribute(used)
-    __attribute__((__format__(__printf__, 4, 5)))
-#  endif
-#endif
-    ;
+                         const char* format, ...);
 }  // namespace nglog
 
 #endif  // NGLOG_RAW_LOGGING_H

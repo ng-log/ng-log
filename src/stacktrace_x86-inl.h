@@ -108,10 +108,8 @@ static void** NextStackFrame(void** old_sp) {
 int GetStackTrace(void** result, int max_depth, int skip_count) {
   void** sp;
 
-#ifdef __GNUC__
-#  if __GNUC__ * 100 + __GNUC_MINOR__ >= 402
-#    define USE_BUILTIN_FRAME_ADDRESS
-#  endif
+#if defined(__GNUC__) && (__GNUC__ * 100 + __GNUC_MINOR__ >= 402)
+#  define USE_BUILTIN_FRAME_ADDRESS
 #endif
 
 #ifdef USE_BUILTIN_FRAME_ADDRESS

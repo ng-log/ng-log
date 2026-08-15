@@ -187,11 +187,7 @@ static void DumpStackTrace(int skip_count, DebugWriter* writerfn, void* arg) {
   }
 }
 
-#  ifdef __GNUC__
-__attribute__((noreturn))
-#  endif
-static void
-DumpStackTraceAndExit() {
+[[noreturn]] static void DumpStackTraceAndExit() {
   DumpStackTrace(1, DebugWriteToStderr, nullptr);
 
   // TODO(hamaji): Use signal instead of sigaction?

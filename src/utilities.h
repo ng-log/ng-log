@@ -37,6 +37,7 @@
 #define NGLOG_INTERNAL_UTILITIES_H
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <memory>
 #include <string>
@@ -77,7 +78,7 @@ using ssize_t = SSIZE_T;
 using ssize_t = std::ptrdiff_t;
 #  endif
 #endif
-
+#include "internal/attributes.h"
 #include "ng-log/log_severity.h"
 #include "ng-log/types.h"
 
@@ -125,27 +126,11 @@ struct CrashReason {
   int depth{0};
 };
 
+std::intmax_t SafeWrite(int fd, const void* data, std::size_t size) noexcept;
+
 }  // namespace internal
 
 inline namespace tools {
-
-#if defined(__has_attribute)
-#  if __has_attribute(noinline)
-#    define ATTRIBUTE_NOINLINE __attribute__((noinline))
-#    define HAVE_ATTRIBUTE_NOINLINE
-#  endif
-#endif
-
-#if !defined(HAVE_ATTRIBUTE_NOINLINE)
-#  if defined(NGLOG_OS_WINDOWS)
-#    define ATTRIBUTE_NOINLINE __declspec(noinline)
-#    define HAVE_ATTRIBUTE_NOINLINE
-#  endif
-#endif
-
-#if !defined(HAVE_ATTRIBUTE_NOINLINE)
-#  define ATTRIBUTE_NOINLINE
-#endif
 
 void AlsoErrorWrite(LogSeverity severity, const char* tag,
                     const char* message) noexcept;

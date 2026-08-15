@@ -235,7 +235,7 @@ int Addr2LineSymbolizeCallback(int /*fd*/, void* pc, char* out,
 }
 
 // Mirrors symbolize.cc's own (unexported) DemangleInplace().
-ATTRIBUTE_NOINLINE
+NGLOG_ATTRIBUTE_NOINLINE
 void DemangleInplace(char* out, std::size_t out_size) {
   char demangled[256];  // Big enough for sane demangled symbols.
 

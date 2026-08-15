@@ -35,6 +35,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "ng-log/platform.h"
+
 namespace nglog {
 
 using int32 = std::int32_t;
@@ -59,15 +61,6 @@ using uint64 = std::uint64_t;
 #  define NGLOG_IFDEF_THREAD_SANITIZER(X) X
 #else
 #  define NGLOG_IFDEF_THREAD_SANITIZER(X)
-#endif
-
-#if defined(_MSC_VER)
-#  define NGLOG_MSVC_PUSH_DISABLE_WARNING(n) \
-    __pragma(warning(push)) __pragma(warning(disable : n))
-#  define NGLOG_MSVC_POP_WARNING() __pragma(warning(pop))
-#else
-#  define NGLOG_MSVC_PUSH_DISABLE_WARNING(n)
-#  define NGLOG_MSVC_POP_WARNING()
 #endif
 
 #if defined(NGLOG_SANITIZE_THREAD)

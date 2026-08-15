@@ -66,26 +66,26 @@ AddressRange expected_range[BACKTRACE_STEPS];
 // Start should be a label somewhere before recursive call, end somewhere
 // after it. Some compilers can initially assign both labels the same address.
 // The caller's return address extends the range before it is checked.
-#    define INIT_ADDRESS_RANGE(fn, start_label, end_label, prange) \
-      do {                                                         \
-        (prange)->start = &&start_label;                           \
-        (prange)->end = &&end_label;                               \
+#    define NGLOG_INIT_ADDRESS_RANGE(fn, start_label, end_label, prange) \
+      do {                                                               \
+        (prange)->start = &&start_label;                                 \
+        (prange)->end = &&end_label;                                     \
       } while (0)
 // This macro expands into "unmovable" code (opaque to GCC), and that
 // prevents GCC from moving a_label up or down in the code.
 // Without it, there is no code following the 'end' label, and GCC
 // (4.3.1, 4.4.0) thinks it safe to assign &&end an address that is before
 // the recursive call.
-#    define DECLARE_ADDRESS_LABEL(a_label) \
-    a_label:                               \
-      do {                                 \
-        __asm__ __volatile__("");          \
+#    define NGLOG_DECLARE_ADDRESS_LABEL(a_label) \
+    a_label:                                     \
+      do {                                       \
+        __asm__ __volatile__("");                \
       } while (0)
 // Gcc 4.4.0 may split function into multiple chunks, and the chunk
 // performing recursive call may end up later in the code then the return
 // instruction (this actually happens with FDO).
 // Adjust function range from __builtin_return_address.
-#    define ADJUST_ADDRESS_RANGE_FROM_RA(prange)                             \
+#    define NGLOG_ADJUST_ADDRESS_RANGE_FROM_RA(prange)                       \
       do {                                                                   \
         void* ra = __builtin_return_address(0);                              \
         ASSERT_LT((prange)->start, ra);                                      \
@@ -97,16 +97,16 @@ AddressRange expected_range[BACKTRACE_STEPS];
       } while (0)
 #  else
 // Assume the Check* functions below are not longer than 256 bytes.
-#    define INIT_ADDRESS_RANGE(fn, start_label, end_label, prange) \
-      do {                                                         \
-        (prange)->start = reinterpret_cast<const void*>(&fn);      \
-        (prange)->end = reinterpret_cast<const char*>(&fn) + 256;  \
+#    define NGLOG_INIT_ADDRESS_RANGE(fn, start_label, end_label, prange) \
+      do {                                                               \
+        (prange)->start = reinterpret_cast<const void*>(&fn);            \
+        (prange)->end = reinterpret_cast<const char*>(&fn) + 256;        \
       } while (0)
-#    define DECLARE_ADDRESS_LABEL(a_label) \
-      do {                                 \
-      } while (0)
-#    define ADJUST_ADDRESS_RANGE_FROM_RA(prange) \
+#    define NGLOG_DECLARE_ADDRESS_LABEL(a_label) \
       do {                                       \
+      } while (0)
+#    define NGLOG_ADJUST_ADDRESS_RANGE_FROM_RA(prange) \
+      do {                                             \
       } while (0)
 #  endif  // __GNUC__
 
@@ -128,19 +128,20 @@ static void CheckRetAddrIsInFunction(void* ret_addr,
 #    pragma GCC diagnostic ignored "-Wpedantic"
 #  endif
 
-void ATTRIBUTE_NOINLINE CheckStackTrace(int);
+NGLOG_ATTRIBUTE_NOINLINE
+void CheckStackTrace(int);
 #  if __GNUC__
-static void* ATTRIBUTE_NOINLINE GetReturnAddress() {
-  return __builtin_return_address(0);
-}
+NGLOG_ATTRIBUTE_NOINLINE
+static void* GetReturnAddress() { return __builtin_return_address(0); }
 #  endif
 
-static void ATTRIBUTE_NOINLINE CheckStackTraceLeaf() {
+NGLOG_ATTRIBUTE_NOINLINE
+static void CheckStackTraceLeaf() {
   const int STACK_LEN = 10;
   void* stack[STACK_LEN];
   int size;
 
-  ADJUST_ADDRESS_RANGE_FROM_RA(&expected_range[1]);
+  NGLOG_ADJUST_ADDRESS_RANGE_FROM_RA(&expected_range[1]);
 #  if __GNUC__
   union {
     void (*function)();
@@ -148,8 +149,8 @@ static void ATTRIBUTE_NOINLINE CheckStackTraceLeaf() {
   } function_address = {&CheckStackTraceLeaf};
   expected_range[0].start = function_address.address;
 #  else
-  INIT_ADDRESS_RANGE(CheckStackTraceLeaf, start, end, &expected_range[0]);
-  DECLARE_ADDRESS_LABEL(start);
+  NGLOG_INIT_ADDRESS_RANGE(CheckStackTraceLeaf, start, end, &expected_range[0]);
+  NGLOG_DECLARE_ADDRESS_LABEL(start);
 #  endif
   size = nglog::GetStackTrace(stack, STACK_LEN, 0);
 #  if __GNUC__
@@ -184,48 +185,52 @@ static void ATTRIBUTE_NOINLINE CheckStackTraceLeaf() {
     printf("OK\n");
   }
 #  ifndef __GNUC__
-  DECLARE_ADDRESS_LABEL(end);
+  NGLOG_DECLARE_ADDRESS_LABEL(end);
 #  endif
 }
 
 //-----------------------------------------------------------------------//
 
 /* Dummy functions to make the backtrace more interesting. */
-static void ATTRIBUTE_NOINLINE CheckStackTrace4(int i) {
-  ADJUST_ADDRESS_RANGE_FROM_RA(&expected_range[2]);
-  INIT_ADDRESS_RANGE(CheckStackTrace4, start, end, &expected_range[1]);
-  DECLARE_ADDRESS_LABEL(start);
+NGLOG_ATTRIBUTE_NOINLINE
+static void CheckStackTrace4(int i) {
+  NGLOG_ADJUST_ADDRESS_RANGE_FROM_RA(&expected_range[2]);
+  NGLOG_INIT_ADDRESS_RANGE(CheckStackTrace4, start, end, &expected_range[1]);
+  NGLOG_DECLARE_ADDRESS_LABEL(start);
   for (int j = i; j >= 0; j--) {
     CheckStackTraceLeaf();
   }
-  DECLARE_ADDRESS_LABEL(end);
+  NGLOG_DECLARE_ADDRESS_LABEL(end);
 }
-static void ATTRIBUTE_NOINLINE CheckStackTrace3(int i) {
-  ADJUST_ADDRESS_RANGE_FROM_RA(&expected_range[3]);
-  INIT_ADDRESS_RANGE(CheckStackTrace3, start, end, &expected_range[2]);
-  DECLARE_ADDRESS_LABEL(start);
+NGLOG_ATTRIBUTE_NOINLINE
+static void CheckStackTrace3(int i) {
+  NGLOG_ADJUST_ADDRESS_RANGE_FROM_RA(&expected_range[3]);
+  NGLOG_INIT_ADDRESS_RANGE(CheckStackTrace3, start, end, &expected_range[2]);
+  NGLOG_DECLARE_ADDRESS_LABEL(start);
   for (int j = i; j >= 0; j--) {
     CheckStackTrace4(j);
   }
-  DECLARE_ADDRESS_LABEL(end);
+  NGLOG_DECLARE_ADDRESS_LABEL(end);
 }
-static void ATTRIBUTE_NOINLINE CheckStackTrace2(int i) {
-  ADJUST_ADDRESS_RANGE_FROM_RA(&expected_range[4]);
-  INIT_ADDRESS_RANGE(CheckStackTrace2, start, end, &expected_range[3]);
-  DECLARE_ADDRESS_LABEL(start);
+NGLOG_ATTRIBUTE_NOINLINE
+static void CheckStackTrace2(int i) {
+  NGLOG_ADJUST_ADDRESS_RANGE_FROM_RA(&expected_range[4]);
+  NGLOG_INIT_ADDRESS_RANGE(CheckStackTrace2, start, end, &expected_range[3]);
+  NGLOG_DECLARE_ADDRESS_LABEL(start);
   for (int j = i; j >= 0; j--) {
     CheckStackTrace3(j);
   }
-  DECLARE_ADDRESS_LABEL(end);
+  NGLOG_DECLARE_ADDRESS_LABEL(end);
 }
-static void ATTRIBUTE_NOINLINE CheckStackTrace1(int i) {
-  ADJUST_ADDRESS_RANGE_FROM_RA(&expected_range[5]);
-  INIT_ADDRESS_RANGE(CheckStackTrace1, start, end, &expected_range[4]);
-  DECLARE_ADDRESS_LABEL(start);
+NGLOG_ATTRIBUTE_NOINLINE
+static void CheckStackTrace1(int i) {
+  NGLOG_ADJUST_ADDRESS_RANGE_FROM_RA(&expected_range[5]);
+  NGLOG_INIT_ADDRESS_RANGE(CheckStackTrace1, start, end, &expected_range[4]);
+  NGLOG_DECLARE_ADDRESS_LABEL(start);
   for (int j = i; j >= 0; j--) {
     CheckStackTrace2(j);
   }
-  DECLARE_ADDRESS_LABEL(end);
+  NGLOG_DECLARE_ADDRESS_LABEL(end);
 }
 
 #  ifndef __GNUC__
@@ -235,16 +240,18 @@ static void ATTRIBUTE_NOINLINE CheckStackTrace1(int i) {
 // `&CheckStackTrace` returns the address of a trampoline like PLT,
 // not the actual address of `CheckStackTrace`.
 // See https://github.com/google/glog/issues/421 for the detail.
+#  endif
+NGLOG_ATTRIBUTE_NOINLINE
+#  ifndef __GNUC__
 static
 #  endif
-    void ATTRIBUTE_NOINLINE
-    CheckStackTrace(int i) {
-  INIT_ADDRESS_RANGE(CheckStackTrace, start, end, &expected_range[5]);
-  DECLARE_ADDRESS_LABEL(start);
+    void CheckStackTrace(int i) {
+  NGLOG_INIT_ADDRESS_RANGE(CheckStackTrace, start, end, &expected_range[5]);
+  NGLOG_DECLARE_ADDRESS_LABEL(start);
   for (int j = i; j >= 0; j--) {
     CheckStackTrace1(j);
   }
-  DECLARE_ADDRESS_LABEL(end);
+  NGLOG_DECLARE_ADDRESS_LABEL(end);
 }
 
 #  if defined(__clang__)

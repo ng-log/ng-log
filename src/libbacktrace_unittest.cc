@@ -77,7 +77,8 @@ TEST(FormatLibbacktraceLocation, RejectsWhenOutputIsOneByteTooSmall) {
 
 namespace {
 
-void ATTRIBUTE_NOINLINE FunctionSymbolizedForLibbacktraceTest() {
+NGLOG_ATTRIBUTE_NOINLINE
+void FunctionSymbolizedForLibbacktraceTest() {
   volatile int a = 0;
   a = a + 1;
 }

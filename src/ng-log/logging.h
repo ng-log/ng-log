@@ -56,20 +56,9 @@
 #include "ng-log/export.h"
 #include "ng-log/flags.h"
 #include "ng-log/internal/styled_value.h"
+#include "ng-log/log_severity.h"
 #include "ng-log/platform.h"
 #include "ng-log/types.h"
-
-#if defined(__has_attribute)
-#  if __has_attribute(used)
-#    define NGLOG_USED __attribute__((used))
-#  endif  // __has_attribute(used)
-#endif    // defined(__has_attribute)
-
-#if !defined(NGLOG_USED)
-#  define NGLOG_USED
-#endif  // !defined(NGLOG_USED)
-
-#include "ng-log/log_severity.h"
 #include "ng-log/vlog_is_on.h"
 
 namespace nglog {
@@ -630,14 +619,8 @@ NGLOG_EXPORT void MakeCheckOpValueString(std::ostream* os,
 
 // Build the error message string. Specify no inlining for code size.
 template <typename T1, typename T2>
-std::unique_ptr<std::string> MakeCheckOpString(const T1& v1, const T2& v2,
-                                               const char* exprtext)
-#if defined(__has_attribute)
-#  if __has_attribute(used)
-    __attribute__((noinline))
-#  endif
-#endif
-    ;
+NGLOG_ATTRIBUTE_NOINLINE std::unique_ptr<std::string> MakeCheckOpString(
+    const T1& v1, const T2& v2, const char* exprtext);
 
 // A helper class for formatting "expr (V1 vs. V2)" in a CHECK_XX
 // statement.  See MakeCheckOpString for sample usage.  Other
@@ -1189,7 +1172,7 @@ class NGLOG_EXPORT LogMessage {
     // linking against a Clang-built executable, this constructor will be
     // removed by the linker. We use this attribute to prevent the linker from
     // discarding it.
-    NGLOG_USED
+    NGLOG_ATTRIBUTE_USED
     LogStream(char* buf, int len, int64 ctr)
         : std::ostream(nullptr),
           streambuf_(buf, len),
@@ -1681,9 +1664,10 @@ inline NullStream& operator<<(NullStream& str, const T&) {
 class NGLOG_EXPORT NullStreamFatal : public NullStream {
  public:
   using NullStream::NullStream;
-  [[noreturn]]
   // Prevent the linker from discarding the destructor.
-  NGLOG_USED ~NullStreamFatal();
+  NGLOG_ATTRIBUTE_USED
+  [[noreturn]]
+  ~NullStreamFatal();
 };
 
 // Install a signal handler that will dump signal information and a stack

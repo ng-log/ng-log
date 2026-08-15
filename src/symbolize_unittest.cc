@@ -78,8 +78,6 @@ using testing::StrEq;
 
 #if defined(HAVE_STACKTRACE)
 
-#  define always_inline
-
 #  if defined(HAVE_ELF_H) || defined(HAVE_SYS_EXEC_ELF_H) || \
       defined(NGLOG_OS_WINDOWS) || defined(NGLOG_OS_CYGWIN)
 // A wrapper function for Symbolize() to make the unit test simple.
@@ -95,13 +93,13 @@ static const char* TrySymbolize(void* pc, nglog::SymbolizeOptions options =
 #  endif
 
 #  if defined(HAVE_ELF_H) || defined(HAVE_SYS_EXEC_ELF_H)
+// This unit tests make sense only with GCC.
+// Uses lots of GCC specific features.
 #    if defined(__GNUC__) && !defined(__OPENCC__)
-#      if defined(__i386__) && __i386__  // always_inline isn't supported for
-                                         // x86_64 with GCC 4.1.0.
-#        undef always_inline
-#        define always_inline __attribute__((always_inline))
-#        define HAVE_ALWAYS_INLINE
-#      endif  // __i386__
+#      if __GNUC__ >= 4
+#        define TEST_WITH_MODERN_GCC
+#      else
+#      endif  // __GNUC__ >= 4
 #      define TEST_WITH_LABEL_ADDRESSES
 #    endif
 
@@ -301,7 +299,8 @@ struct Foo {
   static void func(int x);
 };
 
-void ATTRIBUTE_NOINLINE Foo::func(int x) {
+NGLOG_ATTRIBUTE_NOINLINE
+void Foo::func(int x) {
   volatile int a = x;
   // NOTE: In C++20, increment of object of volatile-qualified type is
   // deprecated.
@@ -355,7 +354,8 @@ const char kAlternateStackFillValue = 0x55;
 // These helper functions look at the alternate stack buffer, and figure
 // out what portion of this buffer has been touched - this is the stack
 // consumption of the signal handler running on this alternate stack.
-static ATTRIBUTE_NOINLINE bool StackGrowsDown(int* x) {
+NGLOG_ATTRIBUTE_NOINLINE
+static bool StackGrowsDown(int* x) {
   int y;
   return &y < x;
 }
@@ -493,7 +493,8 @@ TEST(Symbolize, SymbolizeWithDemanglingStackConsumption) {
 
 // x86 specific tests.  Uses some inline assembler.
 extern "C" {
-inline void* always_inline inline_func() {
+NGLOG_ATTRIBUTE_ALWAYS_INLINE
+inline void* inline_func() {
   void* pc = nullptr;
 #    ifdef TEST_WITH_LABEL_ADDRESSES
   pc = &&curr_pc;
@@ -502,8 +503,10 @@ curr_pc:
   return pc;
 }
 
-void* ATTRIBUTE_NOINLINE non_inline_func();
-void* ATTRIBUTE_NOINLINE non_inline_func() {
+NGLOG_ATTRIBUTE_NOINLINE
+void* non_inline_func();
+NGLOG_ATTRIBUTE_NOINLINE
+void* non_inline_func() {
   void* pc = nullptr;
 #    ifdef TEST_WITH_LABEL_ADDRESSES
   pc = &&curr_pc;
@@ -512,8 +515,9 @@ curr_pc:
   return pc;
 }
 
-static void ATTRIBUTE_NOINLINE TestWithPCInsideNonInlineFunction() {
-#    if defined(TEST_WITH_LABEL_ADDRESSES) && defined(HAVE_ATTRIBUTE_NOINLINE)
+NGLOG_ATTRIBUTE_NOINLINE
+static void TestWithPCInsideNonInlineFunction() {
+#    if defined(TEST_WITH_LABEL_ADDRESSES)
   void* pc = non_inline_func();
   const char* symbol = TrySymbolize(pc);
 
@@ -524,8 +528,9 @@ static void ATTRIBUTE_NOINLINE TestWithPCInsideNonInlineFunction() {
 #    endif
 }
 
-static void ATTRIBUTE_NOINLINE TestWithPCInsideInlineFunction() {
-#    if defined(TEST_WITH_LABEL_ADDRESSES) && defined(HAVE_ALWAYS_INLINE)
+NGLOG_ATTRIBUTE_NOINLINE
+static void TestWithPCInsideInlineFunction() {
+#    if defined(TEST_WITH_LABEL_ADDRESSES)
   void* pc = inline_func();  // Must be inlined.
   const char* symbol = TrySymbolize(pc);
 
@@ -539,35 +544,26 @@ static void ATTRIBUTE_NOINLINE TestWithPCInsideInlineFunction() {
 
 TEST(Symbolize, PCInsideNonInlineFunction) {
   TestWithPCInsideNonInlineFunction();
-#    if !defined(TEST_WITH_LABEL_ADDRESSES) || !defined(HAVE_ATTRIBUTE_NOINLINE)
+#    if !defined(TEST_WITH_LABEL_ADDRESSES)
   GTEST_SKIP() << "the compiler does not support this symbolization test";
 #    endif
 }
 
 TEST(Symbolize, PCInsideInlineFunction) {
   TestWithPCInsideInlineFunction();
-#    if !defined(TEST_WITH_LABEL_ADDRESSES) || !defined(HAVE_ALWAYS_INLINE)
+#    if !defined(TEST_WITH_LABEL_ADDRESSES)
   GTEST_SKIP() << "the compiler does not support this symbolization test";
 #    endif
 }
 
 // Test with a return address.
-static const char* ATTRIBUTE_NOINLINE TestWithReturnAddress() {
-#    if defined(HAVE_ATTRIBUTE_NOINLINE)
+NGLOG_ATTRIBUTE_NOINLINE
+static const char* TestWithReturnAddress() {
   void* return_address = __builtin_return_address(0);
   return TrySymbolize(return_address, nglog::SymbolizeOptions::kNoLineNumbers);
-#    else
-  return nullptr;
-#    endif
 }
 
-TEST(Symbolize, ReturnAddress) {
-#    if defined(HAVE_ATTRIBUTE_NOINLINE)
-  EXPECT_NE(TestWithReturnAddress(), nullptr);
-#    else
-  GTEST_SKIP() << "the compiler does not support this symbolization test";
-#    endif
-}
+TEST(Symbolize, ReturnAddress) { EXPECT_NE(TestWithReturnAddress(), nullptr); }
 
 #  elif defined(NGLOG_OS_WINDOWS) || defined(NGLOG_OS_CYGWIN)
 
@@ -580,7 +576,8 @@ struct Foo {
   static void func(int x);
 };
 
-__declspec(noinline) void Foo::func(int x) {
+NGLOG_ATTRIBUTE_NOINLINE
+void Foo::func(int x) {
   volatile int a = x;
   // NOTE: In C++20, increment of object of volatile-qualified type is
   // deprecated.
@@ -615,7 +612,8 @@ TEST(Symbolize, SymbolizeWithDemangling) {
 #    endif
 }
 
-__declspec(noinline) const char* TestWithReturnAddress() {
+NGLOG_ATTRIBUTE_NOINLINE
+const char* TestWithReturnAddress() {
   void* return_address =
 #    ifdef __GNUC__  // Cygwin and MinGW support
       __builtin_return_address(0)

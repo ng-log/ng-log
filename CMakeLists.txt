@@ -488,6 +488,7 @@ set (NGLOG_SRCS
   src/internal/lock_metrics.h
   src/internal/log_cleaner.cc
   src/internal/log_cleaner.h
+  src/internal/attributes.h
   src/internal/source_location.cc
   src/internal/source_location.h
   src/internal/style_recorder.cc
@@ -728,6 +729,19 @@ if (BUILD_TESTING AND GTest_FOUND)
   )
 
   target_link_libraries (logging_unittest PRIVATE ng-log_test)
+
+  add_executable (platform_unittest
+    src/platform_unittest.cc
+  )
+
+  target_link_libraries (platform_unittest PRIVATE
+    ng-log_test GTest::gtest_main)
+
+  gtest_discover_tests (platform_unittest
+    TEST_PREFIX platform.
+    DISCOVERY_TIMEOUT 30
+    DISCOVERY_MODE PRE_TEST
+  )
 
   add_executable (preinit_warning_unittest
     src/preinit_warning_unittest.cc

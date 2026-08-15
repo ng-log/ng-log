@@ -88,7 +88,7 @@ SymbolizeOpenObjectFileCallback g_symbolize_open_object_file_callback = nullptr;
 // own demangling via ResolveFunctionAndLine(), so guard the definition
 // itself rather than leave it to trip -Wunused-function there.
 #  if !(defined(NGLOG_OS_WINDOWS) && defined(HAVE_ADDR2LINE))
-ATTRIBUTE_NOINLINE
+NGLOG_ATTRIBUTE_NOINLINE
 void DemangleInplace(char* out, size_t out_size) {
   char demangled[256];  // Big enough for sane demangled symbols.
   if (Demangle(out, demangled, sizeof(demangled))) {
@@ -174,10 +174,10 @@ void ErrorCallback(void* /*data*/, const char* /*msg*/, int /*errnum*/) {}
 // "pc" is handled entirely inside libbacktrace, so neither
 // OpenObjectFileContainingPcAndGetStartAddress() nor
 // g_symbolize_open_object_file_callback is consulted here.
-static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(void* pc, char* out,
-                                                    size_t out_size,
-                                                    SymbolizeOptions options,
-                                                    SymbolizedFrame* frame) {
+NGLOG_ATTRIBUTE_NOINLINE
+static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
+                                 SymbolizeOptions options,
+                                 SymbolizedFrame* frame) {
   if (out_size < 1) {
     return false;
   }
@@ -322,11 +322,10 @@ static int FileGetElfType(const int fd) {
 // and return true.  Otherwise, return false.
 // To keep stack consumption low, we would like this function to not get
 // inlined.
-static ATTRIBUTE_NOINLINE bool GetSectionHeaderByType(const int fd,
-                                                      ElfW(Half) sh_num,
-                                                      const size_t sh_offset,
-                                                      ElfW(Word) type,
-                                                      ElfW(Shdr) * out) {
+NGLOG_ATTRIBUTE_NOINLINE
+static bool GetSectionHeaderByType(const int fd, ElfW(Half) sh_num,
+                                   const size_t sh_offset, ElfW(Word) type,
+                                   ElfW(Shdr) * out) {
   // Read at most 16 section headers at a time to save read calls.
   ElfW(Shdr) buf[16];
   for (size_t i = 0; i < sh_num;) {
@@ -408,11 +407,10 @@ bool GetSectionHeaderByName(int fd, const char* name, size_t name_len,
 // to out.  Otherwise, return false.
 // To keep stack consumption low, we would like this function to not get
 // inlined.
-static ATTRIBUTE_NOINLINE bool FindSymbol(uint64_t pc, const int fd, char* out,
-                                          size_t out_size,
-                                          uint64_t symbol_offset,
-                                          const ElfW(Shdr) * strtab,
-                                          const ElfW(Shdr) * symtab) {
+NGLOG_ATTRIBUTE_NOINLINE
+static bool FindSymbol(std::uint64_t pc, const int fd, char* out,
+                       size_t out_size, uint64_t symbol_offset,
+                       const ElfW(Shdr) * strtab, const ElfW(Shdr) * symtab) {
   if (symtab == nullptr) {
     return false;
   }
@@ -452,7 +450,8 @@ static ATTRIBUTE_NOINLINE bool FindSymbol(uint64_t pc, const int fd, char* out,
       uint64_t end_address = start_address + symbol.st_size;
       if (symbol.st_value != 0 &&  // Skip null value symbols.
           symbol.st_shndx != 0 &&  // Skip undefined symbols.
-          start_address <= pc && pc < end_address) {
+          ELF64_ST_TYPE(symbol.st_info) != STT_TLS && start_address <= pc &&
+          pc < end_address) {
         ssize_t len1 = ReadFromOffset(fd, out, out_size,
                                       strtab->sh_offset + symbol.st_name);
         if (len1 <= 0 || memchr(out, '\0', out_size) == nullptr) {
@@ -631,12 +630,10 @@ static char* GetHex(const char* start, const char* end, uint64_t* hex) {
 // file is opened successfully, returns the file descriptor.  Otherwise,
 // returns -1.  |out_file_name_size| is the size of the file name buffer
 // (including the null-terminator).
-static ATTRIBUTE_NOINLINE FileDescriptor
-OpenObjectFileContainingPcAndGetStartAddress(uint64_t pc,
-                                             uint64_t& start_address,
-                                             uint64_t& base_address,
-                                             char* out_file_name,
-                                             size_t out_file_name_size) {
+NGLOG_ATTRIBUTE_NOINLINE
+static FileDescriptor OpenObjectFileContainingPcAndGetStartAddress(
+    uint64_t pc, uint64_t& start_address, uint64_t& base_address,
+    char* out_file_name, size_t out_file_name_size) {
   FileDescriptor maps_fd{
       FailureRetry([] { return open("/proc/self/maps", O_RDONLY); })};
   if (!maps_fd) {
@@ -862,10 +859,10 @@ static void SafeAppendHexNumber(uint64_t value, char* dest, size_t dest_size) {
 // and "out" is used as its output.
 // To keep stack consumption low, we would like this function to not
 // get inlined.
-static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(void* pc, char* out,
-                                                    size_t out_size,
-                                                    SymbolizeOptions options,
-                                                    SymbolizedFrame* frame) {
+NGLOG_ATTRIBUTE_NOINLINE
+static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
+                                 SymbolizeOptions options,
+                                 SymbolizedFrame* frame) {
   auto pc0 = reinterpret_cast<uintptr_t>(pc);
   uint64_t start_address = 0;
   uint64_t base_address = 0;
@@ -969,9 +966,10 @@ static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(void* pc, char* out,
 namespace nglog {
 inline namespace tools {
 
-static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(
-    void* pc, char* out, size_t out_size, SymbolizeOptions /*options*/,
-    SymbolizedFrame* /*frame*/) {
+NGLOG_ATTRIBUTE_NOINLINE
+static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
+                                 SymbolizeOptions /*options*/,
+                                 SymbolizedFrame* /*frame*/) {
   Dl_info info;
   if (dladdr(pc, &info)) {
     if (info.dli_sname) {
@@ -1013,10 +1011,10 @@ namespace {
 constexpr int kMaxObjectPathUtf8Length = MAX_PATH * 3;
 }  // namespace
 
-static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(void* pc, char* out,
-                                                    size_t out_size,
-                                                    SymbolizeOptions options,
-                                                    SymbolizedFrame* frame) {
+NGLOG_ATTRIBUTE_NOINLINE
+static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
+                                 SymbolizeOptions options,
+                                 SymbolizedFrame* frame) {
   HMODULE module = nullptr;
 
   if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
@@ -1102,10 +1100,10 @@ class SymInitializer final {
 
 }  // namespace
 
-static ATTRIBUTE_NOINLINE bool SymbolizeAndDemangle(void* pc, char* out,
-                                                    size_t out_size,
-                                                    SymbolizeOptions options,
-                                                    SymbolizedFrame* frame) {
+NGLOG_ATTRIBUTE_NOINLINE
+static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
+                                 SymbolizeOptions options,
+                                 SymbolizedFrame* frame) {
   const static SymInitializer symInitializer;
   if (!symInitializer.ready) {
     return false;

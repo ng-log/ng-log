@@ -352,7 +352,8 @@ TEST(SplitAddr2LineFunctionsOutput, RejectsEmptyNameField) {
 
 namespace {
 
-void ATTRIBUTE_NOINLINE FunctionSymbolizedForAddr2LineTest() {
+NGLOG_ATTRIBUTE_NOINLINE
+void FunctionSymbolizedForAddr2LineTest() {
   volatile int a = 0;
   a = a + 1;
 }

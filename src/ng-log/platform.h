@@ -1,4 +1,5 @@
 // Copyright (c) 2024, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -56,6 +57,47 @@
 #else
 // TODO(hamaji): Add other platforms.
 #error Platform not supported by ng-log. Please consider to contribute platform information by submitting a pull request on Github.
+#endif
+
+#if defined(_MSC_VER)
+#  define NGLOG_ATTRIBUTE_NOINLINE [[msvc::noinline]]
+#elif defined(__has_attribute)
+#  if __has_attribute(noinline)
+#    define NGLOG_ATTRIBUTE_NOINLINE [[gnu::noinline]]
+#  endif
+#  if __has_attribute(used)
+#    define NGLOG_ATTRIBUTE_USED [[gnu::used]]
+#  endif
+#endif
+
+#if !defined(NGLOG_ATTRIBUTE_NOINLINE)
+#  define NGLOG_ATTRIBUTE_NOINLINE
+#endif
+
+#if !defined(NGLOG_ATTRIBUTE_USED)
+#  define NGLOG_ATTRIBUTE_USED
+#endif
+
+#if defined(__GNUG__)
+#  define NGLOG_ATTRIBUTE_FORMAT(archetype, stringIndex, firstToCheck) \
+    [[gnu::format(archetype, stringIndex, firstToCheck)]]
+#else
+#  define NGLOG_ATTRIBUTE_FORMAT(archetype, stringIndex, firstToCheck)
+#endif
+
+#if defined(__cpp_inline_variables) && (__cpp_inline_variables >= 201606L)
+#  define NGLOG_INLINE_VARIABLE inline
+#else
+#  define NGLOG_INLINE_VARIABLE
+#endif
+
+#if defined(_MSC_VER)
+#  define NGLOG_MSVC_PUSH_DISABLE_WARNING(n) \
+    __pragma(warning(push)) __pragma(warning(disable : n))
+#  define NGLOG_MSVC_POP_WARNING() __pragma(warning(pop))
+#else
+#  define NGLOG_MSVC_PUSH_DISABLE_WARNING(n)
+#  define NGLOG_MSVC_POP_WARNING()
 #endif
 
 #endif  // NGLOG_PLATFORM_H

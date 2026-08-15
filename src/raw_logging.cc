@@ -1,4 +1,5 @@
 // Copyright (c) 2024, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -60,26 +61,21 @@
 #include "stacktrace.h"
 #include "utilities.h"
 
-#if (defined(HAVE_SYSCALL_H) || defined(HAVE_SYS_SYSCALL_H)) &&      \
-    (!(defined(NGLOG_OS_MACOSX)) && !(defined(NGLOG_OS_OPENBSD))) && \
-    !defined(NGLOG_OS_EMSCRIPTEN)
-#  define safe_write(fd, s, len) syscall(SYS_write, fd, s, len)
-#else
-// Not so safe, but what can you do?
-#  define safe_write(fd, s, len) write(fd, s, len)
-#endif
-
 namespace nglog {
 
-#if defined(__GNUC__)
-#  define NGLOG_ATTRIBUTE_FORMAT(archetype, stringIndex, firstToCheck) \
-    __attribute__((format(archetype, stringIndex, firstToCheck)))
-#  define NGLOG_ATTRIBUTE_FORMAT_ARG(stringIndex) \
-    __attribute__((format_arg(stringIndex)))
+namespace internal {
+
+std::intmax_t SafeWrite(int fd, const void* data, std::size_t size) noexcept {
+#if (defined(HAVE_SYSCALL_H) || defined(HAVE_SYS_SYSCALL_H)) && \
+    !defined(NGLOG_OS_MACOSX) && !defined(NGLOG_OS_OPENBSD) &&  \
+    !defined(NGLOG_OS_EMSCRIPTEN)
+  return syscall(SYS_write, fd, data, size);
 #else
-#  define NGLOG_ATTRIBUTE_FORMAT(archetype, stringIndex, firstToCheck)
-#  define NGLOG_ATTRIBUTE_FORMAT_ARG(stringIndex)
+  return write(fd, data, size);
 #endif
+}
+
+}  // namespace internal
 
 // CAVEAT: std::vsnprintf called from *DoRawLog below has some (exotic) code
 // paths that invoke malloc() and getenv() that might acquire some locks. If
@@ -188,7 +184,7 @@ void RawLog(LogSeverity severity, const char* file, int line,
   // avoiding FILE buffering (to avoid invoking malloc()), and bypassing
   // libc (to side-step any libc interception).
   // We write just once to avoid races with other invocations of RawLog.
-  safe_write(fileno(stderr), buffer, strlen(buffer));
+  internal::SafeWrite(fileno(stderr), buffer, strlen(buffer));
   if (severity == NGLOG_FATAL) {
     std::call_once(crashed, [file, line, msg_start, msg_size] {
       crash_reason.filename = file;

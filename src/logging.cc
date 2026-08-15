@@ -135,9 +135,6 @@ using std::perror;
 using std::fdopen;
 #endif
 
-// There is no thread annotation support.
-#define EXCLUSIVE_LOCKS_REQUIRED(mu)
-
 // TODO(hamaji): consider windows
 enum { PATH_SEPARATOR = '/' };
 
@@ -186,26 +183,6 @@ static void GetHostName(string* hostname) {
   *hostname = "(unknown)";
 #endif
 }
-
-#if defined(__cpp_lib_unreachable) && (__cpp_lib_unreachable >= 202202L)
-#  define NGLOG_UNREACHABLE std::unreachable()
-#elif !defined(NDEBUG)
-#  define NGLOG_UNREACHABLE assert(false)
-#else
-#  if defined(_MSC_VER)
-#    define NGLOG_UNREACHABLE __assume(false)
-#  elif defined(__has_builtin)
-#    if __has_builtin(unreachable)
-#      define NGLOG_UNREACHABLE __builtin_unreachable()
-#    endif
-#  endif
-#  if !defined(NGLOG_UNREACHABLE) && defined(__GNUG__)
-#    define NGLOG_UNREACHABLE __builtin_unreachable()
-#  endif
-#  if !defined(NGLOG_UNREACHABLE)
-#    define NGLOG_UNREACHABLE
-#  endif
-#endif
 
 namespace nglog {
 
@@ -2271,7 +2248,7 @@ void ReprintFatalMessage() {
 }
 
 // L >= log_mutex (callers must hold the log_mutex).
-void LogMessage::SendToLog() EXCLUSIVE_LOCKS_REQUIRED(log_mutex) {
+void LogMessage::SendToLog() NGLOG_LOCKS_REQUIRED(log_mutex) {
   static bool already_warned_before_init = false;
 
   RAW_DCHECK(data_->num_chars_to_log_ > 0 &&
@@ -2394,13 +2371,13 @@ bool LogMessage::SendToRegisteredSinks() {
 }
 
 // L >= log_mutex (callers must hold the log_mutex).
-void LogMessage::SendToSinkAndLog() EXCLUSIVE_LOCKS_REQUIRED(log_mutex) {
+void LogMessage::SendToSinkAndLog() NGLOG_LOCKS_REQUIRED(log_mutex) {
   SendToSink();
   SendToLog();
 }
 
 // L >= log_mutex (callers must hold the log_mutex).
-void LogMessage::SaveOrSendToLog() EXCLUSIVE_LOCKS_REQUIRED(log_mutex) {
+void LogMessage::SaveOrSendToLog() NGLOG_LOCKS_REQUIRED(log_mutex) {
   if (data_->outvec_ != nullptr) {
     RAW_DCHECK(data_->num_chars_to_log_ > 0 &&
                    data_->message_text_[data_->num_chars_to_log_ - 1] == '\n',
@@ -2414,7 +2391,7 @@ void LogMessage::SaveOrSendToLog() EXCLUSIVE_LOCKS_REQUIRED(log_mutex) {
   }
 }
 
-void LogMessage::WriteToStringAndLog() EXCLUSIVE_LOCKS_REQUIRED(log_mutex) {
+void LogMessage::WriteToStringAndLog() NGLOG_LOCKS_REQUIRED(log_mutex) {
   if (data_->message_ != nullptr) {
     RAW_DCHECK(data_->num_chars_to_log_ > 0 &&
                    data_->message_text_[data_->num_chars_to_log_ - 1] == '\n',

@@ -74,7 +74,8 @@ static void** NextStackFrame(void** old_sp) {
 }
 
 // This ensures that GetStackTrace stes up the Link Register properly.
-void StacktracePowerPCDummyFunction() __attribute__((noinline));
+NGLOG_ATTRIBUTE_NOINLINE
+void StacktracePowerPCDummyFunction();
 void StacktracePowerPCDummyFunction() { __asm__ volatile(""); }
 
 // If you change this function, also change GetStackFrames below.

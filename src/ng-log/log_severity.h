@@ -32,6 +32,7 @@
 #define NGLOG_LOG_SEVERITY_H
 
 #include "ng-log/export.h"
+#include "ng-log/platform.h"
 
 namespace nglog {
 
@@ -74,16 +75,6 @@ enum LogSeverity : int {
   FATAL = internal::kFatalSeverity
 #endif
 };
-
-#if defined(__cpp_inline_variables)
-#  if (__cpp_inline_variables >= 201606L)
-#    define NGLOG_INLINE_VARIABLE inline
-#  endif  // (__cpp_inline_variables >= 201606L)
-#endif    // defined(__cpp_inline_variables)
-
-#if !defined(NGLOG_INLINE_VARIABLE)
-#  define NGLOG_INLINE_VARIABLE
-#endif  // !defined(NGLOG_INLINE_VARIABLE)
 
 NGLOG_INLINE_VARIABLE
 constexpr int NUM_SEVERITIES = 4;
