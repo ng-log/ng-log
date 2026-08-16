@@ -31,17 +31,18 @@
 // Author: Satoru Takabayashi
 //
 // For reference check out:
-// http://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangling
-//
-// Note that we only have partial C++0x support yet.
+// https://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangling
 
 #include "demangle.h"
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <memory>
+#include <type_traits>
 
 #include "utilities.h"
 
@@ -59,44 +60,110 @@
 namespace nglog {
 inline namespace tools {
 
-#if !defined(NGLOG_OS_WINDOWS) && !defined(HAVE___CXA_DEMANGLE)
+#if !defined(_MSC_VER)
 namespace {
+enum class OperatorArity { kUnary, kBinary, kTernary, kOther };
+
 struct AbbrevPair {
   const char* const abbrev;
   const char* const real_name;
 };
 
+struct OperatorPair {
+  const char* const abbrev;
+  const char* const real_name;
+  const OperatorArity arity;
+};
+
 // List of operators from Itanium C++ ABI.
-const AbbrevPair kOperatorList[] = {
-    {"nw", "new"},    {"na", "new[]"},    {"dl", "delete"}, {"da", "delete[]"},
-    {"ps", "+"},      {"ng", "-"},        {"ad", "&"},      {"de", "*"},
-    {"co", "~"},      {"pl", "+"},        {"mi", "-"},      {"ml", "*"},
-    {"dv", "/"},      {"rm", "%"},        {"an", "&"},      {"or", "|"},
-    {"eo", "^"},      {"aS", "="},        {"pL", "+="},     {"mI", "-="},
-    {"mL", "*="},     {"dV", "/="},       {"rM", "%="},     {"aN", "&="},
-    {"oR", "|="},     {"eO", "^="},       {"ls", "<<"},     {"rs", ">>"},
-    {"lS", "<<="},    {"rS", ">>="},      {"eq", "=="},     {"ne", "!="},
-    {"lt", "<"},      {"gt", ">"},        {"le", "<="},     {"ge", ">="},
-    {"nt", "!"},      {"aa", "&&"},       {"oo", "||"},     {"pp", "++"},
-    {"mm", "--"},     {"cm", ","},        {"pm", "->*"},    {"pt", "->"},
-    {"cl", "()"},     {"ix", "[]"},       {"qu", "?"},      {"st", "sizeof"},
-    {"sz", "sizeof"}, {nullptr, nullptr},
+const OperatorPair kOperatorList[] = {
+    {"nw", "new", OperatorArity::kUnary},
+    {"na", "new[]", OperatorArity::kUnary},
+    {"dl", "delete", OperatorArity::kUnary},
+    {"da", "delete[]", OperatorArity::kUnary},
+    {"ps", "+", OperatorArity::kUnary},
+    {"ng", "-", OperatorArity::kUnary},
+    {"ad", "&", OperatorArity::kUnary},
+    {"de", "*", OperatorArity::kUnary},
+    {"co", "~", OperatorArity::kUnary},
+    {"pl", "+", OperatorArity::kBinary},
+    {"mi", "-", OperatorArity::kBinary},
+    {"ml", "*", OperatorArity::kBinary},
+    {"dv", "/", OperatorArity::kBinary},
+    {"rm", "%", OperatorArity::kBinary},
+    {"an", "&", OperatorArity::kBinary},
+    {"or", "|", OperatorArity::kBinary},
+    {"eo", "^", OperatorArity::kBinary},
+    {"aS", "=", OperatorArity::kBinary},
+    {"pL", "+=", OperatorArity::kBinary},
+    {"mI", "-=", OperatorArity::kBinary},
+    {"mL", "*=", OperatorArity::kBinary},
+    {"dV", "/=", OperatorArity::kBinary},
+    {"rM", "%=", OperatorArity::kBinary},
+    {"aN", "&=", OperatorArity::kBinary},
+    {"oR", "|=", OperatorArity::kBinary},
+    {"eO", "^=", OperatorArity::kBinary},
+    {"ls", "<<", OperatorArity::kBinary},
+    {"rs", ">>", OperatorArity::kBinary},
+    {"lS", "<<=", OperatorArity::kBinary},
+    {"rS", ">>=", OperatorArity::kBinary},
+    {"eq", "==", OperatorArity::kBinary},
+    {"ne", "!=", OperatorArity::kBinary},
+    {"lt", "<", OperatorArity::kBinary},
+    {"gt", ">", OperatorArity::kBinary},
+    {"le", "<=", OperatorArity::kBinary},
+    {"ge", ">=", OperatorArity::kBinary},
+    {"nt", "!", OperatorArity::kUnary},
+    {"aa", "&&", OperatorArity::kBinary},
+    {"oo", "||", OperatorArity::kBinary},
+    {"pp", "++", OperatorArity::kUnary},
+    {"mm", "--", OperatorArity::kUnary},
+    {"cm", ",", OperatorArity::kBinary},
+    {"pm", "->*", OperatorArity::kBinary},
+    {"pt", "->", OperatorArity::kBinary},
+    {"cl", "()", OperatorArity::kBinary},
+    {"ix", "[]", OperatorArity::kBinary},
+    {"qu", "?", OperatorArity::kTernary},
+    {"aw", "co_await", OperatorArity::kUnary},
+    {"ss", "<=>", OperatorArity::kBinary},
+    {"st", "sizeof", OperatorArity::kUnary},
+    {"sz", "sizeof", OperatorArity::kUnary},
+    {nullptr, nullptr, OperatorArity::kOther},
 };
 
 // List of builtin types from Itanium C++ ABI.
-const AbbrevPair kBuiltinTypeList[] = {
-    {"v", "void"},        {"w", "wchar_t"},
-    {"b", "bool"},        {"c", "char"},
-    {"a", "signed char"}, {"h", "unsigned char"},
-    {"s", "short"},       {"t", "unsigned short"},
-    {"i", "int"},         {"j", "unsigned int"},
-    {"l", "long"},        {"m", "unsigned long"},
-    {"x", "long long"},   {"y", "unsigned long long"},
-    {"n", "__int128"},    {"o", "unsigned __int128"},
-    {"f", "float"},       {"d", "double"},
-    {"e", "long double"}, {"g", "__float128"},
-    {"z", "ellipsis"},    {"Dn", "decltype(nullptr)"},
-    {nullptr, nullptr}};
+const AbbrevPair kBuiltinTypeList[] = {{"v", "void"},
+                                       {"w", "wchar_t"},
+                                       {"b", "bool"},
+                                       {"c", "char"},
+                                       {"a", "signed char"},
+                                       {"h", "unsigned char"},
+                                       {"s", "short"},
+                                       {"t", "unsigned short"},
+                                       {"i", "int"},
+                                       {"j", "unsigned int"},
+                                       {"l", "long"},
+                                       {"m", "unsigned long"},
+                                       {"x", "long long"},
+                                       {"y", "unsigned long long"},
+                                       {"n", "__int128"},
+                                       {"o", "unsigned __int128"},
+                                       {"f", "float"},
+                                       {"d", "double"},
+                                       {"e", "long double"},
+                                       {"g", "__float128"},
+                                       {"z", "ellipsis"},
+                                       {"Da", "auto"},
+                                       {"Dc", "decltype(auto)"},
+                                       {"Dd", "decimal64"},
+                                       {"De", "decimal128"},
+                                       {"Df", "decimal32"},
+                                       {"Dh", "float16"},
+                                       {"Di", "char32_t"},
+                                       {"Ds", "char16_t"},
+                                       {"Du", "char8_t"},
+                                       {"Dn", "decltype(nullptr)"},
+                                       {nullptr, nullptr}};
 
 // List of substitutions Itanium C++ ABI.
 const AbbrevPair kSubstitutionList[] = {
@@ -124,54 +191,98 @@ struct State {
   short nest_level;          // For nested names.
   bool append;               // Append flag.
   bool overflowed;           // True if output gets overflowed.
-  uint32 local_level;
-  uint32 expr_level;
-  uint32 arg_level;
+  bool skip_separator;
+  std::uint32_t local_level;
+  std::uint32_t expr_level;
+  std::uint32_t arg_level;
+  char pending_ref_qualifier;
+  std::uint32_t encoding_level;
+  std::uint32_t type_level;
+  std::uint32_t parse_depth;
 };
 
-// We don't use strlen() in libc since it's not guaranteed to be async
-// signal safe.
-size_t StrLen(const char* str) {
-  size_t len = 0;
-  while (*str != '\0') {
-    ++str;
-    ++len;
+constexpr std::uint32_t kMaxParseDepth = 64;
+constexpr std::uint32_t kMaxEncodingLevel = 64;
+constexpr std::uint32_t kMaxTypeLevel = 64;
+constexpr std::uint32_t kMaxTemplateArgumentLevel = 64;
+constexpr std::uint32_t kMaxExpressionLevel = 64;
+constexpr std::uint32_t kMaxLocalNameLevel = 64;
+
+template <std::uint32_t State::* level, std::uint32_t max_level>
+class ParseLevelGuard {
+ public:
+  explicit ParseLevelGuard(State* state) noexcept
+      : level_((state->*level) < max_level ? &(state->*level) : nullptr) {
+    if (level_ != nullptr) {
+      ++*level_;
+    }
   }
-  return len;
-}
+
+  ~ParseLevelGuard() {
+    if (level_ != nullptr) {
+      --*level_;
+    }
+  }
+
+  ParseLevelGuard(const ParseLevelGuard&) = delete;
+  ParseLevelGuard& operator=(const ParseLevelGuard&) = delete;
+  ParseLevelGuard(ParseLevelGuard&&) = delete;
+  ParseLevelGuard& operator=(ParseLevelGuard&&) = delete;
+
+  explicit operator bool() const noexcept { return level_ != nullptr; }
+
+ private:
+  std::uint32_t* const level_;
+};
+
+using ParseDepthGuard = ParseLevelGuard<&State::parse_depth, kMaxParseDepth>;
+using ParseEncodingGuard =
+    ParseLevelGuard<&State::encoding_level, kMaxEncodingLevel>;
+using ParseTypeGuard = ParseLevelGuard<&State::type_level, kMaxTypeLevel>;
+using ParseTemplateArgGuard =
+    ParseLevelGuard<&State::arg_level, kMaxTemplateArgumentLevel>;
+using ParseExpressionGuard =
+    ParseLevelGuard<&State::expr_level, kMaxExpressionLevel>;
+using ParseLocalNameGuard =
+    ParseLevelGuard<&State::local_level, kMaxLocalNameLevel>;
+
+static_assert(!std::is_copy_constructible<ParseDepthGuard>::value,
+              "parse guards must not be copyable");
+static_assert(!std::is_move_constructible<ParseDepthGuard>::value,
+              "parse guards must not be movable");
 
 // Returns true if "str" has at least "n" characters remaining.
 bool AtLeastNumCharsRemaining(const char* str, ssize_t n) {
-  for (ssize_t i = 0; i < n; ++i) {
-    if (str[i] == '\0') {
-      return false;
-    }
+  if (n <= 0) {
+    return true;
   }
-  return true;
+  return std::memchr(str, '\0', static_cast<std::size_t>(n)) == nullptr;
 }
 
 // Returns true if "str" has "prefix" as a prefix.
 bool StrPrefix(const char* str, const char* prefix) {
-  size_t i = 0;
-  while (str[i] != '\0' && prefix[i] != '\0' && str[i] == prefix[i]) {
-    ++i;
-  }
-  return prefix[i] == '\0';  // Consumed everything in "prefix".
+  return std::strncmp(str, prefix, std::strlen(prefix)) == 0;
 }
 
-void InitState(State* state, const char* mangled, char* out, size_t out_size) {
+void InitState(State* state, const char* mangled, char* out,
+               std::size_t out_size) {
   state->mangled_cur = mangled;
   state->out_cur = out;
   state->out_begin = out;
-  state->out_end = out + out_size;
+  state->out_end = out == nullptr ? nullptr : out + out_size;
   state->prev_name = nullptr;
   state->prev_name_length = -1;
   state->nest_level = -1;
   state->append = true;
   state->overflowed = false;
+  state->skip_separator = false;
   state->local_level = 0;
   state->expr_level = 0;
   state->arg_level = 0;
+  state->pending_ref_qualifier = '\0';
+  state->encoding_level = 0;
+  state->type_level = 0;
+  state->parse_depth = 0;
 }
 
 // Returns true and advances "mangled_cur" if we find "one_char_token"
@@ -189,8 +300,7 @@ bool ParseOneCharToken(State* state, const char one_char_token) {
 // at "mangled_cur" position.  It is assumed that "two_char_token" does
 // not contain '\0'.
 bool ParseTwoCharToken(State* state, const char* two_char_token) {
-  if (state->mangled_cur[0] == two_char_token[0] &&
-      state->mangled_cur[1] == two_char_token[1]) {
+  if (std::strncmp(state->mangled_cur, two_char_token, 2) == 0) {
     state->mangled_cur += 2;
     return true;
   }
@@ -200,12 +310,10 @@ bool ParseTwoCharToken(State* state, const char* two_char_token) {
 // Returns true and advances "mangled_cur" if we find any character in
 // "char_class" at "mangled_cur" position.
 bool ParseCharClass(State* state, const char* char_class) {
-  const char* p = char_class;
-  for (; *p != '\0'; ++p) {
-    if (state->mangled_cur[0] == *p) {
-      ++state->mangled_cur;
-      return true;
-    }
+  if (state->mangled_cur[0] != '\0' &&
+      std::strchr(char_class, state->mangled_cur[0]) != nullptr) {
+    ++state->mangled_cur;
+    return true;
   }
   return false;
 }
@@ -243,7 +351,7 @@ void Append(State* state, const char* const str, ssize_t length) {
     return;
   }
   for (ssize_t i = 0; i < length; ++i) {
-    if (state->out_cur + 1 < state->out_end) {  // +1 for '\0'
+    if (state->out_end - state->out_cur > 1) {  // +1 for '\0'
       *state->out_cur = str[i];
       ++state->out_cur;
     } else {
@@ -270,7 +378,7 @@ bool IsDigit(char c) { return c >= '0' && c <= '9'; }
 // cloned during optimization.  We treat any sequence (.<alpha>+.<digit>+)+ as
 // a function clone suffix.
 bool IsFunctionCloneSuffix(const char* str) {
-  size_t i = 0;
+  std::size_t i = 0;
   while (str[i] != '\0') {
     // Consume a single .<alpha>+.<digit>+ sequence.
     if (str[i] != '.' || !IsAlpha(str[i + 1])) {
@@ -319,7 +427,7 @@ void MaybeAppendWithLength(State* state, const char* const str,
 // A convenient wrapper around MaybeAppendWithLength().
 bool MaybeAppend(State* state, const char* const str) {
   if (state->append) {
-    size_t length = StrLen(str);
+    const std::size_t length = std::strlen(str);
     MaybeAppendWithLength(state, str, static_cast<ssize_t>(length));
   }
   return true;
@@ -358,6 +466,10 @@ void MaybeIncreaseNestLevel(State* state) {
 
 // Appends :: for nested names if necessary.
 void MaybeAppendSeparator(State* state) {
+  if (state->skip_separator) {
+    state->skip_separator = false;
+    return;
+  }
   if (state->nest_level >= 1) {
     MaybeAppend(state, "::");
   }
@@ -365,8 +477,8 @@ void MaybeAppendSeparator(State* state) {
 
 // Cancel the last separator if necessary.
 void MaybeCancelLastSeparator(State* state) {
-  if (state->nest_level >= 1 && state->append &&
-      state->out_begin <= state->out_cur - 2) {
+  if (state->nest_level >= 1 && state->append && state->out_begin != nullptr &&
+      state->out_cur != nullptr && state->out_cur - state->out_begin >= 2) {
     state->out_cur -= 2;
     *state->out_cur = '\0';
   }
@@ -390,9 +502,13 @@ bool ParseUnscopedTemplateName(State* state);
 bool ParseNestedName(State* state);
 bool ParsePrefix(State* state);
 bool ParseUnqualifiedName(State* state);
+bool ParseUnnamedTypeName(State* state);
+bool ParseStructuredBindingName(State* state);
 bool ParseSourceName(State* state);
 bool ParseLocalSourceName(State* state);
-bool ParseNumber(State* state, int* number_out);
+bool ParseNumber(State* state, std::int64_t* number_out);
+bool ParseNonNegativeNumber(State* state, std::int64_t* number_out);
+bool ParsePositiveNumber(State* state, std::int64_t* number_out);
 bool ParseFloatNumber(State* state);
 bool ParseSeqId(State* state);
 bool ParseIdentifier(State* state, ssize_t length);
@@ -400,6 +516,7 @@ bool ParseAbiTags(State* state);
 bool ParseAbiTag(State* state);
 bool ParseOperatorName(State* state);
 bool ParseSpecialName(State* state);
+bool ParseRequiresClause(State* state);
 bool ParseCallOffset(State* state);
 bool ParseNVOffset(State* state);
 bool ParseVOffset(State* state);
@@ -408,6 +525,7 @@ bool ParseType(State* state);
 bool ParseCVQualifiers(State* state);
 bool ParseBuiltinType(State* state);
 bool ParseFunctionType(State* state);
+bool ParseExceptionSpec(State* state);
 bool ParseBareFunctionType(State* state);
 bool ParseClassEnumType(State* state);
 bool ParseArrayType(State* state);
@@ -416,8 +534,15 @@ bool ParseTemplateParam(State* state);
 bool ParseTemplateTemplateParam(State* state);
 bool ParseTemplateArgs(State* state);
 bool ParseTemplateArg(State* state);
+bool ParseFunctionParam(State* state);
 bool ParseExpression(State* state);
 bool ParseExprPrimary(State* state);
+bool ParseUnresolvedName(State* state);
+bool ParseBracedExpression(State* state);
+bool ParseExpressionSequence(State* state, char terminator, bool require_one);
+bool ParseBracedExpressionSequence(State* state);
+bool ParseInitializer(State* state);
+bool ParseRequiresExpression(State* state);
 bool ParseLocalName(State* state);
 bool ParseDiscriminator(State* state);
 bool ParseSubstitution(State* state);
@@ -440,17 +565,12 @@ bool ParseSubstitution(State* state);
 // ParseEncoding() as an example of this convention.  We follow the
 // convention throughout the code.
 //
-// Originally we tried to do demangling without following the full ABI
-// syntax but it turned out we needed to follow the full syntax to
-// parse complicated cases like nested template arguments.  Note that
-// implementing a full-fledged demangler isn't trivial (libiberty's
-// cp-demangle.c has +4300 lines).
+// Following the full grammar is necessary for nested template arguments and
+// dependent expressions.
 //
 // Note that (foo) in <(foo) ...> is a modifier to be ignored.
 //
-// Reference:
-// - Itanium C++ ABI
-//   <http://www.codesourcery.com/cxx-abi/abi.html#mangling>
+// The grammar follows the Itanium C++ ABI mangling specification.
 
 // <mangled-name> ::= _Z <encoding>
 bool ParseMangledName(State* state) {
@@ -461,15 +581,33 @@ bool ParseMangledName(State* state) {
 //            ::= <(data) name>
 //            ::= <special-name>
 bool ParseEncoding(State* state) {
+  ParseDepthGuard depth(state);
+  if (!depth) {
+    return false;
+  }
+  ParseEncodingGuard level(state);
+  if (!level) {
+    return false;
+  }
   State copy = *state;
-  if (ParseName(state) && ParseBareFunctionType(state)) {
-    return true;
+  if (ParseName(state) && Optional(ParseRequiresClause(state)) &&
+      ParseBareFunctionType(state)) {
+    if (state->pending_ref_qualifier == 'R') {
+      MaybeAppend(state, " &");
+    } else if (state->pending_ref_qualifier == 'O') {
+      MaybeAppend(state, " &&");
+    }
+    state->pending_ref_qualifier = '\0';
+    if (Optional(ParseRequiresClause(state))) {
+      return true;
+    }
   }
   *state = copy;
 
   if (ParseName(state) || ParseSpecialName(state)) {
     return true;
   }
+  *state = copy;
   return false;
 }
 
@@ -478,6 +616,10 @@ bool ParseEncoding(State* state) {
 //        ::= <unscoped-name>
 //        ::= <local-name>
 bool ParseName(State* state) {
+  ParseDepthGuard depth(state);
+  if (!depth) {
+    return false;
+  }
   if (ParseNestedName(state) || ParseLocalName(state)) {
     return true;
   }
@@ -520,12 +662,25 @@ bool ParseUnscopedTemplateName(State* state) {
 // <nested-name> ::= N [<CV-qualifiers>] <prefix> <unqualified-name> E
 //               ::= N [<CV-qualifiers>] <template-prefix> <template-args> E
 bool ParseNestedName(State* state) {
+  ParseDepthGuard depth(state);
+  if (!depth) {
+    return false;
+  }
   State copy = *state;
   if (ParseOneCharToken(state, 'N') && EnterNestedName(state) &&
-      Optional(ParseCVQualifiers(state)) && ParsePrefix(state) &&
-      LeaveNestedName(state, copy.nest_level) &&
-      ParseOneCharToken(state, 'E')) {
-    return true;
+      Optional(ParseCVQualifiers(state))) {
+    char ref_qualifier = '\0';
+    if (state->mangled_cur[0] == 'R' || state->mangled_cur[0] == 'O') {
+      ref_qualifier = state->mangled_cur[0];
+      ++state->mangled_cur;
+    }
+    if (ParsePrefix(state)) {
+      state->pending_ref_qualifier = ref_qualifier;
+      if (LeaveNestedName(state, copy.nest_level) &&
+          ParseOneCharToken(state, 'E')) {
+        return true;
+      }
+    }
   }
   *state = copy;
   return false;
@@ -543,6 +698,10 @@ bool ParseNestedName(State* state) {
 //                   ::= <template-param>
 //                   ::= <substitution>
 bool ParsePrefix(State* state) {
+  ParseDepthGuard depth(state);
+  if (!depth) {
+    return false;
+  }
   bool has_something = false;
   while (true) {
     MaybeAppendSeparator(state);
@@ -554,10 +713,22 @@ bool ParsePrefix(State* state) {
     }
     MaybeCancelLastSeparator(state);
     if (has_something && ParseTemplateArgs(state)) {
-      return ParsePrefix(state);
-    } else {
-      break;
+      continue;
     }
+    State copy = *state;
+    if (ParseOneCharToken(state, 'M')) {
+      has_something = true;
+      continue;
+    }
+    *state = copy;
+    if (ParseOneCharToken(state, 'D') &&
+        (ParseOneCharToken(state, 't') || ParseOneCharToken(state, 'T')) &&
+        ParseExpression(state) && ParseOneCharToken(state, 'E')) {
+      has_something = true;
+      continue;
+    }
+    *state = copy;
+    break;
   }
   return true;
 }
@@ -567,27 +738,97 @@ bool ParsePrefix(State* state) {
 //                    ::= <source-name> [<abi-tags>]
 //                    ::= <local-source-name> [<abi-tags>]
 bool ParseUnqualifiedName(State* state) {
-  return (ParseOperatorName(state) || ParseCtorDtorName(state) ||
-          (ParseSourceName(state) && Optional(ParseAbiTags(state))) ||
-          (ParseLocalSourceName(state) && Optional(ParseAbiTags(state))));
-}
-
-// <source-name> ::= <positive length number> <identifier>
-bool ParseSourceName(State* state) {
   State copy = *state;
-  int length = -1;
-  if (ParseNumber(state, &length) && ParseIdentifier(state, length)) {
+  if (ParseOperatorName(state) && Optional(ParseAbiTags(state))) {
+    return true;
+  }
+  *state = copy;
+  if (ParseCtorDtorName(state)) {
+    return true;
+  }
+  *state = copy;
+  if (((state->mangled_cur[0] == 'U' &&
+        (state->mangled_cur[1] == 'l' || state->mangled_cur[1] == 't')) &&
+       ParseUnnamedTypeName(state)) ||
+      (state->mangled_cur[0] == 'D' && state->mangled_cur[1] == 'C' &&
+       ParseStructuredBindingName(state)) ||
+      (ParseSourceName(state) && Optional(ParseAbiTags(state))) ||
+      (ParseLocalSourceName(state) && Optional(ParseAbiTags(state)))) {
     return true;
   }
   *state = copy;
   return false;
 }
 
+// <source-name> ::= <positive length number> <identifier>
+bool ParseSourceName(State* state) {
+  State copy = *state;
+  std::int64_t length = -1;
+  if (ParsePositiveNumber(state, &length) &&
+      length <= std::numeric_limits<ssize_t>::max() &&
+      ParseIdentifier(state, static_cast<ssize_t>(length))) {
+    return true;
+  }
+  *state = copy;
+  return false;
+}
+
+// <unnamed-type-name> ::= Ut [<number>] _
+//                       ::= Ul <lambda-sig> E [<number>] _
+bool ParseUnnamedTypeName(State* state) {
+  State copy = *state;
+  if (ParseTwoCharToken(state, "Ut") &&
+      Optional(ParseNonNegativeNumber(state, nullptr)) &&
+      ParseOneCharToken(state, '_')) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "Ul")) {
+    const bool previous_append = state->append;
+    DisableAppend(state);
+    if (ParseType(state) && ZeroOrMore(ParseType, state) &&
+        ParseOneCharToken(state, 'E') &&
+        Optional(ParseNonNegativeNumber(state, nullptr)) &&
+        ParseOneCharToken(state, '_')) {
+      RestoreAppend(state, previous_append);
+      state->skip_separator = true;
+      return true;
+    }
+  }
+  *state = copy;
+  return false;
+}
+
+// <unqualified-name> ::= DC <source-name>+ E
+bool ParseStructuredBindingName(State* state) {
+  State copy = *state;
+  if (!ParseTwoCharToken(state, "DC")) {
+    return false;
+  }
+
+  MaybeAppend(state, "[");
+  if (!ParseSourceName(state)) {
+    *state = copy;
+    return false;
+  }
+  while (state->mangled_cur[0] != 'E') {
+    State item = *state;
+    MaybeAppend(state, ", ");
+    if (!ParseSourceName(state)) {
+      *state = item;
+      break;
+    }
+  }
+  if (!ParseOneCharToken(state, 'E')) {
+    *state = copy;
+    return false;
+  }
+  MaybeAppend(state, "]");
+  return true;
+}
+
 // <local-source-name> ::= L <source-name> [<discriminator>]
-//
-// References:
-//   http://gcc.gnu.org/bugzilla/show_bug.cgi?id=31775
-//   http://gcc.gnu.org/viewcvs?view=rev&revision=124467
 bool ParseLocalSourceName(State* state) {
   State copy = *state;
   if (ParseOneCharToken(state, 'L') && ParseSourceName(state) &&
@@ -601,30 +842,42 @@ bool ParseLocalSourceName(State* state) {
 // <number> ::= [n] <non-negative decimal integer>
 // If "number_out" is non-null, then *number_out is set to the value of the
 // parsed number on success.
-bool ParseNumber(State* state, int* number_out) {
-  int sign = 1;
-  if (ParseOneCharToken(state, 'n')) {
-    sign = -1;
-  }
+bool ParseNumber(State* state, std::int64_t* number_out) {
+  State copy = *state;
+  const bool negative = ParseOneCharToken(state, 'n');
   const char* p = state->mangled_cur;
-  int number = 0;
-  constexpr int int_max_by_10 = std::numeric_limits<int>::max() / 10;
+  if (*p == '0' && IsDigit(p[1])) {
+    *state = copy;
+    return false;
+  }
+
+  // Most grammar productions only need to validate and consume a number.
+  // Avoid imposing an artificial integer limit when its value is discarded.
+  if (number_out == nullptr) {
+    while (IsDigit(*p)) {
+      ++p;
+    }
+    if (p != state->mangled_cur) {
+      state->mangled_cur = p;
+      return true;
+    }
+    *state = copy;
+    return false;
+  }
+
+  std::uint64_t number = 0;
+  constexpr std::uint64_t kMaxPositive =
+      static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+  constexpr std::uint64_t kMaxNegative = kMaxPositive + 1;
+  const std::uint64_t limit = negative ? kMaxNegative : kMaxPositive;
   for (; *p != '\0'; ++p) {
     if (IsDigit(*p)) {
-      // Prevent signed integer overflow when multiplying
-      if (number > int_max_by_10) {
+      const std::uint64_t digit = static_cast<std::uint64_t>(*p - '0');
+      if (number > limit / 10 || (number == limit / 10 && digit > limit % 10)) {
+        *state = copy;
         return false;
       }
-
-      const int digit = *p - '0';
-      const int shifted = number * 10;
-
-      // Prevent signed integer overflow when summing
-      if (digit > std::numeric_limits<int>::max() - shifted) {
-        return false;
-      }
-
-      number = shifted + digit;
+      number = number * 10 + digit;
     } else {
       break;
     }
@@ -632,10 +885,58 @@ bool ParseNumber(State* state, int* number_out) {
   if (p != state->mangled_cur) {  // Conversion succeeded.
     state->mangled_cur = p;
     if (number_out != nullptr) {
-      *number_out = number * sign;
+      if (negative) {
+        if (number == kMaxNegative) {
+          *number_out = std::numeric_limits<std::int64_t>::min();
+        } else {
+          *number_out = -static_cast<std::int64_t>(number);
+        }
+      } else {
+        *number_out = static_cast<std::int64_t>(number);
+      }
     }
     return true;
   }
+  return false;
+}
+
+bool ParseNonNegativeNumber(State* state, std::int64_t* number_out) {
+  if (number_out == nullptr) {
+    if (state->mangled_cur[0] == 'n') {
+      return false;
+    }
+    return ParseNumber(state, nullptr);
+  }
+
+  State copy = *state;
+  std::int64_t number = 0;
+  if (ParseNumber(state, &number) && number >= 0) {
+    if (number_out != nullptr) {
+      *number_out = number;
+    }
+    return true;
+  }
+  *state = copy;
+  return false;
+}
+
+bool ParsePositiveNumber(State* state, std::int64_t* number_out) {
+  if (number_out == nullptr) {
+    if (state->mangled_cur[0] == '0' || state->mangled_cur[0] == 'n') {
+      return false;
+    }
+    return ParseNumber(state, nullptr);
+  }
+
+  State copy = *state;
+  std::int64_t number = 0;
+  if (ParseNonNegativeNumber(state, &number) && number > 0) {
+    if (number_out != nullptr) {
+      *number_out = number;
+    }
+    return true;
+  }
+  *state = copy;
   return false;
 }
 
@@ -659,12 +960,14 @@ bool ParseFloatNumber(State* state) {
 // using digits and upper case letters
 bool ParseSeqId(State* state) {
   const char* p = state->mangled_cur;
+  const char* const first = p;
   for (; *p != '\0'; ++p) {
     if (!IsDigit(*p) && !(*p >= 'A' && *p <= 'Z')) {
       break;
     }
   }
-  if (p != state->mangled_cur) {  // Conversion succeeded.
+  if (p != state->mangled_cur &&
+      !(p - first > 1 && first[0] == '0')) {  // Conversion succeeded.
     state->mangled_cur = p;
     return true;
   }
@@ -673,17 +976,13 @@ bool ParseSeqId(State* state) {
 
 // <identifier> ::= <unqualified source code identifier> (of given length)
 bool ParseIdentifier(State* state, ssize_t length) {
-  if (length == -1 || !AtLeastNumCharsRemaining(state->mangled_cur, length)) {
+  if (length < 0 || !AtLeastNumCharsRemaining(state->mangled_cur, length)) {
     return false;
   }
   if (IdentifierIsAnonymousNamespace(state, length)) {
     MaybeAppend(state, "(anonymous namespace)");
   } else {
     MaybeAppendWithLength(state, state->mangled_cur, length);
-  }
-  if (length < 0 ||
-      static_cast<std::size_t>(length) > StrLen(state->mangled_cur)) {
-    return false;
   }
   state->mangled_cur += length;
   return true;
@@ -722,6 +1021,12 @@ bool ParseOperatorName(State* state) {
   }
   *state = copy;
 
+  if (ParseTwoCharToken(state, "li") && MaybeAppend(state, "operator\"\" ") &&
+      ParseSourceName(state)) {
+    return true;
+  }
+  *state = copy;
+
   // Then vendor extended operators.
   if (ParseOneCharToken(state, 'v') && ParseCharClass(state, "0123456789") &&
       ParseSourceName(state)) {
@@ -735,7 +1040,7 @@ bool ParseOperatorName(State* state) {
     return false;
   }
   // We may want to perform a binary search if we really need speed.
-  const AbbrevPair* p;
+  const OperatorPair* p;
   for (p = kOperatorList; p->abbrev != nullptr; ++p) {
     if (state->mangled_cur[0] == p->abbrev[0] &&
         state->mangled_cur[1] == p->abbrev[1]) {
@@ -749,6 +1054,27 @@ bool ParseOperatorName(State* state) {
     }
   }
   return false;
+}
+
+bool OperatorHasArity(const char* const op, const OperatorArity arity) {
+  if (StrPrefix(op, "cv") || StrPrefix(op, "li") ||
+      (op[0] == 'v' && AtLeastNumCharsRemaining(op, 2) && IsDigit(op[1]))) {
+    return arity == OperatorArity::kUnary;
+  }
+
+  for (const OperatorPair* p = kOperatorList; p->abbrev != nullptr; ++p) {
+    if (op[0] == p->abbrev[0] && op[1] == p->abbrev[1]) {
+      return p->arity == arity;
+    }
+  }
+  return false;
+}
+
+bool ParseOperatorNameWithArity(State* state, const OperatorArity arity) {
+  if (!OperatorHasArity(state->mangled_cur, arity)) {
+    return false;
+  }
+  return ParseOperatorName(state);
 }
 
 // <special-name> ::= TV <type>
@@ -767,10 +1093,38 @@ bool ParseOperatorName(State* state) {
 //                ::= Th <call-offset> <(base) encoding>
 //                ::= Tv <call-offset> <(base) encoding>
 //
-// Note: we don't care much about them since they don't appear in
-// stack traces.  The are special data.
+// Note: these names do not usually appear in stack traces.
 bool ParseSpecialName(State* state) {
   State copy = *state;
+  if (ParseTwoCharToken(state, "GV") && ParseName(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "GR") && ParseName(state) &&
+      Optional(ParseSeqId(state)) && ParseOneCharToken(state, '_')) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "GT") && ParseOneCharToken(state, 't') &&
+      MaybeAppend(state, "transaction clone for ") && ParseEncoding(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "TW") &&
+      MaybeAppend(state, "TLS wrapper function for ") && ParseName(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "TH") &&
+      MaybeAppend(state, "TLS init function for ") && ParseName(state)) {
+    return true;
+  }
+  *state = copy;
+
   if (ParseOneCharToken(state, 'T') && ParseCharClass(state, "VTIS") &&
       ParseType(state)) {
     return true;
@@ -783,11 +1137,6 @@ bool ParseSpecialName(State* state) {
   }
   *state = copy;
 
-  if (ParseTwoCharToken(state, "GV") && ParseName(state)) {
-    return true;
-  }
-  *state = copy;
-
   if (ParseOneCharToken(state, 'T') && ParseCallOffset(state) &&
       ParseEncoding(state)) {
     return true;
@@ -796,7 +1145,7 @@ bool ParseSpecialName(State* state) {
 
   // G++ extensions
   if (ParseTwoCharToken(state, "TC") && ParseType(state) &&
-      ParseNumber(state, nullptr) && ParseOneCharToken(state, '_') &&
+      ParseNonNegativeNumber(state, nullptr) && ParseOneCharToken(state, '_') &&
       DisableAppend(state) && ParseType(state)) {
     RestoreAppend(state, copy.append);
     return true;
@@ -805,11 +1154,6 @@ bool ParseSpecialName(State* state) {
 
   if (ParseOneCharToken(state, 'T') && ParseCharClass(state, "FJ") &&
       ParseType(state)) {
-    return true;
-  }
-  *state = copy;
-
-  if (ParseTwoCharToken(state, "GR") && ParseName(state)) {
     return true;
   }
   *state = copy;
@@ -864,7 +1208,14 @@ bool ParseVOffset(State* state) {
 //                  ::= D0 | D1 | D2
 bool ParseCtorDtorName(State* state) {
   State copy = *state;
-  if (ParseOneCharToken(state, 'C') && ParseCharClass(state, "123")) {
+  if (ParseTwoCharToken(state, "CI") && ParseCharClass(state, "12") &&
+      state->prev_name != nullptr && ParseType(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseOneCharToken(state, 'C') && ParseCharClass(state, "123") &&
+      state->prev_name != nullptr) {
     const char* const prev_name = state->prev_name;
     const ssize_t prev_name_length = state->prev_name_length;
     MaybeAppendWithLength(state, prev_name, prev_name_length);
@@ -872,7 +1223,8 @@ bool ParseCtorDtorName(State* state) {
   }
   *state = copy;
 
-  if (ParseOneCharToken(state, 'D') && ParseCharClass(state, "012")) {
+  if (ParseOneCharToken(state, 'D') && ParseCharClass(state, "012") &&
+      state->prev_name != nullptr) {
     const char* const prev_name = state->prev_name;
     const ssize_t prev_name_length = state->prev_name_length;
     MaybeAppend(state, "~");
@@ -904,6 +1256,14 @@ bool ParseCtorDtorName(State* state) {
 //        ::= DT <expression> E  # decltype of an expression (C++0x)
 //
 bool ParseType(State* state) {
+  ParseDepthGuard depth(state);
+  if (!depth) {
+    return false;
+  }
+  ParseTypeGuard level(state);
+  if (!level) {
+    return false;
+  }
   // We should check CV-qualifers, and PRGC things first.
   State copy = *state;
   if (ParseCVQualifiers(state) && ParseType(state)) {
@@ -921,6 +1281,13 @@ bool ParseType(State* state) {
   }
   *state = copy;
 
+  if ((ParseTwoCharToken(state, "Ts") || ParseTwoCharToken(state, "Tu") ||
+       ParseTwoCharToken(state, "Te")) &&
+      ParseName(state)) {
+    return true;
+  }
+  *state = copy;
+
   if (ParseOneCharToken(state, 'D') && ParseCharClass(state, "tT") &&
       ParseExpression(state) && ParseOneCharToken(state, 'E')) {
     return true;
@@ -928,7 +1295,7 @@ bool ParseType(State* state) {
   *state = copy;
 
   if (ParseOneCharToken(state, 'U') && ParseSourceName(state) &&
-      ParseType(state)) {
+      Optional(ParseTemplateArgs(state)) && ParseType(state)) {
     return true;
   }
   *state = copy;
@@ -949,6 +1316,7 @@ bool ParseType(State* state) {
     return true;
   }
 
+  *state = copy;
   return false;
 }
 
@@ -966,17 +1334,47 @@ bool ParseCVQualifiers(State* state) {
 // <builtin-type> ::= v, etc.
 //                ::= u <source-name>
 bool ParseBuiltinType(State* state) {
+  State original = *state;
+  if (ParseTwoCharToken(state, "DF") &&
+      ParseNonNegativeNumber(state, nullptr) &&
+      (ParseOneCharToken(state, '_') || ParseOneCharToken(state, 'x') ||
+       ParseOneCharToken(state, 'b'))) {
+    return true;
+  }
+  *state = original;
+
+  Optional(ParseTwoCharToken(state, "DS"));
+  if ((ParseTwoCharToken(state, "DA") || ParseTwoCharToken(state, "DR")) &&
+      ParseCharClass(state, "stijlm")) {
+    return true;
+  }
+  *state = original;
+
+  if (ParseTwoCharToken(state, "DB") || ParseTwoCharToken(state, "DU")) {
+    State width = *state;
+    if (ParseNonNegativeNumber(state, nullptr) &&
+        ParseOneCharToken(state, '_')) {
+      return true;
+    }
+    *state = width;
+    if (ParseExpression(state) && ParseOneCharToken(state, '_')) {
+      return true;
+    }
+  }
+  *state = original;
+
   const AbbrevPair* p;
   for (p = kBuiltinTypeList; p->abbrev != nullptr; ++p) {
-    if (state->mangled_cur[0] == p->abbrev[0]) {
+    if (StrPrefix(state->mangled_cur, p->abbrev)) {
       MaybeAppend(state, p->real_name);
-      ++state->mangled_cur;
+      state->mangled_cur += std::strlen(p->abbrev);
       return true;
     }
   }
 
   State copy = *state;
-  if (ParseOneCharToken(state, 'u') && ParseSourceName(state)) {
+  if (ParseOneCharToken(state, 'u') && ParseSourceName(state) &&
+      Optional(ParseTemplateArgs(state))) {
     return true;
   }
   *state = copy;
@@ -986,9 +1384,42 @@ bool ParseBuiltinType(State* state) {
 // <function-type> ::= F [Y] <bare-function-type> E
 bool ParseFunctionType(State* state) {
   State copy = *state;
-  if (ParseOneCharToken(state, 'F') &&
+  if (Optional(ParseCVQualifiers(state)) &&
+      Optional(ParseExceptionSpec(state)) &&
+      Optional(ParseTwoCharToken(state, "Dx")) &&
+      ParseOneCharToken(state, 'F') &&
       Optional(ParseOneCharToken(state, 'Y')) && ParseBareFunctionType(state) &&
+      Optional(ParseCharClass(state, "RO")) && ParseOneCharToken(state, 'E')) {
+    return true;
+  }
+  *state = copy;
+  return false;
+}
+
+// <exception-spec> ::= Do
+//                    ::= DO <expression> E
+//                    ::= Dw <type>+ E
+bool ParseExceptionSpec(State* state) {
+  State copy = *state;
+  DisableAppend(state);
+  if (ParseTwoCharToken(state, "Do")) {
+    RestoreAppend(state, copy.append);
+    return true;
+  }
+  *state = copy;
+
+  DisableAppend(state);
+  if (ParseTwoCharToken(state, "DO") && ParseExpression(state) &&
       ParseOneCharToken(state, 'E')) {
+    RestoreAppend(state, copy.append);
+    return true;
+  }
+  *state = copy;
+
+  DisableAppend(state);
+  if (ParseTwoCharToken(state, "Dw") && OneOrMore(ParseType, state) &&
+      ParseOneCharToken(state, 'E')) {
+    RestoreAppend(state, copy.append);
     return true;
   }
   *state = copy;
@@ -1008,6 +1439,18 @@ bool ParseBareFunctionType(State* state) {
   return false;
 }
 
+// <requires-clause> ::= Q <constraint-expression>
+bool ParseRequiresClause(State* state) {
+  State copy = *state;
+  DisableAppend(state);
+  if (ParseOneCharToken(state, 'Q') && ParseExpression(state)) {
+    RestoreAppend(state, copy.append);
+    return true;
+  }
+  *state = copy;
+  return false;
+}
+
 // <class-enum-type> ::= <name>
 bool ParseClassEnumType(State* state) { return ParseName(state); }
 
@@ -1015,7 +1458,7 @@ bool ParseClassEnumType(State* state) { return ParseName(state); }
 //              ::= A [<(dimension) expression>] _ <(element) type>
 bool ParseArrayType(State* state) {
   State copy = *state;
-  if (ParseOneCharToken(state, 'A') && ParseNumber(state, nullptr) &&
+  if (ParseOneCharToken(state, 'A') && ParsePositiveNumber(state, nullptr) &&
       ParseOneCharToken(state, '_') && ParseType(state)) {
     return true;
   }
@@ -1048,7 +1491,7 @@ bool ParseTemplateParam(State* state) {
   }
 
   State copy = *state;
-  if (ParseOneCharToken(state, 'T') && ParseNumber(state, nullptr) &&
+  if (ParseOneCharToken(state, 'T') && ParseNonNegativeNumber(state, nullptr) &&
       ParseOneCharToken(state, '_')) {
     MaybeAppend(state, "?");  // We don't support template substitutions.
     return true;
@@ -1068,7 +1511,7 @@ bool ParseTemplateArgs(State* state) {
   State copy = *state;
   DisableAppend(state);
   if (ParseOneCharToken(state, 'I') && OneOrMore(ParseTemplateArg, state) &&
-      ParseOneCharToken(state, 'E')) {
+      Optional(ParseRequiresClause(state)) && ParseOneCharToken(state, 'E')) {
     RestoreAppend(state, copy.append);
     MaybeAppend(state, "<>");
     return true;
@@ -1083,35 +1526,253 @@ bool ParseTemplateArgs(State* state) {
 //                 ::= J <template-arg>* E        # argument pack
 //                 ::= X <expression> E
 bool ParseTemplateArg(State* state) {
-  // Avoid recursion above max_levels
-  constexpr uint32 max_levels = 6;
-
-  if (state->arg_level > max_levels) {
+  ParseDepthGuard depth(state);
+  if (!depth) {
     return false;
   }
-  ++state->arg_level;
+  ParseTemplateArgGuard level(state);
+  if (!level) {
+    return false;
+  }
+  State original = *state;
 
   State copy = *state;
   if ((ParseOneCharToken(state, 'I') || ParseOneCharToken(state, 'J')) &&
       ZeroOrMore(ParseTemplateArg, state) && ParseOneCharToken(state, 'E')) {
-    --state->arg_level;
     return true;
   }
   *state = copy;
 
   if (ParseType(state) || ParseExprPrimary(state)) {
-    --state->arg_level;
     return true;
   }
   *state = copy;
 
   if (ParseOneCharToken(state, 'X') && ParseExpression(state) &&
       ParseOneCharToken(state, 'E')) {
-    --state->arg_level;
+    return true;
+  }
+  *state = copy;
+  *state = original;
+  return false;
+}
+
+// <function-param> ::= fp [<CV-qualifiers>] _
+//                    ::= fp [<CV-qualifiers>] <number> _
+//                    ::= fL <number> p [<CV-qualifiers>] _
+//                    ::= fpT
+bool ParseFunctionParam(State* state) {
+  State copy = *state;
+  if (ParseTwoCharToken(state, "fp")) {
+    Optional(ParseCVQualifiers(state));
+    if (ParseOneCharToken(state, 'T') ||
+        (Optional(ParseNonNegativeNumber(state, nullptr)) &&
+         ParseOneCharToken(state, '_'))) {
+      return true;
+    }
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "fL") &&
+      ParseNonNegativeNumber(state, nullptr) && ParseOneCharToken(state, 'p')) {
+    Optional(ParseCVQualifiers(state));
+    if (Optional(ParseNonNegativeNumber(state, nullptr)) &&
+        ParseOneCharToken(state, '_')) {
+      return true;
+    }
+  }
+  *state = copy;
+  return false;
+}
+
+bool ParseSimpleId(State* state) {
+  State copy = *state;
+  if (ParseSourceName(state) && Optional(ParseTemplateArgs(state))) {
     return true;
   }
   *state = copy;
   return false;
+}
+
+bool ParseUnresolvedType(State* state) {
+  State copy = *state;
+  if (ParseTemplateParam(state) && Optional(ParseTemplateArgs(state))) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseSubstitution(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if ((ParseTwoCharToken(state, "Dt") || ParseTwoCharToken(state, "DT")) &&
+      ParseExpression(state) && ParseOneCharToken(state, 'E')) {
+    return true;
+  }
+  *state = copy;
+  return false;
+}
+
+bool ParseBaseUnresolvedName(State* state) {
+  State copy = *state;
+  if (ParseSimpleId(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "on") && ParseOperatorName(state) &&
+      Optional(ParseTemplateArgs(state))) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "dn") &&
+      (ParseUnresolvedType(state) || ParseSimpleId(state))) {
+    return true;
+  }
+  *state = copy;
+  return false;
+}
+
+// <unresolved-name> ::= [gs] <base-unresolved-name>
+//                     ::= sr <unresolved-type> <base-unresolved-name>
+//                     ::= sr N <unresolved-type>+ E <base-unresolved-name>
+bool ParseUnresolvedName(State* state) {
+  State copy = *state;
+  if (ParseBaseUnresolvedName(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (Optional(ParseTwoCharToken(state, "gs")) &&
+      ParseBaseUnresolvedName(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (Optional(ParseTwoCharToken(state, "gs")) &&
+      ParseTwoCharToken(state, "sr") && OneOrMore(ParseSimpleId, state) &&
+      ParseOneCharToken(state, 'E') && ParseBaseUnresolvedName(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "sr") && OneOrMore(ParseSimpleId, state) &&
+      ParseOneCharToken(state, 'E') && ParseBaseUnresolvedName(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "sr") && ParseUnresolvedType(state) &&
+      ParseBaseUnresolvedName(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "sr") && ParseOneCharToken(state, 'N') &&
+      ParseUnresolvedType(state) && OneOrMore(ParseSimpleId, state) &&
+      ParseOneCharToken(state, 'E') && ParseBaseUnresolvedName(state)) {
+    return true;
+  }
+  *state = copy;
+  return false;
+}
+
+// <braced-expression> ::= <expression>
+//                        ::= di <source-name> <braced-expression>
+//                        ::= dx <expression> <braced-expression>
+//                        ::= dX <expression> <expression> <braced-expression>
+bool ParseBracedExpression(State* state) {
+  ParseDepthGuard depth(state);
+  if (!depth) {
+    return false;
+  }
+  State copy = *state;
+  if (ParseExpression(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "di") && ParseSourceName(state) &&
+      ParseBracedExpression(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "dx") && ParseExpression(state) &&
+      ParseBracedExpression(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "dX") && ParseExpression(state) &&
+      ParseExpression(state) && ParseBracedExpression(state)) {
+    return true;
+  }
+  *state = copy;
+  return false;
+}
+
+bool ParseExpressionSequence(State* state, const char terminator,
+                             const bool require_one) {
+  bool parsed = false;
+  while (state->mangled_cur[0] != terminator) {
+    if (!ParseExpression(state)) {
+      return false;
+    }
+    parsed = true;
+  }
+  return parsed || !require_one;
+}
+
+bool ParseBracedExpressionSequence(State* state) {
+  while (state->mangled_cur[0] != 'E') {
+    if (!ParseBracedExpression(state)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// <expression> ::= rq <requirement>+ E
+//                ::= rQ <bare-function-type> _ <requirement>+ E
+bool ParseRequiresExpression(State* state) {
+  State copy = *state;
+  if (ParseTwoCharToken(state, "rQ")) {
+    while (state->mangled_cur[0] != '_' && state->mangled_cur[0] != '\0') {
+      if (!ParseType(state)) {
+        *state = copy;
+        return false;
+      }
+    }
+    if (!ParseOneCharToken(state, '_')) {
+      *state = copy;
+      return false;
+    }
+  } else if (!ParseTwoCharToken(state, "rq")) {
+    return false;
+  }
+
+  bool parsed_requirement = false;
+  while (state->mangled_cur[0] != 'E' && state->mangled_cur[0] != '\0') {
+    if (ParseOneCharToken(state, 'X') && ParseExpression(state)) {
+      Optional(ParseOneCharToken(state, 'N'));
+      if (ParseOneCharToken(state, 'R') && !ParseName(state)) {
+        *state = copy;
+        return false;
+      }
+      parsed_requirement = true;
+      continue;
+    }
+    *state = copy;
+    return false;
+  }
+  if (!parsed_requirement || !ParseOneCharToken(state, 'E')) {
+    *state = copy;
+    return false;
+  }
+  return true;
 }
 
 // <expression> ::= <template-param>
@@ -1124,67 +1785,244 @@ bool ParseTemplateArg(State* state) {
 //              ::= sr <type> <unqualified-name> <template-args>
 //              ::= sr <type> <unqualified-name>
 bool ParseExpression(State* state) {
-  if (ParseTemplateParam(state) || ParseExprPrimary(state)) {
-    return true;
-  }
-
-  // Avoid recursion above max_levels
-  constexpr uint32 max_levels = 5;
-
-  if (state->expr_level > max_levels) {
+  ParseDepthGuard depth(state);
+  if (!depth) {
     return false;
   }
-  ++state->expr_level;
+  if (ParseTemplateParam(state) || ParseFunctionParam(state) ||
+      ParseExprPrimary(state) || ParseRequiresExpression(state)) {
+    return true;
+  }
+
+  ParseExpressionGuard level(state);
+  if (!level) {
+    return false;
+  }
+  State original = *state;
 
   State copy = *state;
-  if (ParseOperatorName(state) && ParseExpression(state) &&
-      ParseExpression(state) && ParseExpression(state)) {
-    --state->expr_level;
+  if ((ParseTwoCharToken(state, "pp") || ParseTwoCharToken(state, "mm")) &&
+      ParseOneCharToken(state, '_') && ParseExpression(state)) {
     return true;
   }
   *state = copy;
 
-  if (ParseOperatorName(state) && ParseExpression(state) &&
+  if (ParseTwoCharToken(state, "cv") && ParseType(state)) {
+    if (ParseExpression(state)) {
+      return true;
+    }
+    *state = copy;
+    if (ParseTwoCharToken(state, "cv") && ParseType(state) &&
+        ParseOneCharToken(state, '_') &&
+        ParseExpressionSequence(state, 'E', false) &&
+        ParseOneCharToken(state, 'E')) {
+      return true;
+    }
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "ti") && ParseType(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "te") && ParseExpression(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "at") && ParseType(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "az") && ParseExpression(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "nx") && ParseExpression(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "tw") && ParseExpression(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "tr")) {
+    return true;
+  }
+  *state = copy;
+
+  if (Optional(ParseOneCharToken(state, 'g')) &&
+      (ParseTwoCharToken(state, "nw") || ParseTwoCharToken(state, "na"))) {
+    while (state->mangled_cur[0] != '_' && state->mangled_cur[0] != '\0') {
+      if (!ParseExpression(state)) {
+        break;
+      }
+    }
+    if (ParseOneCharToken(state, '_') && ParseType(state) &&
+        (ParseOneCharToken(state, 'E') || ParseInitializer(state))) {
+      return true;
+    }
+  }
+  *state = copy;
+
+  if (Optional(ParseOneCharToken(state, 'g')) &&
+      (ParseTwoCharToken(state, "dl") || ParseTwoCharToken(state, "da")) &&
       ParseExpression(state)) {
-    --state->expr_level;
     return true;
   }
   *state = copy;
 
-  if (ParseOperatorName(state) && ParseExpression(state)) {
-    --state->expr_level;
+  if ((ParseTwoCharToken(state, "fl") || ParseTwoCharToken(state, "fr")) &&
+      ParseOperatorName(state) && ParseExpression(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if ((ParseTwoCharToken(state, "fL") || ParseTwoCharToken(state, "fR")) &&
+      ParseOperatorName(state) && ParseExpression(state) &&
+      ParseExpression(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseOneCharToken(state, 'u') && ParseSourceName(state) &&
+      ZeroOrMore(ParseTemplateArg, state) && ParseOneCharToken(state, 'E')) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "cl") &&
+      ParseExpressionSequence(state, 'E', true) &&
+      ParseOneCharToken(state, 'E')) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "cp") && ParseUnresolvedName(state) &&
+      ParseExpressionSequence(state, 'E', false) &&
+      ParseOneCharToken(state, 'E')) {
+    return true;
+  }
+  *state = copy;
+
+  if ((ParseTwoCharToken(state, "dc") || ParseTwoCharToken(state, "sc") ||
+       ParseTwoCharToken(state, "cc") || ParseTwoCharToken(state, "rc")) &&
+      ParseType(state) && ParseExpression(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "tl") && ParseType(state) &&
+      ParseBracedExpressionSequence(state) && ParseOneCharToken(state, 'E')) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "il") && ParseBracedExpressionSequence(state) &&
+      ParseOneCharToken(state, 'E')) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "ds") && ParseExpression(state) &&
+      ParseExpression(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "sZ") &&
+      (ParseTemplateParam(state) || ParseFunctionParam(state))) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "sP") && ZeroOrMore(ParseTemplateArg, state) &&
+      ParseOneCharToken(state, 'E')) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "dt") && ParseExpression(state) &&
+      ParseUnresolvedName(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseTwoCharToken(state, "pt") && ParseExpression(state) &&
+      ParseUnresolvedName(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseUnresolvedName(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseOperatorNameWithArity(state, OperatorArity::kTernary) &&
+      ParseExpression(state) && ParseExpression(state) &&
+      ParseExpression(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseOperatorNameWithArity(state, OperatorArity::kBinary) &&
+      ParseExpression(state) && ParseExpression(state)) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseOperatorNameWithArity(state, OperatorArity::kUnary) &&
+      ParseExpression(state)) {
     return true;
   }
   *state = copy;
 
   if (ParseTwoCharToken(state, "st") && ParseType(state)) {
     return true;
-    --state->expr_level;
   }
   *state = copy;
 
+  State qualified_constraint = *state;
+  if (ParseTwoCharToken(state, "sr") && ParseSourceName(state) &&
+      ParseOneCharToken(state, 'E') && ParseUnqualifiedName(state) &&
+      ParseTemplateArgs(state)) {
+    return true;
+  }
+  *state = qualified_constraint;
+
   if (ParseTwoCharToken(state, "sr") && ParseType(state) &&
       ParseUnqualifiedName(state) && ParseTemplateArgs(state)) {
-    --state->expr_level;
     return true;
   }
   *state = copy;
 
   if (ParseTwoCharToken(state, "sr") && ParseType(state) &&
       ParseUnqualifiedName(state)) {
-    --state->expr_level;
     return true;
   }
   *state = copy;
 
   // Pack expansion
-  if (ParseTwoCharToken(state, "sp") && ParseType(state)) {
-    --state->expr_level;
+  if (ParseTwoCharToken(state, "sp") && ParseExpression(state)) {
     return true;
   }
   *state = copy;
 
+  *state = original;
   return false;
+}
+
+// <initializer> ::= pi <expression>* E
+bool ParseInitializer(State* state) {
+  return ParseTwoCharToken(state, "pi") &&
+         ParseExpressionSequence(state, 'E', false) &&
+         ParseOneCharToken(state, 'E');
 }
 
 // <expr-primary> ::= L <type> <(value) number> E
@@ -1201,7 +2039,16 @@ bool ParseExprPrimary(State* state) {
   *state = copy;
 
   if (ParseOneCharToken(state, 'L') && ParseType(state) &&
-      ParseFloatNumber(state) && ParseOneCharToken(state, 'E')) {
+      ParseFloatNumber(state) &&
+      (ParseOneCharToken(state, 'E') ||
+       (ParseOneCharToken(state, '_') && ParseFloatNumber(state) &&
+        ParseOneCharToken(state, 'E')))) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseOneCharToken(state, 'L') && ParseTwoCharToken(state, "Dn") &&
+      ParseOneCharToken(state, 'E')) {
     return true;
   }
   *state = copy;
@@ -1218,6 +2065,19 @@ bool ParseExprPrimary(State* state) {
   }
   *state = copy;
 
+  // String literals are encoded by their array type without their value.
+  // Keep the type out of the abbreviated output to preserve the parser's
+  // small output footprint.
+  if (ParseOneCharToken(state, 'L')) {
+    const bool previous_append = state->append;
+    DisableAppend(state);
+    if (ParseArrayType(state) && ParseOneCharToken(state, 'E')) {
+      RestoreAppend(state, previous_append);
+      return true;
+    }
+  }
+  *state = copy;
+
   return false;
 }
 
@@ -1225,35 +2085,54 @@ bool ParseExprPrimary(State* state) {
 //                 [<discriminator>]
 //              := Z <(function) encoding> E s [<discriminator>]
 bool ParseLocalName(State* state) {
-  // Avoid recursion above max_levels
-  constexpr uint32 max_levels = 5;
-  if (state->local_level > max_levels) {
+  ParseDepthGuard depth(state);
+  if (!depth) {
     return false;
   }
-  ++state->local_level;
+  ParseLocalNameGuard level(state);
+  if (!level) {
+    return false;
+  }
+  State original = *state;
 
   State copy = *state;
   if (ParseOneCharToken(state, 'Z') && ParseEncoding(state) &&
       ParseOneCharToken(state, 'E') && MaybeAppend(state, "::") &&
       ParseName(state) && Optional(ParseDiscriminator(state))) {
-    --state->local_level;
     return true;
   }
   *state = copy;
 
   if (ParseOneCharToken(state, 'Z') && ParseEncoding(state) &&
       ParseTwoCharToken(state, "Es") && Optional(ParseDiscriminator(state))) {
-    --state->local_level;
     return true;
   }
   *state = copy;
+
+  if (ParseOneCharToken(state, 'Z') && ParseEncoding(state) &&
+      ParseTwoCharToken(state, "Ed") &&
+      ParseNonNegativeNumber(state, nullptr) && ParseOneCharToken(state, '_') &&
+      MaybeAppend(state, "::") && ParseName(state) &&
+      Optional(ParseDiscriminator(state))) {
+    return true;
+  }
+  *state = original;
   return false;
 }
 
 // <discriminator> := _ <(non-negative) number>
 bool ParseDiscriminator(State* state) {
   State copy = *state;
-  if (ParseOneCharToken(state, '_') && ParseNumber(state, nullptr)) {
+  std::int64_t number = 0;
+  if (ParseTwoCharToken(state, "__") &&
+      ParseNonNegativeNumber(state, &number) && number >= 10 &&
+      ParseOneCharToken(state, '_')) {
+    return true;
+  }
+  *state = copy;
+
+  if (ParseOneCharToken(state, '_') && ParseNonNegativeNumber(state, &number) &&
+      number < 10) {
     return true;
   }
   *state = copy;
@@ -1265,6 +2144,7 @@ bool ParseDiscriminator(State* state) {
 //                ::= St, etc.
 bool ParseSubstitution(State* state) {
   if (ParseTwoCharToken(state, "S_")) {
+    Optional(ParseAbiTags(state));
     MaybeAppend(state, "?");  // We don't support substitutions.
     return true;
   }
@@ -1272,6 +2152,7 @@ bool ParseSubstitution(State* state) {
   State copy = *state;
   if (ParseOneCharToken(state, 'S') && ParseSeqId(state) &&
       ParseOneCharToken(state, '_')) {
+    Optional(ParseAbiTags(state));
     MaybeAppend(state, "?");  // We don't support substitutions.
     return true;
   }
@@ -1288,6 +2169,7 @@ bool ParseSubstitution(State* state) {
           MaybeAppend(state, p->real_name);
         }
         ++state->mangled_cur;
+        Optional(ParseAbiTags(state));
         return true;
       }
     }
@@ -1311,7 +2193,10 @@ bool ParseTopLevelMangledName(State* state) {
         MaybeAppend(state, state->mangled_cur);
         return true;
       }
-      return ParseName(state);
+      if (state->mangled_cur[0] == '.' && state->mangled_cur[1] != '\0') {
+        return true;
+      }
+      return false;
     }
     return true;
   }
@@ -1320,14 +2205,22 @@ bool ParseTopLevelMangledName(State* state) {
 }  // namespace
 #endif
 
-// The demangler entry point.
-bool Demangle(const char* mangled, char* out, size_t out_size) {
-  // Checked ahead of NGLOG_OS_WINDOWS: which demangler understands "mangled"
-  // depends on the compiler's name-mangling ABI, not the target OS. MinGW
-  // and Clang on Windows use the Itanium ABI (abi::__cxa_demangle()) just
-  // like on Linux or macOS; only MSVC uses the ABI UnDecorateSymbolName()
-  // below understands.
-#if defined(HAVE___CXA_DEMANGLE)
+bool ValidDemangleArguments(const char* mangled, const char* out,
+                            std::size_t out_size) {
+  return mangled != nullptr && out != nullptr && out_size != 0;
+}
+
+// The system demangler is kept separate because it may allocate memory.
+bool DemangleWithSystem(const char* mangled, char* out, std::size_t out_size) {
+  if (out != nullptr && out_size != 0) {
+    out[0] = '\0';
+  }
+  if (!ValidDemangleArguments(mangled, out, out_size)) {
+    return false;
+  }
+
+#if defined(HAVE___CXA_DEMANGLE) && \
+    !(defined(NGLOG_OS_WINDOWS) && defined(_MSC_VER))
   int status = -1;
   std::size_t n = 0;
   std::unique_ptr<char, decltype(&std::free)> unmangled{
@@ -1365,14 +2258,21 @@ bool Demangle(const char* mangled, char* out, size_t out_size) {
   // mangled symbol is guaranteed not to have parentheses,
   // so we search for `(` and extract up to `)`.
   //
-  // Since we may be in a signal handler here, we cannot use `std::string`.
-  char buffer[1024];  // Big enough for a sane symbol.
-  const char* lparen = strchr(mangled, '(');
+  // Avoid `std::string` because this API is also used by low-level callers.
+  constexpr std::size_t kWindowsSymbolBufferSize = 1024;
+  char buffer[kWindowsSymbolBufferSize];
+  const char* lparen = std::strchr(mangled, '(');
   if (lparen) {
     // Extract the string `(?...)`
-    const char* rparen = strchr(lparen, ')');
-    size_t length = static_cast<size_t>(rparen - lparen) - 1;
-    strncpy(buffer, lparen + 1, length);
+    const char* rparen = std::strchr(lparen, ')');
+    if (rparen == nullptr) {
+      return false;
+    }
+    const std::size_t length = static_cast<std::size_t>(rparen - lparen) - 1;
+    if (length >= sizeof(buffer)) {
+      return false;
+    }
+    std::memcpy(buffer, lparen + 1, length);
     buffer[length] = '\0';
     mangled = buffer;
   }  // Else the symbol wasn't inside a set of parentheses
@@ -1384,6 +2284,27 @@ bool Demangle(const char* mangled, char* out, size_t out_size) {
   (void)out_size;
   return false;
 #  endif
+#else
+  (void)mangled;
+  (void)out;
+  (void)out_size;
+  return false;
+#endif
+}
+
+// The local parser is the default because it does not allocate memory or
+// invoke a platform demangler. This keeps the Itanium path suitable for use
+// from failure signal handlers.
+bool Demangle(const char* mangled, char* out, std::size_t out_size) {
+  if (out != nullptr && out_size != 0) {
+    out[0] = '\0';
+  }
+  if (!ValidDemangleArguments(mangled, out, out_size)) {
+    return false;
+  }
+
+#if defined(_MSC_VER)
+  return false;
 #else
   State state;
   InitState(&state, mangled, out, out_size);

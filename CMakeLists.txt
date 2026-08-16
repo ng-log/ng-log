@@ -210,8 +210,7 @@ check_cxx_symbol_exists (UnDecorateSymbolName "windows.h;dbghelp.h" HAVE_DBGHELP
 cmake_pop_check_state ()
 
 if (NOT WITH_FUZZING OR WITH_FUZZING STREQUAL none)
-  # Disable compiler demangler if fuzzing is active; we only want to use the
-  # ng-log demangler then.
+  # Detect the optional system demangler for explicit on-demand use.
   check_cxx_symbol_exists (abi::__cxa_demangle cxxabi.h HAVE___CXA_DEMANGLE)
 endif (NOT WITH_FUZZING OR WITH_FUZZING STREQUAL none)
 
@@ -860,21 +859,11 @@ if (BUILD_TESTING AND GTest_FOUND)
 
   target_link_libraries (demangle_unittest PRIVATE ng-log_test)
 
-  if (HAVE___CXA_DEMANGLE)
-    # Demangle tests use a different (reduced) representation of symbols
-    gtest_discover_tests (demangle_unittest
-      TEST_PREFIX demangle.
-      DISCOVERY_TIMEOUT 30
-      DISCOVERY_MODE PRE_TEST
-      PROPERTIES DISABLED ON
-    )
-  else (HAVE___CXA_DEMANGLE)
-    gtest_discover_tests (demangle_unittest
-      TEST_PREFIX demangle.
-      DISCOVERY_TIMEOUT 30
-      DISCOVERY_MODE PRE_TEST
-    )
-  endif (HAVE___CXA_DEMANGLE)
+  gtest_discover_tests (demangle_unittest
+    TEST_PREFIX demangle.
+    DISCOVERY_TIMEOUT 30
+    DISCOVERY_MODE PRE_TEST
+  )
 
   add_executable (color_unittest
     src/color_unittest.cc

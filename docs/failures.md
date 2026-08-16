@@ -11,6 +11,8 @@ nglog::InstallFailureSignalHandler()`.
 The transcript below was captured from a terminal and converted to HTML with
 ansi2html using these commands:
 
+cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug -DWITH_LINE_INFO=auto
+cmake --build build-debug --target color_stacktrace_example
 env -u NO_COLOR TERM=xterm-256color script -q -c 'build-debug/color_stacktrace_example' /tmp/ng-log-color-stacktrace.typescript
 perl -0pe 's/\r//g; s/\AScript started.*?\n//s; s/\nScript done.*\z//s; s/\e\]8;;[^\e]*\e\\//g; s/\A.*?(?=\*\*\* Aborted)//s' /tmp/ng-log-color-stacktrace.typescript | ansi2html -i -W -s xterm | perl -pe 's{<span style="color: #00cdcd">((src|examples)/([^:<]+):([0-9]+))</span>}{<a href="https://github.com/ng-log/ng-log/blob/master/$2/$3#L$4" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">$1</span></a>}g' > docs/failure-stacktrace.html
 -->
@@ -27,6 +29,24 @@ When writing to a terminal, this output is
 [colorized](flags.md#colorizing-output): the address, `file:line`, and
 function name of each frame are colored separately, and `file:line`
 references become clickable hyperlinks back to the source.
+
+## Signal-Safe C++ Demangling
+
+Stack symbolization always uses an independent recursive descent parser based
+on the public [Itanium C++ ABI name mangling
+grammar](https://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangling). The
+parser writes directly into the caller-provided buffer without dynamic
+allocation, so the Itanium path is suitable for failure signal handlers.
+
+The parser recognizes the modern type, expression, constraint, local-entity,
+and special-name forms emitted by current C++ compilers. Its output is
+intentionally abbreviated for signal-handler use. Function parameter types and
+template argument types are validated and then omitted, while the enclosing
+class, function, constructor, destructor, and operator names are retained.
+Applications that need the platform's complete spelling can call
+`nglog::DemangleWithSystem()` on demand outside signal handlers. The system
+demangler may allocate memory, and it may use different spelling because it
+prints the omitted types and applies its own formatting rules.
 
 ## Customizing Handler Output
 

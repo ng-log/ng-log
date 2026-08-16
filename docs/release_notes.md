@@ -19,6 +19,8 @@
 - Improve logging throughput for applications that log from multiple threads
 - Allow sink callbacks to run concurrently and safely perform nested logging
 - Include the current thread name in failure signal reports when available
+- Use the signal-safe Itanium parser by default and expose complete system
+  demangling on demand
 
 !!! warning "Compatibility"
     If your application depends on glog compatibility, use the 0.8.x series.

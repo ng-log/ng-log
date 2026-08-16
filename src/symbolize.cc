@@ -42,9 +42,9 @@
 // - sizeof(Elf64_Sym)  = 24
 // - sizeof(Elf64_Shdr) = 64
 //
-// This implementation is intended to be async-signal-safe but uses
-// some functions which are not guaranteed to be so, such as memchr()
-// and memmove().  We assume they are async-signal-safe.
+// This implementation is intended to be async-signal-safe. On POSIX systems,
+// the string functions used here are listed as async-signal-safe by
+// POSIX.1-2008 TC2.
 //
 // Additional header can be specified by the NGLOG_BUILD_CONFIG_INCLUDE
 // macro to add platform specific defines (e.g. NGLOG_OS_OPENBSD).
