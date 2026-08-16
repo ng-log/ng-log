@@ -39,11 +39,26 @@
 #include "port.h"
 
 #include <ctime>
+#include <memory>
 
 #include "config.h"
 
 namespace nglog {
 inline namespace tools {
+
+std::string FormatWindowsMessage(std::uint32_t error) {
+  LPSTR message = nullptr;
+  const DWORD message_length = FormatMessageA(
+      FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+          FORMAT_MESSAGE_IGNORE_INSERTS,
+      nullptr, static_cast<DWORD>(error), 0, reinterpret_cast<LPSTR>(&message),
+      0, nullptr);
+  std::unique_ptr<char, decltype(&LocalFree)> release{message, &LocalFree};
+  if (message_length == 0) {
+    return {};
+  }
+  return {message, message_length};
+}
 
 #ifndef HAVE_LOCALTIME_R
 struct tm* localtime_r(const std::time_t* timep, std::tm* result) {

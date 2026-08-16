@@ -68,6 +68,8 @@
 #endif
 #ifdef NGLOG_OS_WINDOWS
 #  include <windows.h>
+
+#  include "windows/port.h"
 #endif
 
 #include <gmock/gmock.h>
@@ -1569,16 +1571,9 @@ TEST(Logging, FileLockFailureReportsWindowsError) {
   const std::string stderr_output = GetCapturedTestStderr();
   EXPECT_THAT(stderr_output, HasSubstr("Could not create log file '"));
   EXPECT_THAT(stderr_output, HasSubstr(dest));
-  char error_message[256];
-  const DWORD error_message_length = FormatMessageA(
-      FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr,
-      ERROR_LOCK_VIOLATION, 0, error_message, sizeof(error_message), nullptr);
-  ASSERT_GT(error_message_length, 0U);
-  std::string expected_error(error_message, error_message_length);
-  while (!expected_error.empty() &&
-         (expected_error.back() == '\r' || expected_error.back() == '\n')) {
-    expected_error.pop_back();
-  }
+  std::string expected_error = nglog::tools::TrimTrailingCRLF(
+      nglog::tools::FormatWindowsMessage(ERROR_LOCK_VIOLATION));
+  ASSERT_FALSE(expected_error.empty());
   EXPECT_THAT(stderr_output, HasSubstr(expected_error));
 
   EXPECT_TRUE(TerminateProcess(process_handle.get(), 0));
@@ -1589,6 +1584,15 @@ TEST(Logging, FileLockFailureReportsWindowsError) {
 
   LogToStderr();
   DeleteFiles(dest + "*");
+#endif
+}
+
+TEST(Logging, TrimTrailingCRLFRemovesTrailingNewlines) {
+#ifdef NGLOG_OS_WINDOWS
+  EXPECT_EQ(nglog::tools::TrimTrailingCRLF("message\r\n"), "message");
+  EXPECT_EQ(nglog::tools::TrimTrailingCRLF("message\n"), "message");
+  EXPECT_EQ(nglog::tools::TrimTrailingCRLF("message"), "message");
+  EXPECT_EQ(nglog::tools::TrimTrailingCRLF("\r\n"), "");
 #endif
 }
 

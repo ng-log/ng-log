@@ -324,21 +324,13 @@ constexpr std::uint64_t kLogFileLockOffset = std::uint64_t{1}
 constexpr DWORD kLogFileLockLength = 1;
 
 std::string WindowsErrorMessage(DWORD error) {
-  LPSTR message = nullptr;
-  const DWORD message_length = FormatMessageA(
-      FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
-          FORMAT_MESSAGE_IGNORE_INSERTS,
-      nullptr, error, 0, reinterpret_cast<LPSTR>(&message), 0, nullptr);
-  if (message_length == 0) {
+  std::string result = FormatWindowsMessage(error);
+
+  if (result.empty()) {
     return "Windows error " + std::to_string(error);
   }
 
-  std::string result(message, message_length);
-  LocalFree(message);
-  while (!result.empty() && (result.back() == '\r' || result.back() == '\n')) {
-    result.pop_back();
-  }
-  return result;
+  return TrimTrailingCRLF(std::move(result));
 }
 #endif
 

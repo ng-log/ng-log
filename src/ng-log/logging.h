@@ -63,6 +63,12 @@
 
 namespace nglog {
 
+#ifdef NGLOG_OS_WINDOWS
+inline namespace tools {
+NGLOG_EXPORT std::string FormatWindowsMessage(std::uint32_t error);
+}
+#endif
+
 struct NGLOG_EXPORT LogMessageTime {
   LogMessageTime();
   explicit LogMessageTime(std::chrono::system_clock::time_point now);
@@ -401,25 +407,17 @@ struct NGLOG_EXPORT LogMessageTime {
   nglog::LogMessage(__FILE__, __LINE__, DFATAL_LEVEL, counter, \
                     &nglog::LogMessage::SendToSyslogAndLog)
 
-#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || \
-    defined(__CYGWIN__) || defined(__CYGWIN32__)
+#if defined(NGLOG_OS_WINDOWS)
 // A very useful logging macro to log windows errors:
-#  define LOG_SYSRESULT(result)                                                \
-    if (FAILED(HRESULT_FROM_WIN32(result))) {                                  \
-      LPSTR message = nullptr;                                                 \
-      LPSTR msg = reinterpret_cast<LPSTR>(&message);                           \
-      DWORD message_length = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER |   \
-                                                FORMAT_MESSAGE_FROM_SYSTEM |   \
-                                                FORMAT_MESSAGE_IGNORE_INSERTS, \
-                                            0, result, 0, msg, 100, nullptr);  \
-      std::unique_ptr<char, decltype(&LocalFree)> release{message,             \
-                                                          &LocalFree};         \
-      if (message_length > 0) {                                                \
-        nglog::LogMessage(__FILE__, __LINE__, NGLOG_ERROR, 0,                  \
-                          &nglog::LogMessage::SendToLog)                       \
-                .stream()                                                      \
-            << reinterpret_cast<const char*>(message);                         \
-      }                                                                        \
+#  define LOG_SYSRESULT(result)                                               \
+    if (FAILED(HRESULT_FROM_WIN32(result))) {                                 \
+      const std::string message = nglog::tools::FormatWindowsMessage(result); \
+      if (!message.empty()) {                                                 \
+        nglog::LogMessage(__FILE__, __LINE__, NGLOG_ERROR, 0,                 \
+                          &nglog::LogMessage::SendToLog)                      \
+                .stream()                                                     \
+            << message;                                                       \
+      }                                                                       \
     }
 #endif
 
