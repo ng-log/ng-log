@@ -245,6 +245,7 @@ static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
 #    include <cstring>
 
 #    include "config.h"
+#    include "internal/checked_arithmetic.h"
 #    include "ng-log/raw_logging.h"
 #    include "symbolize.h"
 
@@ -271,27 +272,34 @@ auto FailureRetry(Functor run, int error = EINTR) noexcept(noexcept(run())) {
 // descriptor "fd" into the buffer starting at "buf" while handling short reads
 // and EINTR.  On success, return the number of bytes read.  Otherwise, return
 // -1.
-static ssize_t ReadFromOffset(const int fd, void* buf, const size_t count,
-                              const size_t offset) {
-  NGLOG_SAFE_ASSERT(fd >= 0);
-  NGLOG_SAFE_ASSERT(count <=
-                    static_cast<size_t>(std::numeric_limits<ssize_t>::max()));
+static ssize_t ReadFromOffset(const int fd, void* buf, const std::size_t count,
+                              const std::size_t offset) {
+  constexpr std::size_t kMaxReadCount =
+      static_cast<std::size_t>(std::numeric_limits<ssize_t>::max());
+  constexpr std::size_t kMaxFileOffset =
+      static_cast<std::size_t>(std::numeric_limits<off_t>::max());
+  if (fd < 0 || count > kMaxReadCount || offset > kMaxFileOffset) {
+    return -1;
+  }
   char* buf0 = reinterpret_cast<char*>(buf);
-  size_t num_bytes = 0;
+  std::size_t num_bytes = 0;
   while (num_bytes < count) {
-    ssize_t len = FailureRetry([fd, p = buf0 + num_bytes, n = count - num_bytes,
-                                m = static_cast<off_t>(offset + num_bytes)] {
-      return pread(fd, p, n, m);
-    });
+    std::size_t read_offset;
+    if (!internal::CheckedAdd(offset, num_bytes, read_offset) ||
+        read_offset > kMaxFileOffset) {
+      return -1;
+    }
+    ssize_t len = FailureRetry(
+        [fd, p = buf0 + num_bytes, n = count - num_bytes,
+         m = static_cast<off_t>(read_offset)] { return pread(fd, p, n, m); });
     if (len < 0) {  // There was an error other than EINTR.
       return -1;
     }
     if (len == 0) {  // Reached EOF.
       break;
     }
-    num_bytes += static_cast<size_t>(len);
+    num_bytes += static_cast<std::size_t>(len);
   }
-  NGLOG_SAFE_ASSERT(num_bytes <= count);
   return static_cast<ssize_t>(num_bytes);
 }
 
@@ -299,10 +307,114 @@ static ssize_t ReadFromOffset(const int fd, void* buf, const size_t count,
 // pointed by "fd" into the buffer starting at "buf" while handling
 // short reads and EINTR.  On success, return true. Otherwise, return
 // false.
-static bool ReadFromOffsetExact(const int fd, void* buf, const size_t count,
-                                const size_t offset) {
+static bool ReadFromOffsetExact(const int fd, void* buf,
+                                const std::size_t count,
+                                const std::size_t offset) {
   ssize_t len = ReadFromOffset(fd, buf, count, offset);
-  return static_cast<size_t>(len) == count;
+  return static_cast<std::size_t>(len) == count;
+}
+
+static bool IsFileRangeReadable(const int fd, const std::uint64_t offset,
+                                const std::uint64_t size) {
+  struct stat file_status;
+  if (fstat(fd, &file_status) != 0 || file_status.st_size < 0) {
+    return false;
+  }
+  const std::uint64_t file_size =
+      static_cast<std::uint64_t>(file_status.st_size);
+  return offset <= file_size && size <= file_size - offset;
+}
+
+static bool IsSupportedElfHeader(const ElfW(Ehdr) & elf_header) {
+  constexpr unsigned char kExpectedElfClass =
+      sizeof(void*) == sizeof(std::uint32_t) ? ELFCLASS32 : ELFCLASS64;
+  const std::uint16_t value = 1;
+  const bool is_little_endian =
+      *reinterpret_cast<const unsigned char*>(&value) == 1;
+  const unsigned char expected_data =
+      is_little_endian ? ELFDATA2LSB : ELFDATA2MSB;
+  return std::memcmp(elf_header.e_ident, ELFMAG, SELFMAG) == 0 &&
+         elf_header.e_ident[EI_CLASS] == kExpectedElfClass &&
+         elf_header.e_ident[EI_DATA] == expected_data &&
+         elf_header.e_ident[EI_VERSION] == EV_CURRENT &&
+         elf_header.e_version == EV_CURRENT &&
+         elf_header.e_ehsize == sizeof(ElfW(Ehdr));
+}
+
+static bool ReadSectionHeader(const int fd, const std::size_t section_index,
+                              const std::size_t section_count,
+                              const std::size_t section_offset,
+                              const std::size_t section_entry_size,
+                              ElfW(Shdr) * out) {
+  if (section_index >= section_count ||
+      section_entry_size < sizeof(ElfW(Shdr))) {
+    return false;
+  }
+  std::size_t section_table_offset;
+  std::size_t section_header_offset;
+  if (!internal::CheckedMultiply(section_index, section_entry_size,
+                                 section_table_offset) ||
+      !internal::CheckedAdd(section_offset, section_table_offset,
+                            section_header_offset)) {
+    return false;
+  }
+  return ReadFromOffsetExact(fd, out, sizeof(*out), section_header_offset);
+}
+
+static bool GetSectionTableInfo(const int fd, const ElfW(Ehdr) & elf_header,
+                                std::size_t* section_count,
+                                std::size_t* string_table_index,
+                                std::size_t* section_entry_size) {
+  if (elf_header.e_shoff == 0 && elf_header.e_shnum == 0) {
+    *section_count = 0;
+    if (string_table_index != nullptr) {
+      *string_table_index = 0;
+    }
+    if (section_entry_size != nullptr) {
+      *section_entry_size = 0;
+    }
+    return true;
+  }
+  if (elf_header.e_shentsize < sizeof(ElfW(Shdr))) {
+    return false;
+  }
+  const std::size_t section_offset =
+      static_cast<std::size_t>(elf_header.e_shoff);
+  const std::size_t entry_size = elf_header.e_shentsize;
+
+  std::size_t count = elf_header.e_shnum;
+  std::size_t string_index = elf_header.e_shstrndx;
+  ElfW(Shdr) first_section;
+  if (elf_header.e_shnum == 0 || elf_header.e_shstrndx == SHN_XINDEX) {
+    if (section_offset == 0 ||
+        !ReadFromOffsetExact(fd, &first_section, sizeof(first_section),
+                             section_offset)) {
+      return false;
+    }
+    if (elf_header.e_shnum == 0) {
+      count = static_cast<std::size_t>(first_section.sh_size);
+    }
+    if (elf_header.e_shstrndx == SHN_XINDEX) {
+      string_index = first_section.sh_link;
+    }
+  }
+  if (count == 0) {
+    return false;
+  }
+  std::size_t section_table_size;
+  if (!internal::CheckedMultiply(count, entry_size, section_table_size) ||
+      !IsFileRangeReadable(fd, section_offset, section_table_size) ||
+      (string_table_index != nullptr && string_index >= count)) {
+    return false;
+  }
+  *section_count = count;
+  if (string_table_index != nullptr) {
+    *string_table_index = string_index;
+  }
+  if (section_entry_size != nullptr) {
+    *section_entry_size = entry_size;
+  }
+  return true;
 }
 
 // Returns elf_header.e_type if the file pointed by fd is an ELF binary.
@@ -311,7 +423,7 @@ static int FileGetElfType(const int fd) {
   if (!ReadFromOffsetExact(fd, &elf_header, sizeof(elf_header), 0)) {
     return -1;
   }
-  if (memcmp(elf_header.e_ident, ELFMAG, SELFMAG) != 0) {
+  if (!IsSupportedElfHeader(elf_header)) {
     return -1;
   }
   return elf_header.e_type;
@@ -319,124 +431,528 @@ static int FileGetElfType(const int fd) {
 
 // Read the section headers in the given ELF binary, and if a section
 // of the specified type is found, set the output to this section header
-// and return true.  Otherwise, return false.
+// and return kFound. Return kNotFound when no section matches and kMalformed
+// when the section table cannot be read safely.
 // To keep stack consumption low, we would like this function to not get
 // inlined.
+enum class SectionLookupResult { kNotFound, kFound, kMalformed };
+
 NGLOG_ATTRIBUTE_NOINLINE
-static bool GetSectionHeaderByType(const int fd, ElfW(Half) sh_num,
-                                   const size_t sh_offset, ElfW(Word) type,
-                                   ElfW(Shdr) * out) {
+static SectionLookupResult GetSectionHeaderByType(
+    const int fd, const std::size_t sh_num, const std::size_t sh_offset,
+    const std::size_t sh_entry_size, ElfW(Word) type, ElfW(Shdr) * out) {
+  std::size_t section_table_size;
+  if (!internal::CheckedMultiply(sh_num, sh_entry_size, section_table_size) ||
+      sh_entry_size < sizeof(ElfW(Shdr)) ||
+      !IsFileRangeReadable(fd, sh_offset, section_table_size)) {
+    return SectionLookupResult::kMalformed;
+  }
+
+  if (sh_entry_size != sizeof(ElfW(Shdr))) {
+    for (std::size_t i = 0; i < sh_num; ++i) {
+      ElfW(Shdr) section;
+      if (!ReadSectionHeader(fd, i, sh_num, sh_offset, sh_entry_size,
+                             &section)) {
+        return SectionLookupResult::kMalformed;
+      }
+      if (section.sh_type == type) {
+        *out = section;
+        return SectionLookupResult::kFound;
+      }
+    }
+    return SectionLookupResult::kNotFound;
+  }
+
   // Read at most 16 section headers at a time to save read calls.
   ElfW(Shdr) buf[16];
-  for (size_t i = 0; i < sh_num;) {
-    const size_t num_bytes_left = (sh_num - i) * sizeof(buf[0]);
-    const size_t num_bytes_to_read =
-        (sizeof(buf) > num_bytes_left) ? num_bytes_left : sizeof(buf);
-    const ssize_t len = ReadFromOffset(fd, buf, num_bytes_to_read,
-                                       sh_offset + i * sizeof(buf[0]));
-    if (len == -1) {
-      return false;
+  for (std::size_t i = 0; i < sh_num;) {
+    std::size_t num_bytes_left;
+    if (!internal::CheckedMultiply(sh_num - i, sizeof(buf[0]),
+                                   num_bytes_left)) {
+      return SectionLookupResult::kMalformed;
     }
-    NGLOG_SAFE_ASSERT(static_cast<size_t>(len) % sizeof(buf[0]) == 0);
-    const size_t num_headers_in_buf = static_cast<size_t>(len) / sizeof(buf[0]);
-    NGLOG_SAFE_ASSERT(num_headers_in_buf <= sizeof(buf) / sizeof(buf[0]));
-    for (size_t j = 0; j < num_headers_in_buf; ++j) {
+    const std::size_t num_bytes_to_read =
+        (sizeof(buf) > num_bytes_left) ? num_bytes_left : sizeof(buf);
+    std::size_t read_offset;
+    if (!internal::CheckedMultiply(i, sizeof(buf[0]), read_offset) ||
+        !internal::CheckedAdd(sh_offset, read_offset, read_offset) ||
+        !ReadFromOffsetExact(fd, buf, num_bytes_to_read, read_offset)) {
+      return SectionLookupResult::kMalformed;
+    }
+    const std::size_t num_headers_in_buf = num_bytes_to_read / sizeof(buf[0]);
+    for (std::size_t j = 0; j < num_headers_in_buf; ++j) {
       if (buf[j].sh_type == type) {
         *out = buf[j];
-        return true;
+        return SectionLookupResult::kFound;
       }
     }
     i += num_headers_in_buf;
   }
-  return false;
+  return SectionLookupResult::kNotFound;
 }
 
 // There is no particular reason to limit section name to 63 characters,
 // but there has (as yet) been no need for anything longer either.
-const int kMaxSectionNameLen = 64;
+constexpr std::size_t kMaxSectionNameLen = 64;
 
 // name_len should include terminating '\0'.
-bool GetSectionHeaderByName(int fd, const char* name, size_t name_len,
+bool GetSectionHeaderByName(int fd, const char* name, std::size_t name_len,
                             ElfW(Shdr) * out) {
+  if (name == nullptr || out == nullptr || name_len == 0) {
+    return false;
+  }
   ElfW(Ehdr) elf_header;
   if (!ReadFromOffsetExact(fd, &elf_header, sizeof(elf_header), 0)) {
     return false;
   }
-
-  ElfW(Shdr) shstrtab;
-  size_t shstrtab_offset =
-      (elf_header.e_shoff + static_cast<size_t>(elf_header.e_shentsize) *
-                                static_cast<size_t>(elf_header.e_shstrndx));
-  if (!ReadFromOffsetExact(fd, &shstrtab, sizeof(shstrtab), shstrtab_offset)) {
+  if (!IsSupportedElfHeader(elf_header) || name_len > kMaxSectionNameLen) {
     return false;
   }
 
-  for (size_t i = 0; i < elf_header.e_shnum; ++i) {
-    size_t section_header_offset =
-        (elf_header.e_shoff + elf_header.e_shentsize * i);
-    if (!ReadFromOffsetExact(fd, out, sizeof(*out), section_header_offset)) {
+  std::size_t section_count;
+  std::size_t string_table_index;
+  std::size_t section_entry_size;
+  if (!GetSectionTableInfo(fd, elf_header, &section_count, &string_table_index,
+                           &section_entry_size) ||
+      section_count == 0) {
+    return false;
+  }
+  const std::size_t section_offset =
+      static_cast<std::size_t>(elf_header.e_shoff);
+  ElfW(Shdr) shstrtab;
+  if (!ReadSectionHeader(fd, string_table_index, section_count, section_offset,
+                         section_entry_size, &shstrtab) ||
+      shstrtab.sh_type != SHT_STRTAB) {
+    return false;
+  }
+  if (!IsFileRangeReadable(fd, static_cast<std::uint64_t>(shstrtab.sh_offset),
+                           static_cast<std::uint64_t>(shstrtab.sh_size))) {
+    return false;
+  }
+
+  for (std::size_t i = 0; i < section_count; ++i) {
+    if (!ReadSectionHeader(fd, i, section_count, section_offset,
+                           section_entry_size, out)) {
       return false;
     }
     char header_name[kMaxSectionNameLen];
-    if (sizeof(header_name) < name_len) {
-      RAW_LOG(WARNING,
-              "Section name '%s' is too long (%zu); "
-              "section will not be found (even if present).",
-              name, name_len);
-      // No point in even trying.
-      return false;
-    }
-    size_t name_offset = shstrtab.sh_offset + out->sh_name;
-    ssize_t n_read = ReadFromOffset(fd, &header_name, name_len, name_offset);
-    if (n_read == -1) {
-      return false;
-    } else if (static_cast<size_t>(n_read) != name_len) {
-      // Short read -- name could be at end of file.
+    if (out->sh_name > shstrtab.sh_size ||
+        name_len > shstrtab.sh_size - out->sh_name) {
       continue;
     }
-    if (memcmp(header_name, name, name_len) == 0) {
+    std::size_t name_offset;
+    if (!internal::CheckedAdd(static_cast<std::size_t>(shstrtab.sh_offset),
+                              static_cast<std::size_t>(out->sh_name),
+                              name_offset) ||
+        !ReadFromOffsetExact(fd, header_name, name_len, name_offset)) {
+      return false;
+    }
+    if (std::memcmp(header_name, name, name_len) == 0) {
       return true;
     }
   }
   return false;
 }
 
-// Read a symbol table and look for the symbol containing the
-// pc. Iterate over symbols in a symbol table and look for the symbol
-// containing "pc".  On success, return true and write the symbol name
-// to out.  Otherwise, return false.
+enum class SymbolLookupResult { kNotFound, kFound, kMalformed };
+
+static bool GetProgramHeaderTableInfo(const int fd,
+                                      const ElfW(Ehdr) & elf_header,
+                                      std::size_t* program_header_count) {
+  std::size_t count = elf_header.e_phnum;
+  if (elf_header.e_phnum == 0) {
+    *program_header_count = 0;
+    return true;
+  }
+  if (elf_header.e_phnum == PN_XNUM) {
+    if (elf_header.e_shoff == 0 ||
+        elf_header.e_shentsize < sizeof(ElfW(Shdr))) {
+      return false;
+    }
+    ElfW(Shdr) first_section;
+    if (!ReadFromOffsetExact(fd, &first_section, sizeof(first_section),
+                             static_cast<std::size_t>(elf_header.e_shoff))) {
+      return false;
+    }
+    count = static_cast<std::size_t>(first_section.sh_info);
+  }
+  if (count == 0) {
+    *program_header_count = 0;
+    return true;
+  }
+  if (elf_header.e_phentsize < sizeof(ElfW(Phdr))) {
+    return false;
+  }
+  std::size_t table_size;
+  if (!internal::CheckedMultiply(
+          count, static_cast<std::size_t>(elf_header.e_phentsize),
+          table_size) ||
+      !IsFileRangeReadable(fd, static_cast<std::uint64_t>(elf_header.e_phoff),
+                           table_size)) {
+    return false;
+  }
+  *program_header_count = count;
+  return true;
+}
+
+static bool ReadProgramHeader(const int fd, const std::size_t index,
+                              const std::size_t count,
+                              const std::size_t table_offset,
+                              const std::size_t entry_size, ElfW(Phdr) * out) {
+  if (index >= count || entry_size < sizeof(ElfW(Phdr))) {
+    return false;
+  }
+  std::size_t entry_offset;
+  std::size_t offset;
+  if (!internal::CheckedMultiply(index, entry_size, entry_offset) ||
+      !internal::CheckedAdd(table_offset, entry_offset, offset)) {
+    return false;
+  }
+  return ReadFromOffsetExact(fd, out, sizeof(*out), offset);
+}
+
+static bool ConvertDynamicAddressToFileOffset(
+    const int fd, const ElfW(Ehdr) & elf_header,
+    const std::size_t program_header_count, const std::uint64_t address,
+    const std::uint64_t size, std::size_t* file_offset) {
+  const std::size_t table_offset = static_cast<std::size_t>(elf_header.e_phoff);
+  const std::size_t entry_size = elf_header.e_phentsize;
+  for (std::size_t i = 0; i < program_header_count; ++i) {
+    ElfW(Phdr) program_header;
+    if (!ReadProgramHeader(fd, i, program_header_count, table_offset,
+                           entry_size, &program_header)) {
+      return false;
+    }
+    const std::uint64_t segment_vaddr =
+        static_cast<std::uint64_t>(program_header.p_vaddr);
+    const std::uint64_t segment_filesz =
+        static_cast<std::uint64_t>(program_header.p_filesz);
+    if (program_header.p_type != PT_LOAD || address < segment_vaddr ||
+        address - segment_vaddr > segment_filesz ||
+        size > segment_filesz - (address - segment_vaddr)) {
+      continue;
+    }
+    std::uint64_t offset;
+    if (!internal::CheckedAdd(
+            static_cast<std::uint64_t>(program_header.p_offset),
+            address - segment_vaddr, offset) ||
+        offset > std::numeric_limits<std::size_t>::max() ||
+        !IsFileRangeReadable(fd, offset, size)) {
+      return false;
+    }
+    *file_offset = static_cast<std::size_t>(offset);
+    return true;
+  }
+  return false;
+}
+
+static bool ReadSysVHashSymbolCount(const int fd, const std::size_t offset,
+                                    std::size_t* symbol_count) {
+  std::uint32_t header[2];
+  if (!IsFileRangeReadable(fd, offset, sizeof(header)) ||
+      !ReadFromOffsetExact(fd, header, sizeof(header), offset)) {
+    return false;
+  }
+  std::size_t word_count;
+  if (!internal::CheckedAdd(static_cast<std::size_t>(2),
+                            static_cast<std::size_t>(header[0]), word_count) ||
+      !internal::CheckedAdd(word_count, static_cast<std::size_t>(header[1]),
+                            word_count)) {
+    return false;
+  }
+  std::size_t table_size;
+  if (!internal::CheckedMultiply(word_count, sizeof(std::uint32_t),
+                                 table_size) ||
+      !IsFileRangeReadable(fd, offset, table_size)) {
+    return false;
+  }
+  *symbol_count = header[1];
+  return true;
+}
+
+static bool ReadGnuHashSymbolCount(const int fd, const std::size_t offset,
+                                   std::size_t* symbol_count) {
+  std::uint32_t header[4];
+  if (!IsFileRangeReadable(fd, offset, sizeof(header)) ||
+      !ReadFromOffsetExact(fd, header, sizeof(header), offset)) {
+    return false;
+  }
+  std::size_t bloom_word_count;
+  std::size_t bloom_size;
+  std::size_t bucket_offset;
+  if (!internal::CheckedMultiply(static_cast<std::size_t>(header[2]),
+                                 sizeof(ElfW(Addr)) / sizeof(std::uint32_t),
+                                 bloom_word_count) ||
+      !internal::CheckedMultiply(bloom_word_count, sizeof(std::uint32_t),
+                                 bloom_size) ||
+      !internal::CheckedAdd(offset, sizeof(header), bucket_offset) ||
+      !internal::CheckedAdd(bucket_offset, bloom_size, bucket_offset)) {
+    return false;
+  }
+  std::size_t bucket_size;
+  if (!internal::CheckedMultiply(static_cast<std::size_t>(header[0]),
+                                 sizeof(std::uint32_t), bucket_size) ||
+      !IsFileRangeReadable(fd, bucket_offset, bucket_size)) {
+    return false;
+  }
+  std::size_t chain_offset;
+  if (!internal::CheckedAdd(bucket_offset, bucket_size, chain_offset)) {
+    return false;
+  }
+  std::size_t max_symbol = header[1];
+  for (std::size_t i = 0; i < header[0]; ++i) {
+    std::uint32_t bucket;
+    std::size_t bucket_position;
+    if (!internal::CheckedMultiply(i, sizeof(bucket), bucket_position) ||
+        !internal::CheckedAdd(bucket_offset, bucket_position,
+                              bucket_position) ||
+        !ReadFromOffsetExact(fd, &bucket, sizeof(bucket), bucket_position)) {
+      return false;
+    }
+    if (bucket < header[1]) {
+      continue;
+    }
+    std::uint32_t symbol_index = bucket;
+    std::uint32_t chain_index = bucket - header[1];
+    while (true) {
+      std::size_t chain_position;
+      if (!internal::CheckedMultiply(static_cast<std::size_t>(chain_index),
+                                     sizeof(std::uint32_t), chain_position) ||
+          !internal::CheckedAdd(chain_offset, chain_position, chain_position)) {
+        return false;
+      }
+      std::uint32_t chain_value;
+      if (!ReadFromOffsetExact(fd, &chain_value, sizeof(chain_value),
+                               chain_position)) {
+        return false;
+      }
+      if (static_cast<std::size_t>(symbol_index) >= max_symbol) {
+        std::size_t next_symbol;
+        if (!internal::CheckedAdd(static_cast<std::size_t>(symbol_index),
+                                  std::size_t{1}, next_symbol)) {
+          return false;
+        }
+        max_symbol = next_symbol;
+      }
+      if ((chain_value & 1U) != 0) {
+        break;
+      }
+      if (chain_index == std::numeric_limits<std::uint32_t>::max()) {
+        return false;
+      }
+      ++chain_index;
+    }
+  }
+  *symbol_count = max_symbol;
+  return true;
+}
+
+static SymbolLookupResult GetDynamicSymbolTables(const int fd,
+                                                 const ElfW(Ehdr) & elf_header,
+                                                 ElfW(Shdr) * symtab,
+                                                 ElfW(Shdr) * strtab) {
+  std::size_t program_header_count;
+  if (!GetProgramHeaderTableInfo(fd, elf_header, &program_header_count)) {
+    return SymbolLookupResult::kMalformed;
+  }
+  if (program_header_count == 0) {
+    return SymbolLookupResult::kNotFound;
+  }
+
+  ElfW(Phdr) dynamic_header{};
+  bool has_dynamic_header = false;
+  for (std::size_t i = 0; i < program_header_count; ++i) {
+    ElfW(Phdr) program_header;
+    if (!ReadProgramHeader(fd, i, program_header_count,
+                           static_cast<std::size_t>(elf_header.e_phoff),
+                           static_cast<std::size_t>(elf_header.e_phentsize),
+                           &program_header)) {
+      return SymbolLookupResult::kMalformed;
+    }
+    if (program_header.p_type == PT_DYNAMIC) {
+      dynamic_header = program_header;
+      has_dynamic_header = true;
+      break;
+    }
+  }
+  if (!has_dynamic_header || dynamic_header.p_filesz % sizeof(ElfW(Dyn)) != 0 ||
+      !IsFileRangeReadable(
+          fd, static_cast<std::uint64_t>(dynamic_header.p_offset),
+          static_cast<std::uint64_t>(dynamic_header.p_filesz))) {
+    return has_dynamic_header ? SymbolLookupResult::kMalformed
+                              : SymbolLookupResult::kNotFound;
+  }
+
+  bool has_symtab = false;
+  bool has_strtab = false;
+  bool has_strtab_size = false;
+  bool has_sysv_hash = false;
+  bool has_gnu_hash = false;
+  std::uint64_t symtab_address = 0;
+  std::uint64_t strtab_address = 0;
+  std::uint64_t hash_address = 0;
+  std::uint64_t gnu_hash_address = 0;
+  std::uint64_t strtab_size = 0;
+  std::uint64_t symbol_entry_size = 0;
+  const std::size_t dynamic_offset =
+      static_cast<std::size_t>(dynamic_header.p_offset);
+  const std::size_t dynamic_count =
+      static_cast<std::size_t>(dynamic_header.p_filesz / sizeof(ElfW(Dyn)));
+  for (std::size_t i = 0; i < dynamic_count; ++i) {
+    std::size_t entry_offset;
+    std::size_t offset;
+    if (!internal::CheckedMultiply(i, sizeof(ElfW(Dyn)), entry_offset) ||
+        !internal::CheckedAdd(dynamic_offset, entry_offset, offset)) {
+      return SymbolLookupResult::kMalformed;
+    }
+    ElfW(Dyn) dynamic;
+    if (!ReadFromOffsetExact(fd, &dynamic, sizeof(dynamic), offset)) {
+      return SymbolLookupResult::kMalformed;
+    }
+    switch (dynamic.d_tag) {
+      case DT_NULL:
+        i = dynamic_count;
+        break;
+      case DT_SYMTAB:
+        symtab_address = static_cast<std::uint64_t>(dynamic.d_un.d_ptr);
+        has_symtab = true;
+        break;
+      case DT_SYMENT:
+        symbol_entry_size = static_cast<std::uint64_t>(dynamic.d_un.d_val);
+        break;
+      case DT_STRTAB:
+        strtab_address = static_cast<std::uint64_t>(dynamic.d_un.d_ptr);
+        has_strtab = true;
+        break;
+      case DT_STRSZ:
+        strtab_size = static_cast<std::uint64_t>(dynamic.d_un.d_val);
+        has_strtab_size = true;
+        break;
+      case DT_HASH:
+        hash_address = static_cast<std::uint64_t>(dynamic.d_un.d_ptr);
+        has_sysv_hash = true;
+        break;
+#    if defined(DT_GNU_HASH)
+      case DT_GNU_HASH:
+        gnu_hash_address = static_cast<std::uint64_t>(dynamic.d_un.d_ptr);
+        has_gnu_hash = true;
+        break;
+#    endif
+      default:
+        break;
+    }
+  }
+  if (!has_symtab || !has_strtab || !has_strtab_size ||
+      symbol_entry_size != sizeof(ElfW(Sym)) ||
+      (!has_sysv_hash && !has_gnu_hash)) {
+    return SymbolLookupResult::kNotFound;
+  }
+
+  std::size_t hash_offset;
+  std::size_t gnu_hash_offset;
+  std::size_t symbol_count;
+  if (has_sysv_hash) {
+    if (!ConvertDynamicAddressToFileOffset(
+            fd, elf_header, program_header_count, hash_address,
+            sizeof(std::uint32_t) * 2, &hash_offset) ||
+        !ReadSysVHashSymbolCount(fd, hash_offset, &symbol_count)) {
+      return SymbolLookupResult::kMalformed;
+    }
+  } else {
+    if (!ConvertDynamicAddressToFileOffset(
+            fd, elf_header, program_header_count, gnu_hash_address,
+            sizeof(std::uint32_t) * 4, &gnu_hash_offset) ||
+        !ReadGnuHashSymbolCount(fd, gnu_hash_offset, &symbol_count)) {
+      return SymbolLookupResult::kMalformed;
+    }
+  }
+
+  std::size_t symbol_table_size;
+  if (!internal::CheckedMultiply(symbol_count, sizeof(ElfW(Sym)),
+                                 symbol_table_size)) {
+    return SymbolLookupResult::kMalformed;
+  }
+  std::size_t symbol_offset;
+  std::size_t string_offset;
+  if (!ConvertDynamicAddressToFileOffset(fd, elf_header, program_header_count,
+                                         symtab_address, symbol_table_size,
+                                         &symbol_offset) ||
+      !ConvertDynamicAddressToFileOffset(fd, elf_header, program_header_count,
+                                         strtab_address, strtab_size,
+                                         &string_offset) ||
+      strtab_size > std::numeric_limits<decltype(strtab->sh_size)>::max()) {
+    return SymbolLookupResult::kMalformed;
+  }
+  symtab->sh_type = SHT_DYNSYM;
+  symtab->sh_offset = symbol_offset;
+  symtab->sh_size = symbol_table_size;
+  symtab->sh_entsize = sizeof(ElfW(Sym));
+  strtab->sh_type = SHT_STRTAB;
+  strtab->sh_offset = string_offset;
+  strtab->sh_size = strtab_size;
+  return SymbolLookupResult::kFound;
+}
+
+// Read a symbol table and look for the symbol containing "pc". Return kFound
+// and write the symbol name to out when successful. Return kNotFound when no
+// symbol contains "pc". Return kMalformed for invalid file data.
 // To keep stack consumption low, we would like this function to not get
 // inlined.
 NGLOG_ATTRIBUTE_NOINLINE
-static bool FindSymbol(std::uint64_t pc, const int fd, char* out,
-                       size_t out_size, uint64_t symbol_offset,
-                       const ElfW(Shdr) * strtab, const ElfW(Shdr) * symtab) {
-  if (symtab == nullptr) {
-    return false;
+static SymbolLookupResult FindSymbol(std::uint64_t pc, const int fd, char* out,
+                                     std::size_t out_size,
+                                     std::uint64_t symbol_offset,
+                                     const ElfW(Shdr) * strtab,
+                                     const ElfW(Shdr) * symtab) {
+  if (strtab == nullptr || symtab == nullptr ||
+      symtab->sh_entsize != sizeof(ElfW(Sym)) ||
+      symtab->sh_size % symtab->sh_entsize != 0) {
+    return SymbolLookupResult::kMalformed;
   }
-  const size_t num_symbols = symtab->sh_size / symtab->sh_entsize;
+  if (!IsFileRangeReadable(fd, static_cast<std::uint64_t>(symtab->sh_offset),
+                           static_cast<std::uint64_t>(symtab->sh_size)) ||
+      !IsFileRangeReadable(fd, static_cast<std::uint64_t>(strtab->sh_offset),
+                           static_cast<std::uint64_t>(strtab->sh_size))) {
+    return SymbolLookupResult::kMalformed;
+  }
+  const std::size_t num_symbols = static_cast<std::size_t>(
+      symtab->sh_size /
+      static_cast<decltype(symtab->sh_size)>(symtab->sh_entsize));
   for (std::size_t i = 0; i < num_symbols;) {
-    size_t offset = symtab->sh_offset + i * symtab->sh_entsize;
+    std::size_t symbol_offset_in_file;
+    std::size_t offset;
+    if (!internal::CheckedMultiply(i, sizeof(ElfW(Sym)),
+                                   symbol_offset_in_file) ||
+        !internal::CheckedAdd(static_cast<std::size_t>(symtab->sh_offset),
+                              symbol_offset_in_file, offset)) {
+      return SymbolLookupResult::kMalformed;
+    }
 
     // If we are reading Elf64_Sym's, we want to limit this array to
     // 32 elements (to keep stack consumption low), otherwise we can
     // have a 64 element Elf32_Sym array.
 #    if defined(__WORDSIZE) && __WORDSIZE == 64
-    const size_t NUM_SYMBOLS = 32U;
+    const std::size_t NUM_SYMBOLS = 32U;
 #    else
-    const size_t NUM_SYMBOLS = 64U;
+    const std::size_t NUM_SYMBOLS = 64U;
 #    endif
 
     // Read at most NUM_SYMBOLS symbols at once to save read() calls.
     ElfW(Sym) buf[NUM_SYMBOLS];
-    size_t num_symbols_to_read = std::min(NUM_SYMBOLS, num_symbols - i);
-    const ssize_t len =
-        ReadFromOffset(fd, &buf, sizeof(buf[0]) * num_symbols_to_read, offset);
-    NGLOG_SAFE_ASSERT(static_cast<size_t>(len) % sizeof(buf[0]) == 0);
-    const size_t num_symbols_in_buf = static_cast<size_t>(len) / sizeof(buf[0]);
-    NGLOG_SAFE_ASSERT(num_symbols_in_buf <= num_symbols_to_read);
+    std::size_t num_symbols_to_read = std::min(NUM_SYMBOLS, num_symbols - i);
+    std::size_t bytes_to_read;
+    if (!internal::CheckedMultiply(sizeof(buf[0]), num_symbols_to_read,
+                                   bytes_to_read)) {
+      return SymbolLookupResult::kMalformed;
+    }
+    const ssize_t len = ReadFromOffset(fd, &buf, bytes_to_read, offset);
+    if (len <= 0 || static_cast<std::size_t>(len) % sizeof(buf[0]) != 0) {
+      return SymbolLookupResult::kMalformed;
+    }
+    const std::size_t num_symbols_in_buf =
+        static_cast<std::size_t>(len) / sizeof(buf[0]);
     for (std::size_t j = 0; j < num_symbols_in_buf; ++j) {
-      const ElfW(Sym)& symbol = buf[j];
+      const ElfW(Sym) & symbol = buf[j];
 #    if defined(__WORDSIZE) && __WORDSIZE == 64
       const unsigned char symbol_type = ELF64_ST_TYPE(symbol.st_info);
 #    else
@@ -445,68 +961,191 @@ static bool FindSymbol(std::uint64_t pc, const int fd, char* out,
       if (symbol_type == STT_TLS) {
         continue;
       }
-      uint64_t start_address = symbol.st_value;
-      start_address += symbol_offset;
-      uint64_t end_address = start_address + symbol.st_size;
+      std::uint64_t start_address;
+      std::uint64_t end_address;
+      if (!internal::CheckedAdd(static_cast<std::uint64_t>(symbol.st_value),
+                                symbol_offset, start_address) ||
+          !internal::CheckedAdd(start_address,
+                                static_cast<std::uint64_t>(symbol.st_size),
+                                end_address)) {
+        continue;
+      }
       if (symbol.st_value != 0 &&  // Skip null value symbols.
           symbol.st_shndx != 0 &&  // Skip undefined symbols.
           ELF64_ST_TYPE(symbol.st_info) != STT_TLS && start_address <= pc &&
           pc < end_address) {
-        ssize_t len1 = ReadFromOffset(fd, out, out_size,
-                                      strtab->sh_offset + symbol.st_name);
-        if (len1 <= 0 || memchr(out, '\0', out_size) == nullptr) {
-          memset(out, 0, out_size);
-          return false;
+        if (symbol.st_name >= strtab->sh_size) {
+          return SymbolLookupResult::kMalformed;
         }
-        return true;  // Obtained the symbol name.
+        const auto name_bytes_available = strtab->sh_size - symbol.st_name;
+        const std::size_t bytes_available =
+            name_bytes_available > out_size
+                ? out_size
+                : static_cast<std::size_t>(name_bytes_available);
+        std::size_t name_offset;
+        if (!internal::CheckedAdd(static_cast<std::size_t>(strtab->sh_offset),
+                                  static_cast<std::size_t>(symbol.st_name),
+                                  name_offset) ||
+            bytes_available == 0) {
+          return SymbolLookupResult::kMalformed;
+        }
+        const ssize_t len1 =
+            ReadFromOffset(fd, out, bytes_available, name_offset);
+        if (len1 <= 0 ||
+            std::memchr(out, '\0', static_cast<std::size_t>(len1)) == nullptr) {
+          std::memset(out, 0, out_size);
+          return SymbolLookupResult::kMalformed;
+        }
+        return SymbolLookupResult::kFound;  // Obtained the symbol name.
       }
     }
     i += num_symbols_in_buf;
   }
-  return false;
+  return SymbolLookupResult::kNotFound;
 }
 
-// Get the symbol name of "pc" from the file pointed by "fd".  Process
-// both regular and dynamic symbol tables if necessary.  On success,
-// write the symbol name to "out" and return true.  Otherwise, return
-// false.
-static bool GetSymbolFromObjectFile(const int fd, uint64_t pc, char* out,
-                                    size_t out_size, uint64_t base_address) {
+// Get the symbol name of "pc" from the file pointed by "fd". Process both
+// regular and dynamic symbol tables if necessary. Return kFound when
+// successful, kNotFound when no symbol matches, and kMalformed for invalid
+// file data.
+static SymbolLookupResult GetSymbolFromObjectFile(const int fd,
+                                                  std::uint64_t pc, char* out,
+                                                  std::size_t out_size,
+                                                  std::uint64_t base_address) {
   // Read the ELF header.
   ElfW(Ehdr) elf_header;
   if (!ReadFromOffsetExact(fd, &elf_header, sizeof(elf_header), 0)) {
-    return false;
+    return SymbolLookupResult::kMalformed;
+  }
+  if (!IsSupportedElfHeader(elf_header)) {
+    return SymbolLookupResult::kMalformed;
   }
 
   ElfW(Shdr) symtab, strtab;
+  std::size_t section_count;
+  std::size_t section_entry_size;
+  if (!GetSectionTableInfo(fd, elf_header, &section_count, nullptr,
+                           &section_entry_size)) {
+    return SymbolLookupResult::kMalformed;
+  }
 
-  // Consult a regular symbol table first.
-  if (GetSectionHeaderByType(fd, elf_header.e_shnum, elf_header.e_shoff,
-                             SHT_SYMTAB, &symtab)) {
-    if (!ReadFromOffsetExact(
-            fd, &strtab, sizeof(strtab),
-            elf_header.e_shoff + symtab.sh_link * sizeof(symtab))) {
-      return false;
+  if (section_count != 0) {
+    const std::size_t section_offset =
+        static_cast<std::size_t>(elf_header.e_shoff);
+
+    // Consult a regular symbol table first.
+    const SectionLookupResult regular_result =
+        GetSectionHeaderByType(fd, section_count, section_offset,
+                               section_entry_size, SHT_SYMTAB, &symtab);
+    if (regular_result == SectionLookupResult::kMalformed) {
+      return SymbolLookupResult::kMalformed;
     }
-    if (FindSymbol(pc, fd, out, out_size, base_address, &strtab, &symtab)) {
-      return true;  // Found the symbol in a regular symbol table.
+    if (regular_result == SectionLookupResult::kFound) {
+      if (symtab.sh_link >= section_count ||
+          !ReadSectionHeader(fd, symtab.sh_link, section_count, section_offset,
+                             section_entry_size, &strtab) ||
+          strtab.sh_type != SHT_STRTAB) {
+        return SymbolLookupResult::kMalformed;
+      }
+      const SymbolLookupResult result =
+          FindSymbol(pc, fd, out, out_size, base_address, &strtab, &symtab);
+      if (result == SymbolLookupResult::kFound ||
+          result == SymbolLookupResult::kMalformed) {
+        return result;
+      }
+    }
+
+    // If the symbol is not found, then consult a dynamic symbol table.
+    const SectionLookupResult dynamic_result =
+        GetSectionHeaderByType(fd, section_count, section_offset,
+                               section_entry_size, SHT_DYNSYM, &symtab);
+    if (dynamic_result == SectionLookupResult::kMalformed) {
+      return SymbolLookupResult::kMalformed;
+    }
+    if (dynamic_result == SectionLookupResult::kFound) {
+      if (symtab.sh_link >= section_count ||
+          !ReadSectionHeader(fd, symtab.sh_link, section_count, section_offset,
+                             section_entry_size, &strtab) ||
+          strtab.sh_type != SHT_STRTAB) {
+        return SymbolLookupResult::kMalformed;
+      }
+      const SymbolLookupResult result =
+          FindSymbol(pc, fd, out, out_size, base_address, &strtab, &symtab);
+      if (result == SymbolLookupResult::kFound ||
+          result == SymbolLookupResult::kMalformed) {
+        return result;
+      }
     }
   }
 
-  // If the symbol is not found, then consult a dynamic symbol table.
-  if (GetSectionHeaderByType(fd, elf_header.e_shnum, elf_header.e_shoff,
-                             SHT_DYNSYM, &symtab)) {
-    if (!ReadFromOffsetExact(
-            fd, &strtab, sizeof(strtab),
-            elf_header.e_shoff + symtab.sh_link * sizeof(symtab))) {
+  const SymbolLookupResult dynamic_result =
+      GetDynamicSymbolTables(fd, elf_header, &symtab, &strtab);
+  if (dynamic_result == SymbolLookupResult::kMalformed) {
+    return SymbolLookupResult::kMalformed;
+  }
+  if (dynamic_result == SymbolLookupResult::kFound) {
+    return FindSymbol(pc, fd, out, out_size, base_address, &strtab, &symtab);
+  }
+  return SymbolLookupResult::kNotFound;
+}
+
+static bool GetProgramHeaderCountFromMemory(const int mem_fd,
+                                            const std::uint64_t start_address,
+                                            const ElfW(Ehdr) & elf_header,
+                                            std::size_t* program_header_count) {
+  std::size_t count = elf_header.e_phnum;
+  if (elf_header.e_phnum == 0) {
+    *program_header_count = 0;
+    return true;
+  }
+  if (elf_header.e_phnum == PN_XNUM) {
+    if (elf_header.e_shoff == 0 ||
+        elf_header.e_shentsize < sizeof(ElfW(Shdr))) {
       return false;
     }
-    if (FindSymbol(pc, fd, out, out_size, base_address, &strtab, &symtab)) {
-      return true;  // Found the symbol in a dynamic symbol table.
+    std::uint64_t section_offset;
+    if (!internal::CheckedAdd(start_address,
+                              static_cast<std::uint64_t>(elf_header.e_shoff),
+                              section_offset) ||
+        section_offset > std::numeric_limits<std::size_t>::max()) {
+      return false;
     }
+    ElfW(Shdr) first_section;
+    if (!ReadFromOffsetExact(mem_fd, &first_section, sizeof(first_section),
+                             static_cast<std::size_t>(section_offset))) {
+      return false;
+    }
+    count = static_cast<std::size_t>(first_section.sh_info);
   }
+  if (count != 0 && elf_header.e_phentsize < sizeof(ElfW(Phdr))) {
+    return false;
+  }
+  *program_header_count = count;
+  return true;
+}
 
-  return false;
+static bool ReadProgramHeaderFromMemory(const int mem_fd,
+                                        const std::uint64_t start_address,
+                                        const ElfW(Ehdr) & elf_header,
+                                        const std::size_t index,
+                                        const std::size_t count,
+                                        ElfW(Phdr) * out) {
+  if (index >= count || elf_header.e_phentsize < sizeof(ElfW(Phdr))) {
+    return false;
+  }
+  std::uint64_t entry_offset;
+  std::uint64_t offset;
+  if (!internal::CheckedMultiply(
+          static_cast<std::uint64_t>(index),
+          static_cast<std::uint64_t>(elf_header.e_phentsize), entry_offset) ||
+      !internal::CheckedAdd(static_cast<std::uint64_t>(elf_header.e_phoff),
+                            entry_offset, offset) ||
+      !internal::CheckedAdd(start_address, offset, offset) ||
+      offset > std::numeric_limits<std::size_t>::max()) {
+    return false;
+  }
+  return ReadFromOffsetExact(mem_fd, out, sizeof(*out),
+                             static_cast<std::size_t>(offset));
 }
 
 namespace {
@@ -710,13 +1349,19 @@ static FileDescriptor OpenObjectFileContainingPcAndGetStartAddress(
           // If we fail to find a segment for file offset 0, use the address
           // of the ELF header as the base address.
           base_address = start_address;
-          for (unsigned i = 0; i != ehdr.e_phnum; ++i) {
+          std::size_t program_header_count;
+          if (!GetProgramHeaderCountFromMemory(mem_fd.get(), start_address,
+                                               ehdr, &program_header_count)) {
+            break;
+          }
+          for (std::size_t i = 0; i != program_header_count; ++i) {
             ElfW(Phdr) phdr;
-            if (ReadFromOffsetExact(
-                    mem_fd.get(), &phdr, sizeof(phdr),
-                    start_address + ehdr.e_phoff + i * sizeof(phdr)) &&
+            if (ReadProgramHeaderFromMemory(mem_fd.get(), start_address, ehdr,
+                                            i, program_header_count, &phdr) &&
                 phdr.p_type == PT_LOAD && phdr.p_offset == 0) {
-              base_address = start_address - phdr.p_vaddr;
+              if (phdr.p_vaddr <= start_address) {
+                base_address = start_address - phdr.p_vaddr;
+              }
               break;
             }
           }
@@ -868,7 +1513,8 @@ static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
   uint64_t base_address = 0;
   FileDescriptor object_fd;
 
-  if (out_size < 1) {
+  constexpr std::size_t kMinimumOutputSize = 2;
+  if (out_size < kMinimumOutputSize) {
     return false;
   }
   out[0] = '\0';
@@ -881,6 +1527,7 @@ static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
     object_fd = OpenObjectFileContainingPcAndGetStartAddress(
         pc0, start_address, base_address, out + 1, out_size - 1);
   }
+  const bool object_name_available = out[1] != '\0';
 
 #    if defined(PRINT_UNSYMBOLIZED_STACK_TRACES)
   {
@@ -888,7 +1535,7 @@ static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
   // Check whether a file name was returned.
   if (!object_fd) {
 #    endif
-    if (out[1]) {
+    if (object_name_available) {
       // The object file containing PC was determined successfully however the
       // object file was not opened successfully.  This is still considered
       // success because the object file name and offset are known and tools
@@ -933,9 +1580,13 @@ static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
       out_size -= static_cast<size_t>(num_bytes_written);
     }
   }
-  if (!GetSymbolFromObjectFile(object_fd.get(), pc0, out, out_size,
-                               base_address)) {
-    if (out[1] && !g_symbolize_callback) {
+  const SymbolLookupResult symbol_result = GetSymbolFromObjectFile(
+      object_fd.get(), pc0, out, out_size, base_address);
+  if (symbol_result != SymbolLookupResult::kFound) {
+    if (symbol_result == SymbolLookupResult::kMalformed) {
+      return false;
+    }
+    if (object_name_available && !g_symbolize_callback) {
       // The object file containing PC was opened successfully however the
       // symbol was not found. The object may have been stripped. This is still
       // considered success because the object file name and offset are known

@@ -482,13 +482,14 @@ set (NGLOG_SRCS
   src/demangle.h
   src/flags.cc
   src/initializer.h
+  src/internal/attributes.h
+  src/internal/checked_arithmetic.h
   src/internal/color_format.cc
   src/internal/hyperlink.cc
   src/internal/lock_metrics.cc
   src/internal/lock_metrics.h
   src/internal/log_cleaner.cc
   src/internal/log_cleaner.h
-  src/internal/attributes.h
   src/internal/source_location.cc
   src/internal/source_location.h
   src/internal/style_recorder.cc
