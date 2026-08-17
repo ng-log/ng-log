@@ -648,6 +648,47 @@ TEST(Demangle, InheritingConstructors) {
   EXPECT_THAT(tmp, StrEq("D::A()"));
 }
 
+TEST(Demangle, StructorVariants) {
+  char tmp[64];
+  // GCC emits C4/C5 and D4/D5 for the unified and COMDAT-folded structors.
+  EXPECT_TRUE(Demangle("_ZN1AC4Ev", tmp, sizeof(tmp)));
+  EXPECT_THAT(tmp, StrEq("A::A()"));
+  EXPECT_TRUE(Demangle("_ZN1AC5Ev", tmp, sizeof(tmp)));
+  EXPECT_THAT(tmp, StrEq("A::A()"));
+  EXPECT_TRUE(Demangle("_ZN1AD4Ev", tmp, sizeof(tmp)));
+  EXPECT_THAT(tmp, StrEq("A::~A()"));
+  EXPECT_TRUE(Demangle("_ZN1AD5Ev", tmp, sizeof(tmp)));
+  EXPECT_THAT(tmp, StrEq("A::~A()"));
+  // The ABI reserves D3 but no compiler emits it, and there is no C0.
+  EXPECT_FALSE(Demangle("_ZN1AD3Ev", tmp, sizeof(tmp)));
+  EXPECT_FALSE(Demangle("_ZN1AC0Ev", tmp, sizeof(tmp)));
+}
+
+TEST(Demangle, DefaultArgumentScopes) {
+  char tmp[64];
+  // The parameter number is optional; its absence designates the last
+  // parameter.
+  EXPECT_TRUE(Demangle("_ZZ1fiEd_1x", tmp, sizeof(tmp)));
+  EXPECT_THAT(tmp, StrEq("f()::x"));
+  EXPECT_TRUE(Demangle("_ZZ1fiEd0_1x", tmp, sizeof(tmp)));
+  EXPECT_THAT(tmp, StrEq("f()::x"));
+  EXPECT_TRUE(Demangle("_ZZ1fiEd_NKUlvE_clEv", tmp, sizeof(tmp)));
+  EXPECT_THAT(tmp, StrEq("f()::operator()()"));
+}
+
+TEST(Demangle, StdQualifiedUnresolvedNames) {
+  char tmp[64];
+  EXPECT_TRUE(Demangle("_Z1fIiEvNSt9enable_ifIXsrSt1A5valueEvE4typeE", tmp,
+                       sizeof(tmp)));
+  EXPECT_THAT(tmp, StrEq("f<>()"));
+  EXPECT_TRUE(Demangle("_Z1fIiEvNSt9enable_ifIXsrSt1AI1BE5valueEvE4typeE", tmp,
+                       sizeof(tmp)));
+  EXPECT_THAT(tmp, StrEq("f<>()"));
+  // Only a single qualifier level may follow the std abbreviation.
+  EXPECT_FALSE(Demangle("_Z1fIiEvNSt9enable_ifIXsrSt1A1B5valueEvE4typeE", tmp,
+                        sizeof(tmp)));
+}
+
 TEST(Demangle, TransactionSafeEntryPoints) {
   char tmp[64];
   EXPECT_TRUE(Demangle("_ZGTt3foov", tmp, sizeof(tmp)));
