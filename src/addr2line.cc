@@ -16,6 +16,10 @@
 #  include <cstring>
 #  include <iterator>
 
+#  ifndef NGLOG_OS_WINDOWS
+#    include <unistd.h>
+#  endif  // NGLOG_OS_WINDOWS
+
 #  include "demangle.h"
 #  include "ng-log/flags.h"
 #  include "subprocess.h"
@@ -33,6 +37,82 @@ constexpr std::size_t kMaxAddr2LineOutput = 4096;
 // Largest object file path this module will pass to addr2line, matching
 // the common PATH_MAX on Linux. Longer paths are truncated.
 constexpr std::size_t kMaxObjectPathLength = 4096;
+
+#  ifndef NGLOG_OS_WINDOWS
+constexpr char kAddr2LineName[] = "addr2line";
+char g_addr2line_path[kMaxObjectPathLength] = {};
+std::size_t g_addr2line_path_length = 0;
+
+void CacheAddr2LinePath() {
+  g_addr2line_path_length = 0;
+
+  const char* path = std::getenv("PATH");
+  char default_path[kMaxObjectPathLength];
+  if (path == nullptr) {
+    const std::size_t default_path_length =
+        confstr(_CS_PATH, default_path, sizeof(default_path));
+    if (default_path_length == 0 ||
+        static_cast<std::size_t>(default_path_length) >= sizeof(default_path)) {
+      return;
+    }
+    path = default_path;
+  }
+
+  const char* entry = path;
+  for (;;) {
+    const char* const separator = std::strchr(entry, ':');
+    const std::size_t entry_length =
+        separator == nullptr ? std::strlen(entry)
+                             : static_cast<std::size_t>(separator - entry);
+    const std::size_t directory_length = entry_length == 0 ? 1 : entry_length;
+    const std::size_t candidate_length =
+        directory_length + 1 + sizeof(kAddr2LineName) - 1;
+
+    if (candidate_length + 1 <= kMaxObjectPathLength) {
+      char candidate[kMaxObjectPathLength];
+      if (entry_length == 0) {
+        candidate[0] = '.';
+      } else {
+        std::memcpy(candidate, entry, entry_length);
+      }
+      candidate[directory_length] = '/';
+      std::memcpy(candidate + directory_length + 1, kAddr2LineName,
+                  sizeof(kAddr2LineName));
+
+      if (access(candidate, X_OK) == 0) {
+        char resolved[kMaxObjectPathLength];
+        if (realpath(candidate, resolved) != nullptr) {
+          const std::size_t resolved_length = std::strlen(resolved);
+          if (resolved_length + 1 <= kMaxObjectPathLength) {
+            std::memcpy(g_addr2line_path, resolved, resolved_length + 1);
+            g_addr2line_path_length = resolved_length;
+            return;
+          }
+        }
+      }
+    }
+
+    if (separator == nullptr) {
+      break;
+    }
+    entry = separator + 1;
+  }
+}
+
+bool CopyCachedAddr2LinePath(char* out, std::size_t out_size) noexcept {
+  if (g_addr2line_path_length == 0 || g_addr2line_path_length + 1 > out_size) {
+    return false;
+  }
+  std::memcpy(out, g_addr2line_path, g_addr2line_path_length + 1);
+  return true;
+}
+#  endif  // NGLOG_OS_WINDOWS
+
+#  if defined(NGLOG_OS_WINDOWS)
+using Addr2LineSubprocess = Subprocess<>;
+#  else
+using Addr2LineSubprocess = Subprocess<SubprocessMode::kSignalSafe>;
+#  endif  // NGLOG_OS_WINDOWS
 
 }  // namespace
 
@@ -133,16 +213,18 @@ namespace {
 
 // Runs addr2line with |argv| and copies at most |out_size| bytes of its
 // stdout into |out|. Returns the number of bytes copied, or 0 on any
-// failure, including a timeout. Subprocess::Wait() below forcibly
-// terminates a hung addr2line rather than blocking the crash-reporting
-// path forever.
+// failure, including a timeout or unsuccessful exit. Subprocess::Wait()
+// forcibly terminates a hung addr2line rather than blocking the
+// crash-reporting path forever.
 std::size_t RunAddr2Line(char* const argv[], char* out, std::size_t out_size) {
-  // Deliberately not the parent's environment: addr2line has no need for
-  // it, and this keeps e.g. DEBUGINFOD_URLS from triggering a network
-  // fetch while handling a crash.
+  // The normal subprocess mode receives a minimal environment so addr2line
+  // cannot use settings such as DEBUGINFOD_URLS during a crash. The POSIX
+  // signal-safe mode uses execv(), which necessarily inherits the environment.
   char* envp[] = {nullptr};
 
-  Subprocess process;
+  const std::chrono::milliseconds timeout{FLAGS_addr2line_timeout_ms};
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  Addr2LineSubprocess process;
 
   if (!process.Spawn(argv, envp)) {
     return 0;
@@ -150,8 +232,6 @@ std::size_t RunAddr2Line(char* const argv[], char* out, std::size_t out_size) {
 
   process.CloseStdin();
 
-  const std::chrono::milliseconds timeout{FLAGS_addr2line_timeout_ms};
-  const auto deadline = std::chrono::steady_clock::now() + timeout;
   std::size_t total_read = 0;
 
   while (total_read < out_size) {
@@ -182,7 +262,11 @@ std::size_t RunAddr2Line(char* const argv[], char* out, std::size_t out_size) {
     remaining =
         std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
   }
-  process.Wait(remaining);
+  const SubprocessWaitResult wait_result = process.Wait(remaining);
+  if (wait_result.status != SubprocessWaitResult::kExited ||
+      wait_result.exit_code != 0) {
+    return 0;
+  }
   return total_read;
 }
 
@@ -218,7 +302,14 @@ int Addr2LineSymbolizeCallback(int /*fd*/, void* pc, char* out,
   // avoid having to concatenate them into one string: getopt_long(), which
   // addr2line uses to parse its arguments, accepts both forms for a long
   // option with a required argument.
+#  ifdef NGLOG_OS_WINDOWS
   char argv0[] = "addr2line";
+#  else
+  char argv0[kMaxObjectPathLength];
+  if (!CopyCachedAddr2LinePath(argv0, sizeof(argv0))) {
+    return 0;
+  }
+#  endif  // NGLOG_OS_WINDOWS
   char exe_flag[] = "--exe";
   char* argv[] = {argv0, exe_flag, object_path, address_buf, nullptr};
 
@@ -312,7 +403,14 @@ bool ResolveFunctionAndLine(const char* object_path, void* pc,
   std::snprintf(address_buf, sizeof(address_buf), "0x%llx",
                 static_cast<unsigned long long>(pc0 - relocation));
 
+#  ifdef NGLOG_OS_WINDOWS
   char argv0[] = "addr2line";
+#  else
+  char argv0[kMaxObjectPathLength];
+  if (!CopyCachedAddr2LinePath(argv0, sizeof(argv0))) {
+    return false;
+  }
+#  endif  // NGLOG_OS_WINDOWS
   char functions_flag[] = "--functions";
   char exe_flag[] = "--exe";
   char* argv[] = {argv0,           functions_flag, exe_flag,
@@ -366,6 +464,9 @@ bool ResolveFunctionAndLine(const char* object_path, void* pc,
 }
 
 bool InstallAddr2LineSymbolizeCallback() {
+#  ifndef NGLOG_OS_WINDOWS
+  CacheAddr2LinePath();
+#  endif  // NGLOG_OS_WINDOWS
   InstallSymbolizeCallback(&Addr2LineSymbolizeCallback);
   return true;
 }

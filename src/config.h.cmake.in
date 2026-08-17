@@ -41,8 +41,14 @@
 /* Define if you have the 'fork' function in <unistd.h> */
 #cmakedefine HAVE_FORK
 
+/* Define if you have the '_Fork' function in <unistd.h> */
+#cmakedefine HAVE__FORK
+
 /* Define if you have the 'execve' function in <unistd.h> */
 #cmakedefine HAVE_EXECVE
+
+/* Define if you have the 'execv' function in <unistd.h> */
+#cmakedefine HAVE_EXECV
 
 /* Define if you have the 'pipe' function in <unistd.h> */
 #cmakedefine HAVE_PIPE

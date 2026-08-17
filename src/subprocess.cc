@@ -7,6 +7,11 @@
 
 #include "utilities.h"
 
+// implementation uses posix_spawn() when available and retains the existing
+// fork()+exec() fallback. The signal-safe mode is defined separately in
+// subprocess_fork.cc so the normal implementation cannot accidentally
+// enter a fork child with the signal-handler constraints.
+
 #ifdef HAVE_SUBPROCESS
 
 #  include <algorithm>
@@ -298,12 +303,41 @@ DWORD RunOverlapped(HANDLE handle, std::chrono::milliseconds timeout,
 
 }  // namespace
 
-Subprocess::Subprocess(Subprocess&& other) noexcept
+template <>
+Subprocess<SubprocessMode::kNormal>::Subprocess(Subprocess&& other) noexcept;
+template <>
+Subprocess<SubprocessMode::kNormal>&
+Subprocess<SubprocessMode::kNormal>::operator=(Subprocess&& other) noexcept;
+template <>
+void Subprocess<SubprocessMode::kNormal>::Reset() noexcept;
+template <>
+bool Subprocess<SubprocessMode::kNormal>::Spawn(char* const argv[],
+                                                char* const envp[]);
+template <>
+Subprocess<SubprocessMode::kNormal>::operator bool() const noexcept;
+template <>
+std::size_t Subprocess<SubprocessMode::kNormal>::WriteStdin(
+    const char* data, std::size_t size,
+    std::chrono::milliseconds timeout) noexcept;
+template <>
+void Subprocess<SubprocessMode::kNormal>::CloseStdin() noexcept;
+template <>
+std::size_t Subprocess<SubprocessMode::kNormal>::ReadStdout(
+    char* out, std::size_t out_size,
+    std::chrono::milliseconds timeout) noexcept;
+template <>
+SubprocessWaitResult Subprocess<SubprocessMode::kNormal>::Wait(
+    std::chrono::milliseconds timeout) noexcept;
+
+template <>
+Subprocess<SubprocessMode::kNormal>::Subprocess(Subprocess&& other) noexcept
     : process_{std::move(other.process_)},
       stdin_write_{std::move(other.stdin_write_)},
       stdout_read_{std::move(other.stdout_read_)} {}
 
-Subprocess& Subprocess::operator=(Subprocess&& other) noexcept {
+template <>
+Subprocess<SubprocessMode::kNormal>&
+Subprocess<SubprocessMode::kNormal>::operator=(Subprocess&& other) noexcept {
   if (this != &other) {
     Reset();
     process_ = std::move(other.process_);
@@ -314,7 +348,8 @@ Subprocess& Subprocess::operator=(Subprocess&& other) noexcept {
   return *this;
 }
 
-void Subprocess::Reset() noexcept {
+template <>
+void Subprocess<SubprocessMode::kNormal>::Reset() noexcept {
   if (process_) {
     TerminateProcess(process_.get(), 1);
     WaitForSingleObject(process_.get(), INFINITE);
@@ -325,7 +360,9 @@ void Subprocess::Reset() noexcept {
   stdout_read_.reset();
 }
 
-bool Subprocess::Spawn(char* const argv[], char* const envp[]) {
+template <>
+bool Subprocess<SubprocessMode::kNormal>::Spawn(char* const argv[],
+                                                char* const envp[]) {
   Reset();
 
   UniqueHandle stdin_write;
@@ -399,10 +436,15 @@ bool Subprocess::Spawn(char* const argv[], char* const envp[]) {
   return true;
 }
 
-Subprocess::operator bool() const noexcept { return process_ != nullptr; }
+template <>
+Subprocess<SubprocessMode::kNormal>::operator bool() const noexcept {
+  return process_ != nullptr;
+}
 
-std::size_t Subprocess::WriteStdin(const char* data, std::size_t size,
-                                   std::chrono::milliseconds timeout) {
+template <>
+std::size_t Subprocess<SubprocessMode::kNormal>::WriteStdin(
+    const char* data, std::size_t size,
+    std::chrono::milliseconds timeout) noexcept {
   if (stdin_write_ == nullptr) {
     return 0;
   }
@@ -422,10 +464,15 @@ std::size_t Subprocess::WriteStdin(const char* data, std::size_t size,
   return static_cast<std::size_t>(written);
 }
 
-void Subprocess::CloseStdin() { stdin_write_.reset(); }
+template <>
+void Subprocess<SubprocessMode::kNormal>::CloseStdin() noexcept {
+  stdin_write_.reset();
+}
 
-std::size_t Subprocess::ReadStdout(char* out, std::size_t out_size,
-                                   std::chrono::milliseconds timeout) {
+template <>
+std::size_t Subprocess<SubprocessMode::kNormal>::ReadStdout(
+    char* out, std::size_t out_size,
+    std::chrono::milliseconds timeout) noexcept {
   if (!stdout_read_ || out_size == 0) {
     return 0;
   }
@@ -442,7 +489,9 @@ std::size_t Subprocess::ReadStdout(char* out, std::size_t out_size,
   return static_cast<std::size_t>(read);
 }
 
-SubprocessWaitResult Subprocess::Wait(std::chrono::milliseconds timeout) {
+template <>
+SubprocessWaitResult Subprocess<SubprocessMode::kNormal>::Wait(
+    std::chrono::milliseconds timeout) noexcept {
   if (!process_) {
     return SubprocessWaitResult::Failed();
   }
@@ -450,10 +499,21 @@ SubprocessWaitResult Subprocess::Wait(std::chrono::milliseconds timeout) {
   const DWORD wait_result =
       WaitForSingleObject(process_.get(), ClampTimeoutMillis(timeout));
   if (wait_result == WAIT_TIMEOUT) {
-    TerminateProcess(process_.get(), 1);
+    const BOOL terminated = TerminateProcess(process_.get(), 1);
     if (WaitForSingleObject(process_.get(), INFINITE) != WAIT_OBJECT_0) {
       process_.reset();
-      return SubprocessWaitResult::TimedOut();
+      return SubprocessWaitResult::Failed();
+    }
+    if (!terminated) {
+      DWORD exit_code = STILL_ACTIVE;
+      if (GetExitCodeProcess(process_.get(), &exit_code) == 0 ||
+          exit_code == STILL_ACTIVE ||
+          exit_code > static_cast<DWORD>(std::numeric_limits<int>::max())) {
+        process_.reset();
+        return SubprocessWaitResult::Failed();
+      }
+      process_.reset();
+      return SubprocessWaitResult::Exited(static_cast<int>(exit_code));
     }
     process_.reset();
     return SubprocessWaitResult::TimedOut();
@@ -482,6 +542,9 @@ SubprocessWaitResult Subprocess::Wait(std::chrono::milliseconds timeout) {
 #    include <signal.h>
 #    include <sys/wait.h>
 #    include <unistd.h>
+
+#    include "subprocess_fork.h"
+
 #    ifdef HAVE_POSIX_SPAWN
 #      include <spawn.h>
 #    endif  // HAVE_POSIX_SPAWN
@@ -557,8 +620,8 @@ class PosixSpawnFileActions final {
 // interrupted. The "p" variant, rather than plain posix_spawn(), searches
 // PATH for argv[0] the same way a shell would, so no separate lookup step
 // is needed here.
-pid_t SpawnProcess(char* const argv[], char* const envp[], int stdin_fd,
-                   int stdout_fd, int /*exec_error_fd*/) {
+pid_t SpawnProcessNormal(char* const argv[], char* const envp[], int stdin_fd,
+                         int stdout_fd, int /*exec_error_fd*/) {
   PosixSpawnFileActions file_actions;
 
   if (!file_actions) {
@@ -580,56 +643,52 @@ pid_t SpawnProcess(char* const argv[], char* const envp[], int stdin_fd,
 
 #    else  // !HAVE_POSIX_SPAWN
 
-// execvp(), unlike execve(), searches PATH for argv[0] but also always
-// inherits the caller's environment: there is no portable, PATH-searching
-// exec that also accepts a custom environment. Callers that depend on a
-// minimal environment (see addr2line.cc) do not get that hardening on
-// this fallback path.
-pid_t SpawnProcess(char* const argv[], char* const /*envp*/[], int stdin_fd,
-                   int stdout_fd, int exec_error_fd) {
-  const pid_t pid = fork();
-
-  if (pid < 0) {
-    return -1;
-  }
-
-  if (pid == 0) {
-    if (dup2(stdin_fd, STDIN_FILENO) < 0 ||
-        dup2(stdout_fd, STDOUT_FILENO) < 0) {
-      const int error = errno;
-      FailureRetry([exec_error_fd, error] {
-        return ::write(exec_error_fd, &error, sizeof(error));
-      });
-      _exit(127);
-    }
-
-    const int dev_null = open("/dev/null", O_WRONLY);
-
-    if (dev_null >= 0) {
-      dup2(dev_null, STDERR_FILENO);
-    }
-
-    execvp(argv[0], argv);
-    const int error = errno;
-    FailureRetry([exec_error_fd, error] {
-      return ::write(exec_error_fd, &error, sizeof(error));
-    });
-    _exit(127);  // Shell convention for "command not found".
-  }
-
-  return pid;
+pid_t SpawnProcessNormal(char* const argv[], char* const envp[], int stdin_fd,
+                         int stdout_fd, int exec_error_fd) {
+  return internal::SpawnProcessWithFork(argv, envp, stdin_fd, stdout_fd,
+                                        exec_error_fd, &fork,
+                                        &internal::ExecuteWithExecvp);
 }
 
 #    endif  // HAVE_POSIX_SPAWN
 
 }  // namespace
 
-Subprocess::Subprocess(Subprocess&& other) noexcept
+template <>
+Subprocess<SubprocessMode::kNormal>::Subprocess(Subprocess&& other) noexcept;
+template <>
+Subprocess<SubprocessMode::kNormal>&
+Subprocess<SubprocessMode::kNormal>::operator=(Subprocess&& other) noexcept;
+template <>
+void Subprocess<SubprocessMode::kNormal>::Reset() noexcept;
+template <>
+bool Subprocess<SubprocessMode::kNormal>::Spawn(char* const argv[],
+                                                char* const envp[]) noexcept;
+template <>
+Subprocess<SubprocessMode::kNormal>::operator bool() const noexcept;
+template <>
+std::size_t Subprocess<SubprocessMode::kNormal>::WriteStdin(
+    const char* data, std::size_t size,
+    std::chrono::milliseconds timeout) noexcept;
+template <>
+void Subprocess<SubprocessMode::kNormal>::CloseStdin() noexcept;
+template <>
+std::size_t Subprocess<SubprocessMode::kNormal>::ReadStdout(
+    char* out, std::size_t out_size,
+    std::chrono::milliseconds timeout) noexcept;
+template <>
+SubprocessWaitResult Subprocess<SubprocessMode::kNormal>::Wait(
+    std::chrono::milliseconds timeout) noexcept;
+
+template <>
+Subprocess<SubprocessMode::kNormal>::Subprocess(Subprocess&& other) noexcept
     : pid_{std::exchange(other.pid_, -1)},
       stdin_write_{std::move(other.stdin_write_)},
       stdout_read_{std::move(other.stdout_read_)} {}
 
-Subprocess& Subprocess::operator=(Subprocess&& other) noexcept {
+template <>
+Subprocess<SubprocessMode::kNormal>&
+Subprocess<SubprocessMode::kNormal>::operator=(Subprocess&& other) noexcept {
   if (this != &other) {
     Reset();
     pid_ = std::exchange(other.pid_, -1);
@@ -640,7 +699,8 @@ Subprocess& Subprocess::operator=(Subprocess&& other) noexcept {
   return *this;
 }
 
-void Subprocess::Reset() noexcept {
+template <>
+void Subprocess<SubprocessMode::kNormal>::Reset() noexcept {
   const pid_t pid = std::exchange(pid_, -1);
 
   if (pid >= 0) {
@@ -654,7 +714,9 @@ void Subprocess::Reset() noexcept {
   stdout_read_.reset();
 }
 
-bool Subprocess::Spawn(char* const argv[], char* const envp[]) {
+template <>
+bool Subprocess<SubprocessMode::kNormal>::Spawn(char* const argv[],
+                                                char* const envp[]) noexcept {
   Reset();
 
   FileDescriptor stdin_read;
@@ -701,8 +763,8 @@ bool Subprocess::Spawn(char* const argv[], char* const envp[]) {
   constexpr int exec_error_fd = -1;
 #    endif
 
-  const pid_t pid = SpawnProcess(argv, envp, stdin_read.get(),
-                                 stdout_write.get(), exec_error_fd);
+  const pid_t pid = SpawnProcessNormal(argv, envp, stdin_read.get(),
+                                       stdout_write.get(), exec_error_fd);
 
   stdin_read.reset();
   stdout_write.reset();
@@ -737,10 +799,15 @@ bool Subprocess::Spawn(char* const argv[], char* const envp[]) {
   return true;
 }
 
-Subprocess::operator bool() const noexcept { return pid_ >= 0; }
+template <>
+Subprocess<SubprocessMode::kNormal>::operator bool() const noexcept {
+  return pid_ >= 0;
+}
 
-std::size_t Subprocess::WriteStdin(const char* data, std::size_t size,
-                                   std::chrono::milliseconds timeout) {
+template <>
+std::size_t Subprocess<SubprocessMode::kNormal>::WriteStdin(
+    const char* data, std::size_t size,
+    std::chrono::milliseconds timeout) noexcept {
   if (!stdin_write_) {
     return 0;
   }
@@ -762,10 +829,15 @@ std::size_t Subprocess::WriteStdin(const char* data, std::size_t size,
   return written > 0 ? static_cast<std::size_t>(written) : 0;
 }
 
-void Subprocess::CloseStdin() { stdin_write_.reset(); }
+template <>
+void Subprocess<SubprocessMode::kNormal>::CloseStdin() noexcept {
+  stdin_write_.reset();
+}
 
-std::size_t Subprocess::ReadStdout(char* out, std::size_t out_size,
-                                   std::chrono::milliseconds timeout) {
+template <>
+std::size_t Subprocess<SubprocessMode::kNormal>::ReadStdout(
+    char* out, std::size_t out_size,
+    std::chrono::milliseconds timeout) noexcept {
   if (!stdout_read_) {
     return 0;
   }
@@ -788,7 +860,9 @@ std::size_t Subprocess::ReadStdout(char* out, std::size_t out_size,
   return bytes_read > 0 ? static_cast<std::size_t>(bytes_read) : 0;
 }
 
-SubprocessWaitResult Subprocess::Wait(std::chrono::milliseconds timeout) {
+template <>
+SubprocessWaitResult Subprocess<SubprocessMode::kNormal>::Wait(
+    std::chrono::milliseconds timeout) noexcept {
   if (pid_ < 0) {
     return SubprocessWaitResult::Failed();
   }
@@ -796,6 +870,7 @@ SubprocessWaitResult Subprocess::Wait(std::chrono::milliseconds timeout) {
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   int status = 0;
   bool exited = false;
+  bool wait_failed = false;
 
   for (;;) {
     const pid_t result = FailureRetry(
@@ -803,6 +878,11 @@ SubprocessWaitResult Subprocess::Wait(std::chrono::milliseconds timeout) {
 
     if (result == pid_) {
       exited = true;
+      break;
+    }
+
+    if (result < 0) {
+      wait_failed = true;
       break;
     }
 
@@ -818,9 +898,25 @@ SubprocessWaitResult Subprocess::Wait(std::chrono::milliseconds timeout) {
   }
 
   if (!exited) {
-    ::kill(pid_, SIGKILL);
-    FailureRetry([this, &status] { return ::waitpid(pid_, &status, 0); });
+    const pid_t pid = pid_;
+    const int kill_result =
+        FailureRetry([pid] { return ::kill(pid, SIGKILL); });
+    const int kill_error = errno;
+    const pid_t wait_result =
+        FailureRetry([pid, &status] { return ::waitpid(pid, &status, 0); });
     pid_ = -1;
+
+    if (wait_result != pid) {
+      return SubprocessWaitResult::Failed();
+    }
+    if (wait_failed || (kill_result < 0 && kill_error != ESRCH)) {
+      return SubprocessWaitResult::Failed();
+    }
+    if (kill_result < 0) {
+      return WIFEXITED(status)
+                 ? SubprocessWaitResult::Exited(WEXITSTATUS(status))
+                 : SubprocessWaitResult::Failed();
+    }
     return SubprocessWaitResult::TimedOut();
   }
 
@@ -838,7 +934,10 @@ namespace nglog {
 inline namespace tools {
 
 // Identical on every platform: Reset() itself is what differs.
-Subprocess::~Subprocess() { Reset(); }
+template <>
+Subprocess<SubprocessMode::kNormal>::~Subprocess() {
+  Reset();
+}
 
 }  // namespace tools
 }  // namespace nglog

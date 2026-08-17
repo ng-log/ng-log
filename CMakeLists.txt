@@ -186,8 +186,10 @@ check_cxx_symbol_exists (backtrace_symbols execinfo.h
   HAVE_EXECINFO_BACKTRACE_SYMBOLS)
 check_cxx_symbol_exists (dladdr dlfcn.h HAVE_DLADDR)
 check_cxx_symbol_exists (execve unistd.h HAVE_EXECVE)
+check_cxx_symbol_exists (execv unistd.h HAVE_EXECV)
 check_cxx_symbol_exists (fcntl fcntl.h HAVE_FCNTL)
 check_cxx_symbol_exists (fork unistd.h HAVE_FORK)
+check_cxx_symbol_exists (_Fork unistd.h HAVE__FORK)
 check_cxx_symbol_exists (nanosleep ctime HAVE_NANOSLEEP)
 check_cxx_symbol_exists (pipe unistd.h HAVE_PIPE)
 check_cxx_symbol_exists (poll poll.h HAVE_POLL)
@@ -361,10 +363,11 @@ endif (WITH_SYMBOLIZE)
 
 # Excluded on Emscripten: it has no real process model, so neither
 # posix_spawn() nor fork()+exec() can actually run an addr2line subprocess
-# there, regardless of what the symbol checks below report.
+# there. POSIX addr2line additionally requires _Fork()+execv() because it can
+# run from a signal handler.
 if (_ng-log_try_addr2line AND HAVE_SYMBOLIZE AND UNIX AND NOT EMSCRIPTEN AND
     (HAVE_ELF_H OR HAVE_SYS_EXEC_ELF_H) AND HAVE_SIGACTION AND
-    HAVE_SUBPROCESS)
+    HAVE_SUBPROCESS AND HAVE__FORK AND HAVE_EXECV)
   set (HAVE_ADDR2LINE 1)
 endif ()
 
@@ -576,6 +579,8 @@ set (NGLOG_SRCS
   src/signalhandler.cc
   src/stacktrace.h
   src/subprocess.cc
+  src/subprocess_fork.cc
+  src/subprocess_fork.h
   src/subprocess.h
   src/symbolize.cc
   src/symbolize.h
@@ -875,6 +880,10 @@ if (BUILD_TESTING AND GTest_FOUND)
       src/addr2line_fake_empty.cc
     )
 
+    add_executable (addr2line_fake_fail
+      src/addr2line_fake_fail.cc
+    )
+
     add_executable (addr2line_fake_slow
       src/addr2line_fake_slow.cc
     )
@@ -900,10 +909,11 @@ if (BUILD_TESTING AND GTest_FOUND)
 
     target_link_libraries (addr2line_unittest PRIVATE ng-log_test)
     add_dependencies (addr2line_unittest addr2line_fake_hang addr2line_fake_empty
-      addr2line_fake_slow)
+      addr2line_fake_fail addr2line_fake_slow)
     target_compile_definitions (addr2line_unittest PRIVATE
       ADDR2LINE_FAKE_HANG_PATH="$<TARGET_FILE:addr2line_fake_hang>"
       ADDR2LINE_FAKE_EMPTY_PATH="$<TARGET_FILE:addr2line_fake_empty>"
+      ADDR2LINE_FAKE_FAIL_PATH="$<TARGET_FILE:addr2line_fake_fail>"
       ADDR2LINE_FAKE_SLOW_PATH="$<TARGET_FILE:addr2line_fake_slow>")
 
     if (WIN32)
@@ -913,6 +923,8 @@ if (BUILD_TESTING AND GTest_FOUND)
       target_link_options (addr2line_fake_hang PRIVATE
         -static -static-libgcc -static-libstdc++)
       target_link_options (addr2line_fake_empty PRIVATE
+        -static -static-libgcc -static-libstdc++)
+      target_link_options (addr2line_fake_fail PRIVATE
         -static -static-libgcc -static-libstdc++)
       target_link_options (addr2line_fake_slow PRIVATE
         -static -static-libgcc -static-libstdc++)

@@ -468,6 +468,7 @@ TEST(Addr2LineSymbolizeCallback, UsesOneTimeoutForSlowOutput) {
     ScopedPathOverride scoped_path(dir.c_str());
     const nglog::int32 previous_timeout_ms = FLAGS_addr2line_timeout_ms;
     FLAGS_addr2line_timeout_ms = 40;
+    EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
 
     char symbol[4096];
     const auto start = std::chrono::steady_clock::now();
@@ -478,12 +479,61 @@ TEST(Addr2LineSymbolizeCallback, UsesOneTimeoutForSlowOutput) {
 
     FLAGS_addr2line_timeout_ms = previous_timeout_ms;
     EXPECT_FALSE(resolved);
+    EXPECT_GE(elapsed, std::chrono::milliseconds{20});
     EXPECT_LT(elapsed, std::chrono::milliseconds{160});
+    InstallSymbolizeCallback(nullptr);
   }
 
   RemoveFakeAddr2Line(fake_executable);
   RemoveScratchDirectory(dir);
 }
+
+TEST(Addr2LineSymbolizeCallback, RejectsUnsuccessfulAddr2LineExit) {
+  const std::string dir = MakeScratchDirectory();
+  const std::string fake_executable =
+      MakeFakeAddr2Line(dir, ADDR2LINE_FAKE_FAIL_PATH);
+
+  {
+    ScopedPathOverride scoped_path(dir.c_str());
+    EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
+
+    char symbol[4096] = {};
+    EXPECT_FALSE(ResolveFunctionAndLine(
+        "missing.exe", reinterpret_cast<void*>(1), 0, symbol, sizeof(symbol),
+        SymbolizeOptions::kNone, nullptr));
+
+    InstallSymbolizeCallback(nullptr);
+  }
+
+  RemoveFakeAddr2Line(fake_executable);
+  RemoveScratchDirectory(dir);
+}
+
+#ifndef NGLOG_OS_WINDOWS
+TEST(Addr2LineSymbolizeCallback, KeepsExecutableAfterPathChanges) {
+  const std::string dir = MakeScratchDirectory();
+  const std::string fake_executable =
+      MakeFakeAddr2Line(dir, ADDR2LINE_FAKE_SLOW_PATH);
+
+  {
+    ScopedPathOverride scoped_path(dir.c_str());
+    EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
+
+    SetPathEnvironmentVariable("/nonexistent/directory/for/testing");
+
+    char symbol[4096] = {};
+    EXPECT_TRUE(ResolveFunctionAndLine(
+        "missing.exe", reinterpret_cast<void*>(1), 0, symbol, sizeof(symbol),
+        SymbolizeOptions::kNone, nullptr));
+    EXPECT_STREQ("slow", symbol);
+
+    InstallSymbolizeCallback(nullptr);
+  }
+
+  RemoveFakeAddr2Line(fake_executable);
+  RemoveScratchDirectory(dir);
+}
+#endif  // NGLOG_OS_WINDOWS
 
 TEST(Addr2LineSymbolizeCallback, SkipsGracefullyWhenAddr2LineProducesNoOutput) {
   const std::string dir = MakeScratchDirectory();

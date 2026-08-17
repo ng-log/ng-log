@@ -84,10 +84,35 @@ using UniqueHandle =
     std::unique_ptr<std::remove_pointer_t<HANDLE>, HandleDeleter>;
 #  endif  // defined(NGLOG_OS_WINDOWS)
 
+enum class SubprocessMode { kNormal, kSignalSafe };
+
+namespace {
+
+template <SubprocessMode mode>
+constexpr bool kSubprocessModeIsSpecialized = false;
+
+template <>
+constexpr bool kSubprocessModeIsSpecialized<SubprocessMode::kNormal> = true;
+
+template <>
+constexpr bool kSubprocessModeIsSpecialized<SubprocessMode::kSignalSafe> =
+#  if !defined(NGLOG_OS_WINDOWS) && defined(HAVE__FORK) && defined(HAVE_EXECV)
+    true
+#  else
+    false
+#  endif
+    ;
+
+}  // namespace
+
 // Spawns an external program and lets the caller exchange a bounded
 // amount of data with it.
+template <SubprocessMode mode = SubprocessMode::kNormal>
 class NGLOG_NO_EXPORT Subprocess final {
  public:
+  static_assert(kSubprocessModeIsSpecialized<mode>,
+                "the selected subprocess mode is not available");
+
   Subprocess() noexcept = default;
   ~Subprocess();
 
@@ -97,12 +122,18 @@ class NGLOG_NO_EXPORT Subprocess final {
   Subprocess(Subprocess&& other) noexcept;
   Subprocess& operator=(Subprocess&& other) noexcept;
 
-  // Searches PATH for argv[0] and spawns it with the given argv/envp
-  // (null-terminated, as for execve()/CreateProcessW()), redirecting
-  // stdin/stdout through pipes owned by this Subprocess and discarding
-  // stderr. Returns false if the process could not be spawned at all.
-  // Never blocks waiting for the child.
+  // The normal mode searches PATH for argv[0] and spawns it with the given
+  // argv/envp (null-terminated, as for execve()/CreateProcessW()). The
+  // signal-safe mode requires argv[0] to be an explicit path, ignores envp,
+  // and inherits the current environment through execv(). Both modes
+  // redirect stdin/stdout through pipes owned by this Subprocess and discard
+  // stderr. Returns false if the process could not be spawned at all. Never
+  // blocks waiting for the child.
+#  if defined(NGLOG_OS_WINDOWS)
   bool Spawn(char* const argv[], char* const envp[]);
+#  else
+  bool Spawn(char* const argv[], char* const envp[]) noexcept;
+#  endif
 
   // True once Spawn() has succeeded and Wait() has not yet been called.
   explicit operator bool() const noexcept;
@@ -117,22 +148,22 @@ class NGLOG_NO_EXPORT Subprocess final {
   // its own stdout pipe first. Interleave WriteStdin() with ReadStdout()
   // for large input.
   std::size_t WriteStdin(const char* data, std::size_t size,
-                         std::chrono::milliseconds timeout);
+                         std::chrono::milliseconds timeout) noexcept;
 
   // Closes the process' stdin, signaling EOF to it. Safe to call more
   // than once, or skip if the process needs no input.
-  void CloseStdin();
+  void CloseStdin() noexcept;
 
   // Reads up to |out_size| bytes of the process' stdout into |out|,
   // without blocking beyond |timeout|. Returns the number of bytes read,
   // or 0 on timeout, EOF, or error.
   std::size_t ReadStdout(char* out, std::size_t out_size,
-                         std::chrono::milliseconds timeout);
+                         std::chrono::milliseconds timeout) noexcept;
 
   // Waits for the process to exit, forcibly terminating it if |timeout|
   // elapses first. Always reaps the process exactly once as long as
   // Spawn() succeeded. Call at most once per Subprocess.
-  SubprocessWaitResult Wait(std::chrono::milliseconds timeout);
+  SubprocessWaitResult Wait(std::chrono::milliseconds timeout) noexcept;
 
  private:
   void Reset() noexcept;

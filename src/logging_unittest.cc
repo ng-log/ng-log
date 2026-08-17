@@ -2680,7 +2680,7 @@ TEST(EmailLogging, SlowMailerDoesNotBlockOtherLoggingThreads) {
                               log.data(), nullptr};
   char* const child_envp[] = {nullptr};
 
-  Subprocess child;
+  Subprocess<> child;
   ASSERT_TRUE(child.Spawn(child_argv, child_envp));
   child.CloseStdin();
 

@@ -8,9 +8,12 @@
 // SymbolizeCallback so that this information is printed right before the
 // demangled symbol name.
 //
-// The addr2line executable is entirely optional: it is looked up on PATH by the
-// same mechanism the C library already uses to run any other command, and this
-// module quietly does nothing if it cannot be found there.
+// The addr2line executable is entirely optional. On POSIX, this backend is
+// available only when signal-safe Subprocess support is available through
+// _Fork() and execv(). POSIX resolves and caches its absolute path when the
+// callback is installed so signal-handler invocations do not perform PATH
+// lookup. Windows resolves it when the process is spawned. This module
+// quietly does nothing if it cannot be found.
 
 #ifndef NGLOG_INTERNAL_ADDR2LINE_H
 #define NGLOG_INTERNAL_ADDR2LINE_H
@@ -40,8 +43,8 @@ std::size_t FormatAddr2LineOutput(const char* input, std::size_t input_len,
 
 // Installs a SymbolizeCallback (see symbolize.h) that resolves file names
 // and line numbers via addr2line. Returns true once the callback has been
-// installed. Does not itself check whether addr2line is available: that
-// happens on every symbolization request, when addr2line is actually run.
+// installed. On POSIX, the executable path is resolved and cached during
+// installation. On Windows, availability is checked when addr2line runs.
 NGLOG_NO_EXPORT
 bool InstallAddr2LineSymbolizeCallback();
 
@@ -69,8 +72,9 @@ bool SplitAddr2LineFunctionsOutput(const char* input, std::size_t input_len,
 // |relocation|, via "addr2line --functions". Writes "<file>:<line>
 // <name>" (or just "<name>") to |out|. Returns false only if the name
 // itself could not be resolved. Fills |frame| as documented in
-// symbolize.h when non-null. Used by the Windows backend, which has no
-// other way to name a symbol in a binary built with DWARF debug info.
+// symbolize.h when non-null. Used by the addr2line symbolization backends,
+// including the Windows backend, which has no other way to name a symbol in
+// a binary built with DWARF debug info.
 NGLOG_NO_EXPORT
 bool ResolveFunctionAndLine(const char* object_path, void* pc,
                             uint64_t relocation, char* out,
