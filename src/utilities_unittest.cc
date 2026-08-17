@@ -47,6 +47,52 @@ TEST(utilities, InitializeLoggingDeathTest) {
   ASSERT_DEATH(InitializeLogging("foobar"), "");
 }
 
+TEST(utilities, CollapseRepeatedCharacters) {
+  constexpr char delimiters[] = {'/', '\\'};
+
+  EXPECT_EQ(nglog::CollapseRepeatedCharacters("one///two\\\\three", delimiters),
+            "one/two\\three");
+  EXPECT_EQ(nglog::CollapseRepeatedCharacters("one///two", delimiters,
+                                              sizeof(delimiters)),
+            "one/two");
+  EXPECT_EQ(nglog::CollapseRepeatedCharacters("aabbbaac", "ab"), "ac");
+  EXPECT_EQ(nglog::CollapseRepeatedCharacters("unchanged", delimiters),
+            "unchanged");
+}
+
+TEST(utilities, IsFilenameExtensionAfterBaseFilename) {
+  EXPECT_TRUE(nglog::IsFilenameExtensionAfterBaseFilename(
+      "/tmp/app.custom.20260817-123456.42", "/tmp/app", ".custom"));
+  EXPECT_FALSE(nglog::IsFilenameExtensionAfterBaseFilename(
+      "/tmp/app.20260817-123456.42", "/tmp/app", ".custom"));
+}
+
+TEST(utilities, IsFilenameExtensionAtEnd) {
+  EXPECT_TRUE(nglog::IsFilenameExtensionAtEnd(
+      "/tmp/app.20260817-123456.42.custom", ".custom"));
+  EXPECT_FALSE(nglog::IsFilenameExtensionAtEnd(
+      "/tmp/app.20260817-123456.42.other", ".custom"));
+  EXPECT_FALSE(nglog::IsFilenameExtensionAtEnd(".custom", ".custom"));
+}
+
+TEST(utilities, TrimTrailingCRLFRemovesTrailingNewlines) {
+  EXPECT_EQ(nglog::TrimTrailingCRLF("message\r\n"), "message");
+  EXPECT_EQ(nglog::TrimTrailingCRLF("message\n"), "message");
+  EXPECT_EQ(nglog::TrimTrailingCRLF("message"), "message");
+  EXPECT_EQ(nglog::TrimTrailingCRLF("\r\n"), "");
+}
+
+TEST(utilities, TrimTrailingCharacters) {
+  constexpr char delimiters[] = {' ', '\t'};
+
+  EXPECT_EQ(nglog::TrimTrailingCharacters("message \t", delimiters), "message");
+  EXPECT_EQ(nglog::TrimTrailingCharacters("message \t", delimiters,
+                                          sizeof(delimiters)),
+            "message");
+  EXPECT_EQ(nglog::TrimTrailingCharacters("message", " \t"), "message");
+  EXPECT_EQ(nglog::TrimTrailingCharacters(" \t", delimiters), "");
+}
+
 int main(int argc, char** argv) {
   InitializeLogging(argv[0]);
   testing::InitGoogleTest(&argc, argv);

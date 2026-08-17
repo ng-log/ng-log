@@ -145,10 +145,10 @@ std::vector<std::string> SplitLines(const std::string& s) {
   while (start < s.size()) {
     const std::string::size_type pos = s.find('\n', start);
     if (pos == std::string::npos) {
-      lines.push_back(s.substr(start));
+      lines.emplace_back(s, start);
       break;
     }
-    lines.push_back(s.substr(start, pos - start));
+    lines.emplace_back(s, start, pos - start);
     start = pos + 1;
   }
   return lines;
@@ -221,16 +221,16 @@ std::string GetCapturedTestOutput(int fd) {
 constexpr std::size_t kLoggingPrefixLength = 9;
 
 // Check if the string is [IWEF](\d{8}|YEARDATE)
-bool IsLoggingPrefix(const std::string& s) {
-  if (s.size() != kLoggingPrefixLength) {
+bool IsLoggingPrefix(const std::string& s, std::size_t offset) {
+  if (offset > s.size() || s.size() - offset < kLoggingPrefixLength) {
     return false;
   }
-  if (s[0] == '\0' || !strchr("IWEF", s[0])) return false;
+  if (s[offset] == '\0' || !strchr("IWEF", s[offset])) return false;
   for (size_t i = 1; i <= 8; ++i) {
     // Cast to unsigned char: passing a negative char (e.g. from non-ASCII
     // log content) to isdigit() is undefined behavior.
-    if (!isdigit(static_cast<unsigned char>(s[i])) &&
-        s[i] != "YEARDATE"[i - 1]) {
+    if (!isdigit(static_cast<unsigned char>(s[offset + i])) &&
+        s[offset + i] != "YEARDATE"[i - 1]) {
       return false;
     }
   }
@@ -247,15 +247,14 @@ std::string MungeLine(const std::string& line) {
   std::size_t begin_of_logging_prefix = 0;
   for (; begin_of_logging_prefix + kLoggingPrefixLength < line.size();
        ++begin_of_logging_prefix) {
-    if (IsLoggingPrefix(
-            line.substr(begin_of_logging_prefix, kLoggingPrefixLength))) {
+    if (IsLoggingPrefix(line, begin_of_logging_prefix)) {
       break;
     }
   }
   if (begin_of_logging_prefix + kLoggingPrefixLength >= line.size()) {
     return line;
   } else if (begin_of_logging_prefix > 0) {
-    before = line.substr(0, begin_of_logging_prefix - 1);
+    before.assign(line, 0, begin_of_logging_prefix - 1);
   }
   std::istringstream iss(line.substr(begin_of_logging_prefix));
   iss >> logcode_date;
@@ -272,7 +271,8 @@ std::string MungeLine(const std::string& line) {
   }
   size_t index = thread_lineinfo.find(':');
   CHECK_NE(std::string::npos, index);
-  thread_lineinfo = thread_lineinfo.substr(0, index + 1) + "LINE]";
+  thread_lineinfo.resize(index + 1);
+  thread_lineinfo += "LINE]";
   std::string rest;
   std::getline(iss, rest);
   return (before + logcode_date[0] + "YEARDATE TIME__ " + thread_lineinfo +

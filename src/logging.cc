@@ -1417,9 +1417,9 @@ namespace {
 
 // Directory delimiter; Windows supports both forward slashes and backslashes
 #ifdef NGLOG_OS_WINDOWS
-const char possible_dir_delim[] = {'\\', '/'};
+constexpr char possible_dir_delim[] = "\\/";
 #else
-const char possible_dir_delim[] = {'/'};
+constexpr char possible_dir_delim[] = "/";
 #endif
 
 string PrettyDuration(const std::chrono::duration<int>& secs) {
@@ -2772,9 +2772,8 @@ const vector<string>& GetLoggingDirectories() {
 
     if (!FLAGS_log_dir.empty()) {
       // Ensure the specified path ends with a directory delimiter.
-      if (std::find(std::begin(possible_dir_delim),
-                    std::end(possible_dir_delim),
-                    FLAGS_log_dir.back()) == std::end(possible_dir_delim)) {
+      if (FLAGS_log_dir.find_last_of(possible_dir_delim) !=
+          FLAGS_log_dir.size() - 1) {
         logging_directories_list->push_back(FLAGS_log_dir + "/");
       } else {
         logging_directories_list->push_back(FLAGS_log_dir);

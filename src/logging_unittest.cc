@@ -1587,15 +1587,6 @@ TEST(Logging, FileLockFailureReportsWindowsError) {
 #endif
 }
 
-TEST(Logging, TrimTrailingCRLFRemovesTrailingNewlines) {
-#ifdef NGLOG_OS_WINDOWS
-  EXPECT_EQ(nglog::tools::TrimTrailingCRLF("message\r\n"), "message");
-  EXPECT_EQ(nglog::tools::TrimTrailingCRLF("message\n"), "message");
-  EXPECT_EQ(nglog::tools::TrimTrailingCRLF("message"), "message");
-  EXPECT_EQ(nglog::tools::TrimTrailingCRLF("\r\n"), "");
-#endif
-}
-
 TEST(Logging, Symlink) {
 #ifndef NGLOG_OS_WINDOWS
   FlagSaver saver;

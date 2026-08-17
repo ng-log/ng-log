@@ -119,16 +119,6 @@ namespace nglog {
 inline namespace tools {
 NGLOG_EXPORT std::string FormatWindowsMessage(std::uint32_t error);
 
-inline std::string TrimTrailingCRLF(std::string message) {
-  const std::string::size_type pos = message.find_last_not_of("\r\n");
-  if (pos == std::string::npos) {
-    return {};
-  }
-  // pos points to a non-CR/LF character.
-  message.erase(pos + 1);
-  return message;
-}
-
 #  ifndef HAVE_LOCALTIME_R
 NGLOG_NO_EXPORT std::tm* localtime_r(const std::time_t* timep, std::tm* result);
 #  endif  // not HAVE_LOCALTIME_R

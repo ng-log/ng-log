@@ -216,6 +216,57 @@ namespace nglog {
 
 inline namespace tools {
 
+std::string CollapseRepeatedCharacters(const std::string& input,
+                                       const char* characters,
+                                       std::size_t character_count) {
+  std::string result;
+  result.reserve(input.size());
+  for (std::size_t pos = 0; pos < input.size();) {
+    const std::size_t first_character =
+        input.find_first_of(characters, pos, character_count);
+    if (first_character == std::string::npos) {
+      result.append(input, pos);
+      pos = input.size();
+    } else {
+      result.append(input, pos, first_character - pos + 1);
+      pos = input.find_first_not_of(characters, first_character + 1,
+                                    character_count);
+    }
+  }
+  return result;
+}
+
+bool IsFilenameExtensionAfterBaseFilename(
+    const std::string& filepath, const std::string& base_filename,
+    const std::string& filename_extension) {
+  return filepath.compare(base_filename.size(), filename_extension.size(),
+                          filename_extension) == 0;
+}
+
+bool IsFilenameExtensionAtEnd(const std::string& filepath,
+                              const std::string& filename_extension) {
+  if (filename_extension.size() >= filepath.size()) {
+    return false;
+  }
+  return filepath.compare(filepath.size() - filename_extension.size(),
+                          filename_extension.size(), filename_extension) == 0;
+}
+
+std::string TrimTrailingCharacters(std::string input, const char* characters,
+                                   std::size_t character_count) {
+  const std::string::size_type pos =
+      input.find_last_not_of(characters, std::string::npos, character_count);
+  if (pos == std::string::npos) {
+    return {};
+  }
+  input.erase(pos + 1);
+  return input;
+}
+
+std::string TrimTrailingCRLF(std::string message) {
+  return TrimTrailingCharacters(std::move(message), "\r\n");
+}
+
 const char* const_basename(const char* filepath) {
   const char* base = strrchr(filepath, '/');
 #ifdef NGLOG_OS_WINDOWS  // Look for either path separator in Windows

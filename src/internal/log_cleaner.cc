@@ -34,9 +34,9 @@ namespace internal {
 namespace {
 
 #ifdef NGLOG_OS_WINDOWS
-const char possible_dir_delim[] = {'\\', '/'};
+constexpr char possible_dir_delim[] = "\\/";
 #else
-const char possible_dir_delim[] = {'/'};
+constexpr char possible_dir_delim[] = "/";
 #endif
 
 }  // namespace
@@ -188,11 +188,9 @@ void LogCleaner::CleanOverdueLogs(
   if (!base_filename_selected) {
     dirs = GetLoggingDirectories();
   } else {
-    std::size_t pos = base_filename.find_last_of(
-        possible_dir_delim, std::string::npos, sizeof(possible_dir_delim));
+    const std::size_t pos = base_filename.find_last_of(possible_dir_delim);
     if (pos != std::string::npos) {
-      std::string dir = base_filename.substr(0, pos + 1);
-      dirs.push_back(dir);
+      dirs.emplace_back(base_filename, 0, pos + 1);
     } else {
       dirs.emplace_back(".");
     }
@@ -234,12 +232,9 @@ std::vector<std::string> LogCleaner::GetOverdueLogNames(
       }
 
       std::string filepath = ent->d_name;
-      const char* const dir_delim_end =
-          possible_dir_delim + sizeof(possible_dir_delim);
-
       if (!log_directory.empty() &&
-          std::find(possible_dir_delim, dir_delim_end,
-                    log_directory[log_directory.size() - 1]) != dir_delim_end) {
+          log_directory.find_last_of(possible_dir_delim) ==
+              log_directory.size() - 1) {
         filepath = log_directory + filepath;
       }
 
@@ -260,22 +255,9 @@ bool LogCleaner::IsLogFromCurrentProject(
   // We should remove duplicated delimiters from `base_filename`, e.g.,
   // before: "/tmp//<base_filename>.<create_time>.<pid>"
   // after:  "/tmp/<base_filename>.<create_time>.<pid>"
-  std::string cleaned_base_filename;
-
-  const char* const dir_delim_end =
-      possible_dir_delim + sizeof(possible_dir_delim);
-
+  std::string cleaned_base_filename =
+      CollapseRepeatedCharacters(base_filename, possible_dir_delim);
   std::size_t real_filepath_size = filepath.size();
-  for (char c : base_filename) {
-    if (cleaned_base_filename.empty()) {
-      cleaned_base_filename += c;
-    } else if (std::find(possible_dir_delim, dir_delim_end, c) ==
-                   dir_delim_end ||
-               (!cleaned_base_filename.empty() &&
-                c != cleaned_base_filename[cleaned_base_filename.size() - 1])) {
-      cleaned_base_filename += c;
-    }
-  }
 
   // Return early if the filename does not start with cleaned_base_filename.
   if (filepath.find(cleaned_base_filename) != 0) {
@@ -289,19 +271,15 @@ bool LogCleaner::IsLogFromCurrentProject(
       return false;
     }
     // For the original version, filename_extension is in the filepath middle.
-    std::string ext = filepath.substr(cleaned_base_filename.size(),
-                                      filename_extension.size());
-    if (ext == filename_extension) {
+    if (IsFilenameExtensionAfterBaseFilename(filepath, cleaned_base_filename,
+                                             filename_extension)) {
       cleaned_base_filename += filename_extension;
     } else {
       // For the new version, filename_extension is at the filepath end.
-      if (filename_extension.size() >= real_filepath_size) {
+      if (!IsFilenameExtensionAtEnd(filepath, filename_extension)) {
         return false;
       }
-      real_filepath_size = filepath.size() - filename_extension.size();
-      if (filepath.substr(real_filepath_size) != filename_extension) {
-        return false;
-      }
+      real_filepath_size -= filename_extension.size();
     }
   }
 

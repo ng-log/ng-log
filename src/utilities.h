@@ -135,6 +135,40 @@ inline namespace tools {
 void AlsoErrorWrite(LogSeverity severity, const char* tag,
                     const char* message) noexcept;
 
+// Returns input with each run of characters from the set replaced by its
+// first character. The character array may be non-null-terminated.
+std::string CollapseRepeatedCharacters(const std::string& input,
+                                       const char* characters,
+                                       std::size_t character_count);
+
+bool IsFilenameExtensionAfterBaseFilename(
+    const std::string& filepath, const std::string& base_filename,
+    const std::string& filename_extension);
+
+bool IsFilenameExtensionAtEnd(const std::string& filepath,
+                              const std::string& filename_extension);
+
+std::string TrimTrailingCRLF(std::string message);
+
+std::string TrimTrailingCharacters(std::string input, const char* characters,
+                                   std::size_t character_count);
+
+template <std::size_t N>
+inline std::string TrimTrailingCharacters(std::string input,
+                                          const char (&characters)[N]) {
+  static_assert(N > 0, "characters must not be empty");
+  const std::size_t character_count = N - (characters[N - 1] == '\0' ? 1 : 0);
+  return TrimTrailingCharacters(std::move(input), characters, character_count);
+}
+
+template <std::size_t N>
+inline std::string CollapseRepeatedCharacters(const std::string& input,
+                                              const char (&characters)[N]) {
+  static_assert(N > 0, "characters must not be empty");
+  const std::size_t character_count = N - (characters[N - 1] == '\0' ? 1 : 0);
+  return CollapseRepeatedCharacters(input, characters, character_count);
+}
+
 const char* ProgramInvocationShortName();
 
 int32 GetMainThreadPid();
