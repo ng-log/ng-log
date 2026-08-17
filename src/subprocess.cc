@@ -5,6 +5,8 @@
 
 #include "subprocess.h"
 
+#include "utilities.h"
+
 #ifdef HAVE_SUBPROCESS
 
 #  include <algorithm>
@@ -207,8 +209,8 @@ constexpr DWORD kPipeBufferSize = 4096;
 // |server_is_reader| selects the direction of |our_end|: true for the
 // process' stdout (this process reads, the child writes), false for its
 // stdin (this process writes, the child reads).
-bool CreateOverlappedPipePair(bool server_is_reader, HANDLE& our_end,
-                              HANDLE& child_end) {
+bool CreateOverlappedPipePair(bool server_is_reader, UniqueHandle& our_end,
+                              UniqueHandle& child_end) {
   static std::atomic<unsigned long> counter{0};
   constexpr std::size_t kNameLength = 64;
   wchar_t name[kNameLength];
@@ -225,25 +227,28 @@ bool CreateOverlappedPipePair(bool server_is_reader, HANDLE& our_end,
       (server_is_reader ? PIPE_ACCESS_INBOUND : PIPE_ACCESS_OUTBOUND) |
       FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE;
 
-  our_end = CreateNamedPipeW(name, open_mode, PIPE_TYPE_BYTE | PIPE_WAIT, 1,
-                             kPipeBufferSize, kPipeBufferSize, 0, nullptr);
+  HANDLE our_handle =
+      CreateNamedPipeW(name, open_mode, PIPE_TYPE_BYTE | PIPE_WAIT, 1,
+                       kPipeBufferSize, kPipeBufferSize, 0, nullptr);
 
-  if (our_end == INVALID_HANDLE_VALUE) {
+  if (our_handle == INVALID_HANDLE_VALUE) {
     return false;
   }
+  our_end.reset(our_handle);
 
   SECURITY_ATTRIBUTES inheritable{};
   inheritable.nLength = sizeof(inheritable);
   inheritable.bInheritHandle = TRUE;
 
   const DWORD child_access = server_is_reader ? GENERIC_WRITE : GENERIC_READ;
-  child_end = CreateFileW(name, child_access, 0, &inheritable, OPEN_EXISTING,
-                          FILE_ATTRIBUTE_NORMAL, nullptr);
+  HANDLE child_handle =
+      CreateFileW(name, child_access, 0, &inheritable, OPEN_EXISTING,
+                  FILE_ATTRIBUTE_NORMAL, nullptr);
 
-  if (child_end == INVALID_HANDLE_VALUE) {
-    CloseHandle(our_end);
+  if (child_handle == INVALID_HANDLE_VALUE) {
     return false;
   }
+  child_end.reset(child_handle);
 
   return true;
 }
@@ -323,21 +328,19 @@ void Subprocess::Reset() noexcept {
 bool Subprocess::Spawn(char* const argv[], char* const envp[]) {
   Reset();
 
-  HANDLE stdin_write = nullptr;
-  HANDLE stdin_read = nullptr;
+  UniqueHandle stdin_write;
+  UniqueHandle stdin_read;
 
   if (!CreateOverlappedPipePair(/*server_is_reader=*/false, stdin_write,
                                 stdin_read)) {
     return false;
   }
 
-  HANDLE stdout_read = nullptr;
-  HANDLE stdout_write = nullptr;
+  UniqueHandle stdout_read;
+  UniqueHandle stdout_write;
 
   if (!CreateOverlappedPipePair(/*server_is_reader=*/true, stdout_read,
                                 stdout_write)) {
-    CloseHandle(stdin_write);
-    CloseHandle(stdin_read);
     return false;
   }
 
@@ -347,9 +350,9 @@ bool Subprocess::Spawn(char* const argv[], char* const envp[]) {
   SECURITY_ATTRIBUTES inheritable{};
   inheritable.nLength = sizeof(inheritable);
   inheritable.bInheritHandle = TRUE;
-  HANDLE null_device =
-      CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_WRITE, &inheritable,
-                  OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  UniqueHandle null_device{CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_WRITE,
+                                       &inheritable, OPEN_EXISTING,
+                                       FILE_ATTRIBUTE_NORMAL, nullptr)};
 
   std::wstring command_line;
   if (argv[0] != nullptr) {
@@ -365,9 +368,9 @@ bool Subprocess::Spawn(char* const argv[], char* const envp[]) {
   STARTUPINFOW startup_info{};
   startup_info.cb = sizeof(startup_info);
   startup_info.dwFlags = STARTF_USESTDHANDLES;
-  startup_info.hStdInput = stdin_read;
-  startup_info.hStdOutput = stdout_write;
-  startup_info.hStdError = null_device;
+  startup_info.hStdInput = stdin_read.get();
+  startup_info.hStdOutput = stdout_write.get();
+  startup_info.hStdError = null_device.get();
 
   PROCESS_INFORMATION process_info{};
   // CreateProcessW() requires mutable buffers for the command line and
@@ -382,23 +385,17 @@ bool Subprocess::Spawn(char* const argv[], char* const envp[]) {
 
   // These were only needed for the child to inherit. The child has its
   // own copies (or, on failure, nothing needs them any more).
-  CloseHandle(stdin_read);
-  CloseHandle(stdout_write);
-
-  if (null_device != INVALID_HANDLE_VALUE) {
-    CloseHandle(null_device);
-  }
+  stdin_read.reset();
+  stdout_write.reset();
 
   if (!spawned) {
-    CloseHandle(stdin_write);
-    CloseHandle(stdout_read);
     return false;
   }
 
-  CloseHandle(process_info.hThread);
+  UniqueHandle thread{process_info.hThread};
   process_ = UniqueHandle{process_info.hProcess};
-  stdin_write_ = UniqueHandle{stdin_write};
-  stdout_read_ = UniqueHandle{stdout_read};
+  stdin_write_ = std::move(stdin_write);
+  stdout_read_ = std::move(stdout_read);
   return true;
 }
 
@@ -512,6 +509,28 @@ int ClampPollTimeout(std::chrono::milliseconds timeout) {
 
 #    ifdef HAVE_POSIX_SPAWN
 
+class PosixSpawnFileActions final {
+ public:
+  PosixSpawnFileActions() noexcept
+      : initialized_{posix_spawn_file_actions_init(&actions_) == 0} {}
+
+  ~PosixSpawnFileActions() {
+    if (initialized_) {
+      posix_spawn_file_actions_destroy(&actions_);
+    }
+  }
+
+  PosixSpawnFileActions(const PosixSpawnFileActions&) = delete;
+  PosixSpawnFileActions& operator=(const PosixSpawnFileActions&) = delete;
+
+  explicit operator bool() const noexcept { return initialized_; }
+  posix_spawn_file_actions_t* get() noexcept { return &actions_; }
+
+ private:
+  posix_spawn_file_actions_t actions_{};
+  bool initialized_;
+};
+
 // Preferred over fork()+execvp() where available: posix_spawn() lets the
 // C library perform the requested redirections internally (via
 // posix_spawn_file_actions_t) rather than running our own code in the
@@ -524,21 +543,21 @@ int ClampPollTimeout(std::chrono::milliseconds timeout) {
 // is needed here.
 pid_t SpawnProcess(char* const argv[], char* const envp[], int stdin_fd,
                    int stdout_fd, int /*exec_error_fd*/) {
-  posix_spawn_file_actions_t file_actions;
+  PosixSpawnFileActions file_actions;
 
-  if (posix_spawn_file_actions_init(&file_actions) != 0) {
+  if (!file_actions) {
     return -1;
   }
 
-  posix_spawn_file_actions_adddup2(&file_actions, stdin_fd, STDIN_FILENO);
-  posix_spawn_file_actions_adddup2(&file_actions, stdout_fd, STDOUT_FILENO);
-  posix_spawn_file_actions_addopen(&file_actions, STDERR_FILENO, "/dev/null",
-                                   O_WRONLY, 0);
+  posix_spawn_file_actions_adddup2(file_actions.get(), stdin_fd, STDIN_FILENO);
+  posix_spawn_file_actions_adddup2(file_actions.get(), stdout_fd,
+                                   STDOUT_FILENO);
+  posix_spawn_file_actions_addopen(file_actions.get(), STDERR_FILENO,
+                                   "/dev/null", O_WRONLY, 0);
 
   pid_t pid = -1;
   const int result =
-      posix_spawnp(&pid, argv[0], &file_actions, nullptr, argv, envp);
-  posix_spawn_file_actions_destroy(&file_actions);
+      posix_spawnp(&pid, argv[0], file_actions.get(), nullptr, argv, envp);
 
   return result == 0 ? pid : -1;
 }
@@ -591,15 +610,15 @@ pid_t SpawnProcess(char* const argv[], char* const /*envp*/[], int stdin_fd,
 
 Subprocess::Subprocess(Subprocess&& other) noexcept
     : pid_{std::exchange(other.pid_, -1)},
-      stdin_write_{std::exchange(other.stdin_write_, -1)},
-      stdout_read_{std::exchange(other.stdout_read_, -1)} {}
+      stdin_write_{std::move(other.stdin_write_)},
+      stdout_read_{std::move(other.stdout_read_)} {}
 
 Subprocess& Subprocess::operator=(Subprocess&& other) noexcept {
   if (this != &other) {
     Reset();
     pid_ = std::exchange(other.pid_, -1);
-    stdin_write_ = std::exchange(other.stdin_write_, -1);
-    stdout_read_ = std::exchange(other.stdout_read_, -1);
+    stdin_write_ = std::move(other.stdin_write_);
+    stdout_read_ = std::move(other.stdout_read_);
   }
 
   return *this;
@@ -616,97 +635,89 @@ void Subprocess::Reset() noexcept {
 
   CloseStdin();
 
-  const int stdout_read = std::exchange(stdout_read_, -1);
-
-  if (stdout_read >= 0) {
-    ::close(stdout_read);
-  }
+  stdout_read_.reset();
 }
 
 bool Subprocess::Spawn(char* const argv[], char* const envp[]) {
   Reset();
 
+  FileDescriptor stdin_read;
+  FileDescriptor stdin_write;
   int stdin_fds[2];
 
   if (::pipe(stdin_fds) != 0) {
     return false;
   }
+  stdin_read.reset(stdin_fds[0]);
+  stdin_write.reset(stdin_fds[1]);
 
+  FileDescriptor stdout_read;
+  FileDescriptor stdout_write;
   int stdout_fds[2];
 
   if (::pipe(stdout_fds) != 0) {
-    ::close(stdin_fds[0]);
-    ::close(stdin_fds[1]);
     return false;
   }
+  stdout_read.reset(stdout_fds[0]);
+  stdout_write.reset(stdout_fds[1]);
 
-  if (!SetCloseOnExec(stdin_fds[0]) || !SetCloseOnExec(stdin_fds[1]) ||
-      !SetCloseOnExec(stdout_fds[0]) || !SetCloseOnExec(stdout_fds[1])) {
-    ::close(stdin_fds[0]);
-    ::close(stdin_fds[1]);
-    ::close(stdout_fds[0]);
-    ::close(stdout_fds[1]);
+  if (!SetCloseOnExec(stdin_read.get()) || !SetCloseOnExec(stdin_write.get()) ||
+      !SetCloseOnExec(stdout_read.get()) ||
+      !SetCloseOnExec(stdout_write.get())) {
     return false;
   }
 
 #    ifndef HAVE_POSIX_SPAWN
+  FileDescriptor exec_error_read;
+  FileDescriptor exec_error_write;
   int exec_error_fds[2] = {-1, -1};
-  if (::pipe(exec_error_fds) != 0 || !SetCloseOnExec(exec_error_fds[0]) ||
-      !SetCloseOnExec(exec_error_fds[1])) {
-    if (exec_error_fds[0] >= 0) {
-      ::close(exec_error_fds[0]);
-    }
-    if (exec_error_fds[1] >= 0) {
-      ::close(exec_error_fds[1]);
-    }
-    ::close(stdin_fds[1]);
-    ::close(stdout_fds[0]);
+  if (::pipe(exec_error_fds) != 0) {
     return false;
   }
-  const int exec_error_fd = exec_error_fds[1];
+  exec_error_read.reset(exec_error_fds[0]);
+  exec_error_write.reset(exec_error_fds[1]);
+  if (!SetCloseOnExec(exec_error_read.get()) ||
+      !SetCloseOnExec(exec_error_write.get())) {
+    return false;
+  }
+  const int exec_error_fd = exec_error_write.get();
 #    else
   constexpr int exec_error_fd = -1;
 #    endif
 
-  const pid_t pid =
-      SpawnProcess(argv, envp, stdin_fds[0], stdout_fds[1], exec_error_fd);
+  const pid_t pid = SpawnProcess(argv, envp, stdin_read.get(),
+                                 stdout_write.get(), exec_error_fd);
 
-  ::close(stdin_fds[0]);
-  ::close(stdout_fds[1]);
+  stdin_read.reset();
+  stdout_write.reset();
 
 #    ifndef HAVE_POSIX_SPAWN
-  ::close(exec_error_fds[1]);
+  exec_error_write.reset();
 #    endif
 
   if (pid < 0) {
-    ::close(stdin_fds[1]);
-    ::close(stdout_fds[0]);
-#    ifndef HAVE_POSIX_SPAWN
-    ::close(exec_error_fds[0]);
-#    endif
     return false;
   }
 
 #    ifndef HAVE_POSIX_SPAWN
   int exec_error = 0;
-  const ssize_t exec_error_bytes = FailureRetry([&exec_error, &exec_error_fds] {
-    return ::read(exec_error_fds[0], &exec_error, sizeof(exec_error));
-  });
-  ::close(exec_error_fds[0]);
+  const ssize_t exec_error_bytes =
+      FailureRetry([&exec_error, &exec_error_read] {
+        return ::read(exec_error_read.get(), &exec_error, sizeof(exec_error));
+      });
+  exec_error_read.reset();
 
   if (exec_error_bytes != 0) {
     ::kill(pid, SIGKILL);
     int status = 0;
     FailureRetry([pid, &status] { return ::waitpid(pid, &status, 0); });
-    ::close(stdin_fds[1]);
-    ::close(stdout_fds[0]);
     return false;
   }
 #    endif
 
   pid_ = pid;
-  stdin_write_ = stdin_fds[1];
-  stdout_read_ = stdout_fds[0];
+  stdin_write_ = std::move(stdin_write);
+  stdout_read_ = std::move(stdout_read);
   return true;
 }
 
@@ -714,12 +725,12 @@ Subprocess::operator bool() const noexcept { return pid_ >= 0; }
 
 std::size_t Subprocess::WriteStdin(const char* data, std::size_t size,
                                    std::chrono::milliseconds timeout) {
-  if (stdin_write_ < 0) {
+  if (!stdin_write_) {
     return 0;
   }
 
   struct pollfd pfd{};
-  pfd.fd = stdin_write_;
+  pfd.fd = stdin_write_.get();
   pfd.events = POLLOUT;
 
   const int poll_result = FailureRetry(
@@ -730,27 +741,21 @@ std::size_t Subprocess::WriteStdin(const char* data, std::size_t size,
   }
 
   const ssize_t written = FailureRetry(
-      [this, data, size] { return ::write(stdin_write_, data, size); });
+      [this, data, size] { return ::write(stdin_write_.get(), data, size); });
 
   return written > 0 ? static_cast<std::size_t>(written) : 0;
 }
 
-void Subprocess::CloseStdin() {
-  const int stdin_write = std::exchange(stdin_write_, -1);
-
-  if (stdin_write >= 0) {
-    ::close(stdin_write);
-  }
-}
+void Subprocess::CloseStdin() { stdin_write_.reset(); }
 
 std::size_t Subprocess::ReadStdout(char* out, std::size_t out_size,
                                    std::chrono::milliseconds timeout) {
-  if (stdout_read_ < 0) {
+  if (!stdout_read_) {
     return 0;
   }
 
   struct pollfd pfd{};
-  pfd.fd = stdout_read_;
+  pfd.fd = stdout_read_.get();
   pfd.events = POLLIN;
 
   const int poll_result = FailureRetry(
@@ -760,8 +765,9 @@ std::size_t Subprocess::ReadStdout(char* out, std::size_t out_size,
     return 0;
   }
 
-  const ssize_t bytes_read = FailureRetry(
-      [this, out, out_size] { return ::read(stdout_read_, out, out_size); });
+  const ssize_t bytes_read = FailureRetry([this, out, out_size] {
+    return ::read(stdout_read_.get(), out, out_size);
+  });
 
   return bytes_read > 0 ? static_cast<std::size_t>(bytes_read) : 0;
 }

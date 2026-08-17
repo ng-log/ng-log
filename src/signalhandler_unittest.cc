@@ -54,6 +54,7 @@
 #include "ng-log/platform.h"
 #include "stacktrace.h"
 #include "symbolize.h"
+#include "utilities.h"
 
 #if defined(HAVE_UNISTD_H)
 #  include <unistd.h>
@@ -246,50 +247,44 @@ static ColorlogtostderrResult RunColorlogtostderrChild(const char* self_path) {
   constexpr int kChildExecFailure = 127;
   constexpr size_t kOutputBufferSize = 256;
   ColorlogtostderrResult result;
-  const int master = posix_openpt(O_RDWR | O_NOCTTY);
-  if (master < 0 || grantpt(master) != 0 || unlockpt(master) != 0) {
+  FileDescriptor master{posix_openpt(O_RDWR | O_NOCTTY)};
+  if (!master || grantpt(master.get()) != 0 || unlockpt(master.get()) != 0) {
     result.error = "could not create a pseudo-terminal: ";
     result.error += strerror(errno);
-    if (master >= 0) {
-      close(master);
-    }
     return result;
   }
 
-  const char* const slave_name = ptsname(master);
-  const int slave =
-      slave_name == nullptr ? -1 : open(slave_name, O_RDWR | O_NOCTTY);
-  if (slave < 0) {
+  const char* const slave_name = ptsname(master.get());
+  FileDescriptor slave{
+      slave_name == nullptr ? -1 : open(slave_name, O_RDWR | O_NOCTTY)};
+  if (!slave) {
     result.error = "could not open the pseudo-terminal slave: ";
     result.error += strerror(errno);
-    close(master);
     return result;
   }
 
   const pid_t pid = fork();
   if (pid == 0) {
-    if (dup2(slave, fileno(stderr)) < 0) {
+    if (dup2(slave.get(), fileno(stderr)) < 0) {
       _exit(kChildExecFailure);
     }
-    close(master);
-    close(slave);
+    close(master.get());
+    close(slave.get());
     unsetenv("NO_COLOR");
     setenv("TERM", "xterm", 1);
     execl(self_path, self_path, "colorlogtostderr_off",
           static_cast<char*>(nullptr));
     _exit(kChildExecFailure);
   }
-  close(slave);
+  slave.reset();
 
   if (pid < 0) {
-    close(master);
     result.error = "fork failed: ";
     result.error += strerror(errno);
     return result;
   }
 
   if (waitpid(pid, &result.status, 0) != pid) {
-    close(master);
     result.error = "waitpid failed: ";
     result.error += strerror(errno);
     return result;
@@ -297,7 +292,7 @@ static ColorlogtostderrResult RunColorlogtostderrChild(const char* self_path) {
 
   char buffer[kOutputBufferSize];
   for (;;) {
-    const ssize_t bytes_read = read(master, buffer, sizeof(buffer));
+    const ssize_t bytes_read = read(master.get(), buffer, sizeof(buffer));
     if (bytes_read > 0) {
       result.output.append(buffer, static_cast<size_t>(bytes_read));
       continue;
@@ -311,8 +306,6 @@ static ColorlogtostderrResult RunColorlogtostderrChild(const char* self_path) {
     }
     break;
   }
-  close(master);
-
   result.completed = result.error.empty();
   return result;
 }

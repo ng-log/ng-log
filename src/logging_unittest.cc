@@ -357,7 +357,7 @@ TEST(DeathNoAllocNewHook, logging) {
 }
 
 void TestRawLogging() {
-  auto* foo = new string("foo ");
+  auto foo = std::make_unique<string>("foo ");
   string huge_str(50000, 'a');
 
   FlagSaver saver;
@@ -406,8 +406,6 @@ void TestRawLogging() {
 
   RAW_CHECK(1 == 1, "should be ok");
   RAW_DCHECK(true, "should be ok");
-
-  delete foo;
 }
 
 void LogWithLevels(int v, int severity, bool err, bool alsoerr) {
@@ -785,7 +783,8 @@ TEST(Logging, CustomLoggerCanLogDuringWrite) {
         alarm(kDeathTestTimeoutSeconds);
         FLAGS_logtostderr = false;
         FLAGS_logtostdout = false;
-        base::SetLogger(NGLOG_INFO, new ReentrantLogger);
+        auto logger = std::make_unique<ReentrantLogger>();
+        base::SetLogger(NGLOG_INFO, logger.release());
         LOG(INFO) << "Log through a reentrant custom logger.";
         _exit(EXIT_SUCCESS);
       },
@@ -934,10 +933,9 @@ void TestDCHECK() {
   DCHECK_GT(2, 1);
   DCHECK_LT(1, 2);
 
-  auto* orig_ptr = new int64;
-  int64* ptr = DCHECK_NOTNULL(orig_ptr);
-  CHECK_EQ(ptr, orig_ptr);
-  delete orig_ptr;
+  auto orig_ptr = std::make_unique<int64>();
+  int64* ptr = DCHECK_NOTNULL(orig_ptr.get());
+  CHECK_EQ(ptr, orig_ptr.get());
 }
 
 void TestSTREQ() {
@@ -982,31 +980,29 @@ TEST(DeathCheckNN, Simple) {
 static void GetFiles(const string& pattern, vector<string>* files) {
   files->clear();
 #if defined(HAVE_GLOB_H)
-  glob_t g;
+  glob_t g{};
+  const auto cleanup_fn = [&g] { globfree(&g); };
+  const ScopedExit<decltype(cleanup_fn)> cleanup{cleanup_fn};
   const int r = glob(pattern.c_str(), 0, nullptr, &g);
   CHECK((r == 0) || (r == GLOB_NOMATCH)) << ": error matching " << pattern;
   for (size_t i = 0; i < g.gl_pathc; i++) {
     files->push_back(string(g.gl_pathv[i]));
   }
-  globfree(&g);
 #elif defined(NGLOG_OS_WINDOWS)
   WIN32_FIND_DATAA data;
-  HANDLE handle = FindFirstFileA(pattern.c_str(), &data);
+  WindowsHandle handle{FindFirstFileA(pattern.c_str(), &data)};
   size_t index = pattern.rfind('\\');
   if (index == string::npos) {
     LOG(FATAL) << "No directory separator.";
   }
   const string dirname = pattern.substr(0, index + 1);
-  if (handle == INVALID_HANDLE_VALUE) {
+  if (handle == nullptr || handle.get() == INVALID_HANDLE_VALUE) {
     // Finding no files is OK.
     return;
   }
   do {
     files->push_back(dirname + data.cFileName);
-  } while (FindNextFileA(handle, &data));
-  if (!FindClose(handle)) {
-    LOG_SYSRESULT(GetLastError());
-  }
+  } while (FindNextFileA(handle.get(), &data));
 #else
 #  error There is no way to do glob.
 #endif
@@ -1019,6 +1015,10 @@ static void DeleteFiles(const string& pattern) {
   for (auto& file : files) {
     CHECK(unlink(file.c_str()) == 0) << ": " << strerror(errno);
   }
+}
+
+TEST(Logging, DeleteFilesAcceptsNoMatches) {
+  DeleteFiles(TestTmpDir() + "/nglog-file-that-does-not-exist-*");
 }
 
 // check string is in file (or is *NOT*, depending on optional checkInFileOrNot)
@@ -1675,9 +1675,10 @@ TEST(Logging, Wrapper) {
   fprintf(stderr, "==== Test log wrapper\n");
 
   bool custom_logger_deleted = false;
-  auto* my_logger = new MyLogger(&custom_logger_deleted);
+  auto my_logger_owner = std::make_unique<MyLogger>(&custom_logger_deleted);
+  auto* my_logger = my_logger_owner.get();
   base::Logger* old_logger = base::GetLogger(NGLOG_INFO);
-  base::SetLogger(NGLOG_INFO, my_logger);
+  base::SetLogger(NGLOG_INFO, my_logger_owner.release());
   LOG(INFO) << "Send to wrapped logger";
   CHECK(strstr(my_logger->data.c_str(), "Send to wrapped logger") != nullptr);
   FlushLogFiles(NGLOG_INFO);
@@ -1856,8 +1857,9 @@ TEST(Logging, MessageCountDoesNotWaitForLogger) {
   FLAGS_logtostdout = false;
 
   base::Logger* old_logger = base::GetLogger(NGLOG_INFO);
-  auto* logger = new BlockingLogger;
-  base::SetLogger(NGLOG_INFO, logger);
+  auto logger_owner = std::make_unique<BlockingLogger>();
+  auto* logger = logger_owner.get();
+  base::SetLogger(NGLOG_INFO, logger_owner.release());
 
   std::thread logging_thread([] { LOG(INFO) << "blocked logger"; });
   ASSERT_TRUE(logger->WaitUntilEntered());
@@ -1925,9 +1927,9 @@ struct RecordDeletionLogger : public base::Logger {
 
 TEST(Logging, CustomLoggerDeletionOnShutdown) {
   bool custom_logger_deleted = false;
-  base::SetLogger(NGLOG_INFO,
-                  new RecordDeletionLogger(&custom_logger_deleted,
-                                           base::GetLogger(NGLOG_INFO)));
+  auto logger = std::make_unique<RecordDeletionLogger>(
+      &custom_logger_deleted, base::GetLogger(NGLOG_INFO));
+  base::SetLogger(NGLOG_INFO, logger.release());
   EXPECT_TRUE(IsLoggingInitialized());
   ShutdownLogging();
   EXPECT_TRUE(custom_logger_deleted);

@@ -34,6 +34,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 
 #include "internal/lock_metrics.h"
 #include "ng-log/logging.h"
@@ -221,7 +222,8 @@ int main(int argc, char** argv) {
   FLAGS_logtostderr = false;
   FLAGS_logtostdout = false;
   base::Logger* old_logger = base::GetLogger(NGLOG_INFO);
-  base::SetLogger(NGLOG_INFO, new NullLogger);
+  auto logger = std::make_unique<NullLogger>();
+  base::SetLogger(NGLOG_INFO, logger.release());
   NullSink registered_sink;
   AddLogSink(&registered_sink);
   internal::ResetLockMetrics();

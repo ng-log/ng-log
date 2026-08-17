@@ -630,17 +630,17 @@ class NGLOG_EXPORT CheckOpMessageBuilder {
  public:
   // Inserts "exprtext" and " (" to the stream.
   explicit CheckOpMessageBuilder(const char* exprtext);
-  // Deletes "stream_".
+  // Releases the stream.
   ~CheckOpMessageBuilder();
   // For inserting the first variable.
-  std::ostream* ForVar1() { return stream_; }
+  std::ostream* ForVar1() { return stream_.get(); }
   // For inserting the second variable (adds an intermediate " vs. ").
   std::ostream* ForVar2();
   // Get the result (inserts the closing ")").
   std::unique_ptr<std::string> NewString();
 
  private:
-  std::ostringstream* stream_;
+  std::unique_ptr<std::ostringstream> stream_;
 };
 
 template <typename T1, typename T2>
@@ -1330,7 +1330,7 @@ class NGLOG_EXPORT LogMessage {
 
   // We keep the data in a separate struct so that each instance of
   // LogMessage uses less stack space.
-  internal::LogMessageData* allocated_;
+  std::unique_ptr<internal::LogMessageData> allocated_;
   internal::LogMessageData* data_;
   LogMessageTime time_;
 

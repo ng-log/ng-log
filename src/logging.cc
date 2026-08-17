@@ -612,6 +612,8 @@ class LogDestination {
   void ResetLoggerImpl() { SetLoggerImpl(&fileobject_); }
 
   LogFileObject fileobject_;
+  // Owns a logger supplied through SetLogger() while logger_ points to it.
+  std::unique_ptr<base::Logger> owned_logger_;
   base::Logger* logger_;  // Either &fileobject_, or wrapper around it
 
   static std::unique_ptr<LogDestination> log_destinations_[NUM_SEVERITIES];
@@ -666,7 +668,7 @@ const string& LogDestination::hostname() {
 LogDestination::LogDestination(LogSeverity severity, const char* base_filename)
     : fileobject_(severity, base_filename), logger_(&fileobject_) {}
 
-LogDestination::~LogDestination() { ResetLoggerImpl(); }
+LogDestination::~LogDestination() = default;
 
 void LogDestination::SetLoggerImpl(base::Logger* logger) {
   if (logger_ == logger) {
@@ -674,10 +676,7 @@ void LogDestination::SetLoggerImpl(base::Logger* logger) {
     return;
   }
 
-  if (logger_ && logger_ != &fileobject_) {
-    // Delete user-specified logger set via SetLogger().
-    delete logger_;
-  }
+  owned_logger_.reset(logger == &fileobject_ ? nullptr : logger);
   logger_ = logger;
 }
 
@@ -1993,8 +1992,8 @@ void LogMessage::Init(const char* file, int line, LogSeverity severity,
       thread_data_available = false;
       data_ = new (&thread_msg_data) internal::LogMessageData;
     } else {
-      allocated_ = new internal::LogMessageData();
-      data_ = allocated_;
+      allocated_ = std::make_unique<internal::LogMessageData>();
+      data_ = allocated_.get();
     }
     data_->first_fatal_ = false;
   } else {
@@ -2081,7 +2080,7 @@ LogMessage::~LogMessage() noexcept(false) {
     data_->~LogMessageData();
     thread_data_available = true;
   } else {
-    delete allocated_;
+    allocated_.reset();
   }
 
   if (fail) {
@@ -2606,6 +2605,12 @@ static inline void trim(std::string& s) {
 static bool SendEmailInternal(const char* dest, const char* subject,
                               const char* body, bool use_logging) {
 #ifndef NGLOG_OS_EMSCRIPTEN
+  struct PcloseDeleter {
+    int* status;
+
+    void operator()(FILE* pipe) const noexcept { *status = pclose(pipe); }
+  };
+
   if (dest && *dest) {
     // Split the comma-separated list of email addresses, validate each one and
     // build a sanitized new comma-separated string without whitespace.
@@ -2671,13 +2676,16 @@ static bool SendEmailInternal(const char* dest, const char* subject,
       VLOG(4) << "Mailing command: " << cmd;
     }
 
-    FILE* pipe = popen(cmd.c_str(), "w");
+    int pclose_status = -1;
+    std::unique_ptr<FILE, PcloseDeleter> pipe{popen(cmd.c_str(), "w"),
+                                              PcloseDeleter{&pclose_status}};
     if (pipe != nullptr) {
       // Add the body if we have one
       if (body) {
-        fwrite(body, sizeof(char), strlen(body), pipe);
+        fwrite(body, sizeof(char), strlen(body), pipe.get());
       }
-      bool ok = pclose(pipe) != -1;
+      pipe.reset();
+      const bool ok = pclose_status != -1;
       if (!ok) {
         if (use_logging) {
           LOG(ERROR) << "Problems sending mail to " << dest << ": "
@@ -3016,15 +3024,15 @@ LogMessageFatal::~LogMessageFatal() noexcept(false) {
 namespace internal {
 
 CheckOpMessageBuilder::CheckOpMessageBuilder(const char* exprtext)
-    : stream_(new ostringstream) {
+    : stream_(std::make_unique<ostringstream>()) {
   *stream_ << exprtext << " (";
 }
 
-CheckOpMessageBuilder::~CheckOpMessageBuilder() { delete stream_; }
+CheckOpMessageBuilder::~CheckOpMessageBuilder() = default;
 
 ostream* CheckOpMessageBuilder::ForVar2() {
   *stream_ << " vs. ";
-  return stream_;
+  return stream_.get();
 }
 
 std::unique_ptr<string> CheckOpMessageBuilder::NewString() {

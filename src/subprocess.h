@@ -30,6 +30,8 @@
 #    include <type_traits>
 #  else
 #    include <sys/types.h>
+
+#    include "utilities.h"
 #  endif  // defined(NGLOG_OS_WINDOWS)
 
 namespace nglog {
@@ -38,7 +40,7 @@ inline namespace tools {
 #  if defined(NGLOG_OS_WINDOWS)
 struct HandleDeleter {
   void operator()(HANDLE handle) const noexcept {
-    if (handle != nullptr) {
+    if (handle != nullptr && handle != INVALID_HANDLE_VALUE) {
       CloseHandle(handle);
     }
   }
@@ -110,8 +112,8 @@ class NGLOG_NO_EXPORT Subprocess final {
   UniqueHandle stdout_read_;
 #  else
   pid_t pid_ = -1;
-  int stdin_write_ = -1;
-  int stdout_read_ = -1;
+  FileDescriptor stdin_write_;
+  FileDescriptor stdout_read_;
 #  endif  // defined(NGLOG_OS_WINDOWS)
 };
 

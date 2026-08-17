@@ -35,6 +35,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
 
 #include "base/commandlineflags.h"
 #include "config.h"
@@ -162,10 +163,11 @@ static void CheckStackTraceLeaf() {
 
   if (true) {
 #  ifdef HAVE_EXECINFO_BACKTRACE_SYMBOLS
-    char** strings = backtrace_symbols(stack, size);
+    std::unique_ptr<char*, decltype(&std::free)> strings{
+        backtrace_symbols(stack, size), &std::free};
     printf("Obtained %d stack frames.\n", size);
     for (int i = 0; i < size; i++) {
-      printf("%s %p\n", strings[i], stack[i]);
+      printf("%s %p\n", strings.get()[i], stack[i]);
     }
 
     union {
@@ -174,7 +176,6 @@ static void CheckStackTraceLeaf() {
     } p = {&CheckStackTrace};
 
     printf("CheckStackTrace() addr: %p\n", p.p2);
-    free(strings);
 #  endif
   }
   for (int i = 0; i < BACKTRACE_STEPS; i++) {
