@@ -135,9 +135,6 @@ using std::perror;
 using std::fdopen;
 #endif
 
-// TODO(hamaji): consider windows
-enum { PATH_SEPARATOR = '/' };
-
 #ifndef HAVE_PREAD
 static ssize_t pread(int fd, void* buf, size_t count, off_t offset) {
   off_t orig_offset = lseek(fd, 0, SEEK_CUR);
@@ -473,7 +470,7 @@ class LogFileObject : public base::Logger {
   static const uint32 kRolloverAttemptFrequency = 0x20;
 
   internal::FileMutex mutex_;
-  bool base_filename_selected_;
+  internal::LogFilenameSource filename_source_;
   string base_filename_;
   string symlink_basename_;
   string filename_extension_;  // option users can specify (eg to add port#)
@@ -491,10 +488,9 @@ class LogFileObject : public base::Logger {
   std::string create_filename_;
 #endif
 
-  // Actually create a logfile using the value of base_filename_ and the
-  // optional argument time_pid_string
+  // Actually create a logfile using the generated filename.
   // REQUIRES: lock_ is held
-  bool CreateLogfile(const string& time_pid_string);
+  bool CreateLogfile(const std::string& filename);
 };
 
 }  // namespace
@@ -1434,7 +1430,9 @@ string PrettyDuration(const std::chrono::duration<int>& secs) {
 }
 
 LogFileObject::LogFileObject(LogSeverity severity, const char* base_filename)
-    : base_filename_selected_(base_filename != nullptr),
+    : filename_source_(base_filename != nullptr
+                           ? internal::LogFilenameSource::kSelected
+                           : internal::LogFilenameSource::kDefault),
       base_filename_((base_filename != nullptr) ? base_filename : ""),
       symlink_basename_(tools::ProgramInvocationShortName()),
       filename_extension_(),
@@ -1449,7 +1447,7 @@ LogFileObject::~LogFileObject() {
 
 void LogFileObject::SetBasename(const char* basename) {
   std::lock_guard<internal::FileMutex> l{mutex_};
-  base_filename_selected_ = true;
+  filename_source_ = internal::LogFilenameSource::kSelected;
   if (base_filename_ != basename) {
     // Get rid of old log file since we are changing names
     if (file_ != nullptr) {
@@ -1496,19 +1494,13 @@ void LogFileObject::FlushUnlocked(
                 std::chrono::duration<int32>{FLAGS_logbufsecs});
 }
 
-bool LogFileObject::CreateLogfile(const string& time_pid_string) {
+bool LogFileObject::CreateLogfile(const std::string& filename) {
 #ifdef NGLOG_OS_WINDOWS
   create_error_message_.clear();
 #endif
-  string string_filename = base_filename_;
-  if (FLAGS_timestamp_in_logfile_name) {
-    string_filename += time_pid_string;
-  }
-  string_filename += filename_extension_;
 #ifdef NGLOG_OS_WINDOWS
-  create_filename_ = string_filename;
+  create_filename_ = filename;
 #endif
-  const char* filename = string_filename.c_str();
   // only write to files, create if non-existent.
   int flags = O_WRONLY | O_CREAT;
 #if defined(NGLOG_OS_WINDOWS)
@@ -1522,7 +1514,7 @@ bool LogFileObject::CreateLogfile(const string& time_pid_string) {
     // the first time or a file is being recreated due to exceeding max size
 
     struct stat statbuf;
-    if (stat(filename, &statbuf) == 0) {
+    if (stat(filename.c_str(), &statbuf) == 0) {
       // truncate the file if it exceeds the max size
       if ((static_cast<std::size_t>(statbuf.st_size) >> 20U) >= MaxLogSize()) {
 #if defined(NGLOG_OS_WINDOWS)
@@ -1538,7 +1530,7 @@ bool LogFileObject::CreateLogfile(const string& time_pid_string) {
   }
 
   FileDescriptor fd{
-      open(filename, flags, static_cast<mode_t>(FLAGS_logfile_mode))};
+      open(filename.c_str(), flags, static_cast<mode_t>(FLAGS_logfile_mode))};
   if (!fd) {
 #ifdef NGLOG_OS_WINDOWS
     create_error_message_ = StrError(errno);
@@ -1601,8 +1593,8 @@ bool LogFileObject::CreateLogfile(const string& time_pid_string) {
     create_error_message_ = StrError(errno);
 #endif
     if (FLAGS_timestamp_in_logfile_name) {
-      unlink(filename);  // Erase the half-baked evidence: an unusable log file,
-                         // only if we just created it.
+      unlink(filename.c_str());  // Erase the half-baked evidence: an unusable
+                                 // log file, only if we just created it.
     }
     return false;
   }
@@ -1625,13 +1617,14 @@ bool LogFileObject::CreateLogfile(const string& time_pid_string) {
   // no error.
   if (!symlink_basename_.empty()) {
     // take directory from filename
-    const char* slash = strrchr(filename, PATH_SEPARATOR);
-    const string linkname =
+    const std::string::size_type separator =
+        filename.find_last_of(possible_dir_delim);
+    const std::string linkname =
         symlink_basename_ + '.' + LogSeverityNames[severity_];
-    string linkpath;
-    if (slash)
-      linkpath = string(
-          filename, static_cast<size_t>(slash - filename + 1));  // get dirname
+    std::string linkpath;
+    if (separator != std::string::npos) {
+      linkpath = filename.substr(0, separator + 1);
+    }
     linkpath += linkname;
     unlink(linkpath.c_str());  // delete old one if it exists
 
@@ -1641,7 +1634,9 @@ bool LogFileObject::CreateLogfile(const string& time_pid_string) {
     // We must have unistd.h.
     // Make the symlink be relative (in the same dir) so that if the
     // entire log directory gets relocated the link is still valid.
-    const char* linkdest = slash ? (slash + 1) : filename;
+    const char* linkdest = separator != std::string::npos
+                               ? filename.c_str() + separator + 1
+                               : filename.c_str();
     if (symlink(linkdest, linkpath.c_str()) != 0) {
       // silently ignore failures
     }
@@ -1651,7 +1646,7 @@ bool LogFileObject::CreateLogfile(const string& time_pid_string) {
     if (!FLAGS_log_link.empty()) {
       linkpath = FLAGS_log_link + "/" + linkname;
       unlink(linkpath.c_str());  // delete old one if it exists
-      if (symlink(filename, linkpath.c_str()) != 0) {
+      if (symlink(filename.c_str(), linkpath.c_str()) != 0) {
         // silently ignore failures
       }
     }
@@ -1677,7 +1672,8 @@ void LogFileObject::WriteUnlocked(
 #endif
 
   // We don't log if the base_name_ is "" (which means "don't write")
-  if (base_filename_selected_ && base_filename_.empty()) {
+  if (filename_source_ == internal::LogFilenameSource::kSelected &&
+      base_filename_.empty()) {
     return;
   }
 
@@ -1713,15 +1709,19 @@ void LogFileObject::WriteUnlocked(
                     << tm_time.tm_sec << '.' << GetMainThreadPid();
     const string& time_pid_string = time_pid_stream.str();
 
-    if (base_filename_selected_) {
-      if (!CreateLogfile(time_pid_string)) {
+    std::string filename;
+    if (filename_source_ == internal::LogFilenameSource::kSelected) {
+      filename = tools::MakeLogFilename(base_filename_, time_pid_string,
+                                        filename_extension_,
+                                        FLAGS_timestamp_in_logfile_name);
+      if (!CreateLogfile(filename)) {
 #ifdef NGLOG_OS_WINDOWS
         const std::string& error_message = create_error_message_;
         WriteLogFileCreationError(create_filename_, error_message);
 #else
         const int error_number = errno;
         fprintf(stderr, "Could not create log file '%s': %s\n",
-                time_pid_string.c_str(), StrError(error_number).c_str());
+                filename.c_str(), StrError(error_number).c_str());
 #endif
         return;
       }
@@ -1757,8 +1757,11 @@ void LogFileObject::WriteUnlocked(
       // until we succeed or run out of options
       bool success = false;
       for (const auto& log_dir : log_dirs) {
-        base_filename_ = log_dir + "/" + stripped_filename;
-        if (CreateLogfile(time_pid_string)) {
+        base_filename_ = log_dir + stripped_filename;
+        filename = tools::MakeLogFilename(base_filename_, time_pid_string,
+                                          filename_extension_,
+                                          FLAGS_timestamp_in_logfile_name);
+        if (CreateLogfile(filename)) {
           success = true;
           break;
         }
@@ -1771,7 +1774,7 @@ void LogFileObject::WriteUnlocked(
 #else
         const int error_number = errno;
         fprintf(stderr, "Could not create log file '%s': %s\n",
-                time_pid_string.c_str(), StrError(error_number).c_str());
+                filename.c_str(), StrError(error_number).c_str());
 #endif
         return;
       }
@@ -1779,8 +1782,11 @@ void LogFileObject::WriteUnlocked(
 
     // Let the log cleaner know about the naming pattern of the new file so
     // that logs matching it are removed once they become overdue.
-    internal::g_log_cleaner.AddLogFilePattern(
-        base_filename_selected_, base_filename_, filename_extension_);
+    internal::g_log_cleaner.AddLogFile(
+        filename_source_, base_filename_, filename,
+        tools::MakeLogFilenameMatcher(
+            tools::const_basename(base_filename_.c_str()), filename_extension_,
+            FLAGS_timestamp_in_logfile_name));
 
     // Write a header message into the log file
     if (FLAGS_log_file_header) {

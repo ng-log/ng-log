@@ -3,13 +3,13 @@
 
 #include "internal/log_cleaner.h"
 
-#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -35,9 +35,23 @@ namespace {
 
 #ifdef NGLOG_OS_WINDOWS
 constexpr char possible_dir_delim[] = "\\/";
+constexpr char path_delim = '\\';
 #else
 constexpr char possible_dir_delim[] = "/";
+constexpr char path_delim = '/';
 #endif
+
+std::string JoinPath(const std::string& directory,
+                     const std::string& filename) {
+  if (directory == ".") {
+    return filename;
+  }
+  if (!directory.empty() &&
+      directory.find_last_of(possible_dir_delim) == directory.size() - 1) {
+    return directory + filename;
+  }
+  return directory + path_delim + filename;
+}
 
 }  // namespace
 
@@ -92,26 +106,34 @@ void LogCleaner::Disable() {
 
   const auto current_time = std::chrono::system_clock::now();
   for (const auto& pattern : patterns) {
-    CleanOverdueLogs(current_time, overdue,
-                     pattern.second.base_filename_selected, pattern.first,
-                     pattern.second.filename_extension);
+    CleanOverdueLogs(current_time, overdue, pattern.first, pattern.second);
   }
 }
 
-void LogCleaner::AddLogFilePattern(bool base_filename_selected,
-                                   const std::string& base_filename,
-                                   const std::string& filename_extension) {
+void LogCleaner::AddLogFile(LogFilenameSource filename_source,
+                            const std::string& base_filename,
+                            const std::string& filename,
+                            const std::regex& filename_regex) {
   // The only caller, LogFileObject::Write(), already returns early when
-  // base_filename_selected_ is true and base_filename_ is empty (that
+  // filename_source is kSelected and base_filename is empty (that
   // combination means "don't write"), so this combination can never reach
   // here.
-  assert(!base_filename_selected || !base_filename.empty());
+  assert(filename_source == LogFilenameSource::kDefault ||
+         !base_filename.empty());
+
+  const std::size_t separator = filename.find_last_of(possible_dir_delim);
+  const std::string source_directory =
+      separator == std::string::npos ? "." : filename.substr(0, separator + 1);
+  const std::string relative_filename = separator == std::string::npos
+                                            ? filename
+                                            : filename.substr(separator + 1);
 
   {
     std::lock_guard<internal::CleanerMutex> l{mutex_};
     LogFilePattern& pattern = patterns_[base_filename];
-    pattern.base_filename_selected = base_filename_selected;
-    pattern.filename_extension = filename_extension;
+    pattern.filename_source = filename_source;
+    pattern.filename_regex = filename_regex;
+    pattern.filenames_by_directory[source_directory].insert(relative_filename);
     // A log file was just created: scan for overdue logs right away.
     pattern.next_cleanup_time = {};
   }
@@ -170,9 +192,7 @@ void LogCleaner::Worker() {
     // before use rather than unconditionally at the top of the loop.
     const auto current_time = std::chrono::system_clock::now();
     for (const auto& pattern : due) {
-      CleanOverdueLogs(current_time, overdue,
-                       pattern.second.base_filename_selected, pattern.first,
-                       pattern.second.filename_extension);
+      CleanOverdueLogs(current_time, overdue, pattern.first, pattern.second);
     }
     // New patterns may have been registered or the cleaner may have been
     // stopped while the lock was released: loop back to re-check both.
@@ -181,24 +201,31 @@ void LogCleaner::Worker() {
 
 void LogCleaner::CleanOverdueLogs(
     const std::chrono::system_clock::time_point& current_time,
-    const std::chrono::minutes& overdue, bool base_filename_selected,
-    const std::string& base_filename, const std::string& filename_extension) {
-  std::vector<std::string> dirs;
+    const std::chrono::minutes& overdue, const std::string& base_filename,
+    const LogFilePattern& pattern) {
+  std::set<std::string> dirs;
 
-  if (!base_filename_selected) {
-    dirs = GetLoggingDirectories();
+  if (pattern.filename_source == LogFilenameSource::kDefault) {
+    for (const std::string& directory : GetLoggingDirectories()) {
+      dirs.insert(directory.empty() ? "." : directory);
+    }
   } else {
     const std::size_t pos = base_filename.find_last_of(possible_dir_delim);
     if (pos != std::string::npos) {
-      dirs.emplace_back(base_filename, 0, pos + 1);
+      const std::string directory = base_filename.substr(0, pos + 1);
+      dirs.insert(directory.empty() ? "." : directory);
     } else {
-      dirs.emplace_back(".");
+      dirs.insert(".");
     }
   }
 
+  for (const auto& filenames : pattern.filenames_by_directory) {
+    dirs.insert(filenames.first.empty() ? "." : filenames.first);
+  }
+
   for (const std::string& dir : dirs) {
-    std::vector<std::string> logs = GetOverdueLogNames(
-        dir, current_time, overdue, base_filename, filename_extension);
+    std::vector<std::string> logs =
+        GetOverdueLogNames(dir, current_time, overdue, pattern);
     for (const std::string& log : logs) {
       // NOTE May fail on Windows if the file is still open.
       int result = unlink(log.c_str());
@@ -212,10 +239,19 @@ void LogCleaner::CleanOverdueLogs(
 std::vector<std::string> LogCleaner::GetOverdueLogNames(
     std::string log_directory,
     const std::chrono::system_clock::time_point& current_time,
-    const std::chrono::minutes& overdue, const std::string& base_filename,
-    const std::string& filename_extension) {
-  // The names of overdue logs.
-  std::vector<std::string> overdue_log_names;
+    const std::chrono::minutes& overdue, const LogFilePattern& pattern) {
+  std::unordered_set<std::string> overdue_log_names;
+
+  const auto exact_filenames =
+      pattern.filenames_by_directory.find(log_directory);
+  if (exact_filenames != pattern.filenames_by_directory.end()) {
+    for (const std::string& filename : exact_filenames->second) {
+      const std::string filepath = JoinPath(log_directory, filename);
+      if (IsLogLastModifiedOver(filepath, current_time, overdue)) {
+        overdue_log_names.insert(filepath);
+      }
+    }
+  }
 
   // Try to get all files within log_directory.
   struct DirectoryDeleter {
@@ -231,88 +267,17 @@ std::vector<std::string> LogCleaner::GetOverdueLogNames(
         continue;
       }
 
-      std::string filepath = ent->d_name;
-      if (!log_directory.empty() &&
-          log_directory.find_last_of(possible_dir_delim) ==
-              log_directory.size() - 1) {
-        filepath = log_directory + filepath;
-      }
-
-      if (IsLogFromCurrentProject(filepath, base_filename,
-                                  filename_extension) &&
-          IsLogLastModifiedOver(filepath, current_time, overdue)) {
-        overdue_log_names.push_back(filepath);
+      const std::string filename = ent->d_name;
+      if (std::regex_match(filename, pattern.filename_regex)) {
+        const std::string filepath = JoinPath(log_directory, filename);
+        if (IsLogLastModifiedOver(filepath, current_time, overdue)) {
+          overdue_log_names.insert(filepath);
+        }
       }
     }
   }
 
-  return overdue_log_names;
-}
-
-bool LogCleaner::IsLogFromCurrentProject(
-    const std::string& filepath, const std::string& base_filename,
-    const std::string& filename_extension) {
-  // We should remove duplicated delimiters from `base_filename`, e.g.,
-  // before: "/tmp//<base_filename>.<create_time>.<pid>"
-  // after:  "/tmp/<base_filename>.<create_time>.<pid>"
-  std::string cleaned_base_filename =
-      CollapseRepeatedCharacters(base_filename, possible_dir_delim);
-  std::size_t real_filepath_size = filepath.size();
-
-  // Return early if the filename does not start with cleaned_base_filename.
-  if (filepath.find(cleaned_base_filename) != 0) {
-    return false;
-  }
-
-  // Check whether filename_extension is next to cleaned_base_filename in
-  // filepath if the user has set a custom filename extension.
-  if (!filename_extension.empty()) {
-    if (cleaned_base_filename.size() >= real_filepath_size) {
-      return false;
-    }
-    // For the original version, filename_extension is in the filepath middle.
-    if (IsFilenameExtensionAfterBaseFilename(filepath, cleaned_base_filename,
-                                             filename_extension)) {
-      cleaned_base_filename += filename_extension;
-    } else {
-      // For the new version, filename_extension is at the filepath end.
-      if (!IsFilenameExtensionAtEnd(filepath, filename_extension)) {
-        return false;
-      }
-      real_filepath_size -= filename_extension.size();
-    }
-  }
-
-  // The characters after cleaned_base_filename should match
-  // YYYYMMDD-HHMMSS.pid.
-  for (std::size_t i = cleaned_base_filename.size(); i < real_filepath_size;
-       ++i) {
-    const char& c = filepath[i];
-
-    if (i <= cleaned_base_filename.size() + 7) {
-      if (c < '0' || c > '9') {
-        return false;
-      }
-    } else if (i == cleaned_base_filename.size() + 8) {
-      if (c != '-') {
-        return false;
-      }
-    } else if (i <= cleaned_base_filename.size() + 14) {
-      if (c < '0' || c > '9') {
-        return false;
-      }
-    } else if (i == cleaned_base_filename.size() + 15) {
-      if (c != '.') {
-        return false;
-      }
-    } else if (i >= cleaned_base_filename.size() + 16) {
-      if (c < '0' || c > '9') {
-        return false;
-      }
-    }
-  }
-
-  return true;
+  return {overdue_log_names.begin(), overdue_log_names.end()};
 }
 
 bool LogCleaner::IsLogLastModifiedOver(

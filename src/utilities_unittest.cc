@@ -47,32 +47,34 @@ TEST(utilities, InitializeLoggingDeathTest) {
   ASSERT_DEATH(InitializeLogging("foobar"), "");
 }
 
-TEST(utilities, CollapseRepeatedCharacters) {
-  constexpr char delimiters[] = {'/', '\\'};
-
-  EXPECT_EQ(nglog::CollapseRepeatedCharacters("one///two\\\\three", delimiters),
-            "one/two\\three");
-  EXPECT_EQ(nglog::CollapseRepeatedCharacters("one///two", delimiters,
-                                              sizeof(delimiters)),
-            "one/two");
-  EXPECT_EQ(nglog::CollapseRepeatedCharacters("aabbbaac", "ab"), "ac");
-  EXPECT_EQ(nglog::CollapseRepeatedCharacters("unchanged", delimiters),
-            "unchanged");
+TEST(utilities, MakeLogFilename) {
+  EXPECT_EQ(nglog::MakeLogFilename("/tmp/app[1].", "20260817-123456.42",
+                                   ".foo+", true),
+            "/tmp/app[1].20260817-123456.42.foo+");
+  EXPECT_EQ(nglog::MakeLogFilename("/tmp/app[1].", "20260817-123456.42",
+                                   ".foo+", false),
+            "/tmp/app[1]..foo+");
 }
 
-TEST(utilities, IsFilenameExtensionAfterBaseFilename) {
-  EXPECT_TRUE(nglog::IsFilenameExtensionAfterBaseFilename(
-      "/tmp/app.custom.20260817-123456.42", "/tmp/app", ".custom"));
-  EXPECT_FALSE(nglog::IsFilenameExtensionAfterBaseFilename(
-      "/tmp/app.20260817-123456.42", "/tmp/app", ".custom"));
+TEST(utilities, MakeLogFilenameMatcher) {
+  const std::regex timestamp_regex =
+      nglog::tools::MakeLogFilenameMatcher("app[1].", ".foo+", true);
+  EXPECT_TRUE(
+      std::regex_match("app[1].20260817-123456.42.foo+", timestamp_regex));
+  EXPECT_FALSE(
+      std::regex_match("app11.20260817-123456.42.foo+", timestamp_regex));
+
+  const std::regex non_timestamp_regex =
+      nglog::tools::MakeLogFilenameMatcher("app[1].", ".foo+", false);
+  EXPECT_TRUE(std::regex_match("app[1]..foo+", non_timestamp_regex));
+  EXPECT_FALSE(
+      std::regex_match("app[1].20260817-123456.42.foo+", non_timestamp_regex));
 }
 
-TEST(utilities, IsFilenameExtensionAtEnd) {
-  EXPECT_TRUE(nglog::IsFilenameExtensionAtEnd(
-      "/tmp/app.20260817-123456.42.custom", ".custom"));
-  EXPECT_FALSE(nglog::IsFilenameExtensionAtEnd(
-      "/tmp/app.20260817-123456.42.other", ".custom"));
-  EXPECT_FALSE(nglog::IsFilenameExtensionAtEnd(".custom", ".custom"));
+TEST(utilities, MakeLogFilenameMatcherRequiresBaseFilename) {
+  const std::regex regex =
+      nglog::tools::MakeLogFilenameMatcher("", ".foo+", true);
+  EXPECT_FALSE(std::regex_match("20260817-123456.42.foo+", regex));
 }
 
 TEST(utilities, TrimTrailingCRLFRemovesTrailingNewlines) {

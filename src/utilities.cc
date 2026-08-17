@@ -39,6 +39,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #include "addr2line.h"
 #include "config.h"
@@ -74,6 +75,26 @@
 extern char* __progname;
 #endif
 
+namespace {
+
+constexpr char log_filename_timestamp_pattern[] = "[0-9]{8}-[0-9]{6}\\.[0-9]+";
+constexpr char log_filename_never_match_pattern[] = "a^";
+
+std::string EscapeRegexCharacters(const std::string& input) {
+  constexpr char regex_characters[] = "\\.^$|()[]{}*+?";
+  std::string result;
+  result.reserve(input.size());
+  for (const char character : input) {
+    if (std::strchr(regex_characters, character) != nullptr) {
+      result += '\\';
+    }
+    result += character;
+  }
+  return result;
+}
+
+}  // namespace
+
 using std::string;
 
 namespace nglog {
@@ -87,6 +108,36 @@ bool IsLoggingInitialized() {
 inline namespace tools {
 
 constexpr int FileDescriptor::InvalidHandle;
+
+std::string MakeLogFilename(const std::string& base_filename,
+                            const std::string& time_pid_string,
+                            const std::string& filename_extension,
+                            bool timestamp_in_logfile_name) {
+  std::string filename = base_filename;
+  if (timestamp_in_logfile_name) {
+    filename += time_pid_string;
+  }
+  filename += filename_extension;
+  return filename;
+}
+
+std::regex MakeLogFilenameMatcher(const std::string& base_filename,
+                                  const std::string& filename_extension,
+                                  bool timestamp_in_logfile_name) {
+  // An empty base would make a timestamp rule match unrelated files. Exact
+  // current-process filenames remain available to the log cleaner separately.
+  if (base_filename.empty() && timestamp_in_logfile_name) {
+    return std::regex(log_filename_never_match_pattern);
+  }
+
+  std::string pattern = "^" + EscapeRegexCharacters(base_filename);
+  if (timestamp_in_logfile_name) {
+    pattern += log_filename_timestamp_pattern;
+  }
+  pattern += EscapeRegexCharacters(filename_extension);
+  pattern += '$';
+  return std::regex(pattern);
+}
 
 void AlsoErrorWrite(LogSeverity severity, const char* tag,
                     const char* message) noexcept {
@@ -215,42 +266,6 @@ static void DumpStackTrace(int skip_count, DebugWriter* writerfn, void* arg) {
 namespace nglog {
 
 inline namespace tools {
-
-std::string CollapseRepeatedCharacters(const std::string& input,
-                                       const char* characters,
-                                       std::size_t character_count) {
-  std::string result;
-  result.reserve(input.size());
-  for (std::size_t pos = 0; pos < input.size();) {
-    const std::size_t first_character =
-        input.find_first_of(characters, pos, character_count);
-    if (first_character == std::string::npos) {
-      result.append(input, pos);
-      pos = input.size();
-    } else {
-      result.append(input, pos, first_character - pos + 1);
-      pos = input.find_first_not_of(characters, first_character + 1,
-                                    character_count);
-    }
-  }
-  return result;
-}
-
-bool IsFilenameExtensionAfterBaseFilename(
-    const std::string& filepath, const std::string& base_filename,
-    const std::string& filename_extension) {
-  return filepath.compare(base_filename.size(), filename_extension.size(),
-                          filename_extension) == 0;
-}
-
-bool IsFilenameExtensionAtEnd(const std::string& filepath,
-                              const std::string& filename_extension) {
-  if (filename_extension.size() >= filepath.size()) {
-    return false;
-  }
-  return filepath.compare(filepath.size() - filename_extension.size(),
-                          filename_extension.size(), filename_extension) == 0;
-}
 
 std::string TrimTrailingCharacters(std::string input, const char* characters,
                                    std::size_t character_count) {

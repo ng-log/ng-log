@@ -40,6 +40,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <regex>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -135,18 +136,14 @@ inline namespace tools {
 void AlsoErrorWrite(LogSeverity severity, const char* tag,
                     const char* message) noexcept;
 
-// Returns input with each run of characters from the set replaced by its
-// first character. The character array may be non-null-terminated.
-std::string CollapseRepeatedCharacters(const std::string& input,
-                                       const char* characters,
-                                       std::size_t character_count);
+std::string MakeLogFilename(const std::string& base_filename,
+                            const std::string& time_pid_string,
+                            const std::string& filename_extension,
+                            bool timestamp_in_logfile_name);
 
-bool IsFilenameExtensionAfterBaseFilename(
-    const std::string& filepath, const std::string& base_filename,
-    const std::string& filename_extension);
-
-bool IsFilenameExtensionAtEnd(const std::string& filepath,
-                              const std::string& filename_extension);
+std::regex MakeLogFilenameMatcher(const std::string& base_filename,
+                                  const std::string& filename_extension,
+                                  bool timestamp_in_logfile_name);
 
 std::string TrimTrailingCRLF(std::string message);
 
@@ -159,14 +156,6 @@ inline std::string TrimTrailingCharacters(std::string input,
   static_assert(N > 0, "characters must not be empty");
   const std::size_t character_count = N - (characters[N - 1] == '\0' ? 1 : 0);
   return TrimTrailingCharacters(std::move(input), characters, character_count);
-}
-
-template <std::size_t N>
-inline std::string CollapseRepeatedCharacters(const std::string& input,
-                                              const char (&characters)[N]) {
-  static_assert(N > 0, "characters must not be empty");
-  const std::size_t character_count = N - (characters[N - 1] == '\0' ? 1 : 0);
-  return CollapseRepeatedCharacters(input, characters, character_count);
 }
 
 const char* ProgramInvocationShortName();

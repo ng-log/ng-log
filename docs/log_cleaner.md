@@ -18,6 +18,12 @@ And then ng-log will check if there are overdue logs whenever a flush is
 performed. In this example, any log file from your project whose last modified
 time is greater than 3 days will be `unlink`()ed.
 
+The cleaner identifies log files using the filename configuration active in the
+current process. If a filename-related option changes between processes, files
+created by an earlier process may not be recognized and may remain after
+cleanup. Keep filename-related options consistent when cleanup should cover
+files created by earlier processes.
+
 This feature can be disabled at any time (if it has been enabled) using
 ``` cpp
 nglog::DisableLogCleaner();
