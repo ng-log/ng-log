@@ -297,7 +297,8 @@ const char* GetLogSeverityName(LogSeverity severity) {
 }
 
 static bool SendEmailInternal(const char* dest, const char* subject,
-                              const char* body, bool use_logging);
+                              const char* body, bool use_logging,
+                              const std::string& mailer);
 
 base::Logger::~Logger() = default;
 
@@ -550,10 +551,12 @@ class LogDestination {
   // iff it's of a high enough severity to deserve it.
   static void MaybeLogToStderr(const internal::LogMessageData& data);
 
-  // Take a log message of a particular severity and log it to email
-  // iff it's of a high enough severity to deserve it.
-  static void MaybeLogToEmail(LogSeverity severity, const char* message,
-                              size_t len);
+  // Send an already-selected log message to email after the logging lock is
+  // released.
+  static void SendEmailForLogMessage(LogSeverity severity, const char* message,
+                                     std::size_t len, const std::string& to,
+                                     const std::string& host,
+                                     const std::string& mailer);
   // Take a log message of a particular severity and log it to a file
   // iff the base filename is not "" (which means "don't log to me")
   static void MaybeLogToLogfile(
@@ -1184,28 +1187,15 @@ inline void LogDestination::MaybeLogToStderr(
   }
 }
 
-inline void LogDestination::MaybeLogToEmail(LogSeverity severity,
-                                            const char* message, size_t len) {
-  if (severity >= email_logging_severity_ || severity >= FLAGS_logemaillevel) {
-    string to(FLAGS_alsologtoemail);
-    if (!addresses_.empty()) {
-      if (!to.empty()) {
-        to += ",";
-      }
-      to += addresses_;
-    }
-    const string subject(string("[LOG] ") + LogSeverityNames[severity] + ": " +
-                         tools::ProgramInvocationShortName());
-    string body(hostname());
-    body += "\n\n";
-    body.append(message, len);
-
-    // should NOT use SendEmail().  The caller of this function holds the
-    // log_mutex and SendEmail() calls LOG/VLOG which will block trying to
-    // acquire the log_mutex object.  Use SendEmailInternal() and set
-    // use_logging to false.
-    SendEmailInternal(to.c_str(), subject.c_str(), body.c_str(), false);
-  }
+inline void LogDestination::SendEmailForLogMessage(
+    LogSeverity severity, const char* message, std::size_t len,
+    const std::string& to, const std::string& host, const std::string& mailer) {
+  const std::string subject(std::string("[LOG] ") + LogSeverityNames[severity] +
+                            ": " + tools::ProgramInvocationShortName());
+  std::string body(host);
+  body += "\n\n";
+  body.append(message, len);
+  SendEmailInternal(to.c_str(), subject.c_str(), body.c_str(), false, mailer);
 }
 
 inline void LogDestination::MaybeLogToLogfile(
@@ -2184,14 +2174,39 @@ void LogMessage::Flush() {
     SendToSink();
   }
 
+  bool should_send_email = false;
+  std::string email_to;
+  std::string email_host;
+  std::string email_mailer;
   if (send_method != &LogMessage::SendToSink) {
     // Protect the shared logging destinations while dispatching the message.
     std::lock_guard<internal::LogMutex> l{log_mutex};
+    if (send_to_registered_sinks && !FLAGS_logtostderr && !FLAGS_logtostdout &&
+        IsLoggingInitialized() &&
+        (data_->severity_ >= LogDestination::email_logging_severity_ ||
+         data_->severity_ >= FLAGS_logemaillevel)) {
+      should_send_email = true;
+      email_to = FLAGS_alsologtoemail;
+      if (!LogDestination::addresses_.empty()) {
+        if (!email_to.empty()) {
+          email_to += ",";
+        }
+        email_to += LogDestination::addresses_;
+      }
+      email_host = LogDestination::hostname();
+      email_mailer = FLAGS_logmailer;
+    }
     if (send_method == &LogMessage::SendToSinkAndLog) {
       SendToLog();
     } else {
       (this->*send_method)();
     }
+  }
+
+  if (should_send_email) {
+    LogDestination::SendEmailForLogMessage(
+        data_->severity_, data_->message_text_, data_->num_chars_to_log_,
+        email_to, email_host, email_mailer);
   }
 
   bool registered_sinks_waited = false;
@@ -2277,8 +2292,6 @@ void LogMessage::SendToLog() NGLOG_LOCKS_REQUIRED(log_mutex) {
                                            data_->num_chars_to_log_);
 
     LogDestination::MaybeLogToStderr(*data_);
-    LogDestination::MaybeLogToEmail(data_->severity_, data_->message_text_,
-                                    data_->num_chars_to_log_);
     // NOTE: -1 removes trailing \n
   }
 
@@ -2598,6 +2611,30 @@ static string ShellEscape(const string& src) {
   return result;
 }
 
+static std::string ShellEscapeExecutable(const std::string& src) {
+#  ifdef NGLOG_OS_WINDOWS
+  std::string result{"\""};
+  std::size_t backslashes = 0;
+  for (const char ch : src) {
+    if (ch == '\\') {
+      ++backslashes;
+      continue;
+    }
+    result.append(backslashes, '\\');
+    backslashes = 0;
+    if (ch == '\"') {
+      result += '\\';
+    }
+    result += ch;
+  }
+  result.append(backslashes * 2, '\\');
+  result += '\"';
+  return result;
+#  else
+  return ShellEscape(src);
+#  endif
+}
+
 // Trim whitespace from both ends of the provided string.
 static inline void trim(std::string& s) {
   const auto toRemove = [](char ch) { return std::isspace(ch) == 0; };
@@ -2610,7 +2647,8 @@ static inline void trim(std::string& s) {
 // to log errors.  It should be set to false when the caller holds the
 // log_mutex.
 static bool SendEmailInternal(const char* dest, const char* subject,
-                              const char* body, bool use_logging) {
+                              const char* body, bool use_logging,
+                              const std::string& mailer) {
 #ifndef NGLOG_OS_EMSCRIPTEN
   struct PcloseDeleter {
     int* status;
@@ -2668,16 +2706,16 @@ static bool SendEmailInternal(const char* dest, const char* subject,
               body, dest);
     }
 
-    string logmailer;
+    std::string logmailer;
 
-    if (FLAGS_logmailer.empty()) {
+    if (mailer.empty()) {
       // Don't need to shell escape the literal string
       logmailer = "/bin/mail";
     } else {
-      logmailer = ShellEscape(FLAGS_logmailer);
+      logmailer = ShellEscapeExecutable(mailer);
     }
 
-    string cmd =
+    std::string cmd =
         logmailer + " -s" + ShellEscape(subject) + " " + ShellEscape(dest);
     if (use_logging) {
       VLOG(4) << "Mailing command: " << cmd;
@@ -2716,13 +2754,15 @@ static bool SendEmailInternal(const char* dest, const char* subject,
   (void)subject;
   (void)body;
   (void)use_logging;
+  (void)mailer;
   LOG(WARNING) << "Email support not available; not sending message";
 #endif
   return false;
 }
 
 bool SendEmail(const char* dest, const char* subject, const char* body) {
-  return SendEmailInternal(dest, subject, body, true);
+  const std::string mailer = FLAGS_logmailer;
+  return SendEmailInternal(dest, subject, body, true, mailer);
 }
 
 static void GetTempDirectories(vector<string>& list) {

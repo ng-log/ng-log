@@ -10,6 +10,7 @@
 // relying on a shell or OS-shipped utility being present, on every platform
 // Subprocess itself supports.
 
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <thread>
@@ -23,6 +24,10 @@ int main(int argc, char** argv) {
     for (;;) {
       std::this_thread::sleep_for(std::chrono::hours{1});
     }
+  }
+
+  if (argc > 1 && std::strcmp(argv[1], "--fail") == 0) {
+    return 1;
   }
 
   char buf[kBufferSize];

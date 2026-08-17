@@ -80,8 +80,12 @@
 #include "internal/lock_metrics.h"
 #include "mock-log.h"
 #include "ng-log/logging.h"
+#include "ng-log/platform.h"
 #include "ng-log/raw_logging.h"
 #include "stacktrace.h"
+#ifdef HAVE_SUBPROCESS
+#  include "subprocess.h"
+#endif
 #include "testing_utilities.h"
 #include "utilities.h"
 
@@ -178,10 +182,84 @@ std::string early_stderr;
 const char* g_argv0 = nullptr;
 std::string g_prefix_attacher_data;
 
+#ifdef HAVE_SUBPROCESS
+bool SetMailerMarkerEnvironment(const std::string& marker_path) {
+#  ifdef NGLOG_OS_WINDOWS
+  return _putenv_s("NGLOG_TEST_MAILER_MARKER", marker_path.c_str()) == 0;
+#  else
+  return setenv("NGLOG_TEST_MAILER_MARKER", marker_path.c_str(), 1) == 0;
+#  endif
+}
+
+bool MailerMarkerExists(const std::string& marker_path) {
+  std::ifstream marker{marker_path};
+  return marker.good();
+}
+
+int RunSlowMailerScenario(const char* program, const char* marker_path,
+                          const char* log_path) {
+  using namespace std::chrono_literals;
+  constexpr auto kMailerStartTimeout = 10s;
+  constexpr auto kPollInterval = 10ms;
+
+  if (!SetMailerMarkerEnvironment(marker_path)) {
+    return EXIT_FAILURE;
+  }
+  FLAGS_logtostderr = false;
+  FLAGS_logtostdout = false;
+  FLAGS_logmailer = EMAIL_TEST_HELPER_PATH;
+  InitializeLogging(program);
+  SetEmailLogging(NGLOG_WARNING, "example@example.com");
+  SetLogDestination(NGLOG_INFO, log_path);
+
+  std::thread mail_logger{[] { LOG(WARNING) << "first email"; }};
+  const auto mailer_start_deadline =
+      std::chrono::steady_clock::now() + kMailerStartTimeout;
+  while (!MailerMarkerExists(marker_path) &&
+         std::chrono::steady_clock::now() < mailer_start_deadline) {
+    std::this_thread::sleep_for(kPollInterval);
+  }
+  if (!MailerMarkerExists(marker_path)) {
+    mail_logger.join();
+    return EXIT_FAILURE;
+  }
+
+  std::mutex other_log_mutex;
+  std::condition_variable other_log_condition;
+  bool other_log_finished = false;
+  std::thread other_logger{
+      [&other_log_finished, &other_log_mutex, &other_log_condition] {
+        LOG(INFO) << "second log";
+        {
+          std::lock_guard<std::mutex> lock{other_log_mutex};
+          other_log_finished = true;
+        }
+        other_log_condition.notify_one();
+      }};
+  {
+    std::unique_lock<std::mutex> lock{other_log_mutex};
+    other_log_condition.wait(
+        lock, [&other_log_finished] { return other_log_finished; });
+  }
+
+  other_logger.join();
+  mail_logger.join();
+  std::fputs("passed\n", stdout);
+  std::fflush(stdout);
+  return EXIT_SUCCESS;
+}
+#endif  // HAVE_SUBPROCESS
+
 }  // namespace
 
 int main(int argc, char** argv) {
   g_argv0 = argv[0];
+
+#ifdef HAVE_SUBPROCESS
+  if (argc == 4 && std::strcmp(argv[1], "--nglog-slow-mailer") == 0) {
+    return RunSlowMailerScenario(argv[0], argv[2], argv[3]);
+  }
+#endif
 
 #ifdef NGLOG_OS_WINDOWS
   if (argc == 4 && std::strcmp(argv[1], "--nglog-hold-log-lock") == 0) {
@@ -2580,6 +2658,52 @@ TEST(EmailLogging, MaliciousAddress) {
   EXPECT_FALSE(
       SendEmail("!/bin/true@example.com", "Example subject", "Example body"));
 }
+
+#ifdef HAVE_SUBPROCESS
+TEST(EmailLogging, SlowMailerDoesNotBlockOtherLoggingThreads) {
+  using namespace std::chrono_literals;
+  constexpr auto kChildTimeout = 4s;
+  constexpr char kExpectedOutput[] = "passed\n";
+
+  const std::string marker_path = TestTmpDir() + "/sleeping-mailer.started";
+  const std::string log_path = TestTmpDir() + "/slow-mailer-log";
+  DeleteFiles(marker_path);
+  DeleteFiles(log_path + "*");
+
+  std::vector<char> program(g_argv0, g_argv0 + std::strlen(g_argv0) + 1);
+  std::vector<char> marker(marker_path.begin(), marker_path.end());
+  std::vector<char> log(log_path.begin(), log_path.end());
+  marker.push_back('\0');
+  log.push_back('\0');
+  char child_mode[] = "--nglog-slow-mailer";
+  char* const child_argv[] = {program.data(), child_mode, marker.data(),
+                              log.data(), nullptr};
+  char* const child_envp[] = {nullptr};
+
+  Subprocess child;
+  ASSERT_TRUE(child.Spawn(child_argv, child_envp));
+  child.CloseStdin();
+
+  char output[sizeof(kExpectedOutput)] = {};
+  std::size_t output_size = 0;
+  while (output_size < sizeof(kExpectedOutput) - 1) {
+    const std::size_t bytes_read = child.ReadStdout(
+        output + output_size, sizeof(output) - output_size, kChildTimeout);
+    if (bytes_read == 0) {
+      break;
+    }
+    output_size += bytes_read;
+  }
+  const auto result = child.Wait(kChildTimeout);
+  ASSERT_EQ(nglog::SubprocessWaitResult::kExited, result.status);
+  ASSERT_EQ(0, result.exit_code);
+
+  EXPECT_EQ(TrimTrailingCRLF(std::string(output, output_size)),
+            TrimTrailingCRLF(kExpectedOutput));
+  DeleteFiles(marker_path);
+  DeleteFiles(log_path + "*");
+}
+#endif  // HAVE_SUBPROCESS
 
 TEST(Logging, FatalThrow) {
   auto const fail_func = InstallFailureFunction(&ThrowFatalLogFailure);

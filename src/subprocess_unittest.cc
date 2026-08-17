@@ -28,6 +28,7 @@ constexpr std::size_t kOutputBufferSize = 64;
 
 char helper_path[] = SUBPROCESS_HELPER_PATH;
 char hang_flag[] = "--hang";
+char fail_flag[] = "--fail";
 
 }  // namespace
 
@@ -76,7 +77,21 @@ TEST(Subprocess, WaitTerminatesAnUnresponsiveProcess) {
   // The helper never exits on its own with --hang. This must return
   // promptly, having forcibly terminated it, rather than hanging the
   // test itself.
-  process.Wait(100ms);
+  const auto result = process.Wait(100ms);
+  EXPECT_EQ(nglog::SubprocessWaitResult::kTimedOut, result.status);
+}
+
+TEST(Subprocess, WaitReportsUnsuccessfulExit) {
+  char* argv[] = {helper_path, fail_flag, nullptr};
+  char* envp[] = {nullptr};
+
+  Subprocess process;
+  ASSERT_TRUE(process.Spawn(argv, envp));
+  process.CloseStdin();
+
+  const auto result = process.Wait(kTimeout);
+  EXPECT_EQ(nglog::SubprocessWaitResult::kExited, result.status);
+  EXPECT_EQ(1, result.exit_code);
 }
 
 TEST(Subprocess, SpawnFailsForANonExistentProgram) {
@@ -108,7 +123,8 @@ TEST(Subprocess, OperationsOnAnUnspawnedInstanceAreNoOps) {
   EXPECT_EQ(0U, process.ReadStdout(out, sizeof(out), kTimeout));
   EXPECT_EQ(0U, process.WriteStdin("x", 1, kTimeout));
   process.CloseStdin();
-  process.Wait(kTimeout);
+  const auto result = process.Wait(kTimeout);
+  EXPECT_EQ(nglog::SubprocessWaitResult::kFailed, result.status);
 }
 
 TEST(Subprocess, WriteStdinReturnsZeroOnceAfterCloseStdin) {

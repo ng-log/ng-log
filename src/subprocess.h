@@ -37,6 +37,37 @@
 namespace nglog {
 inline namespace tools {
 
+struct SubprocessWaitResult {
+  enum Status { kExited, kTimedOut, kFailed };
+
+  Status status;
+  // Read exit_code only for kExited.
+  int exit_code;
+
+  static SubprocessWaitResult Exited(int code) {
+    SubprocessWaitResult result;
+    result.status = kExited;
+    result.exit_code = code;
+    return result;
+  }
+
+  static SubprocessWaitResult TimedOut() {
+    SubprocessWaitResult result;
+    result.status = kTimedOut;
+    return result;
+  }
+
+  static SubprocessWaitResult Failed() {
+    SubprocessWaitResult result;
+    result.status = kFailed;
+    result.exit_code = -1;
+    return result;
+  }
+
+ private:
+  SubprocessWaitResult() : status(kFailed), exit_code(-1) {}
+};
+
 #  if defined(NGLOG_OS_WINDOWS)
 struct HandleDeleter {
   void operator()(HANDLE handle) const noexcept {
@@ -101,7 +132,7 @@ class NGLOG_NO_EXPORT Subprocess final {
   // Waits for the process to exit, forcibly terminating it if |timeout|
   // elapses first. Always reaps the process exactly once as long as
   // Spawn() succeeded. Call at most once per Subprocess.
-  void Wait(std::chrono::milliseconds timeout);
+  SubprocessWaitResult Wait(std::chrono::milliseconds timeout);
 
  private:
   void Reset() noexcept;

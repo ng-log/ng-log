@@ -442,18 +442,34 @@ std::size_t Subprocess::ReadStdout(char* out, std::size_t out_size,
   return static_cast<std::size_t>(read);
 }
 
-void Subprocess::Wait(std::chrono::milliseconds timeout) {
+SubprocessWaitResult Subprocess::Wait(std::chrono::milliseconds timeout) {
   if (!process_) {
-    return;
+    return SubprocessWaitResult::Failed();
   }
 
-  if (WaitForSingleObject(process_.get(), ClampTimeoutMillis(timeout)) ==
-      WAIT_TIMEOUT) {
+  const DWORD wait_result =
+      WaitForSingleObject(process_.get(), ClampTimeoutMillis(timeout));
+  if (wait_result == WAIT_TIMEOUT) {
     TerminateProcess(process_.get(), 1);
-    WaitForSingleObject(process_.get(), INFINITE);
+    if (WaitForSingleObject(process_.get(), INFINITE) != WAIT_OBJECT_0) {
+      process_.reset();
+      return SubprocessWaitResult::TimedOut();
+    }
+    process_.reset();
+    return SubprocessWaitResult::TimedOut();
+  } else if (wait_result != WAIT_OBJECT_0) {
+    process_.reset();
+    return SubprocessWaitResult::Failed();
   }
 
+  DWORD exit_code = 0;
+  if (GetExitCodeProcess(process_.get(), &exit_code) == 0 ||
+      exit_code > static_cast<DWORD>(std::numeric_limits<int>::max())) {
+    process_.reset();
+    return SubprocessWaitResult::Failed();
+  }
   process_.reset();
+  return SubprocessWaitResult::Exited(static_cast<int>(exit_code));
 }
 
 }  // namespace tools
@@ -772,9 +788,9 @@ std::size_t Subprocess::ReadStdout(char* out, std::size_t out_size,
   return bytes_read > 0 ? static_cast<std::size_t>(bytes_read) : 0;
 }
 
-void Subprocess::Wait(std::chrono::milliseconds timeout) {
+SubprocessWaitResult Subprocess::Wait(std::chrono::milliseconds timeout) {
   if (pid_ < 0) {
-    return;
+    return SubprocessWaitResult::Failed();
   }
 
   const auto deadline = std::chrono::steady_clock::now() + timeout;
@@ -804,9 +820,13 @@ void Subprocess::Wait(std::chrono::milliseconds timeout) {
   if (!exited) {
     ::kill(pid_, SIGKILL);
     FailureRetry([this, &status] { return ::waitpid(pid_, &status, 0); });
+    pid_ = -1;
+    return SubprocessWaitResult::TimedOut();
   }
 
   pid_ = -1;
+  return WIFEXITED(status) ? SubprocessWaitResult::Exited(WEXITSTATUS(status))
+                           : SubprocessWaitResult::Failed();
 }
 
 }  // namespace tools
