@@ -1204,8 +1204,12 @@ bool ParseVOffset(State* state) {
   return false;
 }
 
-// <ctor-dtor-name> ::= C1 | C2 | C3
-//                  ::= D0 | D1 | D2
+// <ctor-dtor-name> ::= C1 | C2 | C3 | C4 | C5
+//                  ::= D0 | D1 | D2 | D4 | D5
+//
+// C4/C5 and D4/D5 are vendor extensions emitted by GCC for the unified and
+// COMDAT-folded structors. There is deliberately no D3: the ABI reserves the
+// value but no compiler emits it.
 bool ParseCtorDtorName(State* state) {
   State copy = *state;
   if (ParseTwoCharToken(state, "CI") && ParseCharClass(state, "12") &&
@@ -1214,7 +1218,7 @@ bool ParseCtorDtorName(State* state) {
   }
   *state = copy;
 
-  if (ParseOneCharToken(state, 'C') && ParseCharClass(state, "123") &&
+  if (ParseOneCharToken(state, 'C') && ParseCharClass(state, "12345") &&
       state->prev_name != nullptr) {
     const char* const prev_name = state->prev_name;
     const ssize_t prev_name_length = state->prev_name_length;
@@ -1223,7 +1227,7 @@ bool ParseCtorDtorName(State* state) {
   }
   *state = copy;
 
-  if (ParseOneCharToken(state, 'D') && ParseCharClass(state, "012") &&
+  if (ParseOneCharToken(state, 'D') && ParseCharClass(state, "01245") &&
       state->prev_name != nullptr) {
     const char* const prev_name = state->prev_name;
     const ssize_t prev_name_length = state->prev_name_length;
@@ -1597,6 +1601,17 @@ bool ParseSimpleId(State* state) {
 bool ParseUnresolvedType(State* state) {
   State copy = *state;
   if (ParseTemplateParam(state) && Optional(ParseTemplateArgs(state))) {
+    return true;
+  }
+  *state = copy;
+
+  // A type in namespace std that scopes an unresolved name is spelled as the
+  // "St" abbreviation followed by the unqualified name, e.g. "srSt1AI1BE5value"
+  // for std::A<B>::value. This must be tried before the <substitution>
+  // production below, which would consume "St" alone and leave the unqualified
+  // name to be misparsed as the <base-unresolved-name>.
+  if (ParseTwoCharToken(state, "St") && MaybeAppend(state, "std::") &&
+      ParseSimpleId(state)) {
     return true;
   }
   *state = copy;
@@ -2084,6 +2099,8 @@ bool ParseExprPrimary(State* state) {
 // <local-name> := Z <(function) encoding> E <(entity) name>
 //                 [<discriminator>]
 //              := Z <(function) encoding> E s [<discriminator>]
+//              := Z <(function) encoding> Ed [ <(parameter) number> ] _
+//                 <(entity) name>
 bool ParseLocalName(State* state) {
   ParseDepthGuard depth(state);
   if (!depth) {
@@ -2111,9 +2128,9 @@ bool ParseLocalName(State* state) {
 
   if (ParseOneCharToken(state, 'Z') && ParseEncoding(state) &&
       ParseTwoCharToken(state, "Ed") &&
-      ParseNonNegativeNumber(state, nullptr) && ParseOneCharToken(state, '_') &&
-      MaybeAppend(state, "::") && ParseName(state) &&
-      Optional(ParseDiscriminator(state))) {
+      Optional(ParseNonNegativeNumber(state, nullptr)) &&
+      ParseOneCharToken(state, '_') && MaybeAppend(state, "::") &&
+      ParseName(state) && Optional(ParseDiscriminator(state))) {
     return true;
   }
   *state = original;
