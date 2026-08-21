@@ -2236,11 +2236,12 @@ static char fatal_message[256];
 void ReprintFatalMessage() {
   if (fatal_message[0]) {
     const size_t n = strlen(fatal_message);
+    // Also write to stderr without color.
+    WriteToStderr(fatal_message, n);
     if (!FLAGS_logtostderr) {
-      // Also write to stderr (don't color to avoid terminal checks)
-      WriteToStderr(fatal_message, n);
+      LogDestination::LogToAllLogfiles(NGLOG_ERROR, fatal_time, fatal_message,
+                                       n);
     }
-    LogDestination::LogToAllLogfiles(NGLOG_ERROR, fatal_time, fatal_message, n);
   }
 }
 

@@ -866,6 +866,65 @@ TEST(Logging, ConcurrentFullDiskWrites) {
 }
 #endif
 
+#if !defined(NGLOG_OS_WINDOWS)
+TEST(Logging, ReprintFatalMessageDoesNotColorStderr) {
+  const char* old_clicolor_force = std::getenv("CLICOLOR_FORCE");
+  const bool had_clicolor_force = old_clicolor_force != nullptr;
+  const std::string saved_clicolor_force =
+      had_clicolor_force ? old_clicolor_force : "";
+  const char* old_no_color = std::getenv("NO_COLOR");
+  const bool had_no_color = old_no_color != nullptr;
+  const std::string saved_no_color = had_no_color ? old_no_color : "";
+  auto restore_environment = [had_clicolor_force, saved_clicolor_force,
+                              had_no_color, saved_no_color] {
+    if (had_clicolor_force) {
+      setenv("CLICOLOR_FORCE", saved_clicolor_force.c_str(), 1);
+    } else {
+      unsetenv("CLICOLOR_FORCE");
+    }
+    if (had_no_color) {
+      setenv("NO_COLOR", saved_no_color.c_str(), 1);
+    } else {
+      unsetenv("NO_COLOR");
+    }
+  };
+  ScopedExit<decltype(restore_environment)> restore{restore_environment};
+
+  ASSERT_EQ(setenv("CLICOLOR_FORCE", "1", 1), 0);
+  unsetenv("NO_COLOR");
+
+  auto flags = internal::MakeFlagsScope(
+      internal::MakeFlagsScopePair(FLAGS_logtostderr, true),
+      internal::MakeFlagsScopePair(FLAGS_logtostdout, false),
+      internal::MakeFlagsScopePair(FLAGS_colorlogtostderr, true));
+  const bool previous_exit_on_dfatal = base::internal::GetExitOnDFatal();
+  base::internal::SetExitOnDFatal(true);
+  auto restore_exit_on_dfatal = [previous_exit_on_dfatal] {
+    base::internal::SetExitOnDFatal(previous_exit_on_dfatal);
+  };
+  ScopedExit<decltype(restore_exit_on_dfatal)> restore_exit{
+      restore_exit_on_dfatal};
+
+  const logging_fail_func_t previous_failure_function =
+      InstallFailureFunction(&ThrowFatalLogFailure);
+  auto restore_failure_function = [previous_failure_function] {
+    InstallFailureFunction(previous_failure_function);
+  };
+  ScopedExit<decltype(restore_failure_function)> restore_failure{
+      restore_failure_function};
+
+  CaptureTestStderr();
+  EXPECT_THROW({ LOG(FATAL) << "fatal message for replay"; }, std::logic_error);
+  const std::string initial_output = GetCapturedTestStderr();
+  ASSERT_NE(initial_output.find("\033["), std::string::npos);
+
+  CaptureTestStderr();
+  ReprintFatalMessage();
+  const std::string replayed_output = GetCapturedTestStderr();
+  EXPECT_EQ(replayed_output.find("\033["), std::string::npos);
+}
+#endif
+
 TEST(Logging, ConcurrentFatalMessages) {
   constexpr int kFatalMessageCount = 20;
   const logging_fail_func_t previous_failure_function =

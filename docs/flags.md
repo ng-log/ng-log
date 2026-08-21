@@ -34,7 +34,14 @@ The following flags are most commonly used:
 
 `logtostderr` (`bool`, default=`false`)
 
-:   Log messages to `stderr` instead of logfiles.
+:   Use `stderr` as the primary destination instead of logfiles. Setting this
+    flag to `false` does not suppress `stderr` output. The
+    `stderrthreshold` flag still copies messages at or
+    above its configured severity to `stderr` in addition to their normal
+    destination. During crash handling, the fatal message is written directly
+    to `stderr` so it remains visible as the last message in crash output.
+    When `logtostderr` is `false`, the fatal message is also replayed through
+    the configured logfile or `stdout` destination.
 
 `stderrthreshold` (`int`, default=2, which is `ERROR`)
 
