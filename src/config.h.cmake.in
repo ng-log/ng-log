@@ -68,6 +68,9 @@
 /* Define if pthread_getname_np is available */
 #cmakedefine HAVE_PTHREAD_GETNAME_NP
 
+/* Define if pthread_setname_np is available */
+#cmakedefine HAVE_PTHREAD_SETNAME_NP
+
 /* Define if GetThreadDescription is available */
 #cmakedefine HAVE_GET_THREAD_DESCRIPTION
 

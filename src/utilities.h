@@ -136,6 +136,8 @@ inline namespace tools {
 void AlsoErrorWrite(LogSeverity severity, const char* tag,
                     const char* message) noexcept;
 
+void SetThreadName(const char* name);
+
 std::string MakeLogFilename(const std::string& base_filename,
                             const std::string& time_pid_string,
                             const std::string& filename_extension,

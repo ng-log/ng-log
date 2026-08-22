@@ -33,6 +33,12 @@
 
 #include <gtest/gtest.h>
 
+#if defined(NGLOG_OS_WINDOWS) && defined(HAVE_GET_THREAD_DESCRIPTION)
+#  include <windows.h>
+#elif defined(HAVE_PTHREAD_GETNAME_NP)
+#  include <pthread.h>
+#endif
+
 #include "internal/emscripten_console.h"
 #include "ng-log/logging.h"
 #include "testing_utilities.h"
@@ -106,6 +112,29 @@ TEST(utilities, TrimTrailingCharacters) {
   EXPECT_EQ(nglog::TrimTrailingCharacters("message", " \t"), "message");
   EXPECT_EQ(nglog::TrimTrailingCharacters(" \t", delimiters), "");
 }
+
+#if defined(NGLOG_OS_WINDOWS) && defined(HAVE_GET_THREAD_DESCRIPTION)
+TEST(utilities, SetThreadName) {
+  constexpr char kThreadName[] = "TestThread";
+  nglog::SetThreadName(kThreadName);
+
+  PWSTR thread_name = nullptr;
+  ASSERT_EQ(GetThreadDescription(GetCurrentThread(), &thread_name), S_OK);
+  ASSERT_NE(thread_name, nullptr);
+  EXPECT_STREQ(thread_name, L"TestThread");
+  LocalFree(thread_name);
+}
+#elif defined(HAVE_PTHREAD_GETNAME_NP)
+TEST(utilities, SetThreadName) {
+  constexpr char kThreadName[] = "TestThread";
+  nglog::SetThreadName(kThreadName);
+
+  char thread_name[16];
+  ASSERT_EQ(
+      pthread_getname_np(pthread_self(), thread_name, sizeof(thread_name)), 0);
+  EXPECT_STREQ(thread_name, kThreadName);
+}
+#endif
 
 int main(int argc, char** argv) {
   InitializeLogging(argv[0]);

@@ -193,6 +193,19 @@ check_cxx_symbol_exists (posix_spawn_file_actions_addopen spawn.h
   HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDOPEN)
 check_cxx_symbol_exists (pread unistd.h HAVE_PREAD)
 check_cxx_symbol_exists (pthread_getname_np pthread.h HAVE_PTHREAD_GETNAME_NP)
+cmake_push_check_state (RESET)
+set (CMAKE_REQUIRED_DEFINITIONS -D_GNU_SOURCE)
+check_cxx_source_compiles ([=[
+  #include <pthread.h>
+  int main() {
+#if defined(__APPLE__)
+    return pthread_setname_np("test");
+#else
+    return pthread_setname_np(pthread_self(), "test");
+#endif
+  }
+]=] HAVE_PTHREAD_SETNAME_NP)
+cmake_pop_check_state ()
 check_cxx_symbol_exists (pwrite unistd.h HAVE_PWRITE)
 check_cxx_symbol_exists (sched_yield sched.h HAVE_SCHED_YIELD)
 check_cxx_symbol_exists (sigaction signal.h HAVE_SIGACTION)

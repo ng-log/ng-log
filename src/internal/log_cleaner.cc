@@ -40,6 +40,7 @@ constexpr char path_delim = '\\';
 constexpr char possible_dir_delim[] = "/";
 constexpr char path_delim = '/';
 #endif
+constexpr char kLogCleanerThreadName[] = "LogCleaner";
 
 std::string JoinPath(const std::string& directory,
                      const std::string& filename) {
@@ -141,6 +142,8 @@ void LogCleaner::AddLogFile(LogFilenameSource filename_source,
 }
 
 void LogCleaner::Worker() {
+  SetThreadName(kLogCleanerThreadName);
+
   for (;;) {
     // Scans are scheduled on the steady clock, so fetch it before taking the
     // lock: it does not depend on any guarded state.

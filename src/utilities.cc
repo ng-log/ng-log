@@ -71,6 +71,12 @@
 #ifdef HAVE_PWD_H
 #  include <pwd.h>
 #endif
+#ifdef HAVE_PTHREAD_SETNAME_NP
+#  include <pthread.h>
+#endif
+#ifdef NGLOG_OS_WINDOWS
+#  include <windows.h>
+#endif
 
 #if defined(HAVE___PROGNAME)
 extern char* __progname;
@@ -164,6 +170,35 @@ void AlsoErrorWrite(LogSeverity severity, const char* tag,
   (void)severity;
   (void)tag;
   (void)message;
+#endif
+}
+
+void SetThreadName(const char* name) {
+  if (name == nullptr) {
+    return;
+  }
+
+#if defined(NGLOG_OS_WINDOWS) && defined(HAVE_GET_THREAD_DESCRIPTION)
+  const int wide_name_size =
+      MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, name, -1, nullptr, 0);
+  if (wide_name_size <= 0) {
+    return;
+  }
+
+  std::wstring wide_name(static_cast<std::size_t>(wide_name_size), L'\0');
+  if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, name, -1,
+                          &wide_name[0], wide_name_size) <= 0) {
+    return;
+  }
+  SetThreadDescription(GetCurrentThread(), wide_name.c_str());
+#elif defined(HAVE_PTHREAD_SETNAME_NP)
+#  if defined(NGLOG_OS_MACOSX)
+  pthread_setname_np(name);
+#  else
+  pthread_setname_np(pthread_self(), name);
+#  endif
+#else
+  (void)name;
 #endif
 }
 
