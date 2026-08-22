@@ -41,9 +41,9 @@
 #include "ng-log/logging.h"
 #include "utilities.h"
 
-#if defined(NGLOG_USE_WINDOWS_PORT)
+#if defined(NGLOG_OS_WINDOWS)
 #  include "port.h"
-#endif  // defined(NGLOG_USE_WINDOWS_PORT)
+#endif  // defined(NGLOG_OS_WINDOWS)
 
 namespace nglog {
 

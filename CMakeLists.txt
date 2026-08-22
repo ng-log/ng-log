@@ -531,7 +531,6 @@ if ((CYGWIN OR WIN32) AND NOT UNIX)
     src/windows/port.cc
     src/windows/port.h
   )
-  set (_ng-log_USE_WINDOWS_PORT TRUE)
 endif ((CYGWIN OR WIN32) AND NOT UNIX)
 
 add_library (ng-log_internal OBJECT
@@ -564,12 +563,6 @@ add_library (ng-log::ng-log ALIAS ng-log)
 
 set (ng-log_libraries_options_for_static_linking)
 set (ng-log_pkgconfig_compile_options)
-
-if (_ng-log_USE_WINDOWS_PORT)
-  target_compile_definitions (ng-log PRIVATE NGLOG_USE_WINDOWS_PORT)
-endif (_ng-log_USE_WINDOWS_PORT)
-
-unset (_ng-log_USE_WINDOWS_PORT)
 
 if (WIN32)
   # Do not define min and max as macros

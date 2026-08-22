@@ -65,7 +65,7 @@
 
 #include "config.h"
 #include "ng-log/platform.h"
-#if defined(NGLOG_USE_WINDOWS_PORT)
+#if defined(NGLOG_OS_WINDOWS)
 #  include "port.h"
 #endif
 #if defined(HAVE_UNISTD_H)
