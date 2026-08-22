@@ -1,4 +1,5 @@
 // Copyright (c) 2000 - 2007, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -27,39 +28,26 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
-// Portable implementation - just use glibc
+// Author: Andrew Schwartzmeyer
 //
-// Note:  The glibc implementation may cause a call to malloc.
-// This can cause a deadlock in HeapProfiler.
-#include <execinfo.h>
+// Windows implementation using CaptureStackBackTrace.
 
-#include <cstring>
-
-#include "stacktrace.h"
+// clang-format off
+#include <windows.h> // Must come before <dbghelp.h>
+#include <dbghelp.h>
+// clang-format on
 
 namespace nglog {
 inline namespace tools {
 
-// If you change this function, also change GetStackFrames below.
 int GetStackTrace(void** result, int max_depth, int skip_count) {
-  static const int kStackLength = 64;
-  void* stack[kStackLength];
-  int size;
-
-  size = backtrace(stack, kStackLength);
+  if (max_depth > 64) {
+    max_depth = 64;
+  }
   skip_count++;  // we want to skip the current frame as well
-  int result_count = size - skip_count;
-  if (result_count < 0) {
-    result_count = 0;
-  }
-  if (result_count > max_depth) {
-    result_count = max_depth;
-  }
-  for (int i = 0; i < result_count; i++) {
-    result[i] = stack[i + skip_count];
-  }
-
-  return result_count;
+  // This API is thread-safe (moreover it walks only the current thread).
+  return CaptureStackBackTrace(static_cast<DWORD>(skip_count),
+                               static_cast<DWORD>(max_depth), result, nullptr);
 }
 
 }  // namespace tools

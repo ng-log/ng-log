@@ -1,4 +1,5 @@
 // Copyright (c) 2007, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -29,7 +30,7 @@
 //
 // Author: Craig Silverstein
 //
-// Produce stack trace.  I'm guessing (hoping!) the code is much like
+// Produce a stack trace.  I'm guessing (hoping!) the code is much like
 // for x86.  For apple machines, at least, it seems to be; see
 //    http://developer.apple.com/documentation/mac/runtimehtml/RTArch-59.html
 //    http://www.linux-foundation.org/spec/ELF/ppc64/PPC-elf64abi-1.9.html#STACK

@@ -36,28 +36,6 @@
 
 #include "config.h"
 #include "ng-log/export.h"
-#include "ng-log/platform.h"
-#if defined(HAVE_LIBUNWIND)
-#  define STACKTRACE_H "stacktrace_libunwind-inl.h"
-#elif defined(HAVE_UNWIND)
-#  define STACKTRACE_H "stacktrace_unwind-inl.h"
-#elif !defined(NO_FRAME_POINTER)
-#  if defined(__i386__) && __GNUC__ >= 2
-#    define STACKTRACE_H "stacktrace_x86-inl.h"
-#  elif (defined(__ppc__) || defined(__PPC__)) && __GNUC__ >= 2
-#    define STACKTRACE_H "stacktrace_powerpc-inl.h"
-#  elif defined(NGLOG_OS_WINDOWS)
-#    define STACKTRACE_H "stacktrace_windows-inl.h"
-#  endif
-#endif
-
-#if !defined(STACKTRACE_H) && defined(HAVE_EXECINFO_BACKTRACE)
-#  define STACKTRACE_H "stacktrace_generic-inl.h"
-#endif
-
-#if defined(STACKTRACE_H)
-#  define HAVE_STACKTRACE
-#endif
 
 namespace nglog {
 inline namespace tools {

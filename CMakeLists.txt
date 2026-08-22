@@ -6,6 +6,10 @@ project (ng-log
   LANGUAGES CXX
 )
 
+if (POLICY CMP0219)
+  cmake_policy (SET CMP0219 NEW)
+endif (POLICY CMP0219)
+
 set (CPACK_PACKAGE_NAME ng-log)
 set (CPACK_PACKAGE_DESCRIPTION_SUMMARY "C++ logging library")
 set (CPACK_PACKAGE_VERSION_MAJOR ${ng-log_VERSION_MAJOR})
@@ -280,10 +284,6 @@ if (HAVE_UCONTEXT_H AND NOT DEFINED PC_FROM_UCONTEXT)
   cmake_pop_check_state ()
 endif (HAVE_UCONTEXT_H AND NOT DEFINED PC_FROM_UCONTEXT)
 
-if (HAVE_EXECINFO_BACKTRACE AND HAVE_EXECINFO_BACKTRACE_SYMBOLS)
-  set (HAVE_STACKTRACE 1)
-endif (HAVE_EXECINFO_BACKTRACE AND HAVE_EXECINFO_BACKTRACE_SYMBOLS)
-
 # Excluded on Emscripten: it has no real process model, so neither
 # posix_spawn() nor fork()+exec() can actually run a subprocess there,
 # regardless of what the symbol checks below report. CreateProcess() is
@@ -311,7 +311,6 @@ if (WITH_SYMBOLIZE)
       # CodeView, not DWARF, and addr2line does not read that format.
       set (HAVE_SYMBOLIZE 1)
       set (HAVE_ADDR2LINE 1)
-      set (HAVE_STACKTRACE 1)
     elseif (MINGW AND _ng-log_try_libbacktrace AND
             TARGET libbacktrace::libbacktrace)
       # Likewise, libbacktrace resolves both the symbol name and the
@@ -350,9 +349,6 @@ if (WITH_SYMBOLIZE)
 
       cmake_pop_check_state ()
 
-      if (HAVE_SYMBOLIZE)
-        set (HAVE_STACKTRACE 1)
-      endif (HAVE_SYMBOLIZE)
     endif (MINGW AND _ng-log_try_addr2line AND HAVE_SUBPROCESS)
   elseif (APPLE AND HAVE_DLADDR)
     set (HAVE_SYMBOLIZE 1)
@@ -415,6 +411,70 @@ if (CYGWIN)
 else (CYGWIN)
   set (TEST_SRC_DIR \"${ng-log_SOURCE_DIR}\")
 endif (CYGWIN)
+
+configure_file (src/config.h.cmake.in config.h)
+
+# Probe each stacktrace implementation independently. Select the first
+# available implementation according to the established backend priority.
+set (_ng-log_STACKTRACE_SOURCE)
+cmake_push_check_state (RESET)
+set (CMAKE_REQUIRED_INCLUDES
+  ${ng-log_BINARY_DIR}
+  ${ng-log_SOURCE_DIR}/src
+)
+
+file (READ ${ng-log_SOURCE_DIR}/src/internal/stacktrace_x86.cc
+  _ng-log_STACKTRACE_X86_SOURCE)
+string (APPEND _ng-log_STACKTRACE_X86_SOURCE
+  "\nint main() {\n"
+  "  void* frames[1];\n"
+  "  return nglog::GetStackTrace(frames, 1, 0) < 0;\n"
+  "}\n"
+)
+check_cxx_source_compiles ("${_ng-log_STACKTRACE_X86_SOURCE}"
+  _ng-log_HAVE_STACKTRACE_X86)
+
+file (READ ${ng-log_SOURCE_DIR}/src/internal/stacktrace_powerpc.cc
+  _ng-log_STACKTRACE_POWERPC_SOURCE)
+string (APPEND _ng-log_STACKTRACE_POWERPC_SOURCE
+  "\nint main() {\n"
+  "  void* frames[1];\n"
+  "  return nglog::GetStackTrace(frames, 1, 0) < 0;\n"
+  "}\n"
+)
+check_cxx_source_compiles ("${_ng-log_STACKTRACE_POWERPC_SOURCE}"
+  _ng-log_HAVE_STACKTRACE_POWERPC)
+
+file (READ ${ng-log_SOURCE_DIR}/src/internal/stacktrace_windows.cc
+  _ng-log_STACKTRACE_WINDOWS_SOURCE)
+string (APPEND _ng-log_STACKTRACE_WINDOWS_SOURCE
+  "\nint main() {\n"
+  "  void* frames[1];\n"
+  "  return nglog::GetStackTrace(frames, 1, 0) < 0;\n"
+  "}\n"
+)
+check_cxx_source_compiles ("${_ng-log_STACKTRACE_WINDOWS_SOURCE}"
+  _ng-log_HAVE_STACKTRACE_WINDOWS)
+
+cmake_pop_check_state ()
+
+if (HAVE_LIBUNWIND)
+  set (_ng-log_STACKTRACE_SOURCE src/internal/stacktrace_libunwind.cc)
+elseif (HAVE_UNWIND)
+  set (_ng-log_STACKTRACE_SOURCE src/internal/stacktrace_unwind.cc)
+elseif (_ng-log_HAVE_STACKTRACE_X86)
+  set (_ng-log_STACKTRACE_SOURCE src/internal/stacktrace_x86.cc)
+elseif (_ng-log_HAVE_STACKTRACE_POWERPC)
+  set (_ng-log_STACKTRACE_SOURCE src/internal/stacktrace_powerpc.cc)
+elseif (_ng-log_HAVE_STACKTRACE_WINDOWS)
+  set (_ng-log_STACKTRACE_SOURCE src/internal/stacktrace_windows.cc)
+elseif (HAVE_EXECINFO_BACKTRACE)
+  set (_ng-log_STACKTRACE_SOURCE src/internal/stacktrace_generic.cc)
+endif (HAVE_LIBUNWIND)
+
+if (_ng-log_STACKTRACE_SOURCE)
+  set (HAVE_STACKTRACE 1)
+endif (_ng-log_STACKTRACE_SOURCE)
 
 configure_file (src/config.h.cmake.in config.h)
 
@@ -514,7 +574,6 @@ set (NGLOG_SRCS
   src/ng-log/internal/text_style.h
   src/raw_logging.cc
   src/signalhandler.cc
-  src/stacktrace.cc
   src/stacktrace.h
   src/subprocess.cc
   src/subprocess.h
@@ -524,6 +583,10 @@ set (NGLOG_SRCS
   src/utilities.h
   src/vlog_is_on.cc
 )
+
+if (_ng-log_STACKTRACE_SOURCE)
+  list (APPEND NGLOG_SRCS ${_ng-log_STACKTRACE_SOURCE})
+endif (_ng-log_STACKTRACE_SOURCE)
 
 # NOTE MSYS2 defines both WIN32 and UNIX. Do not use windows port in this case.
 if ((CYGWIN OR WIN32) AND NOT UNIX)

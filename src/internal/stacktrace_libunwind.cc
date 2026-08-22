@@ -1,4 +1,5 @@
-// Copyright (c) 2023, Google Inc.
+// Copyright (c) 2005 - 2007, Google Inc.
+// Copyright (c) 2026, The ng-log contributors
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -29,77 +30,66 @@
 //
 // Author: Arun Sharma
 //
-// Produce stack trace using libgcc
+// Produce a stack trace using libunwind.
 
-#include <unwind.h>  // ABI defined unwinder
+#include "utilities.h"
 
+extern "C" {
+#define UNW_LOCAL_ONLY
+#include <libunwind.h>
+}
+#include "ng-log/raw_logging.h"
 #include "stacktrace.h"
 
 namespace nglog {
 inline namespace tools {
 
-struct trace_arg_t {
-  void** result;
-  int max_depth;
-  int skip_count;
-  int count;
-};
-
-// Workaround for the malloc() in _Unwind_Backtrace() issue.
-static _Unwind_Reason_Code nop_backtrace(struct _Unwind_Context* /*uc*/,
-                                         void* /*opq*/) {
-  return _URC_NO_REASON;
-}
-
-// This code is not considered ready to run until
-// static initializers run so that we are guaranteed
-// that any malloc-related initialization is done.
-static bool ready_to_run = false;
-class StackTraceInit {
- public:
-  StackTraceInit() {
-    // Extra call to force initialization
-    _Unwind_Backtrace(nop_backtrace, nullptr);
-    ready_to_run = true;
-  }
-};
-
-static StackTraceInit module_initializer;  // Force initialization
-
-static _Unwind_Reason_Code GetOneFrame(struct _Unwind_Context* uc, void* opq) {
-  auto* targ = static_cast<trace_arg_t*>(opq);
-
-  if (targ->skip_count > 0) {
-    targ->skip_count--;
-  } else {
-    targ->result[targ->count++] = reinterpret_cast<void*>(_Unwind_GetIP(uc));
-  }
-
-  if (targ->count == targ->max_depth) {
-    return _URC_END_OF_STACK;
-  }
-
-  return _URC_NO_REASON;
-}
+// Sometimes, we can try to get a stack trace from within a stack
+// trace, because libunwind can call mmap (maybe indirectly via an
+// internal mmap based memory allocator), and that mmap gets trapped
+// and causes a stack-trace request.  If were to try to honor that
+// recursive request, we'd end up with infinite recursion or deadlock.
+// Luckily, it's safe to ignore those subsequent traces.  In such
+// cases, we return 0 to indicate the situation.
+// We can use the GCC __thread syntax here since libunwind is not supported on
+// Windows.
+static __thread bool g_tl_entered;  // Initialized to false.
 
 // If you change this function, also change GetStackFrames below.
 int GetStackTrace(void** result, int max_depth, int skip_count) {
-  if (!ready_to_run) {
+  void* ip;
+  int n = 0;
+  unw_cursor_t cursor;
+  unw_context_t uc;
+
+  if (g_tl_entered) {
     return 0;
   }
+  g_tl_entered = true;
 
-  trace_arg_t targ;
+  unw_getcontext(&uc);
+  RAW_CHECK(unw_init_local(&cursor, &uc) >= 0, "unw_init_local failed");
+  skip_count++;  // Do not include the "GetStackTrace" frame
 
-  skip_count += 1;  // Do not include the "GetStackTrace" frame
+  while (n < max_depth) {
+    int ret =
+        unw_get_reg(&cursor, UNW_REG_IP, reinterpret_cast<unw_word_t*>(&ip));
+    if (ret < 0) {
+      break;
+    }
+    if (skip_count > 0) {
+      skip_count--;
+    } else {
+      result[n++] = ip;
+    }
+    ret = unw_step(&cursor);
+    if (ret <= 0) {
+      break;
+    }
+  }
 
-  targ.result = result;
-  targ.max_depth = max_depth;
-  targ.skip_count = skip_count;
-  targ.count = 0;
-
-  _Unwind_Backtrace(GetOneFrame, &targ);
-
-  return targ.count;
+  g_tl_entered = false;
+  return n;
 }
 
 }  // namespace tools

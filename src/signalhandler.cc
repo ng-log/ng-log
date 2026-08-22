@@ -502,6 +502,7 @@ void DumpSignalInfo(int signal_number, siginfo_t* siginfo) {
 #endif  // HAVE_SIGACTION
 
 // Dumps information about the stack frame to STDERR.
+#if !defined(NGLOG_OS_WINDOWS) || defined(HAVE_STACKTRACE)
 void DumpStackFrameInfo(const char* prefix, void* pc) {
   // Get the symbol name.
   const char* symbol = "(unknown)";
@@ -640,6 +641,7 @@ void DumpStackFrameInfo(const char* prefix, void* pc) {
   }
   g_failure_writer("\n", 1);
 }
+#endif  // !defined(NGLOG_OS_WINDOWS) || defined(HAVE_STACKTRACE)
 
 // Invoke the default signal handler.
 void InvokeDefaultSignalHandler(int signal_number) {
