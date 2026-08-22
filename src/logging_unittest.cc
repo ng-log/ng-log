@@ -327,7 +327,7 @@ void TestLogging(bool check_counts) {
   }
 }
 
-static void NoAllocNewHook() { LOG(FATAL) << "unexpected new"; }
+static void NoAllocNewHook() { RAW_LOG(FATAL, "%s", "unexpected new"); }
 
 struct NewHook {
   NewHook() { g_new_hook = &NoAllocNewHook; }
@@ -335,11 +335,10 @@ struct NewHook {
 };
 
 namespace {
-// noinline: since C++14 permits eliding calls to the replaceable global
-// operator new when the result goes unused, an inlined new-expression here
-// would let the compiler optimize away the call (and the NewHook it's
-// meant to exercise) entirely.
-[[gnu::noinline]] int* allocInt() { return new int; }
+// Keep the allocation in a separate function so the death test exercises the
+// replaceable global operator new on every supported compiler.
+NGLOG_ATTRIBUTE_NOINLINE
+int* allocInt() { return new int; }
 }  // namespace
 
 TEST(DeathNoAllocNewHook, logging) {
@@ -351,7 +350,9 @@ TEST(DeathNoAllocNewHook, logging) {
   ASSERT_DEATH(
       {
         NewHook new_hook;
-        allocInt();
+        if (allocInt() == nullptr) {
+          std::abort();
+        }
       },
       "unexpected new");
 }
