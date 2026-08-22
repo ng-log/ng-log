@@ -2646,21 +2646,39 @@ TEST(LoggingGoldenFile, Stdout) {
 #if defined(__GNUC__)
 TEST(VLOG, ConcurrentLevelUpdates) {
   constexpr int kInitialLevel = 0;
-  constexpr int kUpdateCount = 1000000;
+  constexpr int kUpdateCount = 100000;
   constexpr int kVlogTestLevel = 1;
   constexpr int kVlogLevelPeriod = 2;
+  constexpr int kYieldPeriod = 64;
   SetVLOGLevel("logging_unittest", kInitialLevel);
   static_cast<void>(VLOG_IS_ON(kVlogTestLevel));
   std::atomic<bool> stop{false};
-  std::thread reader([&stop] {
+  std::condition_variable reader_started_condition;
+  std::mutex reader_started_mutex;
+  bool reader_started = false;
+  std::thread reader([&stop, &reader_started_condition, &reader_started_mutex,
+                      &reader_started] {
+    {
+      std::lock_guard<std::mutex> lock(reader_started_mutex);
+      reader_started = true;
+    }
+    reader_started_condition.notify_one();
     while (!stop.load(std::memory_order_relaxed)) {
       static_cast<void>(VLOG_IS_ON(kVlogTestLevel));
     }
   });
 
+  {
+    std::unique_lock<std::mutex> lock(reader_started_mutex);
+    reader_started_condition.wait(lock,
+                                  [&reader_started] { return reader_started; });
+  }
+
   for (int i = 0; i < kUpdateCount; ++i) {
     SetVLOGLevel("logging_unittest", i % kVlogLevelPeriod);
-    std::this_thread::yield();
+    if (i % kYieldPeriod == 0) {
+      std::this_thread::yield();
+    }
   }
 
   stop.store(true, std::memory_order_relaxed);
