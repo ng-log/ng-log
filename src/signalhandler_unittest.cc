@@ -118,8 +118,7 @@ static void WriteAndReenter(const char* data, size_t size) {
 }
 
 static void CrashInThread() {
-  volatile int* ptr = nullptr;
-  *ptr = 0;
+  raise(SIGSEGV);
 }
 
 #if defined(NGLOG_OS_LINUX)
@@ -375,9 +374,7 @@ int main(int argc, char** argv) {
     // We'll check if this is outputted.
     LOG(INFO) << "create the log file";
     LOG(INFO) << "a message before segv";
-    // We assume 0xDEAD is not writable.
-    int* a = (int*)0xDEAD;
-    *a = 0;
+    raise(SIGSEGV);
   } else if (command == "loop") {
     fprintf(stderr, "looping\n");
     while (true);
