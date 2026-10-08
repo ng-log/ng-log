@@ -589,19 +589,13 @@ void TestLogString() {
   vector<string> errors;
   vector<string>* no_errors = nullptr;
 
-  LOG_STRING(INFO, &errors) << "LOG_STRING: "
-                            << "collected info";
-  LOG_STRING(WARNING, &errors) << "LOG_STRING: "
-                               << "collected warning";
-  LOG_STRING(ERROR, &errors) << "LOG_STRING: "
-                             << "collected error";
+  LOG_STRING(INFO, &errors) << "LOG_STRING: " << "collected info";
+  LOG_STRING(WARNING, &errors) << "LOG_STRING: " << "collected warning";
+  LOG_STRING(ERROR, &errors) << "LOG_STRING: " << "collected error";
 
-  LOG_STRING(INFO, no_errors) << "LOG_STRING: "
-                              << "reported info";
-  LOG_STRING(WARNING, no_errors) << "LOG_STRING: "
-                                 << "reported warning";
-  LOG_STRING(ERROR, nullptr) << "LOG_STRING: "
-                             << "reported error";
+  LOG_STRING(INFO, no_errors) << "LOG_STRING: " << "reported info";
+  LOG_STRING(WARNING, no_errors) << "LOG_STRING: " << "reported warning";
+  LOG_STRING(ERROR, nullptr) << "LOG_STRING: " << "reported error";
 
   for (auto& error : errors) {
     LOG(INFO) << "Captured by LOG_STRING:  " << error;
@@ -612,22 +606,16 @@ void TestLogToString() {
   string error;
   string* no_error = nullptr;
 
-  LOG_TO_STRING(INFO, &error) << "LOG_TO_STRING: "
-                              << "collected info";
+  LOG_TO_STRING(INFO, &error) << "LOG_TO_STRING: " << "collected info";
   LOG(INFO) << "Captured by LOG_TO_STRING:  " << error;
-  LOG_TO_STRING(WARNING, &error) << "LOG_TO_STRING: "
-                                 << "collected warning";
+  LOG_TO_STRING(WARNING, &error) << "LOG_TO_STRING: " << "collected warning";
   LOG(INFO) << "Captured by LOG_TO_STRING:  " << error;
-  LOG_TO_STRING(ERROR, &error) << "LOG_TO_STRING: "
-                               << "collected error";
+  LOG_TO_STRING(ERROR, &error) << "LOG_TO_STRING: " << "collected error";
   LOG(INFO) << "Captured by LOG_TO_STRING:  " << error;
 
-  LOG_TO_STRING(INFO, no_error) << "LOG_TO_STRING: "
-                                << "reported info";
-  LOG_TO_STRING(WARNING, no_error) << "LOG_TO_STRING: "
-                                   << "reported warning";
-  LOG_TO_STRING(ERROR, nullptr) << "LOG_TO_STRING: "
-                                << "reported error";
+  LOG_TO_STRING(INFO, no_error) << "LOG_TO_STRING: " << "reported info";
+  LOG_TO_STRING(WARNING, no_error) << "LOG_TO_STRING: " << "reported warning";
+  LOG_TO_STRING(ERROR, nullptr) << "LOG_TO_STRING: " << "reported error";
 }
 
 class TestLogSinkImpl : public LogSink {
@@ -763,39 +751,27 @@ void TestLogSink() {
   TestLogSinkImpl sink;
   LogSink* no_sink = nullptr;
 
-  LOG_TO_SINK(&sink, INFO) << "LOG_TO_SINK: "
-                           << "collected info";
-  LOG_TO_SINK(&sink, WARNING) << "LOG_TO_SINK: "
-                              << "collected warning";
-  LOG_TO_SINK(&sink, ERROR) << "LOG_TO_SINK: "
-                            << "collected error";
+  LOG_TO_SINK(&sink, INFO) << "LOG_TO_SINK: " << "collected info";
+  LOG_TO_SINK(&sink, WARNING) << "LOG_TO_SINK: " << "collected warning";
+  LOG_TO_SINK(&sink, ERROR) << "LOG_TO_SINK: " << "collected error";
 
-  LOG_TO_SINK(no_sink, INFO) << "LOG_TO_SINK: "
-                             << "reported info";
-  LOG_TO_SINK(no_sink, WARNING) << "LOG_TO_SINK: "
-                                << "reported warning";
-  LOG_TO_SINK(nullptr, ERROR) << "LOG_TO_SINK: "
-                              << "reported error";
+  LOG_TO_SINK(no_sink, INFO) << "LOG_TO_SINK: " << "reported info";
+  LOG_TO_SINK(no_sink, WARNING) << "LOG_TO_SINK: " << "reported warning";
+  LOG_TO_SINK(nullptr, ERROR) << "LOG_TO_SINK: " << "reported error";
 
   LOG_TO_SINK_BUT_NOT_TO_LOGFILE(&sink, INFO)
-      << "LOG_TO_SINK_BUT_NOT_TO_LOGFILE: "
-      << "collected info";
+      << "LOG_TO_SINK_BUT_NOT_TO_LOGFILE: " << "collected info";
   LOG_TO_SINK_BUT_NOT_TO_LOGFILE(&sink, WARNING)
-      << "LOG_TO_SINK_BUT_NOT_TO_LOGFILE: "
-      << "collected warning";
+      << "LOG_TO_SINK_BUT_NOT_TO_LOGFILE: " << "collected warning";
   LOG_TO_SINK_BUT_NOT_TO_LOGFILE(&sink, ERROR)
-      << "LOG_TO_SINK_BUT_NOT_TO_LOGFILE: "
-      << "collected error";
+      << "LOG_TO_SINK_BUT_NOT_TO_LOGFILE: " << "collected error";
 
   LOG_TO_SINK_BUT_NOT_TO_LOGFILE(no_sink, INFO)
-      << "LOG_TO_SINK_BUT_NOT_TO_LOGFILE: "
-      << "thrashed info";
+      << "LOG_TO_SINK_BUT_NOT_TO_LOGFILE: " << "thrashed info";
   LOG_TO_SINK_BUT_NOT_TO_LOGFILE(no_sink, WARNING)
-      << "LOG_TO_SINK_BUT_NOT_TO_LOGFILE: "
-      << "thrashed warning";
+      << "LOG_TO_SINK_BUT_NOT_TO_LOGFILE: " << "thrashed warning";
   LOG_TO_SINK_BUT_NOT_TO_LOGFILE(nullptr, ERROR)
-      << "LOG_TO_SINK_BUT_NOT_TO_LOGFILE: "
-      << "thrashed error";
+      << "LOG_TO_SINK_BUT_NOT_TO_LOGFILE: " << "thrashed error";
 
   LOG(INFO) << "Captured by LOG_TO_SINK:";
   for (auto& error : sink.errors) {
@@ -1189,7 +1165,8 @@ TEST(FlagsScope, MoveTransfersRestoration) {
   int flag = 1;
 
   {
-    auto flags = internal::MakeFlagsScope(internal::MakeFlagsScopePair(flag, 2));
+    auto flags =
+        internal::MakeFlagsScope(internal::MakeFlagsScopePair(flag, 2));
     auto moved_flags = std::move(flags);
     EXPECT_EQ(flag, 2);
   }
@@ -1564,10 +1541,9 @@ TEST(Logging, LockedOversizedFileIsNotTruncated) {
 #ifdef NGLOG_OS_WINDOWS
   FlagSaver saver;
   FLAGS_logtostderr = false;
-  auto flags =
-      internal::MakeFlagsScope(
-          internal::MakeFlagsScopePair(FLAGS_timestamp_in_logfile_name, false),
-          internal::MakeFlagsScopePair(FLAGS_max_log_size, 1U));
+  auto flags = internal::MakeFlagsScope(
+      internal::MakeFlagsScopePair(FLAGS_timestamp_in_logfile_name, false),
+      internal::MakeFlagsScopePair(FLAGS_max_log_size, 1U));
 
   const std::string dest = TestTmpDir() + "/logging_test_locked_oversized_file";
   const std::string ready = dest + ".ready";
@@ -1680,9 +1656,8 @@ TEST(Logging, FileLockFailureReportsWindowsError) {
 #ifdef NGLOG_OS_WINDOWS
   FlagSaver saver;
   FLAGS_logtostderr = false;
-  auto flags =
-      internal::MakeFlagsScope(
-          internal::MakeFlagsScopePair(FLAGS_timestamp_in_logfile_name, false));
+  auto flags = internal::MakeFlagsScope(
+      internal::MakeFlagsScopePair(FLAGS_timestamp_in_logfile_name, false));
 
   const std::string dest = TestTmpDir() + "/logging_test_lock_error";
   const std::string ready = dest + ".ready";
@@ -2827,3 +2802,129 @@ TEST(VLOG, ConcurrentLevelUpdates) {
   SetVLOGLevel("logging_unittest", kInitialLevel);
 }
 #endif
+
+namespace {
+
+template <int CallSiteId>
+struct OccasionalCallSite {
+  static void Run(int iters, int n, int first_n) {
+    for (int j = 0; j < iters; ++j) {
+      LOG_EVERY_N(INFO, n) << "Multithreaded every n: " << COUNTER;
+      LOG_FIRST_N(WARNING, first_n) << "Multithreaded first n: " << COUNTER;
+      LOG_IF_EVERY_N(INFO, true, n) << "Multithreaded if every n: " << COUNTER;
+      PLOG_EVERY_N(INFO, n) << "Multithreaded plog every n: " << COUNTER;
+    }
+  }
+};
+
+template <int... Is>
+void RunAllOccasionalCallsitesHelper(std::integer_sequence<int, Is...>,
+                                     int iters, int n, int first_n) {
+  int dummy[] = {0, (OccasionalCallSite<Is>::Run(iters, n, first_n), 0)...};
+  (void)dummy;
+}
+
+template <int NumCallsites>
+void RunAllOccasionalCallsites(int iters, int n, int first_n) {
+  RunAllOccasionalCallsitesHelper(
+      std::make_integer_sequence<int, NumCallsites>{}, iters, n, first_n);
+}
+
+}  // namespace
+
+TEST(Logging, MultithreadedOccasionalLogging) {
+  constexpr int kNumThreads = 8;
+  constexpr int kItersPerThread = 50;
+  constexpr int kN = 10;
+  constexpr int kFirstN = 5;
+  constexpr int kNumCallsites = 8;
+
+  static std::atomic<int> test_run_counter{0};
+  int const run_number =
+      test_run_counter.fetch_add(1, std::memory_order_relaxed);
+
+  int64 const base_num_infos = LogMessage::num_messages(NGLOG_INFO);
+  int64 const base_num_warnings = LogMessage::num_messages(NGLOG_WARNING);
+
+  std::atomic<int> ready{0};
+  std::atomic<bool> start_barrier{false};
+
+  std::vector<std::thread> threads;
+  threads.reserve(kNumThreads);
+  for (int i = 0; i < kNumThreads; ++i) {
+    threads.emplace_back([&ready, &start_barrier]() {
+      ready.fetch_add(1, std::memory_order_relaxed);
+      while (!start_barrier.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+      RunAllOccasionalCallsites<kNumCallsites>(kItersPerThread, kN, kFirstN);
+    });
+  }
+
+  while (ready.load(std::memory_order_relaxed) < kNumThreads) {
+    std::this_thread::yield();
+  }
+  start_barrier.store(true, std::memory_order_release);
+
+  for (auto& t : threads) {
+    t.join();
+  }
+
+  constexpr int kTotalCallsPerCallsite = kNumThreads * kItersPerThread;
+  constexpr int kExpectedEveryNPerCallsite = kTotalCallsPerCallsite / kN;
+  // LOG_EVERY_N, LOG_IF_EVERY_N, and PLOG_EVERY_N all log to NGLOG_INFO.
+  constexpr int kExpectedInfos =
+      kNumCallsites * (kExpectedEveryNPerCallsite * 3);
+  // On the first run, LOG_FIRST_N fires up to its threshold across callsites.
+  // On subsequent runs, all callsites have already reached their limit.
+  int const expected_warnings =
+      (run_number == 0) ? (kNumCallsites * kFirstN) : 0;
+
+  EXPECT_EQ(LogMessage::num_messages(NGLOG_INFO) - base_num_infos,
+            kExpectedInfos);
+  EXPECT_EQ(LogMessage::num_messages(NGLOG_WARNING) - base_num_warnings,
+            expected_warnings);
+}
+
+TEST(Logging, OccasionalLoggingInSwitchAndGoto) {
+  int const x = 1;
+  switch (x) {
+    case 1:
+      LOG_EVERY_N(INFO, 1) << "switch test every n";
+      LOG_FIRST_N(INFO, 1) << "switch test first n";
+      LOG_IF_EVERY_N(INFO, true, 1) << "switch test if every n";
+      PLOG_EVERY_N(INFO, 1) << "switch test plog every n";
+      break;
+    case 2:
+      break;
+    default:
+      break;
+  }
+
+  goto test_label;
+  LOG_EVERY_N(INFO, 1) << "unreachable";
+test_label:;
+}
+
+TEST(Logging, OccasionalLoggingNonPositiveN) {
+  LOG_EVERY_N(INFO, 0) << "Should not divide by zero";
+  LOG_EVERY_N(INFO, -1) << "Should not divide by zero";
+  LOG_IF_EVERY_N(INFO, true, 0) << "Should not divide by zero";
+  LOG_IF_EVERY_N(INFO, true, -5) << "Should not divide by zero";
+  PLOG_EVERY_N(INFO, 0) << "Should not divide by zero";
+  PLOG_EVERY_N(INFO, -1) << "Should not divide by zero";
+  LOG_FIRST_N(INFO, 0) << "Should not log or crash";
+  LOG_FIRST_N(INFO, -1) << "Should not log or crash";
+}
+
+TEST(Logging, LogIfEveryNCounterSemantics) {
+  ScopedMockLog log;
+  EXPECT_CALL(log, Log(NGLOG_INFO, _, StrEq("Condition counter: 1")));
+  EXPECT_CALL(log, Log(NGLOG_INFO, _, StrEq("Condition counter: 2")));
+  EXPECT_CALL(log, Log(NGLOG_INFO, _, StrEq("Condition counter: 3")));
+
+  for (int i = 0; i < 6; ++i) {
+    bool const cond = (i % 2 == 0);
+    LOG_IF_EVERY_N(INFO, cond, 1) << "Condition counter: " << COUNTER;
+  }
+}
