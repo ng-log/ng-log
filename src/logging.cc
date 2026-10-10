@@ -1494,6 +1494,10 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
   // only write to files, create if non-existent.
   int flags = O_WRONLY | O_CREAT;
 #if defined(NGLOG_OS_WINDOWS)
+  // Keep child processes, such as the mailer, from inheriting the handle and
+  // thereby holding the log file open. This is the counterpart of
+  // FD_CLOEXEC on other platforms.
+  flags |= O_NOINHERIT;
   bool truncate_file = false;
 #endif
   if (FLAGS_timestamp_in_logfile_name) {

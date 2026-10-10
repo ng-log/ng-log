@@ -1659,6 +1659,48 @@ TEST(Logging, LockedOversizedFileIsNotTruncated) {
 #endif
 }
 
+TEST(Logging, LogFileIsNotInheritedByChildProcesses) {
+#if defined(NGLOG_OS_WINDOWS) && defined(HAVE_SUBPROCESS)
+  using namespace std::chrono_literals;
+  constexpr auto kChildTimeout = 10s;
+
+  FlagSaver saver;
+  FLAGS_logtostderr = false;
+  auto flags = internal::MakeFlagsScope(
+      internal::MakeFlagsScopePair(FLAGS_timestamp_in_logfile_name, false));
+
+  const std::string dest = TestTmpDir() + "/logging_test_uninherited_file";
+  DeleteFiles(dest + "*");
+
+  SetLogDestination(NGLOG_INFO, dest.c_str());
+  LOG(INFO) << "message that opens the log file";
+  ASSERT_TRUE(std::ifstream{dest}.good());
+
+  // The child inherits all inheritable handles of this process and stays
+  // alive until its stdin is closed.
+  char program[] = EMAIL_TEST_HELPER_PATH;
+  char* const child_argv[] = {program, nullptr};
+  char* const child_envp[] = {nullptr};
+  Subprocess<> child;
+  ASSERT_TRUE(child.Spawn(child_argv, child_envp));
+
+  // Changing the destination closes the log file in this process. A log file
+  // handle inherited by the child would keep the file open.
+  const std::string other_dest = dest + ".other";
+  SetLogDestination(NGLOG_INFO, other_dest.c_str());
+  const int removed = std::remove(dest.c_str());
+  const int remove_error = errno;
+
+  child.CloseStdin();
+  child.Wait(kChildTimeout);
+
+  EXPECT_EQ(0, removed) << StrError(remove_error);
+
+  LogToStderr();
+  DeleteFiles(dest + "*");
+#endif
+}
+
 TEST(Logging, FileLockFailureReportsWindowsError) {
 #ifdef NGLOG_OS_WINDOWS
   FlagSaver saver;
