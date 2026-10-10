@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <string>
@@ -320,6 +321,55 @@ TYPED_TEST(SubprocessTest, WriteStdinTimesOutOnceThePipeFillsUp) {
 
   EXPECT_TRUE(saw_timeout);
   process.Wait(100ms);
+}
+
+TYPED_TEST(SubprocessTest, ZeroTimeoutReadsDoNotLoseOutput) {
+  typename TestFixture::Process process;
+  char* argv[] = {helper_path, nullptr};
+  char* envp[] = {nullptr};
+
+  ASSERT_TRUE(process.Spawn(argv, envp));
+
+  // Polling with a zero timeout makes reads time out while the echoed output
+  // is still in flight. Output arriving as such a read is abandoned must be
+  // returned rather than silently dropped.
+  constexpr std::size_t kTotalSize = std::size_t{256} * 1024;
+  constexpr std::size_t kChunkSize = 4096;
+  // Printable characters only, since the helper's standard streams may
+  // translate line endings or treat control characters as end of file.
+  constexpr char kPatternFirst = 'a';
+  constexpr std::size_t kPatternPeriod = 26;
+  constexpr std::chrono::milliseconds kStreamTimeout = 30s;
+
+  std::string expected(kTotalSize, '\0');
+  for (std::size_t i = 0; i < expected.size(); ++i) {
+    expected[i] = static_cast<char>(kPatternFirst + i % kPatternPeriod);
+  }
+
+  std::string received;
+  std::size_t sent = 0;
+  char out[kChunkSize];
+  const auto deadline = std::chrono::steady_clock::now() + kStreamTimeout;
+
+  while (received.size() < expected.size() &&
+         std::chrono::steady_clock::now() < deadline) {
+    // Write the next chunk only once everything sent so far has been echoed
+    // back, so that neither pipe fills up.
+    if (sent < expected.size() && received.size() == sent) {
+      sent += process.WriteStdin(expected.data() + sent,
+                                 std::min(kChunkSize, expected.size() - sent),
+                                 kTimeout);
+    }
+    received.append(out, process.ReadStdout(out, sizeof(out),
+                                            std::chrono::milliseconds{0}));
+  }
+
+  process.CloseStdin();
+  process.Wait(kTimeout);
+
+  EXPECT_EQ(kTotalSize, sent);
+  ASSERT_EQ(sent, received.size());
+  EXPECT_TRUE(received == expected);
 }
 
 #if !defined(NGLOG_OS_WINDOWS) && defined(HAVE__FORK) && defined(HAVE_EXECV)

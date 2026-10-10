@@ -284,14 +284,16 @@ DWORD RunOverlapped(HANDLE handle, std::chrono::milliseconds timeout,
       WaitForSingleObject(overlapped.hEvent, ClampTimeoutMillis(timeout)) !=
           WAIT_OBJECT_0) {
     // Timed out: cancel the pending operation, then wait for it to
-    // actually finish (successfully or as cancelled) before the
-    // OVERLAPPED structure goes out of scope. Any bytes transferred
-    // before the cancel are discarded, matching the documented "0 on
-    // timeout" contract.
-    DWORD ignored = 0;
+    // actually finish before the OVERLAPPED structure goes out of scope.
+    // The operation may still complete before the cancellation takes
+    // effect. The bytes it transferred are then already consumed from or
+    // committed to the pipe and must be reported instead of being lost.
     CancelIoEx(handle, &overlapped);
-    GetOverlappedResult(handle, &overlapped, &ignored, TRUE);
-    return 0;
+    DWORD transferred = 0;
+    if (!GetOverlappedResult(handle, &overlapped, &transferred, TRUE)) {
+      return 0;
+    }
+    return transferred;
   }
 
   // Even after an immediate success, GetOverlappedResult() is the
