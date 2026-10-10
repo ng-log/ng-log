@@ -1,3 +1,8 @@
+# SPDX-FileCopyrightText: 2023 Google Inc.
+# SPDX-FileCopyrightText: 2026 The ng-log contributors
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 name: CIFuzz
 on: [pull_request]
 jobs:

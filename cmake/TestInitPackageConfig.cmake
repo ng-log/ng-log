@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2019-2021 Google Inc.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 # Create the build directory
 execute_process (
   COMMAND ${CMAKE_COMMAND} -E make_directory ${TEST_BINARY_DIR}

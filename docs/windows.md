@@ -1,3 +1,10 @@
+<!--
+SPDX-FileCopyrightText: 2024 Google Inc.
+SPDX-FileCopyrightText: 2026 The ng-log contributors
+
+SPDX-License-Identifier: BSD-3-Clause
+-->
+
 # Notes for Windows Users
 
 ng-log defines the severity level `ERROR`, which is also defined by `windows.h`.

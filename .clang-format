@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2021-2023 Google Inc.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 ---
 Language:        Cpp
 # BasedOnStyle:  Google

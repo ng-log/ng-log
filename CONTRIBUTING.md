@@ -1,3 +1,10 @@
+<!--
+SPDX-FileCopyrightText: 2015-2020 Google Inc.
+SPDX-FileCopyrightText: 2026 The ng-log contributors
+
+SPDX-License-Identifier: BSD-3-Clause
+-->
+
 # Contributing
 
 Contributions must follow the guidelines below.

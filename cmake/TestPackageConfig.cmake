@@ -1,3 +1,8 @@
+# SPDX-FileCopyrightText: 2019-2023 Google Inc.
+# SPDX-FileCopyrightText: 2026 The ng-log contributors
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 if (GENERATOR_TOOLSET)
   list (APPEND _ADDITIONAL_ARGS -T ${GENERATOR_TOOLSET})
 endif (GENERATOR_TOOLSET)

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2021-2024 Google Inc.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 ---
 Checks:          'clang-diagnostic-*,clang-analyzer-*,google-*,modernize-*,-modernize-use-trailing-return-type,readability-*,portability-*,performance-*,bugprone-*,android-*,darwin-*,clang-analyzer-*'
 WarningsAsErrors: ''

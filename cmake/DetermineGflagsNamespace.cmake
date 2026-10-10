@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2015-2019 Google Inc.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 macro(determine_gflags_namespace VARIABLE)
   if (NOT DEFINED "${VARIABLE}")
     if (CMAKE_REQUIRED_INCLUDES)

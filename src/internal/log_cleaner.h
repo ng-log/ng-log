@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2019-2024 Google Inc.
 // SPDX-FileCopyrightText: 2026 The ng-log contributors
+//
 // SPDX-License-Identifier: BSD-3-Clause
 
 #ifndef NGLOG_INTERNAL_LOG_CLEANER_H_

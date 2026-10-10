@@ -1,7 +1,11 @@
 /*
  * Dirent interface for Microsoft Visual Studio
  *
- * Copyright (C) 1998-2019 Toni Ronkko
+ * SPDX-FileCopyrightText: 1998-2019 Toni Ronkko
+ * SPDX-FileCopyrightText: 2026 The ng-log contributors
+ *
+ * SPDX-License-Identifier: MIT
+ *
  * This file is part of dirent.  Dirent may be freely distributed
  * under the MIT license.  For all details and documentation, see
  * https://github.com/tronkko/dirent

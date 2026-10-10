@@ -1,3 +1,10 @@
+<!--
+SPDX-FileCopyrightText: 2024 Google Inc.
+SPDX-FileCopyrightText: 2026 The ng-log contributors
+
+SPDX-License-Identifier: BSD-3-Clause
+-->
+
 # Building from Source
 
 ng-log can be compiled using [CMake](http://www.cmake.org) on a wide range of

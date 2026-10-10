@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2021-2024 Google Inc.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 set (RUNS 3)
 
 # Create the subdirectory required by this unit test.

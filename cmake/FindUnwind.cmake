@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2019-2021 Google Inc.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 # - Try to find libunwind
 # Once done this will define
 #

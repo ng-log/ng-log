@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2019-2023 Google Inc.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 cmake_policy (PUSH)
 cmake_policy (VERSION 3.16...3.27)
 

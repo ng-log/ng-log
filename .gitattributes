@@ -1,1 +1,5 @@
+# SPDX-FileCopyrightText: 2021 Google Inc.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 *.h linguist-language=C++

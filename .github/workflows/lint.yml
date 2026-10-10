@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2026 The ng-log contributors
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+name: Lint
+
+on: [push, pull_request]
+
+jobs:
+  reuse:
+    name: REUSE
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check REUSE compliance
+        uses: fsfe/reuse-action@v6

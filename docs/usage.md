@@ -1,3 +1,10 @@
+<!--
+SPDX-FileCopyrightText: 2024 Google Inc.
+SPDX-FileCopyrightText: 2026 The ng-log contributors
+
+SPDX-License-Identifier: BSD-3-Clause
+-->
+
 # Using ng-log in a CMake Project
 
 Assuming that ng-log was previously [built using CMake](build.md) or installed

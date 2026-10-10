@@ -1,3 +1,8 @@
+# SPDX-FileCopyrightText: 2021-2024 Google Inc.
+# SPDX-FileCopyrightText: 2026 The ng-log contributors
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 set (RUNS 3)
 
 foreach (iter RANGE 1 ${RUNS})

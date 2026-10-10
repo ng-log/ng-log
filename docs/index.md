@@ -1,3 +1,10 @@
+<!--
+SPDX-FileCopyrightText: 2024 Google Inc.
+SPDX-FileCopyrightText: 2026 The ng-log contributors
+
+SPDX-License-Identifier: BSD-3-Clause
+-->
+
 # ng-log
 
 ng-log (formerly Google Logging Library or glog) is a C++14 library

@@ -1,3 +1,10 @@
+<!--
+SPDX-FileCopyrightText: 2024 Google Inc.
+SPDX-FileCopyrightText: 2026 The ng-log contributors
+
+SPDX-License-Identifier: BSD-3-Clause
+-->
+
 # Strip Logging Messages
 
 Strings used in log messages can increase the size of your binary and present a

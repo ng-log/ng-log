@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 The ng-log contributors
+
+SPDX-License-Identifier: BSD-3-Clause
+-->
+
 # Migrating from glog
 
 To migrate from glog to ng-log, you'll need to adjust your code as follows:

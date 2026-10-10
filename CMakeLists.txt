@@ -1,3 +1,8 @@
+# SPDX-FileCopyrightText: 2015-2024 Google Inc.
+# SPDX-FileCopyrightText: 2026 The ng-log contributors
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 cmake_minimum_required (VERSION 3.22)
 project (ng-log
   VERSION 0.9.0
