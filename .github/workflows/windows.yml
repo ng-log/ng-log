@@ -5,15 +5,10 @@
 
 name: Windows
 
-on: [push, pull_request]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+on: workflow_call
 
 jobs:
   build-msvc:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
     name: ${{matrix.msvc}}-${{matrix.arch}}-C++${{matrix.std}}-${{matrix.build_type}}-${{matrix.lib}}
     runs-on: ${{matrix.os}}
     permissions:
@@ -155,7 +150,6 @@ jobs:
           category: language:cpp
 
   build-mingw:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
     name: ${{matrix.sys}}-${{matrix.env}}-C++${{matrix.std}}-${{matrix.build_type}}-${{matrix.lib}}
     runs-on: windows-2025
     permissions:
@@ -204,7 +198,7 @@ jobs:
       - name: Setup Coverage Dependencies
         if: matrix.build_type == 'Debug'
         run: |
-          pip install 'gcovr==7.0'
+          pip install -r .github/coverage/requirements.txt
 
       - name: Setup Environment
         if: matrix.build_type == 'Debug'
@@ -246,7 +240,7 @@ jobs:
         if: matrix.build_type == 'Debug'
         run: |
           cd build_${{matrix.build_type}}
-          gcovr -r .. . -s --cobertura coverage.xml
+          gcovr -r .. . -s --cobertura coverage.xml --json coverage.json
 
       - name: Upload Coverage to Codecov
         if: matrix.build_type == 'Debug'
@@ -256,6 +250,14 @@ jobs:
           files: build_${{matrix.build_type}}/coverage.xml
           fail_ci_if_error: true
           verbose: true
+
+      - name: Archive Coverage
+        if: matrix.build_type == 'Debug'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-mingw-cxx${{matrix.std}}-${{matrix.lib}}
+          path: build_${{matrix.build_type}}/coverage.json
+          retention-days: 1
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4

@@ -9,12 +9,3 @@ comment:
   require_changes: false
   require_base: false
   require_head: true
-ignore:
-  - "**/*_unittest.cc"
-  - "src/*_unittest/**"
-  - "src/logging_benchmark.cc"
-  - "src/testing_utilities.h"
-  - "src/testing_utilities.cc"
-  - "src/mock-log.h"
-  - "src/subprocess_test_helper.cc"
-  - "src/addr2line_fake_*.cc"

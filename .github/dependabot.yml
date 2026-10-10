@@ -1,8 +1,9 @@
 # SPDX-FileCopyrightText: 2023 Google Inc.
+# SPDX-FileCopyrightText: 2026 The ng-log contributors
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-# Set update schedule for GitHub Actions
+# Set update schedule for GitHub Actions and Python packages
 
 version: 2
 updates:
@@ -11,4 +12,9 @@ updates:
     directory: "/"
     schedule:
       # Check for updates to GitHub Actions every week
+      interval: "weekly"
+
+  - package-ecosystem: "pip"
+    directory: "/.github/coverage"
+    schedule:
       interval: "weekly"

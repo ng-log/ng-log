@@ -5,15 +5,10 @@
 
 name: macOS
 
-on: [push, pull_request]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+on: workflow_call
 
 jobs:
   build-macos:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
     name: AppleClang-C++${{matrix.std}}-${{matrix.build_type}}
     runs-on: macos-15
     permissions:
@@ -35,10 +30,15 @@ jobs:
         run: |
           brew install google-benchmark googletest ninja
 
+      - uses: actions/setup-python@v7
+        if: matrix.build_type == 'Debug'
+        with:
+          python-version: '3.x'
+
       - name: Setup Coverage Dependencies
         if: matrix.build_type == 'Debug'
         run: |
-          brew install gcovr
+          pip install -r .github/coverage/requirements.txt
 
       - name: Setup Environment
         if: matrix.build_type == 'Debug'
@@ -74,7 +74,7 @@ jobs:
         run: |
           cd build_${{matrix.build_type}}
           rm -r Tests/
-          gcovr -r .. . -s --cobertura coverage.xml
+          gcovr -r .. . -s --cobertura coverage.xml --json coverage.json
 
       - name: Upload Coverage to Codecov
         if: matrix.build_type == 'Debug'
@@ -84,3 +84,11 @@ jobs:
           files: build_${{matrix.build_type}}/coverage.xml
           fail_ci_if_error: true
           verbose: true
+
+      - name: Archive Coverage
+        if: matrix.build_type == 'Debug'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-macos-cxx${{matrix.std}}
+          path: build_${{matrix.build_type}}/coverage.json
+          retention-days: 1
