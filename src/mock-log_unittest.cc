@@ -50,7 +50,6 @@ using std::string;
 using testing::_;
 using testing::EndsWith;
 using testing::InSequence;
-using testing::InvokeWithoutArgs;
 using testing::StrEq;
 
 constexpr std::chrono::milliseconds kSinkCallbackTimeout{100};
@@ -89,10 +88,10 @@ TEST(ScopedMockLogTest, LogDuringIntercept) {
   InSequence s;
   EXPECT_CALL(log,
               Log(NGLOG_INFO, StrEq(__FILE__), StrEq("Logging a branch...")))
-      .WillOnce(InvokeWithoutArgs(LogTree));
+      .WillOnce(LogTree);
   EXPECT_CALL(
       log, Log(NGLOG_INFO, StrEq(__FILE__), StrEq("Logging the whole tree...")))
-      .WillOnce(InvokeWithoutArgs(LogForest));
+      .WillOnce(LogForest);
   EXPECT_CALL(log, Log(NGLOG_INFO, StrEq(__FILE__),
                        StrEq("Logging the entire forest.")));
   EXPECT_CALL(log, Log(NGLOG_INFO, StrEq(__FILE__),
