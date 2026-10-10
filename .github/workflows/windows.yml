@@ -168,10 +168,10 @@ jobs:
         build_type: [Debug]
         lib: [shared, static]
         std: [14, 17, 20, 23]
-        sys: [mingw64]
+        sys: [ucrt64]
         include:
-         - sys: mingw64
-           env: x86_64
+         - sys: ucrt64
+           env: ucrt-x86_64
 
     steps:
       - uses: actions/checkout@v7
