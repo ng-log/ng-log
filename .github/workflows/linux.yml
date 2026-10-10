@@ -50,7 +50,7 @@ jobs:
       - name: Setup Environment
         if: matrix.build_type == 'Debug'
         run: |
-          echo 'CXXFLAGS=--coverage' >> $GITHUB_ENV
+          echo 'CXXFLAGS=--coverage -fprofile-update=atomic' >> $GITHUB_ENV
 
       - name: Configure
         env:
