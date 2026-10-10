@@ -4,6 +4,17 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 cmake_minimum_required (VERSION 3.22)
+
+if (CMAKE_VERSION VERSION_GREATER_EQUAL 4.3)
+  if (CMAKE_VERSION VERSION_LESS 4.4)
+    set (CMAKE_EXPERIMENTAL_GENERATE_SBOM
+      ca494ed3-b261-4205-a01f-603c95e4cae0)
+  else (CMAKE_VERSION VERSION_LESS 4.4)
+    set (CMAKE_EXPERIMENTAL_GENERATE_SBOM
+      2d856d6d-53e8-488b-a17f-d486d2cac317)
+  endif (CMAKE_VERSION VERSION_LESS 4.4)
+endif (CMAKE_VERSION VERSION_GREATER_EQUAL 4.3)
+
 project (ng-log
   VERSION 0.9.0
   DESCRIPTION "C++ logging module"
@@ -703,6 +714,16 @@ endif (ANDROID)
 
 set_target_properties (ng-log PROPERTIES VERSION ${ng-log_VERSION})
 set_target_properties (ng-log PROPERTIES SOVERSION 0)
+
+set (_ng-log_SPDX_LICENSE BSD-3-Clause)
+
+# The Windows port compiles the MIT licensed dirent implementation into the
+# library.
+if (WIN32)
+  string (APPEND _ng-log_SPDX_LICENSE " AND MIT")
+endif (WIN32)
+
+set_property (TARGET ng-log PROPERTY SPDX_LICENSE ${_ng-log_SPDX_LICENSE})
 
 if (CYGWIN OR WIN32)
   target_compile_definitions (ng-log PUBLIC NGLOG_NO_ABBREVIATED_SEVERITIES)
@@ -1635,3 +1656,44 @@ install (DIRECTORY ${_ng-log_BINARY_CMake_DATADIR}
 
 install (EXPORT ng-log-targets NAMESPACE ng-log:: DESTINATION
   ${_ng-log_CMake_INSTALLDIR})
+
+if (CMAKE_VERSION VERSION_GREATER_EQUAL 4.3
+  AND CMAKE_EXPERIMENTAL_GENERATE_SBOM)
+  if (CMAKE_VERSION VERSION_GREATER_EQUAL 4.4)
+    set (_ng-log_SBOM_EXPORT_ARGUMENTS EXPORTS ng-log-targets)
+  else (CMAKE_VERSION VERSION_GREATER_EQUAL 4.4)
+    set (_ng-log_SBOM_EXPORT_ARGUMENTS EXPORT ng-log-targets)
+  endif (CMAKE_VERSION VERSION_GREATER_EQUAL 4.4)
+
+  set (_ng-log_SBOM_ARGUMENTS
+    PROJECT ng-log
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/sbom
+    VERSION ${ng-log_VERSION}
+    LICENSE ${_ng-log_SPDX_LICENSE}
+    DESCRIPTION ${ng-log_DESCRIPTION}
+    HOMEPAGE_URL ${ng-log_HOMEPAGE_URL}
+    FORMAT spdx-3.0+json
+  )
+
+  if (CMAKE_VERSION VERSION_GREATER_EQUAL 4.4)
+    list (APPEND _ng-log_SBOM_ARGUMENTS
+      PACKAGE_URL ${ng-log_HOMEPAGE_URL})
+  endif (CMAKE_VERSION VERSION_GREATER_EQUAL 4.4)
+
+  # SBOM generation is experimental and must not turn into a configuration
+  # error when author warnings are treated as errors.
+  if (COMMAND cmake_diagnostic)
+    cmake_diagnostic (PUSH)
+    cmake_diagnostic (DEMOTE CMD_EXPERIMENTAL WARN)
+  endif (COMMAND cmake_diagnostic)
+
+  install (SBOM ng-log
+    ${_ng-log_SBOM_EXPORT_ARGUMENTS}
+    ${_ng-log_SBOM_ARGUMENTS}
+  )
+
+  if (COMMAND cmake_diagnostic)
+    cmake_diagnostic (POP)
+  endif (COMMAND cmake_diagnostic)
+endif (CMAKE_VERSION VERSION_GREATER_EQUAL 4.3
+  AND CMAKE_EXPERIMENTAL_GENERATE_SBOM)
