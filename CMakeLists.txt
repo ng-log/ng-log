@@ -1158,6 +1158,9 @@ if (BUILD_TESTING AND GTest_FOUND)
     TEST_PREFIX mock-log.
     DISCOVERY_TIMEOUT 30
     DISCOVERY_MODE PRE_TEST
+    PROPERTIES
+      # Reports deadlocks without failing slow runs on overloaded runners.
+      TIMEOUT 60
   )
 
   # Generate an initial cache
