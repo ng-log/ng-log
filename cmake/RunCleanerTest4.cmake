@@ -12,7 +12,7 @@ set (RUNS 3)
 # instead of spelling out its name.
 
 foreach (iter RANGE 1 ${RUNS})
-  execute_process (COMMAND ${LOGCLEANUP} -log_dir=${TEST_DIR}
+  execute_process (COMMAND ${EMULATOR} ${LOGCLEANUP} -log_dir=${TEST_DIR}
     RESULT_VARIABLE _RESULT)
 
   if (NOT _RESULT EQUAL 0)

@@ -1243,6 +1243,7 @@ if (BUILD_TESTING AND GTest_FOUND)
   add_test (NAME cleanup_immediately COMMAND
     ${CMAKE_COMMAND}
     -DLOGCLEANUP=$<TARGET_FILE:cleanup_immediately_unittest>
+    "-DEMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
     # NOTE The trailing slash is important
     -DTEST_DIR=${CLEANUP_LOG_DIR}/
     -P ${ng-log_SOURCE_DIR}/cmake/RunCleanerTest1.cmake
@@ -1250,12 +1251,14 @@ if (BUILD_TESTING AND GTest_FOUND)
   add_test (NAME cleanup_with_absolute_prefix COMMAND
     ${CMAKE_COMMAND}
     -DLOGCLEANUP=$<TARGET_FILE:cleanup_with_absolute_prefix_unittest>
+    "-DEMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
     -DTEST_DIR=${ng-log_BINARY_DIR}/
     -P ${ng-log_SOURCE_DIR}/cmake/RunCleanerTest2.cmake
     WORKING_DIRECTORY ${ng-log_BINARY_DIR})
   add_test (NAME cleanup_with_relative_prefix COMMAND
     ${CMAKE_COMMAND}
     -DLOGCLEANUP=$<TARGET_FILE:cleanup_with_relative_prefix_unittest>
+    "-DEMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
     -DTEST_DIR=${ng-log_BINARY_DIR}/
     -DTEST_SUBDIR=test_subdir/
     -P ${ng-log_SOURCE_DIR}/cmake/RunCleanerTest3.cmake
@@ -1263,6 +1266,7 @@ if (BUILD_TESTING AND GTest_FOUND)
   add_test (NAME cleanup_with_non_ascii_prefix COMMAND
     ${CMAKE_COMMAND}
     -DLOGCLEANUP=$<TARGET_FILE:cleanup_with_non_ascii_prefix_unittest>
+    "-DEMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
     -DTEST_DIR=${ng-log_BINARY_DIR}/
     -P ${ng-log_SOURCE_DIR}/cmake/RunCleanerTest4.cmake
     WORKING_DIRECTORY ${ng-log_BINARY_DIR})
