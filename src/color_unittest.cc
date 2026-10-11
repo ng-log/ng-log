@@ -656,8 +656,10 @@ TEST(StreamSupportsColor, StableAcrossRepeatedCalls) {
 
 #ifdef NGLOG_OS_EMSCRIPTEN
 TEST(Emscripten, ReadsNodeEnvironment) {
+  // Do not depend on whether stderr is a terminal.
   EM_ASM({
     process.env.VTE_VERSION = "8401";
+    process.env.CLICOLOR_FORCE = "1";
     delete process.env.NO_COLOR;
   });
   EXPECT_TRUE(StreamSupportsHyperlinks(stderr));

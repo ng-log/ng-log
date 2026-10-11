@@ -13,7 +13,7 @@
 
 using namespace nglog;
 
-#if !defined(NGLOG_OS_WINDOWS)
+#if !defined(NGLOG_OS_WINDOWS) && defined(GTEST_HAS_DEATH_TEST)
 TEST(Logging, PreInitializationWarningUsesFieldColors) {
   ASSERT_EQ(setenv("CLICOLOR_FORCE", "1", 1), 0);
   ASSERT_EQ(setenv("TERM", "xterm", 1), 0);

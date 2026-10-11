@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -279,11 +280,18 @@ std::string Munge(const std::string& filename) {
     StringReplace(&line, "__NULLP__", null_str);
     StringReplace(&line, "__PTRTEST__", ptr_str);
 
-    StringReplace(&line, "__SUCCESS__", StrError(0));
-    StringReplace(&line, "__ENOENT__", StrError(ENOENT));
-    StringReplace(&line, "__EINTR__", StrError(EINTR));
-    StringReplace(&line, "__ENXIO__", StrError(ENXIO));
-    StringReplace(&line, "__ENOEXEC__", StrError(ENOEXEC));
+    // Error numbers differ between platforms. Describe the number PLOG
+    // printed in brackets.
+    constexpr char kStrErrorPlaceholder[] = "__STRERROR__";
+    const std::string::size_type strerror_pos = line.find(kStrErrorPlaceholder);
+    if (strerror_pos != std::string::npos) {
+      const std::string::size_type errnum_pos = line.find('[', strerror_pos);
+      CHECK(errnum_pos != std::string::npos)
+          << "missing error number after " << kStrErrorPlaceholder << " in "
+          << line;
+      const int errnum = std::atoi(line.c_str() + errnum_pos + 1);
+      StringReplace(&line, kStrErrorPlaceholder, StrError(errnum));
+    }
     result += line + "\n";
   }
   return result;

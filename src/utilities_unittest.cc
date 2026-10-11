@@ -25,9 +25,11 @@ using namespace GFLAGS_NAMESPACE;
 
 using namespace nglog;
 
+#ifdef GTEST_HAS_DEATH_TEST
 TEST(utilities, InitializeLoggingDeathTest) {
   ASSERT_DEATH(InitializeLogging("foobar"), "");
 }
+#endif
 
 TEST(utilities, MakeLogFilename) {
   EXPECT_EQ(nglog::MakeLogFilename("/tmp/app[1].", "20260817-123456.42",

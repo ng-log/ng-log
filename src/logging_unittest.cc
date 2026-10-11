@@ -387,6 +387,7 @@ struct NewHook {
   ~NewHook() { g_new_hook = nullptr; }
 };
 
+#ifdef GTEST_HAS_DEATH_TEST
 namespace {
 // Keep the allocation in a separate function so the death test exercises the
 // replaceable global operator new on every supported compiler.
@@ -409,6 +410,7 @@ TEST(DeathNoAllocNewHook, logging) {
       },
       "unexpected new");
 }
+#endif
 
 void TestRawLogging() {
   auto foo = std::make_unique<string>("foo ");
@@ -578,12 +580,14 @@ void TestVLogModule() {
 #endif
 }
 
+#ifdef GTEST_HAS_DEATH_TEST
 TEST(DeathRawCHECK, logging) {
   ASSERT_DEATH(RAW_CHECK(false, "failure 1"),
                "RAW: Check false failed: failure 1");
   ASSERT_DEBUG_DEATH(RAW_DCHECK(1 == 2, "failure 2"),
                      "RAW: Check 1 == 2 failed: failure 2");
 }
+#endif
 
 void TestLogString() {
   vector<string> errors;
@@ -815,7 +819,8 @@ TEST(Logging, RegisteredSinkCanLogDuringSend) {
 }
 
 TEST(Logging, RegisteredSinkCanRemoveItself) {
-#if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H)
+#if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && \
+    defined(GTEST_HAS_DEATH_TEST)
   constexpr unsigned kDeathTestTimeoutSeconds = 2;
   ASSERT_EXIT(
       {
@@ -830,7 +835,8 @@ TEST(Logging, RegisteredSinkCanRemoveItself) {
 }
 
 TEST(Logging, CustomLoggerCanLogDuringWrite) {
-#if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H)
+#if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && \
+    defined(GTEST_HAS_DEATH_TEST)
   constexpr unsigned kDeathTestTimeoutSeconds = 2;
   ASSERT_EXIT(
       {
@@ -1064,6 +1070,7 @@ void TestSTREQ() {
   CHECK_STREQ(string("test").c_str(), (string("te") + string("st")).c_str());
 }
 
+#ifdef GTEST_HAS_DEATH_TEST
 TEST(DeathSTREQ, logging) {
   ASSERT_DEATH(CHECK_STREQ(nullptr, "this"), "");
   ASSERT_DEATH(CHECK_STREQ("this", "siht"), "");
@@ -1073,6 +1080,7 @@ TEST(DeathSTREQ, logging) {
   ASSERT_DEATH(CHECK_STRNE("this", "this"), "");
   ASSERT_DEATH(CHECK_STREQ((string("a") + "b").c_str(), "abc"), "");
 }
+#endif
 
 TEST(CheckNOTNULL, Simple) {
   int64 t;
@@ -1085,9 +1093,11 @@ TEST(CheckNOTNULL, Simple) {
   CHECK_NOTNULL(reinterpret_cast<int64*>(ptr));
 }
 
+#ifdef GTEST_HAS_DEATH_TEST
 TEST(DeathCheckNN, Simple) {
   ASSERT_DEATH(CHECK_NOTNULL(static_cast<void*>(nullptr)), "");
 }
+#endif
 
 // Get list of file names that match pattern
 static void GetFiles(const string& pattern, vector<string>* files) {
@@ -1392,8 +1402,9 @@ TEST(Logging, HeaderFormatLineWithCustomPrefixFormatter) {
 }
 
 TEST(Logging, TwoProcessesWrite) {
-// The implementation relies on advisory file locking.
-#if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && defined(HAVE_FCNTL)
+// The implementation relies on advisory file locking. Emscripten cannot fork.
+#if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && \
+    defined(HAVE_FCNTL) && !defined(NGLOG_OS_EMSCRIPTEN)
   FlagSaver saver;
   FLAGS_logtostderr = false;
 
@@ -1909,8 +1920,10 @@ TEST(Logging, Truncate) {
 
   // MacOSX 10.4 doesn't fail in this case.
   // Windows doesn't have symlink.
+  // Emscripten follows symlinks despite O_NOFOLLOW.
   // Let's just ignore this test for these cases.
-#  if !defined(NGLOG_OS_MACOSX) && !defined(NGLOG_OS_WINDOWS)
+#  if !defined(NGLOG_OS_MACOSX) && !defined(NGLOG_OS_WINDOWS) && \
+      !defined(NGLOG_OS_EMSCRIPTEN)
   // Through a symlink should fail to truncate
   string linkname = path + ".link";
   unlink(linkname.c_str());
@@ -2020,7 +2033,7 @@ TEST(Logging, MessageCountDoesNotWaitForLogger) {
   EXPECT_EQ(message_count.wait_for(std::chrono::seconds(1)),
             std::future_status::ready);
   if (message_count.valid()) {
-    message_count.get();
+    static_cast<void>(message_count.get());
   }
   base::SetLogger(NGLOG_INFO, old_logger);
 }
@@ -2617,7 +2630,8 @@ TEST(LogMsgTime, gmtoff) {
   EXPECT_TRUE((gmtoff >= utc_min_offset) && (gmtoff <= utc_max_offset));
 }
 
-#ifndef NGLOG_OS_WINDOWS
+// Emscripten derives the time zone from the JavaScript host and ignores TZ.
+#if !defined(NGLOG_OS_WINDOWS) && !defined(NGLOG_OS_EMSCRIPTEN)
 TEST(LogMsgTime, gmtoffSubHour) {
   // The gmtoffset() API is documented to return seconds, so time zones whose
   // offset is not a whole number of hours (e.g. India at UTC+05:30) must be
@@ -2643,8 +2657,10 @@ TEST(LogMsgTime, gmtoffSubHour) {
 
   EXPECT_EQ(gmtoff, 5h + 30min);
 }
-#endif  // NGLOG_OS_WINDOWS
+#endif  // !defined(NGLOG_OS_WINDOWS) && !defined(NGLOG_OS_EMSCRIPTEN)
 
+// Emscripten cannot run a mailer.
+#ifndef NGLOG_OS_EMSCRIPTEN
 TEST(EmailLogging, ValidAddress) {
   FlagSaver saver;
   FLAGS_logmailer = EMAIL_TEST_HELPER_PATH;
@@ -2660,6 +2676,7 @@ TEST(EmailLogging, MultipleAddresses) {
   EXPECT_TRUE(SendEmail("example@example.com,foo@bar.com", "Example subject",
                         "Example body"));
 }
+#endif  // !NGLOG_OS_EMSCRIPTEN
 
 TEST(EmailLogging, InvalidAddress) {
   FlagSaver saver;

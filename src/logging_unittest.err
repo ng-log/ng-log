@@ -44,28 +44,28 @@ IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log_if info every 1 expr
 EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] log_if error every 1 expr
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] vlog_if 0 every 1 expr
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] foo bar 10 3.4
-EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Plog every 2, iteration 1: __SUCCESS__ [0]
+EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Plog every 2, iteration 1: __STRERROR__ [0]
 EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Log every 3, iteration 1
 EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Log every 4, iteration 1
 WYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Log if every 5, iteration 1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Log if every 1, iteration 1
 EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Log if less than 3 every 2, iteration 1
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Log if every 1, iteration 2
-EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Plog every 2, iteration 3: __ENOENT__ [2]
+EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Plog every 2, iteration 3: __STRERROR__ [2]
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Log if every 1, iteration 3
 EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Log if less than 3 every 2, iteration 3
 EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Log every 3, iteration 4
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Log if every 1, iteration 4
-EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Plog every 2, iteration 5: __EINTR__ [4]
+EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Plog every 2, iteration 5: __STRERROR__ [4]
 EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Log every 4, iteration 5
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Log if every 1, iteration 5
 WYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Log if every 5, iteration 6
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Log if every 1, iteration 6
-EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Plog every 2, iteration 7: __ENXIO__ [6]
+EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Plog every 2, iteration 7: __STRERROR__ [6]
 EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Log every 3, iteration 7
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Log if every 1, iteration 7
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Log if every 1, iteration 8
-EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Plog every 2, iteration 9: __ENOEXEC__ [8]
+EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Plog every 2, iteration 9: __STRERROR__ [8]
 EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Log every 4, iteration 9
 IYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Log if every 1, iteration 9
 EYEARDATE TIME__ THREADID logging_unittest.cc:LINE] Log every 3, iteration 10

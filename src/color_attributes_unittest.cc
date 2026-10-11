@@ -287,7 +287,8 @@ TEST(ColorAttributes, RendersStyledSpansAndHyperlinksOnAnsiOutput) {
   EXPECT_THAT(output, HasSubstr("before"));
   EXPECT_THAT(output, HasSubstr("after"));
   EXPECT_THAT(output, HasSubstr("\033[2;39m: "));
-  EXPECT_THAT(output, HasSubstr("\033[1;36m [2]\033[0m"));
+  EXPECT_THAT(output,
+              HasSubstr("\033[1;36m [" + std::to_string(ENOENT) + "]\033[0m"));
 }
 
 TEST(ColorAttributes, ResetsAttributesBeforeTheLineEnding) {
