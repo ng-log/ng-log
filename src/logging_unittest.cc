@@ -15,7 +15,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
-#include <future>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -660,10 +659,9 @@ class BlockingLogger : public base::Logger {
   void Flush() override {}
   uint32 LogSize() override { return 0; }
 
-  bool WaitUntilEntered() {
+  void WaitUntilEntered() {
     std::unique_lock<std::mutex> lock(mutex_);
-    return condition_.wait_for(lock, std::chrono::seconds(1),
-                               [this] { return entered_; });
+    condition_.wait(lock, [this] { return entered_; });
   }
 
   void Release() {
@@ -1986,20 +1984,13 @@ TEST(Logging, MessageCountDoesNotWaitForLogger) {
   base::SetLogger(NGLOG_INFO, logger_owner.release());
 
   std::thread logging_thread([] { LOG(INFO) << "blocked logger"; });
-  ASSERT_TRUE(logger->WaitUntilEntered());
+  logger->WaitUntilEntered();
 
-  std::future<int64> message_count = std::async(
-      std::launch::async, [] { return LogMessage::num_messages(NGLOG_INFO); });
-  EXPECT_EQ(message_count.wait_for(std::chrono::milliseconds(100)),
-            std::future_status::ready);
+  // Hangs until the CTest timeout if counting waits for the blocked logger.
+  static_cast<void>(LogMessage::num_messages(NGLOG_INFO));
 
   logger->Release();
   logging_thread.join();
-  EXPECT_EQ(message_count.wait_for(std::chrono::seconds(1)),
-            std::future_status::ready);
-  if (message_count.valid()) {
-    static_cast<void>(message_count.get());
-  }
   base::SetLogger(NGLOG_INFO, old_logger);
 }
 
