@@ -683,6 +683,8 @@ class BlockingLogger : public base::Logger {
 
 class ReentrantLogSink : public LogSink {
  public:
+  // Joining the thread deadlocks if a sink registry lock is held during the
+  // callback. CTest reports such a hang by timing out the test.
   void send(LogSeverity /* severity */, const char* /* full_filename */,
             const char* /* base_filename */, int /* line */,
             const LogMessageTime& /* time */, const char* /* message */,
@@ -692,48 +694,15 @@ class ReentrantLogSink : public LogSink {
       return;
     }
 
-    const std::shared_ptr<State> state = state_;
-    std::thread nested_thread([state] {
-      LOG(INFO) << "Nested log from sink callback.";
-      {
-        std::lock_guard<std::mutex> lock(state->mutex);
-        state->nested_finished = true;
-      }
-      state->condition.notify_all();
-    });
-    nested_thread.detach();
-
-    std::unique_lock<std::mutex> lock(state->mutex);
-    const bool nested_completed = state->condition.wait_for(
-        lock, kSinkCallbackTimeout, [state] { return state->nested_finished; });
-    state->nested_completed_during_callback = nested_completed;
-    lock.unlock();
-    state->condition.notify_all();
+    std::thread([] { LOG(INFO) << "Nested log from sink callback."; }).join();
+    nested_completed_ = true;
   }
 
-  bool WaitForNestedCompletion() const {
-    std::unique_lock<std::mutex> lock(state_->mutex);
-    return state_->condition.wait_for(
-        lock, kSinkCallbackTimeout, [this] { return state_->nested_finished; });
-  }
-
-  bool NestedCompletedDuringCallback() const {
-    std::lock_guard<std::mutex> lock(state_->mutex);
-    return state_->nested_completed_during_callback;
-  }
+  bool NestedCompleted() const { return nested_completed_; }
 
  private:
-  static constexpr std::chrono::seconds kSinkCallbackTimeout{1};
-
-  struct State {
-    std::mutex mutex;
-    std::condition_variable condition;
-    bool nested_finished{false};
-    bool nested_completed_during_callback{false};
-  };
-
   std::atomic<bool> nested_started_{false};
-  std::shared_ptr<State> state_{std::make_shared<State>()};
+  std::atomic<bool> nested_completed_{false};
 };
 
 class SelfRemovingLogSink : public LogSink {
@@ -760,8 +729,6 @@ class ReentrantLogger : public base::Logger {
  private:
   bool nested_{false};
 };
-
-constexpr std::chrono::seconds ReentrantLogSink::kSinkCallbackTimeout;
 
 void TestLogSink() {
   TestLogSinkImpl sink;
@@ -814,8 +781,7 @@ TEST(Logging, RegisteredSinkCanLogDuringSend) {
   LOG(INFO) << "Log to registered reentrant sink.";
 
   RemoveLogSink(&sink);
-  EXPECT_TRUE(sink.WaitForNestedCompletion());
-  EXPECT_TRUE(sink.NestedCompletedDuringCallback());
+  EXPECT_TRUE(sink.NestedCompleted());
 }
 
 TEST(Logging, RegisteredSinkCanRemoveItself) {
@@ -860,8 +826,7 @@ TEST(Logging, DirectSinkCanLogDuringSend) {
   LOG_TO_SINK_BUT_NOT_TO_LOGFILE(&sink, INFO)
       << "Log to direct reentrant sink.";
 
-  EXPECT_TRUE(sink.WaitForNestedCompletion());
-  EXPECT_TRUE(sink.NestedCompletedDuringCallback());
+  EXPECT_TRUE(sink.NestedCompleted());
 }
 
 #ifdef NGLOG_ENABLE_LOCK_METRICS

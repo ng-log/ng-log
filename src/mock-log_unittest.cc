@@ -12,7 +12,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <chrono>
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <string>
@@ -26,8 +26,6 @@ using testing::_;
 using testing::EndsWith;
 using testing::InSequence;
 using testing::StrEq;
-
-constexpr std::chrono::milliseconds kSinkCallbackTimeout{100};
 
 // Tests that ScopedMockLog intercepts LOG()s when it's alive.
 TEST(ScopedMockLogTest, InterceptsLog) {
@@ -90,80 +88,48 @@ TEST(ScopedMockLogTest, SendsToSinksInReverseRegistrationOrder) {
 
 class ReentrantLogSink : public nglog::LogSink {
  public:
-  ~ReentrantLogSink() override { JoinThreads(); }
-
   void send(nglog::LogSeverity /* severity */, const char* /* full_filename */,
             const char* /* base_filename */, int /* line */,
             const nglog::LogMessageTime& /* time */, const char* /* message */,
             std::size_t /* message_len */) override {}
 
+  // Joining the threads deadlocks if a sink registry lock is held during the
+  // callback. CTest reports such a hang by timing out the test.
   void WaitTillSent() override {
-    {
-      std::lock_guard<std::mutex> lock{mutex_};
-      if (started_) {
-        return;
-      }
-      started_ = true;
+    if (started_.exchange(true)) {
+      return;
     }
 
-    add_thread_ = std::thread([this] {
+    bool add_started = false;
+    std::thread add_thread([this, &add_started] {
       {
         std::lock_guard<std::mutex> lock{mutex_};
-        add_started_ = true;
+        add_started = true;
       }
       condition_.notify_all();
       nglog::AddLogSink(this);
-      {
-        std::lock_guard<std::mutex> lock{mutex_};
-        add_finished_ = true;
-      }
-      condition_.notify_all();
     });
 
     {
       std::unique_lock<std::mutex> lock{mutex_};
-      condition_.wait(lock, [this] { return add_started_; });
+      condition_.wait(lock, [&add_started] { return add_started; });
     }
 
-    log_thread_ = std::thread([this] {
-      LOG(INFO) << "Logging from a sink callback.";
-      {
-        std::lock_guard<std::mutex> lock{mutex_};
-        log_finished_ = true;
-      }
-      condition_.notify_all();
-    });
+    std::thread log_thread(
+        [] { LOG(INFO) << "Logging from a sink callback."; });
 
-    std::unique_lock<std::mutex> lock{mutex_};
-    callback_completed_ =
-        condition_.wait_for(lock, kSinkCallbackTimeout,
-                            [this] { return add_finished_ && log_finished_; });
+    add_thread.join();
+    log_thread.join();
+    callback_completed_ = true;
   }
 
-  bool CallbackCompleted() const {
-    std::lock_guard<std::mutex> lock{mutex_};
-    return callback_completed_;
-  }
+  bool CallbackCompleted() const { return callback_completed_; }
 
  private:
-  void JoinThreads() {
-    if (add_thread_.joinable()) {
-      add_thread_.join();
-    }
-    if (log_thread_.joinable()) {
-      log_thread_.join();
-    }
-  }
-
-  mutable std::mutex mutex_;
+  std::mutex mutex_;
   std::condition_variable condition_;
-  std::thread add_thread_;
-  std::thread log_thread_;
-  bool started_{false};
-  bool add_started_{false};
-  bool add_finished_{false};
-  bool log_finished_{false};
-  bool callback_completed_{false};
+  std::atomic<bool> started_{false};
+  std::atomic<bool> callback_completed_{false};
 };
 
 TEST(ScopedMockLogTest, SinkCallbackCanLogWhileSinksChange) {
