@@ -11,8 +11,18 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 jobs:
-  linux:
+  emscripten:
     if: &skip-duplicate-pull-request github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
+    name: Emscripten
+    uses: ./.github/workflows/emscripten.yml
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    secrets: inherit
+
+  linux:
+    if: *skip-duplicate-pull-request
     name: Linux
     uses: ./.github/workflows/linux.yml
     permissions:
@@ -47,7 +57,7 @@ jobs:
   # repository are covered by the push event of their head branch.
   upload-coverage:
     if: github.event_name == 'push'
-    needs: [linux, macos, windows]
+    needs: [emscripten, linux, macos, windows]
     name: Upload Coverage to GitHub
     runs-on: ubuntu-26.04
     permissions:
