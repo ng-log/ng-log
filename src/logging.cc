@@ -2148,7 +2148,8 @@ void LogMessage::Flush() {
 
   // Do we need to add a \n to the end of this message?
   bool append_newline =
-      (data_->message_text_[data_->num_chars_to_log_ - 1] != '\n');
+      data_->num_chars_to_log_ == 0 ||
+      data_->message_text_[data_->num_chars_to_log_ - 1] != '\n';
   char original_final_char = '\0';
 
   // If we do need to add a \n, we'll do it by violating the memory of the

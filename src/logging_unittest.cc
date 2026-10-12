@@ -1005,7 +1005,28 @@ TEST(Logging, RegisteredSinkDispatchUsesOneRegistrySnapshot) {
   RemoveLogSink(&sink);
   EXPECT_EQ(metrics.acquisitions, 1U);
 }
+
 #endif
+
+class MessageCollectingSink : public LogSink {
+ public:
+  vector<string> messages;
+  void send(LogSeverity /*severity*/, const char* /*full_filename*/,
+            const char* /*base_filename*/, int /*line*/,
+            const LogMessageTime& /*time*/, const char* message,
+            size_t message_len) override {
+    messages.emplace_back(message, message_len);
+  }
+};
+
+TEST(Logging, EmptyMessageWithoutPrefixIsSentAsEmptyMessage) {
+  MessageCollectingSink sink;
+  {
+    LogMessage message(__FILE__, LogMessage::kNoLogPrefix, NGLOG_INFO, &sink,
+                       /*also_send_to_log=*/false);
+  }
+  EXPECT_THAT(sink.messages, testing::ElementsAre(""));
+}
 
 #if defined(NGLOG_OS_LINUX)
 TEST(Logging, ConcurrentFullDiskWrites) {
