@@ -13,6 +13,14 @@
 #include "internal/flag_display.h"
 #include "ng-log/log_severity.h"
 
+// The flags themselves are constant initialized. Only their registration runs
+// during dynamic initialization and termination, and the flags remain usable
+// before and after it.
+#if defined(__clang__)
+#  pragma clang diagnostic ignored "-Wglobal-constructors"
+#  pragma clang diagnostic ignored "-Wexit-time-destructors"
+#endif  // defined(__clang__)
+
 namespace {
 
 constexpr std::int32_t kSecondsPerMinute = 60;

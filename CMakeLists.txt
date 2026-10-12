@@ -669,6 +669,17 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND NOT WIN32 AND NOT APPLE)
   target_compile_options (ng-log_internal PRIVATE -fno-gnu-unique)
 endif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND NOT WIN32 AND NOT APPLE)
 
+# Logging is supported from the constructors and destructors of objects with
+# static storage duration, which run in an unspecified order relative to the
+# library. Its state must therefore be either constant initialized and never
+# destroyed, or constructed on first use and never destroyed.
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND
+    CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
+  target_compile_options (ng-log_internal PRIVATE
+    -Werror=global-constructors -Werror=exit-time-destructors)
+endif (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND
+  CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
+
 if (WITH_LOCK_METRICS)
   target_compile_definitions (ng-log_internal PRIVATE NGLOG_ENABLE_LOCK_METRICS)
 endif (WITH_LOCK_METRICS)
