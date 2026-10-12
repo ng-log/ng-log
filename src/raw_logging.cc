@@ -31,6 +31,7 @@
 #endif
 #include <fcntl.h>  // for open()
 
+#include "internal/no_destructor.h"
 #include "internal/utf8.h"
 #include "ng-log/logging.h"
 #include "ng-log/raw_logging.h"
@@ -91,7 +92,10 @@ inline static bool VADoRawLog(char** buf, size_t* size, const char* format,
 }
 
 static const int kLogBufSize = 3000;
-static std::once_flag crashed;
+static std::once_flag& crashed() {
+  static const internal::NoDestructor<std::once_flag> flag;
+  return *flag;
+}
 static internal::CrashReason crash_reason;
 static char crash_buf[kLogBufSize + 1] = {0};  // Will end in '\0'
 
@@ -168,7 +172,7 @@ void RawLog(LogSeverity severity, const char* file, int line,
   internal::SafeWrite(fileno(stderr), buffer, strlen(buffer));
 #endif
   if (severity == NGLOG_FATAL) {
-    std::call_once(crashed, [file, line, msg_start, msg_size] {
+    std::call_once(crashed(), [file, line, msg_start, msg_size] {
       crash_reason.filename = file;
       crash_reason.line_number = line;
       memcpy(crash_buf, msg_start, msg_size);  // Don't include prefix

@@ -43,6 +43,7 @@
 #include "config.h"
 #include "internal/lock_metrics.h"
 #include "internal/log_cleaner.h"
+#include "internal/no_destructor.h"
 #include "internal/path.h"
 #include "internal/source_location.h"
 #include "internal/style_recorder.h"
@@ -244,7 +245,10 @@ struct LogMessageData {
 // changing the destination file for log messages of a given severity) also
 // lock this mutex.  Please be sure that anybody who might possibly need to
 // lock it does so.
-static internal::LogMutex log_mutex;
+static internal::LogMutex& log_mutex() {
+  static const internal::NoDestructor<internal::LogMutex> mutex;
+  return *mutex;
+}
 
 // Number of messages sent at each severity.  Under log_mutex.
 std::atomic<int64> LogMessage::num_messages_[NUM_SEVERITIES]{};
@@ -393,7 +397,11 @@ class PrefixFormatter {
   void* data;
 };
 
-std::unique_ptr<PrefixFormatter> g_prefix_formatter;
+std::unique_ptr<PrefixFormatter>& prefix_formatter() {
+  static const internal::NoDestructor<std::unique_ptr<PrefixFormatter>>
+      formatter;
+  return *formatter;
+}
 
 // Encapsulates all file-system related state
 class LogFileObject : public base::Logger {
@@ -580,11 +588,21 @@ class LogDestination {
   std::unique_ptr<base::Logger> owned_logger_;
   base::Logger* logger_;  // Either &fileobject_, or wrapper around it
 
-  static std::unique_ptr<LogDestination> log_destinations_[NUM_SEVERITIES];
+  using LogDestinations =
+      std::array<std::unique_ptr<LogDestination>, NUM_SEVERITIES>;
+
+  static LogDestinations& log_destinations();
+  static string& addresses();
+
+  // Restores the file logger of every destination and thereby destroys the
+  // loggers supplied through SetLogger(). Registered with std::atexit when the
+  // first such logger is installed, since the destinations themselves are
+  // never destroyed.
+  static void ReleaseOwnedLoggersAtExit();
+  // Under log_mutex.
+  static bool release_owned_loggers_registered_;
+
   static std::underlying_type_t<LogSeverity> email_logging_severity_;
-  static string addresses_;
-  static string hostname_;
-  static std::once_flag hostname_once_;
 
   // arbitrary global logging destinations.
   static std::shared_ptr<const vector<LogSink*>> sinks_;
@@ -606,9 +624,6 @@ class LogDestination {
 std::underlying_type_t<LogSeverity> LogDestination::email_logging_severity_ =
     99999;
 
-string LogDestination::addresses_;
-string LogDestination::hostname_;
-
 std::shared_ptr<const vector<LogSink*>> LogDestination::sinks_;
 std::atomic<bool> LogDestination::sinks_present_{false};
 LogDestination::SinkMutex LogDestination::sink_mutex_;
@@ -616,17 +631,31 @@ std::mutex LogDestination::sink_call_mutex_;
 std::condition_variable LogDestination::sink_call_cond_;
 std::unordered_map<LogSink*, size_t> LogDestination::sink_call_counts_;
 thread_local std::unordered_map<LogSink*, size_t> sink_call_counts_for_thread;
-std::once_flag LogDestination::hostname_once_;
+bool LogDestination::release_owned_loggers_registered_ = false;
+
+/* static */
+LogDestination::LogDestinations& LogDestination::log_destinations() {
+  static const internal::NoDestructor<LogDestinations> destinations;
+  return *destinations;
+}
+
+/* static */
+string& LogDestination::addresses() {
+  static const internal::NoDestructor<string> addresses;
+  return *addresses;
+}
 
 /* static */
 const string& LogDestination::hostname() {
-  std::call_once(hostname_once_, [] {
-    GetHostName(&hostname_);
-    if (hostname_.empty()) {
-      hostname_ = "(unknown)";
+  static const internal::NoDestructor<string> hostname{[] {
+    string name;
+    GetHostName(&name);
+    if (name.empty()) {
+      name = "(unknown)";
     }
-  });
-  return hostname_;
+    return name;
+  }()};
+  return *hostname;
 }
 
 LogDestination::LogDestination(LogSeverity severity, const char* base_filename)
@@ -642,13 +671,28 @@ void LogDestination::SetLoggerImpl(base::Logger* logger) {
 
   owned_logger_.reset(logger == &fileobject_ ? nullptr : logger);
   logger_ = logger;
+  if (owned_logger_ != nullptr && !release_owned_loggers_registered_) {
+    release_owned_loggers_registered_ =
+        std::atexit(&LogDestination::ReleaseOwnedLoggersAtExit) == 0;
+  }
+}
+
+/* static */
+void LogDestination::ReleaseOwnedLoggersAtExit() {
+  std::lock_guard<internal::LogMutex> l{log_mutex()};
+  for (auto& destination : log_destinations()) {
+    if (destination != nullptr) {
+      destination->ResetLoggerImpl();
+    }
+  }
 }
 
 inline void LogDestination::FlushLogFilesUnsafe(int min_severity) {
   // assume we have the log_mutex or we simply don't care
   // about it
-  std::for_each(std::next(std::begin(log_destinations_), min_severity),
-                std::end(log_destinations_),
+  LogDestinations& destinations = log_destinations();
+  std::for_each(std::next(destinations.begin(), min_severity),
+                destinations.end(),
                 [now = std::chrono::system_clock::now()](
                     std::unique_ptr<LogDestination>& log) {
                   if (log != nullptr) {
@@ -662,7 +706,7 @@ inline void LogDestination::FlushLogFilesUnsafe(int min_severity) {
 inline void LogDestination::FlushLogFiles(int min_severity) {
   // Prevent any subtle race conditions by wrapping a mutex lock around
   // all this stuff.
-  std::lock_guard<::nglog::internal::LogMutex> l{log_mutex};
+  std::lock_guard<::nglog::internal::LogMutex> l{log_mutex()};
   for (int i = min_severity; i < NUM_SEVERITIES; i++) {
     LogDestination* log = log_destination(static_cast<LogSeverity>(i));
     if (log != nullptr) {
@@ -675,7 +719,7 @@ inline void LogDestination::SetLogDestination(LogSeverity severity,
                                               const char* base_filename) {
   // Prevent any subtle race conditions by wrapping a mutex lock around
   // all this stuff.
-  std::lock_guard<::nglog::internal::LogMutex> l{log_mutex};
+  std::lock_guard<::nglog::internal::LogMutex> l{log_mutex()};
   log_destination(severity)->fileobject_.SetBasename(base_filename);
 }
 
@@ -683,7 +727,7 @@ inline void LogDestination::SetLogSymlink(LogSeverity severity,
                                           const char* symlink_basename) {
   CHECK_GE(severity, 0);
   CHECK_LT(severity, NUM_SEVERITIES);
-  std::lock_guard<::nglog::internal::LogMutex> l{log_mutex};
+  std::lock_guard<::nglog::internal::LogMutex> l{log_mutex()};
   log_destination(severity)->fileobject_.SetSymlinkBasename(symlink_basename);
 }
 
@@ -717,7 +761,7 @@ inline void LogDestination::RemoveLogSink(LogSink* destination) {
 inline void LogDestination::SetLogFilenameExtension(const char* ext) {
   // Prevent any subtle race conditions by wrapping a mutex lock around
   // all this stuff.
-  std::lock_guard<::nglog::internal::LogMutex> l{log_mutex};
+  std::lock_guard<::nglog::internal::LogMutex> l{log_mutex()};
   for (int severity = 0; severity < NUM_SEVERITIES; ++severity) {
     log_destination(static_cast<LogSeverity>(severity))
         ->fileobject_.SetExtension(ext);
@@ -727,7 +771,7 @@ inline void LogDestination::SetLogFilenameExtension(const char* ext) {
 inline void LogDestination::SetStderrLogging(LogSeverity min_severity) {
   // Prevent any subtle race conditions by wrapping a mutex lock around
   // all this stuff.
-  std::lock_guard<internal::LogMutex> l{log_mutex};
+  std::lock_guard<internal::LogMutex> l{log_mutex()};
   nglog::SetFlag(FLAGS_stderrthreshold,
                  static_cast<std::int32_t>(min_severity));
 }
@@ -746,9 +790,9 @@ inline void LogDestination::SetEmailLogging(LogSeverity min_severity,
                                             const char* addresses) {
   // Prevent any subtle race conditions by wrapping a mutex lock around
   // all this stuff.
-  std::lock_guard<internal::LogMutex> l{log_mutex};
+  std::lock_guard<internal::LogMutex> l{log_mutex()};
   LogDestination::email_logging_severity_ = min_severity;
-  LogDestination::addresses_ = addresses;
+  LogDestination::addresses() = addresses;
 }
 
 // Adapts a FILE* stream to the formatter that WithColor() in
@@ -1343,19 +1387,16 @@ void LogDestination::WaitForAllSinkCalls() {
   });
 }
 
-std::unique_ptr<LogDestination>
-    LogDestination::log_destinations_[NUM_SEVERITIES];
-
 inline LogDestination* LogDestination::log_destination(LogSeverity severity) {
-  if (log_destinations_[severity] == nullptr) {
-    log_destinations_[severity] =
-        std::make_unique<LogDestination>(severity, nullptr);
+  std::unique_ptr<LogDestination>& destination = log_destinations()[severity];
+  if (destination == nullptr) {
+    destination = std::make_unique<LogDestination>(severity, nullptr);
   }
-  return log_destinations_[severity].get();
+  return destination.get();
 }
 
 void LogDestination::DeleteLogDestinations() {
-  for (auto& log_destination : log_destinations_) {
+  for (auto& log_destination : log_destinations()) {
     log_destination.reset();
   }
   {
@@ -1368,12 +1409,15 @@ void LogDestination::DeleteLogDestinations() {
 
 namespace {
 
-std::string g_application_fingerprint;
+std::string& application_fingerprint() {
+  static const internal::NoDestructor<std::string> fingerprint;
+  return *fingerprint;
+}
 
 }  // namespace
 
 void SetApplicationFingerprint(const std::string& fingerprint) {
-  g_application_fingerprint = fingerprint;
+  application_fingerprint() = fingerprint;
 }
 
 namespace {
@@ -1787,9 +1831,10 @@ void LogFileObject::WriteUnlocked(
                          << "Running on machine: " << LogDestination::hostname()
                          << '\n';
 
-      if (!g_application_fingerprint.empty()) {
-        file_header_stream << "Application fingerprint: "
-                           << g_application_fingerprint << '\n';
+      const std::string& fingerprint = application_fingerprint();
+      if (!fingerprint.empty()) {
+        file_header_stream << "Application fingerprint: " << fingerprint
+                           << '\n';
       }
       file_header_stream
           << "Running duration (h:mm:ss): "
@@ -1800,7 +1845,7 @@ void LogFileObject::WriteUnlocked(
       // The hardcoded format line only describes the default prefix; with a
       // user-installed prefix formatter the actual line format is unknown
       // here, so advertising the default one would be wrong.
-      if (g_prefix_formatter == nullptr) {
+      if (prefix_formatter() == nullptr) {
         const char* const date_time_format =
             nglog::GetFlag(FLAGS_log_year_in_prefix)
                 ? "yyyymmdd hh:mm:ss.uuuuuu"
@@ -1900,16 +1945,19 @@ void LogFileObject::WriteUnlocked(
 
 }  // namespace
 
-// Static log data space to avoid alloc failures in a LOG(FATAL)
-//
-// Since multiple threads may call LOG(FATAL), and we want to preserve
-// the data from the first call, we allocate one exclusive set of space
-// and one thread-local set for each concurrent caller.
-static internal::FatalMutex fatal_msg_lock;
+// Since multiple threads may call LOG(FATAL), and we want to preserve the data
+// from the first call, the first fatal message gets its own space. Further
+// fatal messages use the space of ordinary messages.
+static internal::FatalMutex& fatal_msg_lock() {
+  static const internal::NoDestructor<internal::FatalMutex> mutex;
+  return *mutex;
+}
 static internal::CrashReason crash_reason;
 static bool fatal_msg_exclusive = true;
-static internal::LogMessageData fatal_msg_data_exclusive;
-static thread_local internal::LogMessageData fatal_msg_data_shared;
+static internal::LogMessageData& fatal_msg_data_exclusive() {
+  static const internal::NoDestructor<internal::LogMessageData> data;
+  return *data;
+}
 
 // Static thread-local log data space to use, because typically at most one
 // LogMessageData object exists (in this case glog makes zero heap memory
@@ -1978,28 +2026,23 @@ LogMessage::LogMessage(const char* file, int line, LogSeverity severity,
 void LogMessage::Init(const char* file, int line, LogSeverity severity,
                       void (LogMessage::*send_method)()) {
   allocated_ = nullptr;
-  if (severity != NGLOG_FATAL ||
-      !exit_on_dfatal.load(std::memory_order_relaxed)) {
-    // No need for locking, because this is thread local.
-    if (thread_data_available) {
-      thread_data_available = false;
-      data_ = new (&thread_msg_data) internal::LogMessageData;
-    } else {
-      allocated_ = std::make_unique<internal::LogMessageData>();
-      data_ = allocated_.get();
-    }
-    data_->first_fatal_ = false;
-  } else {
-    std::lock_guard<internal::FatalMutex> l{fatal_msg_lock};
-    if (fatal_msg_exclusive) {
-      fatal_msg_exclusive = false;
-      data_ = &fatal_msg_data_exclusive;
-      data_->first_fatal_ = true;
-    } else {
-      data_ = &fatal_msg_data_shared;
-      data_->first_fatal_ = false;
-    }
+  bool first_fatal = false;
+  if (severity == NGLOG_FATAL &&
+      exit_on_dfatal.load(std::memory_order_relaxed)) {
+    std::lock_guard<internal::FatalMutex> l{fatal_msg_lock()};
+    first_fatal = std::exchange(fatal_msg_exclusive, false);
   }
+  if (first_fatal) {
+    data_ = &fatal_msg_data_exclusive();
+  } else if (thread_data_available) {
+    // No need for locking, because this is thread local.
+    thread_data_available = false;
+    data_ = new (&thread_msg_data) internal::LogMessageData;
+  } else {
+    allocated_ = std::make_unique<internal::LogMessageData>();
+    data_ = allocated_.get();
+  }
+  data_->first_fatal_ = first_fatal;
 
   data_->preserved_errno_ = errno;
   data_->severity_ = severity;
@@ -2027,13 +2070,13 @@ void LogMessage::Init(const char* file, int line, LogSeverity severity,
   //    (log level, GMT year, month, date, time, thread_id, file basename, line)
   // We exclude the thread_id for the default thread.
   if (nglog::GetFlag(FLAGS_log_prefix) && (line != kNoLogPrefix)) {
-    if (g_prefix_formatter == nullptr) {
+    if (prefix_formatter() == nullptr) {
       AppendDefaultPrefix(*data_, severity, time_);
     } else {
       std::ios saved_fmt(nullptr);
       saved_fmt.copyfmt(stream());
       stream().fill('0');
-      (*g_prefix_formatter)(stream(), *this);
+      (*prefix_formatter())(stream(), *this);
       stream() << " ";
       stream().copyfmt(saved_fmt);
     }
@@ -2186,18 +2229,19 @@ void LogMessage::Flush() {
   std::string email_mailer;
   if (send_method != &LogMessage::SendToSink) {
     // Protect the shared logging destinations while dispatching the message.
-    std::lock_guard<internal::LogMutex> l{log_mutex};
+    std::lock_guard<internal::LogMutex> l{log_mutex()};
     if (send_to_registered_sinks && !nglog::GetFlag(FLAGS_logtostderr) &&
         !nglog::GetFlag(FLAGS_logtostdout) && IsLoggingInitialized() &&
         (data_->severity_ >= LogDestination::email_logging_severity_ ||
          data_->severity_ >= nglog::GetFlag(FLAGS_logemaillevel))) {
       should_send_email = true;
       email_to = nglog::GetFlag(FLAGS_alsologtoemail);
-      if (!LogDestination::addresses_.empty()) {
+      const string& addresses = LogDestination::addresses();
+      if (!addresses.empty()) {
         if (!email_to.empty()) {
           email_to += ",";
         }
-        email_to += LogDestination::addresses_;
+        email_to += addresses;
       }
       email_host = LogDestination::hostname();
       email_mailer = nglog::GetFlag(FLAGS_logmailer);
@@ -2267,7 +2311,7 @@ void ReprintFatalMessage() {
 }
 
 // L >= log_mutex (callers must hold the log_mutex).
-void LogMessage::SendToLog() NGLOG_LOCKS_REQUIRED(log_mutex) {
+void LogMessage::SendToLog() NGLOG_LOCKS_REQUIRED(log_mutex()) {
   static bool already_warned_before_init = false;
 
   RAW_DCHECK(data_->num_chars_to_log_ > 0 &&
@@ -2323,7 +2367,7 @@ void LogMessage::SendToLog() NGLOG_LOCKS_REQUIRED(log_mutex) {
 
     if (!nglog::GetFlag(FLAGS_logtostderr) &&
         !nglog::GetFlag(FLAGS_logtostdout)) {
-      for (auto& log_destination : LogDestination::log_destinations_) {
+      for (auto& log_destination : LogDestination::log_destinations()) {
         if (log_destination) {
           log_destination->logger_->Write(
               true, std::chrono::system_clock::time_point{}, "", 0);
@@ -2334,10 +2378,10 @@ void LogMessage::SendToLog() NGLOG_LOCKS_REQUIRED(log_mutex) {
 }
 
 void LogMessage::RecordCrashReason(internal::CrashReason* reason) {
-  reason->filename = fatal_msg_data_exclusive.fullname_;
-  reason->line_number = fatal_msg_data_exclusive.line_;
-  reason->message = fatal_msg_data_exclusive.message_text_ +
-                    fatal_msg_data_exclusive.num_prefix_chars_;
+  const internal::LogMessageData& data = fatal_msg_data_exclusive();
+  reason->filename = data.fullname_;
+  reason->line_number = data.line_;
+  reason->message = data.message_text_ + data.num_prefix_chars_;
 #ifdef HAVE_STACKTRACE
   // Retrieve the stack trace, omitting the logging frames that got us here.
   reason->depth = GetStackTrace(reason->stack, ARRAYSIZE(reason->stack), 4);
@@ -2390,13 +2434,13 @@ bool LogMessage::SendToRegisteredSinks() {
 }
 
 // L >= log_mutex (callers must hold the log_mutex).
-void LogMessage::SendToSinkAndLog() NGLOG_LOCKS_REQUIRED(log_mutex) {
+void LogMessage::SendToSinkAndLog() NGLOG_LOCKS_REQUIRED(log_mutex()) {
   SendToSink();
   SendToLog();
 }
 
 // L >= log_mutex (callers must hold the log_mutex).
-void LogMessage::SaveOrSendToLog() NGLOG_LOCKS_REQUIRED(log_mutex) {
+void LogMessage::SaveOrSendToLog() NGLOG_LOCKS_REQUIRED(log_mutex()) {
   if (data_->outvec_ != nullptr) {
     RAW_DCHECK(data_->num_chars_to_log_ > 0 &&
                    data_->message_text_[data_->num_chars_to_log_ - 1] == '\n',
@@ -2410,7 +2454,7 @@ void LogMessage::SaveOrSendToLog() NGLOG_LOCKS_REQUIRED(log_mutex) {
   }
 }
 
-void LogMessage::WriteToStringAndLog() NGLOG_LOCKS_REQUIRED(log_mutex) {
+void LogMessage::WriteToStringAndLog() NGLOG_LOCKS_REQUIRED(log_mutex()) {
   if (data_->message_ != nullptr) {
     RAW_DCHECK(data_->num_chars_to_log_ > 0 &&
                    data_->message_text_[data_->num_chars_to_log_ - 1] == '\n',
@@ -2446,12 +2490,12 @@ void LogMessage::SendToSyslogAndLog() {
 }
 
 base::Logger* base::GetLogger(LogSeverity severity) {
-  std::lock_guard<internal::LogMutex> l{log_mutex};
+  std::lock_guard<internal::LogMutex> l{log_mutex()};
   return LogDestination::log_destination(severity)->GetLoggerImpl();
 }
 
 void base::SetLogger(LogSeverity severity, base::Logger* logger) {
-  std::lock_guard<internal::LogMutex> l{log_mutex};
+  std::lock_guard<internal::LogMutex> l{log_mutex()};
   LogDestination::log_destination(severity)->SetLoggerImpl(logger);
 }
 
@@ -2560,7 +2604,7 @@ namespace internal {
 
 bool GetExitOnDFatal();
 bool GetExitOnDFatal() {
-  std::lock_guard<::nglog::internal::LogMutex> l{log_mutex};
+  std::lock_guard<::nglog::internal::LogMutex> l{log_mutex()};
   return exit_on_dfatal.load(std::memory_order_relaxed);
 }
 
@@ -2576,7 +2620,7 @@ bool GetExitOnDFatal() {
 // these differences are acceptable.
 void SetExitOnDFatal(bool value);
 void SetExitOnDFatal(bool value) {
-  std::lock_guard<::nglog::internal::LogMutex> l{log_mutex};
+  std::lock_guard<::nglog::internal::LogMutex> l{log_mutex()};
   exit_on_dfatal.store(value, std::memory_order_relaxed);
 }
 
@@ -2818,34 +2862,41 @@ static void GetTempDirectories(vector<string>& list) {
 #endif
 }
 
-static std::unique_ptr<std::vector<std::string>> logging_directories_list;
+static std::unique_ptr<std::vector<std::string>>& logging_directories_list() {
+  static const internal::NoDestructor<std::unique_ptr<std::vector<std::string>>>
+      directories;
+  return *directories;
+}
 
 const vector<string>& GetLoggingDirectories() {
+  std::unique_ptr<std::vector<std::string>>& directories =
+      logging_directories_list();
   // Not strictly thread-safe but we're called early in InitGoogle().
-  if (logging_directories_list == nullptr) {
-    logging_directories_list = std::make_unique<std::vector<std::string>>();
+  if (directories == nullptr) {
+    directories = std::make_unique<std::vector<std::string>>();
 
     const std::string log_dir = nglog::GetFlag(FLAGS_log_dir);
     if (!log_dir.empty()) {
       // Ensure the specified path ends with a directory delimiter.
       if (log_dir.find_last_of(possible_dir_delim) != log_dir.size() - 1) {
-        logging_directories_list->push_back(log_dir + "/");
+        directories->push_back(log_dir + "/");
       } else {
-        logging_directories_list->push_back(log_dir);
+        directories->push_back(log_dir);
       }
     } else {
-      GetTempDirectories(*logging_directories_list);
+      GetTempDirectories(*directories);
 #ifdef NGLOG_OS_WINDOWS
       string tmp;
-      if (internal::GetWindowsDirectoryUtf8(&tmp))
-        logging_directories_list->push_back(tmp);
-      logging_directories_list->push_back(".\\");
+      if (internal::GetWindowsDirectoryUtf8(&tmp)) {
+        directories->push_back(tmp);
+      }
+      directories->push_back(".\\");
 #else
-      logging_directories_list->push_back("./");
+      directories->push_back("./");
 #endif
     }
   }
-  return *logging_directories_list;
+  return *directories;
 }
 
 // Returns a set of existing temporary directories, which will be a
@@ -3139,17 +3190,17 @@ void InitializeLogging(const char* argv0) { InitializeLoggingUtilities(argv0); }
 
 void InstallPrefixFormatter(PrefixFormatterCallback callback, void* data) {
   if (callback != nullptr) {
-    g_prefix_formatter = std::make_unique<PrefixFormatter>(callback, data);
+    prefix_formatter() = std::make_unique<PrefixFormatter>(callback, data);
   } else {
-    g_prefix_formatter = nullptr;
+    prefix_formatter() = nullptr;
   }
 }
 
 void ShutdownLogging() {
   ShutdownLoggingUtilities();
   LogDestination::DeleteLogDestinations();
-  logging_directories_list = nullptr;
-  g_prefix_formatter = nullptr;
+  logging_directories_list() = nullptr;
+  prefix_formatter() = nullptr;
 }
 
 void EnableLogCleaner(unsigned int overdue_days) {

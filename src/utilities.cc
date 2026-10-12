@@ -20,8 +20,8 @@
 
 #include "addr2line.h"
 #include "config.h"
-#include "initializer.h"
 #include "internal/emscripten_console.h"
+#include "internal/no_destructor.h"
 #include "internal/source_location.h"
 #include "internal/utf8.h"
 #include "libbacktrace.h"
@@ -383,21 +383,32 @@ const char* ProgramInvocationShortName() {
 #endif
 }
 
-static int32 g_main_thread_pid = getpid();
-int32 GetMainThreadPid() { return g_main_thread_pid; }
+// Zero is never the ID of a running process, so it marks the ID of the main
+// thread as not yet recorded.
+static std::atomic<int32> g_main_thread_pid{0};
 
-bool PidHasChanged() {
-  int32 pid = getpid();
-  if (g_main_thread_pid == pid) {
-    return false;
+int32 GetMainThreadPid() {
+  int32 pid = g_main_thread_pid.load(std::memory_order_relaxed);
+  if (pid == 0) {
+    const auto current = static_cast<int32>(getpid());
+    // Keep the ID recorded concurrently by another thread, if any.
+    if (g_main_thread_pid.compare_exchange_strong(pid, current,
+                                                  std::memory_order_relaxed)) {
+      pid = current;
+    }
   }
-  g_main_thread_pid = pid;
-  return true;
+  return pid;
 }
 
-static string g_my_user_name;
-const string& MyUserName() { return g_my_user_name; }
-static void MyUserNameInitializer() {
+bool PidHasChanged() {
+  const auto pid = static_cast<int32>(getpid());
+  const int32 previous =
+      g_main_thread_pid.exchange(pid, std::memory_order_relaxed);
+  return previous != 0 && previous != pid;
+}
+
+static string QueryUserName() {
+  string name;
   // TODO(hamaji): Probably this is not portable.
 #if defined(NGLOG_OS_WINDOWS)
   const char* user = getenv("USERNAME");
@@ -405,7 +416,7 @@ static void MyUserNameInitializer() {
   const char* user = getenv("USER");
 #endif
   if (user != nullptr) {
-    g_my_user_name = user;
+    name = user;
   } else {
 #if defined(HAVE_PWD_H) && defined(HAVE_UNISTD_H)
     struct passwd pwd;
@@ -414,18 +425,23 @@ static void MyUserNameInitializer() {
     uid_t uid = geteuid();
     int pwuid_res = getpwuid_r(uid, &pwd, buffer, sizeof(buffer), &result);
     if (pwuid_res == 0 && result) {
-      g_my_user_name = pwd.pw_name;
+      name = pwd.pw_name;
     } else {
       std::snprintf(buffer, sizeof(buffer), "uid%d", uid);
-      g_my_user_name = buffer;
+      name = buffer;
     }
 #endif
-    if (g_my_user_name.empty()) {
-      g_my_user_name = "invalid-user";
+    if (name.empty()) {
+      name = "invalid-user";
     }
   }
+  return name;
 }
-REGISTER_MODULE_INITIALIZER(utilities, MyUserNameInitializer())
+
+const string& MyUserName() {
+  static const internal::NoDestructor<string> name{QueryUserName()};
+  return *name;
+}
 
 // We use an atomic operation to prevent problems with calling CrashReason
 // from inside the Mutex implementation (potentially through RAW_CHECK).

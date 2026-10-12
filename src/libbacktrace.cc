@@ -13,7 +13,6 @@
 #  include <cstddef>
 #  include <cstdint>
 #  include <cstdio>
-#  include <mutex>
 
 #  include "ng-log/flags.h"
 #  include "symbolize.h"
@@ -32,27 +31,22 @@ namespace {
 void ErrorCallback(void* /*data*/, const char* /*msg*/, int /*errnum*/) {}
 // LCOV_EXCL_STOP
 
-// GetBacktraceState() must always return the same state: libbacktrace has
-// no documented way to merge or discard one, so creating more than one per
-// process would just mean redundant ELF/DWARF parsing work. std::call_once
-// makes that single-creation guarantee explicit, rather than relying on a
-// function-local static's implicit (and, per frame, re-checked) guard.
-std::once_flag g_backtrace_state_once;
-backtrace_state* g_backtrace_state = nullptr;
-
 }  // namespace
 
+// GetBacktraceState() must always return the same state: libbacktrace has
+// no documented way to merge or discard one, so creating more than one per
+// process would just mean redundant ELF/DWARF parsing work. The language
+// initializes a function-local static exactly once, even if several threads
+// get here concurrently.
 backtrace_state* GetBacktraceState() {
-  std::call_once(g_backtrace_state_once, [] {
-    // A nullptr filename lets libbacktrace locate the running executable
-    // itself (e.g. via /proc/self/exe on Linux). Other loaded modules are
-    // discovered on demand as addresses are looked up. threaded=1 because
-    // Symbolize() may run concurrently from multiple threads (e.g. from
-    // signal handlers on different threads).
-    g_backtrace_state = backtrace_create_state(nullptr, /*threaded=*/1,
-                                               &ErrorCallback, nullptr);
-  });
-  return g_backtrace_state;
+  // A nullptr filename lets libbacktrace locate the running executable
+  // itself (e.g. via /proc/self/exe on Linux). Other loaded modules are
+  // discovered on demand as addresses are looked up. threaded=1 because
+  // Symbolize() may run concurrently from multiple threads (e.g. from
+  // signal handlers on different threads).
+  static backtrace_state* const state =
+      backtrace_create_state(nullptr, /*threaded=*/1, &ErrorCallback, nullptr);
+  return state;
 }
 
 std::size_t FormatLibbacktraceLocation(const char* filename, int lineno,

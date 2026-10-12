@@ -96,9 +96,11 @@ struct CrashReason {
   int line_number{0};
   const char* message{nullptr};
 
+  static constexpr std::size_t kMaxStackDepth = 32;
+
   // We'll also store a bit of stack trace context at the time of crash as
   // it may not be available later on.
-  void* stack[32];
+  void* stack[kMaxStackDepth]{};
   int depth{0};
 };
 

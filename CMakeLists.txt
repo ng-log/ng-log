@@ -590,7 +590,6 @@ set (NGLOG_SRCS
   src/demangle.cc
   src/demangle.h
   src/flags.cc
-  src/initializer.h
   src/internal/attributes.h
   src/internal/checked_arithmetic.h
   src/internal/color_format.cc
@@ -979,6 +978,14 @@ if (BUILD_TESTING AND GTest_FOUND)
     ng-log_test)
   add_test (NAME flags.static_initialization
     COMMAND flags_static_initialization_unittest)
+
+  add_executable (logging_static_initialization_unittest
+    src/logging_static_initialization_unittest.cc
+  )
+  target_link_libraries (logging_static_initialization_unittest PRIVATE
+    ng-log_test)
+  add_test (NAME logging.static_initialization
+    COMMAND logging_static_initialization_unittest)
 
   add_executable (preinit_warning_unittest
     src/preinit_warning_unittest.cc

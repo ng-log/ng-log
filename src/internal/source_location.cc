@@ -15,6 +15,7 @@
 #include <locale>
 
 #include "config.h"
+#include "internal/no_destructor.h"
 #include "internal/utf8.h"
 #include "ng-log/platform.h"
 
@@ -402,7 +403,7 @@ void FormatSymbolizedFrame(const char* symbol, std::size_t symbol_length,
 }
 
 const std::string& CachedHostname() {
-  static const std::string hostname = [] {
+  static const NoDestructor<std::string> hostname{[] {
 #ifdef NGLOG_OS_WINDOWS
     std::string name;
     if (GetComputerNameUtf8(&name)) {
@@ -419,12 +420,12 @@ const std::string& CachedHostname() {
 #else
     return std::string();
 #endif
-  }();
-  return hostname;
+  }()};
+  return *hostname;
 }
 
 const std::string& CachedCwd() {
-  static const std::string cwd = [] {
+  static const NoDestructor<std::string> cwd{[] {
     char buf[512] = "";
 #ifdef NGLOG_OS_WINDOWS
     wchar_t wide_buf[sizeof(buf) / sizeof(buf[0])];
@@ -441,8 +442,8 @@ const std::string& CachedCwd() {
     }
     return std::string(buf);
 #endif
-  }();
-  return cwd;
+  }()};
+  return *cwd;
 }
 
 }  // namespace internal
