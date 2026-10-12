@@ -591,8 +591,27 @@ class LogDestination {
   using LogDestinations =
       std::array<std::unique_ptr<LogDestination>, NUM_SEVERITIES>;
 
+  // Ongoing calls of a sink, in total and per calling thread.
+  struct SinkCalls {
+    size_t count{0};
+    std::unordered_map<std::thread::id, size_t> count_by_thread;
+  };
+
+  // Arbitrary global logging destinations and their ongoing calls.
+  struct Sinks {
+    // Protects the vector "list", but not the LogSink objects its elements
+    // reference.
+    SinkMutex mutex;
+    std::shared_ptr<const vector<LogSink*>> list;
+    // Protects "calls".
+    std::mutex call_mutex;
+    std::condition_variable call_cond;
+    std::unordered_map<LogSink*, SinkCalls> calls;
+  };
+
   static LogDestinations& log_destinations();
   static string& addresses();
+  static Sinks& sinks();
 
   // Restores the file logger of every destination and thereby destroys the
   // loggers supplied through SetLogger(). Registered with std::atexit when the
@@ -602,18 +621,12 @@ class LogDestination {
   // Under log_mutex.
   static bool release_owned_loggers_registered_;
 
+  // Calls made by the current thread itself cannot complete while it waits,
+  // so only the calls of other threads are waited for.
+  static bool OnlyCallsOfCurrentThread(const SinkCalls& calls);
+
   static std::underlying_type_t<LogSeverity> email_logging_severity_;
-
-  // arbitrary global logging destinations.
-  static std::shared_ptr<const vector<LogSink*>> sinks_;
   static std::atomic<bool> sinks_present_;
-
-  // Protects the vector sinks_,
-  // but not the LogSink objects its elements reference.
-  static SinkMutex sink_mutex_;
-  static std::mutex sink_call_mutex_;
-  static std::condition_variable sink_call_cond_;
-  static std::unordered_map<LogSink*, size_t> sink_call_counts_;
 
   // Disallow
   LogDestination(const LogDestination&) = delete;
@@ -624,13 +637,7 @@ class LogDestination {
 std::underlying_type_t<LogSeverity> LogDestination::email_logging_severity_ =
     99999;
 
-std::shared_ptr<const vector<LogSink*>> LogDestination::sinks_;
 std::atomic<bool> LogDestination::sinks_present_{false};
-LogDestination::SinkMutex LogDestination::sink_mutex_;
-std::mutex LogDestination::sink_call_mutex_;
-std::condition_variable LogDestination::sink_call_cond_;
-std::unordered_map<LogSink*, size_t> LogDestination::sink_call_counts_;
-thread_local std::unordered_map<LogSink*, size_t> sink_call_counts_for_thread;
 bool LogDestination::release_owned_loggers_registered_ = false;
 
 /* static */
@@ -643,6 +650,12 @@ LogDestination::LogDestinations& LogDestination::log_destinations() {
 string& LogDestination::addresses() {
   static const internal::NoDestructor<string> addresses;
   return *addresses;
+}
+
+/* static */
+LogDestination::Sinks& LogDestination::sinks() {
+  static const internal::NoDestructor<Sinks> sinks;
+  return *sinks;
 }
 
 /* static */
@@ -734,10 +747,12 @@ inline void LogDestination::SetLogSymlink(LogSeverity severity,
 inline void LogDestination::AddLogSink(LogSink* destination) {
   // Prevent any subtle race conditions by wrapping a mutex lock around
   // all this stuff.
-  SinkLock l{sink_mutex_};
-  std::vector<LogSink*> sinks = sinks_ ? *sinks_ : std::vector<LogSink*>{};
-  sinks.push_back(destination);
-  sinks_ = std::make_shared<const std::vector<LogSink*>>(std::move(sinks));
+  Sinks& state = sinks();
+  SinkLock l{state.mutex};
+  std::vector<LogSink*> list =
+      state.list ? *state.list : std::vector<LogSink*>{};
+  list.push_back(destination);
+  state.list = std::make_shared<const std::vector<LogSink*>>(std::move(list));
   sinks_present_.store(true, std::memory_order_release);
 }
 
@@ -745,14 +760,16 @@ inline void LogDestination::RemoveLogSink(LogSink* destination) {
   // Prevent any subtle race conditions by wrapping a mutex lock around
   // all this stuff.
   {
-    SinkLock l{sink_mutex_};
+    Sinks& state = sinks();
+    SinkLock l{state.mutex};
     // This doesn't keep the sinks in order, but who cares?
-    if (sinks_) {
-      std::vector<LogSink*> sinks = *sinks_;
-      sinks.erase(std::remove(sinks.begin(), sinks.end(), destination),
-                  sinks.end());
-      sinks_ = std::make_shared<const std::vector<LogSink*>>(std::move(sinks));
-      sinks_present_.store(!sinks_->empty(), std::memory_order_release);
+    if (state.list) {
+      std::vector<LogSink*> list = *state.list;
+      list.erase(std::remove(list.begin(), list.end(), destination),
+                 list.end());
+      state.list =
+          std::make_shared<const std::vector<LogSink*>>(std::move(list));
+      sinks_present_.store(!state.list->empty(), std::memory_order_release);
     }
   }
   WaitForSinkCalls(destination);
@@ -1319,71 +1336,67 @@ std::shared_ptr<const std::vector<LogSink*>> LogDestination::GetSinksForCall() {
     return nullptr;
   }
 
-  std::shared_lock<SinkMutex> l{sink_mutex_};
-  const auto sinks = sinks_;
-  if (sinks) {
-    std::lock_guard<std::mutex> call_lock{sink_call_mutex_};
-    for (size_t i = sinks->size(); i-- > 0;) {
-      LogSink* sink = (*sinks)[i];
-      ++sink_call_counts_[sink];
-      ++sink_call_counts_for_thread[sink];
+  Sinks& state = sinks();
+  std::shared_lock<SinkMutex> l{state.mutex};
+  const auto list = state.list;
+  if (list) {
+    const std::thread::id thread_id = std::this_thread::get_id();
+    std::lock_guard<std::mutex> call_lock{state.call_mutex};
+    for (size_t i = list->size(); i-- > 0;) {
+      SinkCalls& calls = state.calls[(*list)[i]];
+      ++calls.count;
+      ++calls.count_by_thread[thread_id];
     }
   }
-  return sinks;
+  return list;
 }
 
 void LogDestination::EndSinkCall(LogSink* sink) {
-  std::lock_guard<std::mutex> l{sink_call_mutex_};
-  auto it = sink_call_counts_.find(sink);
-  CHECK(it != sink_call_counts_.end());
-  CHECK_GT(it->second, 0U);
-  --it->second;
-  auto thread_it = sink_call_counts_for_thread.find(sink);
-  CHECK(thread_it != sink_call_counts_for_thread.end());
+  Sinks& state = sinks();
+  std::lock_guard<std::mutex> l{state.call_mutex};
+  auto it = state.calls.find(sink);
+  CHECK(it != state.calls.end());
+  SinkCalls& calls = it->second;
+  CHECK_GT(calls.count, 0U);
+  --calls.count;
+  auto thread_it = calls.count_by_thread.find(std::this_thread::get_id());
+  CHECK(thread_it != calls.count_by_thread.end());
   CHECK_GT(thread_it->second, 0U);
   --thread_it->second;
   if (thread_it->second == 0) {
-    sink_call_counts_for_thread.erase(thread_it);
+    calls.count_by_thread.erase(thread_it);
   }
-  if (it->second == 0) {
-    sink_call_counts_.erase(it);
+  if (calls.count == 0) {
+    state.calls.erase(it);
   }
-  sink_call_cond_.notify_all();
+  state.call_cond.notify_all();
+}
+
+/* static */
+bool LogDestination::OnlyCallsOfCurrentThread(const SinkCalls& calls) {
+  const auto thread_it = calls.count_by_thread.find(std::this_thread::get_id());
+  const size_t thread_count =
+      thread_it == calls.count_by_thread.end() ? 0 : thread_it->second;
+  return calls.count == thread_count;
 }
 
 void LogDestination::WaitForSinkCalls(LogSink* sink) {
-  std::unique_lock<std::mutex> l{sink_call_mutex_};
-  sink_call_cond_.wait(l, [sink] {
-    const auto global_it = sink_call_counts_.find(sink);
-    const auto thread_it = sink_call_counts_for_thread.find(sink);
-    const size_t thread_count =
-        thread_it == sink_call_counts_for_thread.end() ? 0 : thread_it->second;
-    const size_t global_count =
-        global_it == sink_call_counts_.end() ? 0 : global_it->second;
-    return global_count == thread_count;
+  Sinks& state = sinks();
+  std::unique_lock<std::mutex> l{state.call_mutex};
+  state.call_cond.wait(l, [&state, sink] {
+    const auto it = state.calls.find(sink);
+    return it == state.calls.end() || OnlyCallsOfCurrentThread(it->second);
   });
 }
 
 void LogDestination::WaitForAllSinkCalls() {
-  std::unique_lock<std::mutex> l{sink_call_mutex_};
-  sink_call_cond_.wait(l, [] {
-    for (const auto& entry : sink_call_counts_) {
-      const auto thread_it = sink_call_counts_for_thread.find(entry.first);
-      const size_t thread_count = thread_it == sink_call_counts_for_thread.end()
-                                      ? 0
-                                      : thread_it->second;
-      if (entry.second != thread_count) {
-        return false;
-      }
-    }
-    for (const auto& entry : sink_call_counts_for_thread) {
-      const auto global_it = sink_call_counts_.find(entry.first);
-      if (global_it == sink_call_counts_.end() ||
-          global_it->second != entry.second) {
-        return false;
-      }
-    }
-    return true;
+  Sinks& state = sinks();
+  std::unique_lock<std::mutex> l{state.call_mutex};
+  state.call_cond.wait(l, [&state] {
+    return std::all_of(state.calls.begin(), state.calls.end(),
+                       [](const std::pair<LogSink* const, SinkCalls>& entry) {
+                         return OnlyCallsOfCurrentThread(entry.second);
+                       });
   });
 }
 
@@ -1400,8 +1413,9 @@ void LogDestination::DeleteLogDestinations() {
     log_destination.reset();
   }
   {
-    SinkLock l{sink_mutex_};
-    sinks_.reset();
+    Sinks& state = sinks();
+    SinkLock l{state.mutex};
+    state.list.reset();
     sinks_present_.store(false, std::memory_order_release);
   }
   WaitForAllSinkCalls();

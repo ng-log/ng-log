@@ -6,7 +6,9 @@
 // Logs from a static initializer and from a static destructor. The order
 // relative to the ng-log library is unspecified, so the library must not rely
 // on any of its own variables being dynamically initialized before or
-// destroyed after these calls.
+// destroyed after these calls. Within this translation unit, the sink is
+// defined before the logger and is therefore constructed before and destroyed
+// after it.
 
 #include <atomic>
 #include <chrono>
@@ -21,6 +23,21 @@
 namespace {
 
 constexpr int kVerbosity = 1;
+
+class CountingSink final : public nglog::LogSink {
+ public:
+  void send(nglog::LogSeverity /*severity*/, const char* /*full_filename*/,
+            const char* /*base_filename*/, int /*line*/,
+            const nglog::LogMessageTime& /*time*/, const char* /*message*/,
+            std::size_t /*message_len*/) override {
+    ++count_;
+  }
+
+  int count() const noexcept { return count_; }
+
+ private:
+  std::atomic<int> count_{0};
+};
 
 // Forwards to the logger it replaces and records its own destruction.
 class RecordingLogger final : public nglog::base::Logger {
@@ -51,13 +68,19 @@ void Fail(const char* message) {
   std::_Exit(EXIT_FAILURE);
 }
 
+CountingSink sink;
+
 struct StaticLogger {
   StaticLogger() {
     nglog::SetFlag(FLAGS_v, kVerbosity);
+    nglog::AddLogSink(&sink);
     LOG(INFO) << "static initializer";
     LOG(WARNING) << "static initializer";
     LOG(ERROR) << "static initializer";
     VLOG(kVerbosity) << "static initializer";
+    if (sink.count() != 4) {
+      Fail("the sink did not receive the messages of the static initializer");
+    }
   }
 
   ~StaticLogger() {
@@ -66,11 +89,20 @@ struct StaticLogger {
     if (!g_logger_destroyed) {
       Fail("the logger installed by main was not destroyed");
     }
+    const int before = sink.count();
     LOG(INFO) << "static destructor";
     LOG(WARNING) << "static destructor";
     LOG(ERROR) << "static destructor";
     VLOG(kVerbosity) << "static destructor";
     nglog::FlushLogFiles(NGLOG_INFO);
+    if (sink.count() != before + 4) {
+      Fail("the sink did not receive the messages of the static destructor");
+    }
+    nglog::RemoveLogSink(&sink);
+    LOG(INFO) << "static destructor after removing the sink";
+    if (sink.count() != before + 4) {
+      Fail("the removed sink received a message");
+    }
   }
 };
 
@@ -83,6 +115,7 @@ int main(int /*argc*/, char** argv) {
   nglog::InitializeLogging(argv[0]);
   nglog::base::SetLogger(
       NGLOG_INFO, new RecordingLogger{nglog::base::GetLogger(NGLOG_INFO)});
+  const int before = sink.count();
   LOG(INFO) << "main";
-  return EXIT_SUCCESS;
+  return sink.count() == before + 1 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
