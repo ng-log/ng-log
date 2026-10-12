@@ -173,7 +173,6 @@ bool MailerMarkerExists(const std::string& marker_path) {
 int RunSlowMailerScenario(const char* program, const char* marker_path,
                           const char* log_path) {
   using namespace std::chrono_literals;
-  constexpr auto kMailerStartTimeout = 10s;
   constexpr auto kPollInterval = 10ms;
 
   if (!SetMailerMarkerEnvironment(marker_path)) {
@@ -187,15 +186,10 @@ int RunSlowMailerScenario(const char* program, const char* marker_path,
   SetLogDestination(NGLOG_INFO, log_path);
 
   std::thread mail_logger{[] { LOG(WARNING) << "first email"; }};
-  const auto mailer_start_deadline =
-      std::chrono::steady_clock::now() + kMailerStartTimeout;
-  while (!MailerMarkerExists(marker_path) &&
-         std::chrono::steady_clock::now() < mailer_start_deadline) {
+  // A mailer that never starts surfaces as a hang reported by the CTest
+  // timeout.
+  while (!MailerMarkerExists(marker_path)) {
     std::this_thread::sleep_for(kPollInterval);
-  }
-  if (!MailerMarkerExists(marker_path)) {
-    mail_logger.join();
-    return EXIT_FAILURE;
   }
 
   std::mutex other_log_mutex;
@@ -2652,7 +2646,9 @@ TEST(EmailLogging, MaliciousAddress) {
 #ifdef HAVE_SUBPROCESS
 TEST(EmailLogging, SlowMailerDoesNotBlockOtherLoggingThreads) {
   using namespace std::chrono_literals;
-  constexpr auto kChildTimeout = 4s;
+  // Exceeds the CTest timeout, so that a blocked child is reported by CTest
+  // instead of failing spuriously on overloaded runners.
+  constexpr auto kChildTimeout = 120s;
   constexpr char kExpectedOutput[] = "passed\n";
 
   const std::string marker_path = TestTmpDir() + "/sleeping-mailer.started";
