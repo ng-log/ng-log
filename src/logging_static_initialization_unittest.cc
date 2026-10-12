@@ -23,6 +23,8 @@
 namespace {
 
 constexpr int kVerbosity = 1;
+// Long enough for the cleaner not to remove any log file of a test run.
+constexpr std::chrono::hours kOverdue{24};
 
 class CountingSink final : public nglog::LogSink {
  public:
@@ -74,6 +76,8 @@ struct StaticLogger {
   StaticLogger() {
     nglog::SetFlag(FLAGS_v, kVerbosity);
     nglog::AddLogSink(&sink);
+    // The cleaner thread must be stopped before the process exits.
+    nglog::EnableLogCleaner(kOverdue);
     LOG(INFO) << "static initializer";
     LOG(WARNING) << "static initializer";
     LOG(ERROR) << "static initializer";

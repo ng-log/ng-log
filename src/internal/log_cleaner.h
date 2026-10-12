@@ -25,6 +25,8 @@ enum class LogFilenameSource { kDefault, kSelected };
 class NGLOG_NO_EXPORT LogCleaner {
  public:
   LogCleaner() = default;
+  LogCleaner(const LogCleaner&) = delete;
+  LogCleaner& operator=(const LogCleaner&) = delete;
   ~LogCleaner();
 
   // Setting overdue to 0 days will delete all logs.
@@ -63,6 +65,12 @@ class NGLOG_NO_EXPORT LogCleaner {
   // Stops and joins the cleaner thread.
   void Stop();
 
+  // Stops the cleaner thread of the process for good. Registered with
+  // std::atexit before the thread is started for the first time, so that the
+  // thread is joined before the destruction of the objects with static storage
+  // duration completes.
+  static void StopAtExit();
+
   static void CleanOverdueLogs(
       const std::chrono::system_clock::time_point& current_time,
       const std::chrono::minutes& overdue, const std::string& base_filename,
@@ -82,13 +90,18 @@ class NGLOG_NO_EXPORT LogCleaner {
   CleanerConditionVariable cond_;
   std::thread thread_;
   bool enabled_{false};
+  bool stop_at_exit_registered_{false};
+  bool stopped_at_exit_{false};
   std::chrono::minutes overdue_{
       std::chrono::duration<int, std::ratio<kSecondsInWeek>>{1}};
   // Maintain a separate cleanup deadline for each base_filename.
   std::unordered_map<std::string, LogFilePattern> patterns_;
 };
 
-extern NGLOG_NO_EXPORT LogCleaner g_log_cleaner;
+// Returns the log cleaner of the process. It is never destroyed and can
+// therefore be used from the constructors and destructors of other objects
+// with static storage duration.
+NGLOG_NO_EXPORT LogCleaner& GetLogCleaner();
 
 }  // namespace internal
 }  // namespace nglog

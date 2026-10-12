@@ -22,6 +22,9 @@ SPDX-License-Identifier: BSD-3-Clause
   `nglog::SetFlag`. Flags can be used before `main` and during program
   termination. Options must start with two dashes, and `logfile_mode` is an
   `nglog::FileMode` written in octal
+- Support [logging before `main`](logging.md#logging-before-and-after-main) and
+  during program termination regardless of the initialization order of
+  translation units
 - Remove Bazel build support
 - Prevent concurrent log writers from blocking during memory-drop maintenance
 - Prevent concurrent logfile writes on Windows

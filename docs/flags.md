@@ -121,8 +121,8 @@ linkage of the ng-log library. Declaring one of them again, for example with
 Flags defined with `NGLOG_DEFINE` are initialized by the compiler and never
 destroyed. They can be read and updated from the static initializer or
 destructor of any translation unit, that is, before `main` and during program
-termination. This applies to the flags only. Logging itself is supported only
-while `main` runs. Before the flag is registered, it holds its declared default.
+termination, just like [logging](logging.md#logging-before-and-after-main).
+Before the flag is registered, it holds its declared default.
 The default is determined when the flag is first used or registered, whichever
 comes first, and does not change afterward. The default value expression may be
 evaluated more than once when threads use the flag concurrently for the first

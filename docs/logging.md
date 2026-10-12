@@ -433,6 +433,20 @@ accepting a small error margin. `CHECK_NEAR` accepts a third floating point
 argument, which specifies the acceptable error margin.
 
 
+## Logging Before and After `main`
+
+Messages can be logged from the constructors and destructors of objects with
+static storage duration, that is, before `main` starts and while the program
+terminates. ng-log constructs its state on first use and never destroys it, so
+the order in which the translation units of a program are initialized and
+destroyed does not matter.
+
+Messages logged before `nglog::InitializeLogging` are written to standard error
+instead of log files. A sink added with `nglog::AddLogSink` receives messages until it is
+removed, so remove it before it is destroyed. The thread of the [log
+cleaner](log_cleaner.md) stops once the program returns from `main` or calls
+`std::exit`, and it is not started again afterward.
+
 ## Raw Logging
 
 The header file `<ng-log/raw_logging.h>` can be used for thread-safe logging,

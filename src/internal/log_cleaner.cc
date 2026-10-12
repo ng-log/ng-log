@@ -11,11 +11,13 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <set>
 #include <string>
 #include <utility>
 
 #include "config.h"
+#include "internal/no_destructor.h"
 #include "internal/path.h"
 #include "utilities.h"
 
@@ -89,9 +91,21 @@ bool VisitOverdueLog(const char* filename, std::size_t filename_length,
 
 }  // namespace
 
-NGLOG_NO_EXPORT LogCleaner g_log_cleaner;
+LogCleaner& GetLogCleaner() {
+  static const NoDestructor<LogCleaner> cleaner;
+  return *cleaner;
+}
 
 LogCleaner::~LogCleaner() { Stop(); }
+
+void LogCleaner::StopAtExit() {
+  LogCleaner& cleaner = GetLogCleaner();
+  {
+    std::lock_guard<CleanerMutex> l{cleaner.mutex_};
+    cleaner.stopped_at_exit_ = true;
+  }
+  cleaner.Stop();
+}
 
 void LogCleaner::Stop() {
   std::thread cleaner;
@@ -110,7 +124,13 @@ void LogCleaner::Enable(const std::chrono::minutes& overdue) {
   {
     std::lock_guard<CleanerMutex> l{mutex_};
     overdue_ = overdue;
-    if (!std::exchange(enabled_, true)) {
+    if (!stop_at_exit_registered_) {
+      stop_at_exit_registered_ = std::atexit(&LogCleaner::StopAtExit) == 0;
+    }
+    // Without the exit handler, or once it ran, the logs are only cleaned up
+    // by Disable().
+    if (stop_at_exit_registered_ && !stopped_at_exit_ &&
+        !std::exchange(enabled_, true)) {
       // Logs may have become overdue while the cleaner was disabled: make all
       // known patterns due for an immediate scan.
       for (auto& pattern : patterns_) {

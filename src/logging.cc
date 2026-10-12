@@ -1825,7 +1825,7 @@ void LogFileObject::WriteUnlocked(
 
     // Let the log cleaner know about the naming pattern of the new file so
     // that logs matching it are removed once they become overdue.
-    internal::g_log_cleaner.AddLogFile(
+    internal::GetLogCleaner().AddLogFile(
         filename_source_, base_filename_, filename,
         tools::MakeLogFilenameMatcher(
             tools::const_basename(base_filename_.c_str()), filename_extension_,
@@ -3218,17 +3218,17 @@ void ShutdownLogging() {
 }
 
 void EnableLogCleaner(unsigned int overdue_days) {
-  internal::g_log_cleaner.Enable(
+  internal::GetLogCleaner().Enable(
       std::chrono::duration_cast<std::chrono::minutes>(
           std::chrono::duration<unsigned, std::ratio<kSecondsInDay>>{
               overdue_days}));
 }
 
 void EnableLogCleaner(const std::chrono::minutes& overdue) {
-  internal::g_log_cleaner.Enable(overdue);
+  internal::GetLogCleaner().Enable(overdue);
 }
 
-void DisableLogCleaner() { internal::g_log_cleaner.Disable(); }
+void DisableLogCleaner() { internal::GetLogCleaner().Disable(); }
 
 LogMessageTime::LogMessageTime() = default;
 
