@@ -22,6 +22,17 @@
 #  include "port.h"
 #endif  // defined(NGLOG_OS_WINDOWS)
 
+// Keeps the preceding call from becoming a tail call, so that a recursive test
+// helper keeps one stack frame per level in optimized builds.
+#if defined(__GNUC__)
+#  define NGLOG_BLOCK_TAIL_CALL_OPTIMIZATION() __asm__("")
+#elif defined(_MSC_VER)
+#  include <intrin.h>
+#  define NGLOG_BLOCK_TAIL_CALL_OPTIMIZATION() __nop()
+#else
+#  define NGLOG_BLOCK_TAIL_CALL_OPTIMIZATION() static_cast<void>(0)
+#endif
+
 namespace nglog {
 
 extern int posix_strerror_r(int err, char* buf, size_t len);
@@ -105,6 +116,13 @@ class ScopedStreamCapture final {
 
 // Add hook for operator new to ensure there are no memory allocation.
 extern void (*g_new_hook)();
+
+#if defined(HAVE_STACKTRACE)
+// Whether the unwinder can walk more than kMaxStackDumpFrames frames. Some
+// backends stop early, such as the x86 frame-pointer one in builds with
+// -fomit-frame-pointer, so tests of a cut-off stack dump skip without it.
+bool UnwinderWalksPastMaxStackDumpFrames();
+#endif  // defined(HAVE_STACKTRACE)
 
 }  // namespace nglog
 
