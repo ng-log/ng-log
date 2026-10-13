@@ -15,6 +15,10 @@
 namespace nglog {
 inline namespace tools {
 
+// The most frames a failure stack dump prints, and the most a CrashReason
+// records.
+constexpr int kMaxFrames = 32;
+
 #if defined(HAVE_STACKTRACE)
 
 // This is similar to the GetStackFrames routine, except that it returns

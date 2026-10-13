@@ -57,6 +57,7 @@ using ssize_t = std::ptrdiff_t;
 #include "internal/attributes.h"
 #include "ng-log/log_severity.h"
 #include "ng-log/types.h"
+#include "stacktrace.h"
 
 // There are three different ways we can try to get the stack trace:
 //
@@ -98,7 +99,7 @@ struct CrashReason {
 
   // We'll also store a bit of stack trace context at the time of crash as
   // it may not be available later on.
-  void* stack[32];
+  void* stack[kMaxFrames];
   int depth{0};
 };
 
@@ -265,6 +266,9 @@ constexpr bool operator!=(std::nullptr_t, const FileDescriptor& rhs) noexcept {
 }  // namespace tools
 
 void DumpStackFrameInfo(const char* prefix, void* pc);
+// Writes the line that ends a stack dump cut off at kMaxFrames, to the same
+// sink as DumpStackFrameInfo().
+void DumpMoreStackFramesFollow();
 
 }  // namespace nglog
 
