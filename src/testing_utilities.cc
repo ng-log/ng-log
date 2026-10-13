@@ -368,6 +368,24 @@ bool MungeAndDiffTestStderr(const std::string& golden_filename) {
 
 void (*g_new_hook)() = nullptr;
 
+#if defined(HAVE_STACKTRACE)
+// Recurses `depth` frames, then returns how many frames the unwinder walks,
+// up to kMaxFrames + 1. Using the result after the recursive call keeps it
+// from becoming a tail call or a loop.
+NGLOG_ATTRIBUTE_NOINLINE static int UnwoundDepthAt(int depth) {
+  if (depth > 0) {
+    volatile int result = UnwoundDepthAt(depth - 1);
+    return result;
+  }
+  void* stack[kMaxFrames + 1];
+  return GetStackTrace(stack, ARRAYSIZE(stack), 0);
+}
+
+bool UnwinderWalksPastMaxFrames() {
+  return UnwoundDepthAt(kMaxFrames + 8) > kMaxFrames;
+}
+#endif  // defined(HAVE_STACKTRACE)
+
 }  // namespace nglog
 
 // noinline prevents a -Wmismatched-new-delete false positive: GCC loses

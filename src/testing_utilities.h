@@ -78,6 +78,13 @@ bool MungeAndDiffTestStderr(const std::string& golden_filename);
 // Add hook for operator new to ensure there are no memory allocation.
 extern void (*g_new_hook)();
 
+#if defined(HAVE_STACKTRACE)
+// Whether the unwinder can walk more than kMaxFrames frames. Some backends
+// stop early, such as the x86 frame-pointer one in builds with
+// -fomit-frame-pointer, so tests of a cut-off stack dump skip without it.
+bool UnwinderWalksPastMaxFrames();
+#endif  // defined(HAVE_STACKTRACE)
+
 }  // namespace nglog
 
 #endif  // NGLOG_SRC_TESTING_UTILITIES_H_

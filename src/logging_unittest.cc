@@ -2537,6 +2537,79 @@ TEST(LogBacktraceAt, DoesBacktraceAtRightLineWhenEnabled) {
 }
 #  endif  // HAVE_SYMBOLIZE
 
+// Recurses `depth` frames before capturing the stack trace. Using the result
+// after the recursive call keeps it from becoming a tail call or a loop.
+NGLOG_ATTRIBUTE_NOINLINE static std::string StackTraceAtDepth(int depth) {
+  if (depth > 0) {
+    std::string trace = StackTraceAtDepth(depth - 1);
+    volatile size_t size = trace.size();
+    static_cast<void>(size);
+    return trace;
+  }
+  return GetStackTrace();
+}
+
+TEST(GetStackTrace, SaysWhenMoreFramesFollow) {
+  if (!UnwinderWalksPastMaxFrames()) {
+    GTEST_SKIP() << "the unwinder stops before kMaxFrames";
+  }
+  const std::string trace = StackTraceAtDepth(kMaxFrames + 8);
+  EXPECT_NE(trace.find("(More stack frames follow...)"), string::npos) << trace;
+}
+
+// Assumes the frames below the test body, gtest's and main's, stay under
+// kMaxFrames.
+TEST(GetStackTrace, ShallowTraceIsNotMarkedAsCutOff) {
+  const std::string trace = StackTraceAtDepth(0);
+  EXPECT_EQ(trace.find("(More stack frames follow...)"), string::npos) << trace;
+}
+
+#  ifdef GTEST_HAS_DEATH_TEST
+// Recurses `depth` frames before the fatal LOG. Storing the result in a
+// volatile keeps the recursive call from becoming a tail call or a loop.
+NGLOG_ATTRIBUTE_NOINLINE static int FatalAtDepth(int depth) {
+  if (depth > 0) {
+    volatile int result = FatalAtDepth(depth - 1);
+    return result + 1;
+  }
+  // GCC sees LOG(FATAL) as noreturn and MSVC does not, and both warn that
+  // every path recurses (-Winfinite-recursion, C4717) unless one visibly
+  // returns. The volatile read hides that the condition is always true.
+  static volatile bool die = true;
+  LOG_IF(FATAL, die) << "fatal at depth";
+  return 0;
+}
+
+TEST(LogFatalStackTrace, SaysWhenMoreFramesFollow) {
+  if (!UnwinderWalksPastMaxFrames()) {
+    GTEST_SKIP() << "the unwinder stops before kMaxFrames";
+  }
+  ASSERT_DEATH(FatalAtDepth(kMaxFrames + 8), "More stack frames follow");
+}
+
+#    ifdef HAVE_SYMBOLIZE
+// Tags what the failure writer receives, so that it can be told apart from
+// output written to stderr directly.
+static void WriteTaggedToStderr(const char* data, size_t size) {
+  std::fprintf(stderr, "writer>%.*s", static_cast<int>(size), data);
+}
+
+// With symbolization on, the frames go through the failure writer, so the
+// marker must as well.
+TEST(LogFatalStackTrace, MarkerReachesInstalledFailureWriter) {
+  if (!UnwinderWalksPastMaxFrames()) {
+    GTEST_SKIP() << "the unwinder stops before kMaxFrames";
+  }
+  ASSERT_DEATH(
+      {
+        InstallFailureWriter(&WriteTaggedToStderr);
+        FatalAtDepth(kMaxFrames + 8);
+      },
+      "writer>    \\(More stack frames follow");
+}
+#    endif  // HAVE_SYMBOLIZE
+#  endif    // GTEST_HAS_DEATH_TEST
+
 #endif  // HAVE_STACKTRACE
 
 struct UserDefinedClass {
