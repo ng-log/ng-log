@@ -26,6 +26,8 @@ extern void (*g_logging_fail_func)();
 extern int posix_strerror_r(int err, char* buf, size_t len);
 extern std::string StrError(int err);
 
+//! System temporary directory that other processes modify concurrently.
+const std::string& SystemTmpDir();
 // Directory for temporary test files and the root of the source tree.
 const std::string& TestTmpDir();
 const std::string& TestSrcDir();

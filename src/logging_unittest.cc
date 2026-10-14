@@ -1261,6 +1261,66 @@ TEST(Logging, DeleteFilesAcceptsNoMatches) {
   DeleteFiles(TestTmpDir() + "/nglog-file-that-does-not-exist-*");
 }
 
+#ifndef NGLOG_OS_WINDOWS
+// Other processes create and delete files in the system temporary directory
+// at any time. Emscripten ends a directory listing early when one of its
+// entries vanishes, so test files must not be listed in a shared directory.
+TEST(Logging, ListingIsUnaffectedBySharedTemporaryDirectory) {
+  constexpr int kFillerCount = 128;
+  constexpr int kAttempts = 1000;
+
+  const std::string target = TestTmpDir() + "/listing_target";
+  FileDescriptor target_file{
+      open(target.c_str(), O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR)};
+  ASSERT_TRUE(target_file) << strerror(errno);
+  target_file.reset();
+  const auto remove_target = [&target] { unlink(target.c_str()); };
+  const ScopedExit<decltype(remove_target)> target_cleanup{remove_target};
+
+  std::vector<std::string> fillers;
+  fillers.reserve(kFillerCount);
+  for (int i = 0; i < kFillerCount; ++i) {
+    fillers.push_back(SystemTmpDir() + "/nglog_listing_filler_" +
+                      std::to_string(getpid()) + '_' + std::to_string(i));
+  }
+  const auto remove_fillers = [&fillers] {
+    for (const std::string& filler : fillers) {
+      unlink(filler.c_str());
+    }
+  };
+  const ScopedExit<decltype(remove_fillers)> fillers_cleanup{remove_fillers};
+
+  std::atomic<bool> done{false};
+  std::thread churn{[&done, &fillers] {
+    while (!done.load(std::memory_order_relaxed)) {
+      for (const std::string& filler : fillers) {
+        FileDescriptor{
+            open(filler.c_str(), O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR)};
+      }
+      for (const std::string& filler : fillers) {
+        unlink(filler.c_str());
+      }
+    }
+  }};
+  const auto stop_churn = [&done, &churn] {
+    done.store(true, std::memory_order_relaxed);
+    churn.join();
+  };
+  const ScopedExit<decltype(stop_churn)> churn_cleanup{stop_churn};
+
+  int missed = 0;
+  for (int i = 0; i < kAttempts; ++i) {
+    vector<string> files;
+    GetFiles(target + "*", &files);
+    if (files.size() != 1) {
+      ++missed;
+    }
+  }
+
+  EXPECT_EQ(missed, 0) << "out of " << kAttempts << " listings";
+}
+#endif
+
 // check string is in file (or is *NOT*, depending on optional checkInFileOrNot)
 static void CheckFile(const string& name, const string& expected_string,
                       const bool checkInFileOrNot = true) {
