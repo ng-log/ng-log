@@ -25,6 +25,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cwchar>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -574,15 +575,23 @@ TEST(Addr2LineSymbolizeCallback, DoesNotHangOnAnUnresponsiveAddr2Line) {
 }
 
 TEST(Addr2LineSymbolizeCallback, UsesOneTimeoutForSlowOutput) {
+  constexpr std::chrono::milliseconds kTimeout{40};
+  // The helper never exits and emits a chunk well within kTimeout. A timeout
+  // restarted by every read would therefore keep reading until the output
+  // buffer fills, which takes over a minute. The bound stays far below that
+  // while tolerating long scheduling stalls of a loaded machine.
+  constexpr std::chrono::seconds kMaxElapsed{10};
+
   const std::string dir = MakeScratchDirectory();
   const std::string fake_executable =
-      MakeFakeAddr2Line(dir, ADDR2LINE_FAKE_SLOW_PATH);
+      MakeFakeAddr2Line(dir, ADDR2LINE_FAKE_STREAM_PATH);
 
   {
     ScopedPathOverride scoped_path(dir.c_str());
     const nglog::int32 previous_timeout_ms =
         nglog::GetFlag(FLAGS_addr2line_timeout_ms);
-    nglog::SetFlag(FLAGS_addr2line_timeout_ms, 40);
+    nglog::SetFlag(FLAGS_addr2line_timeout_ms,
+                   static_cast<nglog::int32>(kTimeout.count()));
     EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
 
     char symbol[4096];
@@ -594,8 +603,10 @@ TEST(Addr2LineSymbolizeCallback, UsesOneTimeoutForSlowOutput) {
 
     nglog::SetFlag(FLAGS_addr2line_timeout_ms, previous_timeout_ms);
     EXPECT_FALSE(resolved);
-    EXPECT_GE(elapsed, std::chrono::milliseconds{20});
-    EXPECT_LT(elapsed, std::chrono::milliseconds{160});
+    // Timer granularity and truncation to whole milliseconds can end the
+    // wait slightly before the deadline.
+    EXPECT_GE(elapsed, kTimeout / 2);
+    EXPECT_LT(elapsed, kMaxElapsed);
     InstallSymbolizeCallback(nullptr);
   }
 
@@ -632,14 +643,22 @@ TEST(Addr2LineSymbolizeCallback, KeepsExecutableAfterPathChanges) {
 
   {
     ScopedPathOverride scoped_path(dir.c_str());
+    // The helper must be able to finish however long it is stalled.
+    const nglog::int32 previous_timeout_ms =
+        nglog::GetFlag(FLAGS_addr2line_timeout_ms);
+    nglog::SetFlag(FLAGS_addr2line_timeout_ms,
+                   std::numeric_limits<nglog::int32>::max());
     EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
 
     SetPathEnvironmentVariable("/nonexistent/directory/for/testing");
 
     char symbol[4096] = {};
-    EXPECT_TRUE(ResolveFunctionAndLine(
+    const bool resolved = ResolveFunctionAndLine(
         "missing.exe", reinterpret_cast<void*>(1), 0, symbol, sizeof(symbol),
-        SymbolizeOptions::kNone, nullptr));
+        SymbolizeOptions::kNone, nullptr);
+
+    nglog::SetFlag(FLAGS_addr2line_timeout_ms, previous_timeout_ms);
+    EXPECT_TRUE(resolved);
     EXPECT_STREQ("slow", symbol);
 
     InstallSymbolizeCallback(nullptr);

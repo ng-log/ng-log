@@ -1041,6 +1041,10 @@ if (BUILD_TESTING AND GTest_FOUND)
       src/addr2line_fake_slow.cc
     )
 
+    add_executable (addr2line_fake_stream
+      src/addr2line_fake_stream.cc
+    )
+
     if (MINGW)
       add_executable (addr2line_fake_functions
         src/addr2line_fake_functions.cc
@@ -1062,12 +1066,13 @@ if (BUILD_TESTING AND GTest_FOUND)
 
     target_link_libraries (addr2line_unittest PRIVATE ng-log_test)
     add_dependencies (addr2line_unittest addr2line_fake_hang addr2line_fake_empty
-      addr2line_fake_fail addr2line_fake_slow)
+      addr2line_fake_fail addr2line_fake_slow addr2line_fake_stream)
     target_compile_definitions (addr2line_unittest PRIVATE
       ADDR2LINE_FAKE_HANG_PATH="$<TARGET_FILE:addr2line_fake_hang>"
       ADDR2LINE_FAKE_EMPTY_PATH="$<TARGET_FILE:addr2line_fake_empty>"
       ADDR2LINE_FAKE_FAIL_PATH="$<TARGET_FILE:addr2line_fake_fail>"
-      ADDR2LINE_FAKE_SLOW_PATH="$<TARGET_FILE:addr2line_fake_slow>")
+      ADDR2LINE_FAKE_SLOW_PATH="$<TARGET_FILE:addr2line_fake_slow>"
+      ADDR2LINE_FAKE_STREAM_PATH="$<TARGET_FILE:addr2line_fake_stream>")
 
     if (WIN32)
       # Statically linked so the runtime DLLs of whichever toolchain
@@ -1080,6 +1085,8 @@ if (BUILD_TESTING AND GTest_FOUND)
       target_link_options (addr2line_fake_fail PRIVATE
         -static -static-libgcc -static-libstdc++)
       target_link_options (addr2line_fake_slow PRIVATE
+        -static -static-libgcc -static-libstdc++)
+      target_link_options (addr2line_fake_stream PRIVATE
         -static -static-libgcc -static-libstdc++)
     endif (WIN32)
   endif (HAVE_ADDR2LINE)
