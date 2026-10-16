@@ -418,7 +418,7 @@ struct NGLOG_EXPORT LogMessageTime {
 #define NGLOG_LOG_SEVERITY(severity) NGLOG_LOG_SEVERITY_##severity
 #define NGLOG_LOG_SEVERITY_ENABLED(severity)      \
   (NGLOG_LOG_SEVERITY(severity) == NGLOG_FATAL || \
-   FLAGS_minloglevel <= NGLOG_LOG_SEVERITY(severity))
+   nglog::GetFlag(FLAGS_minloglevel) <= NGLOG_LOG_SEVERITY(severity))
 
 #define NGLOG_LOG_IF(severity, condition) \
   static_cast<void>(0),                   \
@@ -1478,7 +1478,8 @@ NGLOG_EXPORT void SetLogDestination(LogSeverity severity,
 // Set the basename of the symlink to the latest log file at a given
 // severity.  If symlink_basename is empty, do not make a symlink.  If
 // you don't call this function, the symlink basename is the
-// invocation name of the program.  Thread-safe.
+// invocation name of the program.  On Windows, the link is a shell
+// shortcut whose name ends in ".lnk".  Thread-safe.
 //
 NGLOG_EXPORT void SetLogSymlink(LogSeverity severity,
                                 const char* symlink_basename);
@@ -1577,7 +1578,7 @@ NGLOG_EXPORT void ReprintFatalMessage();
 NGLOG_EXPORT void TruncateLogFile(const char* path, uint64 limit, uint64 keep);
 
 // Truncate stdout and stderr if they are over the value specified by
-// --max_log_size; keep the final 1MB.  This function has the same
+// --max_log_size. Keep the final 1 MiB. This function has the same
 // race condition as TruncateLogFile.
 NGLOG_EXPORT void TruncateStdoutStderr();
 
@@ -1699,7 +1700,9 @@ class NGLOG_EXPORT NullStreamFatal : public NullStream {
 // words, stack traces of other threads won't be shown.
 NGLOG_EXPORT void InstallFailureSignalHandler();
 
-// Returns true if FailureSignalHandler is installed.
+// Returns true if InstallFailureSignalHandler() has installed the failure
+// signal handler. Signal dispositions changed afterwards do not affect the
+// result.
 NGLOG_EXPORT bool IsFailureSignalHandlerInstalled();
 
 // Installs a function that is used for writing the failure dump.  "data"

@@ -16,8 +16,8 @@
 #include <iosfwd>
 #include <string>
 
-#include "base/commandlineflags.h"
 #include "config.h"
+#include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "testing_utilities.h"
 
@@ -61,13 +61,15 @@ TEST(StripLog, LogsExpectedSeverities) {
 #endif
 }
 
+#ifdef GTEST_HAS_DEATH_TEST
 TEST(StripLog, FatalIsNotStripped) {
-#if NGLOG_STRIP_LOG <= 3
+#  if NGLOG_STRIP_LOG <= 3
   ASSERT_DEATH(LOG(FATAL) << "fatal log", "fatal log");
-#else
+#  else
   ASSERT_DEATH(LOG(FATAL) << "fatal log", "");
-#endif
+#  endif
 }
+#endif
 
 int main(int argc, char* argv[]) {
 #if defined(_MSC_VER)
@@ -77,7 +79,7 @@ int main(int argc, char* argv[]) {
 #endif  // defined(_MSC_VER)
   std::signal(SIGABRT, handle_abort);
 
-  FLAGS_logtostderr = true;
+  nglog::SetFlag(FLAGS_logtostderr, true);
   InitializeLogging(argv[0]);
   testing::InitGoogleTest(&argc, argv);
   testing::InitGoogleMock(&argc, argv);

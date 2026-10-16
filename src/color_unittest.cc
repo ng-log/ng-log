@@ -16,6 +16,7 @@
 #include "internal/styled_output.h"
 #include "internal/terminal_capabilities.h"
 #include "internal/theme.h"
+#include "internal/utf8.h"
 #include "ng-log/internal/color_spec.h"
 #include "ng-log/internal/hyperlink.h"
 #include "ng-log/logging.h"
@@ -27,11 +28,6 @@
 
 #ifdef NGLOG_OS_EMSCRIPTEN
 #  include <emscripten.h>
-#endif
-
-#ifdef NGLOG_USE_GFLAGS
-#  include <gflags/gflags.h>
-using namespace GFLAGS_NAMESPACE;
 #endif
 
 using namespace nglog;
@@ -48,7 +44,7 @@ using testing::StrEq;
 namespace {
 
 TEST(Flags, SymbolizeFileBasePathIgnoresEnvironment) {
-  EXPECT_THAT(FLAGS_symbolize_file_base_path, IsEmpty());
+  EXPECT_THAT(nglog::GetFlag(FLAGS_symbolize_file_base_path), IsEmpty());
 }
 
 TEST(ShouldColorize, NoColorEnvWins) {
@@ -259,6 +255,14 @@ TEST(Theme, DefaultThemeUsesDistinctThreadNameColor) {
   EXPECT_EQ(theme.Get(Role::kMetaThreadName).foreground, Color::kCyan);
   EXPECT_NE(theme.Get(Role::kMetaThreadName).foreground,
             theme.Get(Role::kMetaIdentifier).foreground);
+}
+
+TEST(Theme, DefaultThemeUsesWhiteModuleHelpRoles) {
+  const Theme& theme = DefaultTheme();
+  EXPECT_EQ(theme.Get(Role::kHelpModuleHeader).foreground, Color::kWhite);
+  EXPECT_EQ(theme.Get(Role::kHelpModuleHeader).style, TextStyle::kNone);
+  EXPECT_EQ(theme.Get(Role::kHelpModuleName).foreground, Color::kWhite);
+  EXPECT_EQ(theme.Get(Role::kHelpModuleName).style, TextStyle::kBold);
 }
 
 TEST(Theme, SetAndGetRoundTrip) {
@@ -622,6 +626,14 @@ TEST(SourceLocation, CachesHostAndWorkingDirectory) {
   EXPECT_EQ(&CachedCwd(), &CachedCwd());
 }
 
+#ifdef NGLOG_OS_WINDOWS
+TEST(SourceLocation, UsesUtf8ComputerName) {
+  std::string expected;
+  ASSERT_TRUE(GetComputerNameUtf8(&expected));
+  EXPECT_EQ(CachedHostname(), expected);
+}
+#endif
+
 TEST(StyledOutput, WritesRawText) {
   WriteRawToStderr("");
   SUCCEED();
@@ -656,8 +668,10 @@ TEST(StreamSupportsColor, StableAcrossRepeatedCalls) {
 
 #ifdef NGLOG_OS_EMSCRIPTEN
 TEST(Emscripten, ReadsNodeEnvironment) {
+  // Do not depend on whether stderr is a terminal.
   EM_ASM({
     process.env.VTE_VERSION = "8401";
+    process.env.CLICOLOR_FORCE = "1";
     delete process.env.NO_COLOR;
   });
   EXPECT_TRUE(StreamSupportsHyperlinks(stderr));
@@ -666,14 +680,31 @@ TEST(Emscripten, ReadsNodeEnvironment) {
 
 struct AppendOnlyFormatter {
   std::string text;
-  void AppendString(const char* str) { text += str; }
+  void AppendString(const char* str, std::size_t length) {
+    text.append(str, length);
+  }
 };
+
+struct LegacyFormatter {
+  std::string text;
+  void AppendString(const char* str) { text.append(str); }
+};
+
+TEST(Hyperlink, SupportsLegacyFormatter) {
+  LegacyFormatter formatter;
+  Hyperlink hyperlink("https://example.com");
+
+  hyperlink.Wrap(formatter, [&formatter] { formatter.AppendString("body"); });
+
+  EXPECT_EQ(formatter.text,
+            "\033]8;;https://example.com\033\\body\033]8;;\033\\");
+}
 
 TEST(WithColor, WrapsBodyWhenEnabled) {
   AppendOnlyFormatter formatter;
   WithColor(formatter,
             ColorSpec{Color::kRed, TextStyle::kNone, Color::kDefault}, true,
-            [&formatter] { formatter.AppendString("x"); });
+            [&formatter] { formatter.AppendString("x", 1); });
   EXPECT_EQ(formatter.text, "\033[31mx\033[0m");
 }
 
@@ -681,14 +712,14 @@ TEST(WithColor, SkipsEscapeCodesWhenDisabled) {
   AppendOnlyFormatter formatter;
   WithColor(formatter,
             ColorSpec{Color::kRed, TextStyle::kNone, Color::kDefault}, false,
-            [&formatter] { formatter.AppendString("x"); });
+            [&formatter] { formatter.AppendString("x", 1); });
   EXPECT_EQ(formatter.text, "x");
 }
 
 TEST(Hyperlink, WrapsBodyWhenUriIsPresent) {
   AppendOnlyFormatter formatter;
   Hyperlink("file:///a").Wrap(formatter, [&formatter] {
-    formatter.AppendString("x");
+    formatter.AppendString("x", 1);
   });
   EXPECT_EQ(formatter.text, "\033]8;;file:///a\033\\x\033]8;;\033\\");
 }
@@ -696,7 +727,7 @@ TEST(Hyperlink, WrapsBodyWhenUriIsPresent) {
 TEST(Hyperlink, SkipsWhenUriIsMissing) {
   AppendOnlyFormatter formatter;
   Hyperlink(nullptr).Wrap(formatter,
-                          [&formatter] { formatter.AppendString("x"); });
+                          [&formatter] { formatter.AppendString("x", 1); });
   EXPECT_EQ(formatter.text, "x");
 }
 
@@ -716,9 +747,8 @@ TEST(Hyperlink, UriReflectsConstructorArguments) {
 int main(int argc, char** argv) {
   InitializeLogging(argv[0]);
   testing::InitGoogleTest(&argc, argv);
-#ifdef NGLOG_USE_GFLAGS
-  ParseCommandLineFlags(&argc, &argv, true);
-#endif
+  nglog::ParseCommandLineFlags(&argc, &argv,
+                               nglog::FlagParsingMode::kRemoveFlags);
 
   return RUN_ALL_TESTS();
 }

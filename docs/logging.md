@@ -50,7 +50,7 @@ determined according to the following rules.
 **Windows**
 
 :   ng-log uses the
-    [GetTempPathA](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-gettemppatha)
+    [GetTempPathW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-gettemppathw)
     API function to retrieve the directory for temporary files with a
     fallback to
 
@@ -58,6 +58,25 @@ determined according to the following rules.
     2.  `C:\TEMP\`
 
     (in the order given.)
+
+    All file and directory path arguments passed to ng-log must be encoded as
+    UTF-8. On Windows, ASCII paths without a namespace prefix that remain
+    shorter than `MAX_PATH` after resolving them against the current directory
+    use narrow C runtime filesystem operations. Other paths use Unicode
+    filesystem APIs. Invalid UTF-8 paths are rejected. Directory enumeration
+    uses Unicode Windows APIs so every entry name can be represented. MSVC users
+    should also review the [compiler character set
+    guidance](windows.md#compiler-character-sets) when non-ASCII filenames
+    appear in source files or narrow string literals. This support requires
+    Windows 8 or Windows Server 2012 or later.
+
+    Log messages also use UTF-8. On Windows, an ASCII fast path writes console
+    output directly to the console handle without converting it to UTF-16.
+    Output containing non-ASCII characters is converted to UTF-16 and written
+    with Unicode console APIs. Redirected output remains UTF-8. Debugger output
+    uses the Unicode debugger API. MSVC users should also review the [compiler
+    character set guidance](windows.md#compiler-character-sets) when non-ASCII
+    text appears in source files or narrow string literals.
 
 **non-Windows**
 
@@ -67,6 +86,16 @@ determined according to the following rules.
     2.  `TMP`
 
     if set with a fallback to `/tmp/`.
+
+On POSIX systems with descriptor-relative filesystem APIs, ng-log supports log
+paths longer than the complete pathname limit reported by `PATH_MAX`. Ordinary
+paths use the direct filesystem operation as a fast path. If that operation
+fails with `ENAMETOOLONG`, ng-log resolves the directory components through
+file descriptors and retries the operation relative to the containing
+directory. Individual path components and symbolic link targets remain subject
+to the limits of the underlying filesystem. Emscripten emulates
+descriptor-relative operations through complete pathnames, so the limit still
+applies there.
 
 The default path to a log file on Linux, for instance, could be
 

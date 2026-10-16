@@ -10,10 +10,10 @@
 
 #  include <backtrace.h>
 
+#  include <cstddef>
 #  include <cstdint>
 #  include <cstdio>
 #  include <mutex>
-#  include <string>
 
 #  include "ng-log/flags.h"
 #  include "symbolize.h"
@@ -75,22 +75,24 @@ std::size_t FormatLibbacktraceLocation(const char* filename, int lineno,
 
 namespace {
 
+// Symbolization runs inside the failure signal handler, so the location is
+// written directly into the caller's buffer instead of being copied into
+// memory that would have to be allocated.
 struct PcInfoContext {
-  std::string filename;
-  int lineno = 0;
-  bool found = false;
+  char* out;
+  std::size_t out_size;
+  std::size_t written;
 };
 
-// Records the innermost (first) location backtrace_pcinfo() reports for a
+// Formats the innermost (first) location backtrace_pcinfo() reports for a
 // pc, and returns non-zero so backtrace_pcinfo() stops there instead of
 // continuing on to any further inlined call frames.
 int PcInfoCallback(void* data, uintptr_t /*pc*/, const char* filename,
                    int lineno, const char* /*function*/) {
   auto* ctx = static_cast<PcInfoContext*>(data);
   if (filename != nullptr) {
-    ctx->filename = filename;
-    ctx->lineno = lineno;
-    ctx->found = true;
+    ctx->written =
+        FormatLibbacktraceLocation(filename, lineno, ctx->out, ctx->out_size);
   }
   return 1;
 }
@@ -104,7 +106,7 @@ int PcInfoCallback(void* data, uintptr_t /*pc*/, const char* filename,
 int LibbacktraceSymbolizeCallback(int /*fd*/, void* pc, char* out,
                                   std::size_t out_size,
                                   uint64_t /*relocation*/) {
-  if (!FLAGS_symbolize_line_info) {
+  if (!nglog::GetFlag(FLAGS_symbolize_line_info)) {
     return 0;
   }
 
@@ -118,16 +120,10 @@ int LibbacktraceSymbolizeCallback(int /*fd*/, void* pc, char* out,
     // LCOV_EXCL_STOP
   }
 
-  PcInfoContext ctx;
+  PcInfoContext ctx{out, out_size, 0};
   backtrace_pcinfo(state, reinterpret_cast<uintptr_t>(pc), &PcInfoCallback,
                    &ErrorCallback, &ctx);
-
-  if (!ctx.found) {
-    return 0;
-  }
-
-  return static_cast<int>(FormatLibbacktraceLocation(
-      ctx.filename.c_str(), ctx.lineno, out, out_size));
+  return static_cast<int>(ctx.written);
 }
 
 }  // namespace

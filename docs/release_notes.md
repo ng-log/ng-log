@@ -16,10 +16,28 @@ SPDX-License-Identifier: BSD-3-Clause
 - [Colorize](flags.md#colorizing-output) log output and crash stack traces on
   a terminal by default, with hyperlinked `file:line` references
 - Remove the glog compatibility layer
+- Replace the optional gflags dependency with a built-in typed
+  [flag registry](flags.md#public-flags-api). `FLAGS_name` is now a
+  synchronized flag object that is read with `nglog::GetFlag` and updated with
+  `nglog::SetFlag`. Flags can be used before `main` and during program
+  termination. Options must start with two dashes, and `logfile_mode` is an
+  `nglog::FileMode` written in octal
 - Remove Bazel build support
 - Prevent concurrent log writers from blocking during memory-drop maintenance
 - Prevent concurrent logfile writes on Windows
 - Make log cleanup work with non-ASCII Windows directories
+- Breaking change: require UTF-8 encoding for all Windows file and directory
+  path arguments
+- Use UTF-8 log messages with Unicode Windows console and debugger output
+- Prevent `TruncateLogFile` from corrupting log files with line breaks on
+  Windows
+- Avoid UTF-16 conversion for ASCII Windows paths shorter than `MAX_PATH`
+  without namespace prefixes and for ASCII console output
+- Support Windows paths longer than `MAX_PATH` without requiring callers to
+  add extended-length path prefixes
+- Support POSIX log paths longer than `PATH_MAX` through descriptor-relative
+  filesystem operations
+- Breaking change: require Windows 8 or Windows Server 2012 or later
 - Omit the default header format when a custom prefix formatter is installed
 - Improve suppressed logging performance by avoiding message construction and
   reduce overhead when formatting default prefixes
@@ -28,6 +46,16 @@ SPDX-License-Identifier: BSD-3-Clause
 - Include the current thread name in failure signal reports when available
 - Use the signal-safe Itanium parser by default and expose complete system
   demangling on demand
+- Create shell shortcuts named `<basename>.<severity>.lnk` that point to the
+  latest log files on Windows, also in the `log_link` directory
+- Support `TruncateStdoutStderr` on Windows when standard output or standard
+  error is redirected to a file
+- Use UTF-8 Windows user names in log file names
+- Look up the user name from the system when the `USER` or `USERNAME`
+  environment variable is empty
+- `IsFailureSignalHandlerInstalled` reports whether
+  `InstallFailureSignalHandler` was called, regardless of later changes to the
+  signal dispositions
 
 !!! warning "Compatibility"
     If your application depends on glog compatibility, use the 0.8.x series.

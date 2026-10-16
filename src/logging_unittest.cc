@@ -7,6 +7,7 @@
 
 #include <fcntl.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -14,10 +15,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cwchar>
 #include <fstream>
-#include <future>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -31,8 +33,12 @@
 #include <vector>
 
 #include "config.h"
+#include "ng-log/platform.h"
 #ifdef HAVE_GLOB_H
 #  include <glob.h>
+#endif
+#ifndef NGLOG_OS_WINDOWS
+#  include <dirent.h>
 #endif
 #include <sys/stat.h>
 #ifdef HAVE_UNISTD_H
@@ -44,16 +50,18 @@
 #ifdef NGLOG_OS_WINDOWS
 #  include <windows.h>
 
+#  include "long_path_test.h"
 #  include "windows/port.h"
 #endif
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include "base/commandlineflags.h"
-#include "internal/flags_scope.h"
 #include "internal/lock_metrics.h"
+#include "internal/path.h"
+#include "internal/utf8.h"
 #include "mock-log.h"
+#include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "ng-log/platform.h"
 #include "ng-log/raw_logging.h"
@@ -63,11 +71,6 @@
 #endif
 #include "testing_utilities.h"
 #include "utilities.h"
-
-#ifdef NGLOG_USE_GFLAGS
-#  include <gflags/gflags.h>
-using namespace GFLAGS_NAMESPACE;
-#endif
 
 #ifdef NGLOG_OS_WINDOWS
 struct WindowsHandleDeleter {
@@ -174,29 +177,23 @@ bool MailerMarkerExists(const std::string& marker_path) {
 int RunSlowMailerScenario(const char* program, const char* marker_path,
                           const char* log_path) {
   using namespace std::chrono_literals;
-  constexpr auto kMailerStartTimeout = 10s;
   constexpr auto kPollInterval = 10ms;
 
   if (!SetMailerMarkerEnvironment(marker_path)) {
     return EXIT_FAILURE;
   }
-  FLAGS_logtostderr = false;
-  FLAGS_logtostdout = false;
-  FLAGS_logmailer = EMAIL_TEST_HELPER_PATH;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+  nglog::SetFlag(FLAGS_logtostdout, false);
+  nglog::SetFlag(FLAGS_logmailer, EMAIL_TEST_HELPER_PATH);
   InitializeLogging(program);
   SetEmailLogging(NGLOG_WARNING, "example@example.com");
   SetLogDestination(NGLOG_INFO, log_path);
 
   std::thread mail_logger{[] { LOG(WARNING) << "first email"; }};
-  const auto mailer_start_deadline =
-      std::chrono::steady_clock::now() + kMailerStartTimeout;
-  while (!MailerMarkerExists(marker_path) &&
-         std::chrono::steady_clock::now() < mailer_start_deadline) {
+  // A mailer that never starts surfaces as a hang reported by the CTest
+  // timeout.
+  while (!MailerMarkerExists(marker_path)) {
     std::this_thread::sleep_for(kPollInterval);
-  }
-  if (!MailerMarkerExists(marker_path)) {
-    mail_logger.join();
-    return EXIT_FAILURE;
   }
 
   std::mutex other_log_mutex;
@@ -224,6 +221,155 @@ int RunSlowMailerScenario(const char* program, const char* marker_path,
   return EXIT_SUCCESS;
 }
 #endif  // HAVE_SUBPROCESS
+
+#ifdef HAVE_POSIX_LONG_PATH_SUPPORT
+class PosixLongPathTestDirectory final {
+ public:
+  PosixLongPathTestDirectory() = default;
+  PosixLongPathTestDirectory(const PosixLongPathTestDirectory&) = delete;
+  PosixLongPathTestDirectory& operator=(const PosixLongPathTestDirectory&) =
+      delete;
+
+  ~PosixLongPathTestDirectory() { Cleanup(); }
+
+  void Cleanup() {
+    if (directory_fds_.empty()) {
+      if (root_created_) {
+        rmdir(root_path_.c_str());
+        root_created_ = false;
+        root_path_.clear();
+      }
+      return;
+    }
+
+    for (const int descriptor : directory_fds_) {
+      fchmod(descriptor, S_IRWXU);
+    }
+
+    const int contents_fd = dup(directory_fds_.back());
+    if (contents_fd != -1) {
+      DIR* directory = fdopendir(contents_fd);
+      if (directory != nullptr) {
+        while (const struct dirent* entry = readdir(directory)) {
+          if (std::strcmp(entry->d_name, ".") != 0 &&
+              std::strcmp(entry->d_name, "..") != 0) {
+            unlinkat(directory_fds_.back(), entry->d_name, 0);
+          }
+        }
+        closedir(directory);
+      } else {
+        close(contents_fd);
+      }
+    }
+
+    for (std::size_t index = directory_fds_.size(); index > 1; --index) {
+      close(directory_fds_[index - 1]);
+      unlinkat(directory_fds_[index - 2], components_[index - 2].c_str(),
+               AT_REMOVEDIR);
+    }
+    close(directory_fds_.front());
+    rmdir(root_path_.c_str());
+    directory_fds_.clear();
+    components_.clear();
+    root_created_ = false;
+    root_path_.clear();
+    path_.clear();
+  }
+
+  bool CreateInTemporaryDirectory(const std::string& name) {
+    return Create(TestTmpDir() + '/' + name);
+  }
+
+  bool CreateInCurrentDirectory(const std::string& name) {
+    return Create(name);
+  }
+
+  const std::string& path() const { return path_; }
+
+  bool MakeSearchOnly() {
+    for (const int descriptor : directory_fds_) {
+      if (fchmod(descriptor, S_IXUSR) != 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  std::string ChildPath(const std::string& name) const {
+    return path_ + '/' + name;
+  }
+
+  std::string ReadChild(const char* name) const {
+    FileDescriptor fd{openat(directory_fds_.back(), name, O_RDONLY)};
+    if (!fd) {
+      return std::string();
+    }
+
+    std::string contents;
+    constexpr std::size_t kBufferLength = 4096;
+    char buffer[kBufferLength];
+    while (true) {
+      const ssize_t length = read(fd.get(), buffer, sizeof(buffer));
+      if (length <= 0) {
+        break;
+      }
+      contents.append(buffer, static_cast<std::size_t>(length));
+    }
+    return contents;
+  }
+
+ private:
+  bool Create(const std::string& root_path) {
+    root_path_ = root_path;
+    if (mkdir(root_path_.c_str(), S_IRWXU) != 0) {
+      return false;
+    }
+    root_created_ = true;
+
+    const int root_fd = open(root_path_.c_str(), O_RDONLY | O_DIRECTORY);
+    if (root_fd == -1) {
+      rmdir(root_path_.c_str());
+      root_created_ = false;
+      root_path_.clear();
+      return false;
+    }
+    directory_fds_.push_back(root_fd);
+    path_ = root_path_;
+
+    constexpr long kDefaultPathLimit = 4096;
+    constexpr std::size_t kPathLengthMargin = 64;
+    const long configured_path_limit =
+        pathconf(root_path_.c_str(), _PC_PATH_MAX);
+    const std::size_t path_limit = static_cast<std::size_t>(
+        configured_path_limit > 0 ? configured_path_limit : kDefaultPathLimit);
+    constexpr char kComponent[] = "long_path_component";
+    while (path_.size() <= path_limit + kPathLengthMargin) {
+      const int parent_fd = directory_fds_.back();
+      if (mkdirat(parent_fd, kComponent, S_IRWXU) != 0) {
+        Cleanup();
+        return false;
+      }
+      const int child_fd =
+          openat(parent_fd, kComponent, O_RDONLY | O_DIRECTORY);
+      if (child_fd == -1) {
+        unlinkat(parent_fd, kComponent, AT_REMOVEDIR);
+        Cleanup();
+        return false;
+      }
+      components_.emplace_back(kComponent);
+      directory_fds_.push_back(child_fd);
+      path_ += '/';
+      path_ += kComponent;
+    }
+    return true;
+  }
+  std::string root_path_;
+  std::string path_;
+  std::vector<std::string> components_;
+  std::vector<int> directory_fds_;
+  bool root_created_ = false;
+};
+#endif
 
 }  // namespace
 
@@ -264,9 +410,9 @@ int main(int argc, char** argv) {
 
   if ((argc == 3 || argc == 4) &&
       std::strcmp(argv[1], "--nglog-log-child") == 0) {
-    FLAGS_colorlogtostderr = false;
-    FLAGS_logtostderr = false;
-    FLAGS_timestamp_in_logfile_name = false;
+    nglog::SetFlag(FLAGS_colorlogtostderr, false);
+    nglog::SetFlag(FLAGS_logtostderr, false);
+    nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
     InitializeLogging(argv[0]);
     SetLogDestination(NGLOG_INFO, argv[2]);
     LOG(INFO) << "message to new base, child - should only appear on STDERR "
@@ -284,8 +430,8 @@ int main(int argc, char** argv) {
   }
 #endif
 
-  FLAGS_colorlogtostderr = false;
-  FLAGS_timestamp_in_logfile_name = true;
+  nglog::SetFlag(FLAGS_colorlogtostderr, false);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, true);
 
   // Make sure stderr is not buffered as stderr seems to be buffered
   // on recent windows.
@@ -293,8 +439,9 @@ int main(int argc, char** argv) {
 
   // Test some basics before InitializeLogging:
   CaptureTestStderr();
-  LogWithLevels(FLAGS_v, FLAGS_stderrthreshold, FLAGS_logtostderr,
-                FLAGS_alsologtostderr);
+  LogWithLevels(nglog::GetFlag(FLAGS_v), nglog::GetFlag(FLAGS_stderrthreshold),
+                nglog::GetFlag(FLAGS_logtostderr),
+                nglog::GetFlag(FLAGS_alsologtostderr));
   LogWithLevels(0, 0, false, false);  // simulate "before global c-tors"
   early_stderr = GetCapturedTestStderr();
 
@@ -308,14 +455,13 @@ int main(int argc, char** argv) {
 
   EXPECT_TRUE(IsLoggingInitialized());
 
-  FLAGS_logtostderr = true;
+  nglog::SetFlag(FLAGS_logtostderr, true);
 
   testing::InitGoogleTest(&argc, argv);
   InitGoogleMock(&argc, argv);
 
-#ifdef NGLOG_USE_GFLAGS
-  ParseCommandLineFlags(&argc, &argv, true);
-#endif
+  nglog::ParseCommandLineFlags(&argc, &argv,
+                               nglog::FlagParsingMode::kRemoveFlags);
 
   // so that death tests run before we use threads
   return RUN_ALL_TESTS();
@@ -387,6 +533,7 @@ struct NewHook {
   ~NewHook() { g_new_hook = nullptr; }
 };
 
+#ifdef GTEST_HAS_DEATH_TEST
 namespace {
 // Keep the allocation in a separate function so the death test exercises the
 // replaceable global operator new on every supported compiler.
@@ -409,12 +556,13 @@ TEST(DeathNoAllocNewHook, logging) {
       },
       "unexpected new");
 }
+#endif
 
 void TestRawLogging() {
   auto foo = std::make_unique<string>("foo ");
   string huge_str(50000, 'a');
 
-  FlagSaver saver;
+  nglog::ScopedFlags<> save;
 
   // Check that RAW logging does not use mallocs.
   NewHook new_hook;
@@ -442,13 +590,13 @@ void TestRawLogging() {
   RAW_LOG(WARNING, "Huge string: %s", huge_str.c_str());
   RAW_VLOG(0, "Huge string: %s", huge_str.c_str());
 
-  FLAGS_v = 0;
+  nglog::SetFlag(FLAGS_v, 0);
   RAW_LOG(INFO, "log");
   RAW_VLOG(0, "vlog 0 on");
   RAW_VLOG(1, "vlog 1 off");
   RAW_VLOG(2, "vlog 2 off");
   RAW_VLOG(3, "vlog 3 off");
-  FLAGS_v = 2;
+  nglog::SetFlag(FLAGS_v, 2);
   RAW_LOG(INFO, "log");
   RAW_VLOG(1, "vlog 1 on");
   RAW_VLOG(2, "vlog 2 on");
@@ -467,12 +615,12 @@ void LogWithLevels(int v, int severity, bool err, bool alsoerr) {
           "Test: v=%d stderrthreshold=%d logtostderr=%d alsologtostderr=%d", v,
           severity, err, alsoerr);
 
-  FlagSaver saver;
+  nglog::ScopedFlags<> save;
 
-  FLAGS_v = v;
-  FLAGS_stderrthreshold = severity;
-  FLAGS_logtostderr = err;
-  FLAGS_alsologtostderr = alsoerr;
+  nglog::SetFlag(FLAGS_v, v);
+  nglog::SetFlag(FLAGS_stderrthreshold, severity);
+  nglog::SetFlag(FLAGS_logtostderr, err);
+  nglog::SetFlag(FLAGS_alsologtostderr, alsoerr);
 
   RAW_VLOG(-1, "vlog -1");
   RAW_VLOG(0, "vlog 0");
@@ -578,12 +726,14 @@ void TestVLogModule() {
 #endif
 }
 
+#ifdef GTEST_HAS_DEATH_TEST
 TEST(DeathRawCHECK, logging) {
   ASSERT_DEATH(RAW_CHECK(false, "failure 1"),
                "RAW: Check false failed: failure 1");
   ASSERT_DEBUG_DEATH(RAW_DCHECK(1 == 2, "failure 2"),
                      "RAW: Check 1 == 2 failed: failure 2");
 }
+#endif
 
 void TestLogString() {
   vector<string> errors;
@@ -644,10 +794,9 @@ class BlockingLogger : public base::Logger {
   void Flush() override {}
   uint32 LogSize() override { return 0; }
 
-  bool WaitUntilEntered() {
+  void WaitUntilEntered() {
     std::unique_lock<std::mutex> lock(mutex_);
-    return condition_.wait_for(lock, std::chrono::seconds(1),
-                               [this] { return entered_; });
+    condition_.wait(lock, [this] { return entered_; });
   }
 
   void Release() {
@@ -667,6 +816,8 @@ class BlockingLogger : public base::Logger {
 
 class ReentrantLogSink : public LogSink {
  public:
+  // Joining the thread deadlocks if a sink registry lock is held during the
+  // callback. CTest reports such a hang by timing out the test.
   void send(LogSeverity /* severity */, const char* /* full_filename */,
             const char* /* base_filename */, int /* line */,
             const LogMessageTime& /* time */, const char* /* message */,
@@ -676,48 +827,15 @@ class ReentrantLogSink : public LogSink {
       return;
     }
 
-    const std::shared_ptr<State> state = state_;
-    std::thread nested_thread([state] {
-      LOG(INFO) << "Nested log from sink callback.";
-      {
-        std::lock_guard<std::mutex> lock(state->mutex);
-        state->nested_finished = true;
-      }
-      state->condition.notify_all();
-    });
-    nested_thread.detach();
-
-    std::unique_lock<std::mutex> lock(state->mutex);
-    const bool nested_completed = state->condition.wait_for(
-        lock, kSinkCallbackTimeout, [state] { return state->nested_finished; });
-    state->nested_completed_during_callback = nested_completed;
-    lock.unlock();
-    state->condition.notify_all();
+    std::thread([] { LOG(INFO) << "Nested log from sink callback."; }).join();
+    nested_completed_ = true;
   }
 
-  bool WaitForNestedCompletion() const {
-    std::unique_lock<std::mutex> lock(state_->mutex);
-    return state_->condition.wait_for(
-        lock, kSinkCallbackTimeout, [this] { return state_->nested_finished; });
-  }
-
-  bool NestedCompletedDuringCallback() const {
-    std::lock_guard<std::mutex> lock(state_->mutex);
-    return state_->nested_completed_during_callback;
-  }
+  bool NestedCompleted() const { return nested_completed_; }
 
  private:
-  static constexpr std::chrono::seconds kSinkCallbackTimeout{1};
-
-  struct State {
-    std::mutex mutex;
-    std::condition_variable condition;
-    bool nested_finished{false};
-    bool nested_completed_during_callback{false};
-  };
-
   std::atomic<bool> nested_started_{false};
-  std::shared_ptr<State> state_{std::make_shared<State>()};
+  std::atomic<bool> nested_completed_{false};
 };
 
 class SelfRemovingLogSink : public LogSink {
@@ -744,8 +862,6 @@ class ReentrantLogger : public base::Logger {
  private:
   bool nested_{false};
 };
-
-constexpr std::chrono::seconds ReentrantLogSink::kSinkCallbackTimeout;
 
 void TestLogSink() {
   TestLogSinkImpl sink;
@@ -786,12 +902,12 @@ TEST(Logging, RegisteredSinkCanLogDuringSend) {
   LOG(INFO) << "Log to registered reentrant sink.";
 
   RemoveLogSink(&sink);
-  EXPECT_TRUE(sink.WaitForNestedCompletion());
-  EXPECT_TRUE(sink.NestedCompletedDuringCallback());
+  EXPECT_TRUE(sink.NestedCompleted());
 }
 
 TEST(Logging, RegisteredSinkCanRemoveItself) {
-#if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H)
+#if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && \
+    defined(GTEST_HAS_DEATH_TEST)
   constexpr unsigned kDeathTestTimeoutSeconds = 2;
   ASSERT_EXIT(
       {
@@ -806,13 +922,14 @@ TEST(Logging, RegisteredSinkCanRemoveItself) {
 }
 
 TEST(Logging, CustomLoggerCanLogDuringWrite) {
-#if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H)
+#if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && \
+    defined(GTEST_HAS_DEATH_TEST)
   constexpr unsigned kDeathTestTimeoutSeconds = 2;
   ASSERT_EXIT(
       {
         alarm(kDeathTestTimeoutSeconds);
-        FLAGS_logtostderr = false;
-        FLAGS_logtostdout = false;
+        nglog::SetFlag(FLAGS_logtostderr, false);
+        nglog::SetFlag(FLAGS_logtostdout, false);
         auto logger = std::make_unique<ReentrantLogger>();
         base::SetLogger(NGLOG_INFO, logger.release());
         LOG(INFO) << "Log through a reentrant custom logger.";
@@ -823,21 +940,20 @@ TEST(Logging, CustomLoggerCanLogDuringWrite) {
 }
 
 TEST(Logging, DirectSinkCanLogDuringSend) {
-  FlagSaver saver;
-  FLAGS_logtostderr = true;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, true);
 
   ReentrantLogSink sink;
   LOG_TO_SINK_BUT_NOT_TO_LOGFILE(&sink, INFO)
       << "Log to direct reentrant sink.";
 
-  EXPECT_TRUE(sink.WaitForNestedCompletion());
-  EXPECT_TRUE(sink.NestedCompletedDuringCallback());
+  EXPECT_TRUE(sink.NestedCompleted());
 }
 
 #ifdef NGLOG_ENABLE_LOCK_METRICS
 TEST(Logging, DirectSinkWithoutRegisteredSinksDoesNotLockSinkRegistry) {
-  FlagSaver saver;
-  FLAGS_logtostderr = true;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, true);
   internal::ResetLockMetrics();
 
   TestLogSinkImpl sink;
@@ -852,8 +968,8 @@ TEST(Logging, DirectSinkWithoutRegisteredSinksDoesNotLockSinkRegistry) {
 }
 
 TEST(Logging, RegisteredSinkDispatchUsesOneRegistrySnapshot) {
-  FlagSaver saver;
-  FLAGS_logtostderr = true;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, true);
   TestLogSinkImpl sink;
   AddLogSink(&sink);
   internal::ResetLockMetrics();
@@ -865,17 +981,38 @@ TEST(Logging, RegisteredSinkDispatchUsesOneRegistrySnapshot) {
   RemoveLogSink(&sink);
   EXPECT_EQ(metrics.acquisitions, 1U);
 }
+
 #endif
+
+class MessageCollectingSink : public LogSink {
+ public:
+  vector<string> messages;
+  void send(LogSeverity /*severity*/, const char* /*full_filename*/,
+            const char* /*base_filename*/, int /*line*/,
+            const LogMessageTime& /*time*/, const char* message,
+            size_t message_len) override {
+    messages.emplace_back(message, message_len);
+  }
+};
+
+TEST(Logging, EmptyMessageWithoutPrefixIsSentAsEmptyMessage) {
+  MessageCollectingSink sink;
+  {
+    LogMessage message(__FILE__, LogMessage::kNoLogPrefix, NGLOG_INFO, &sink,
+                       /*also_send_to_log=*/false);
+  }
+  EXPECT_THAT(sink.messages, testing::ElementsAre(""));
+}
 
 #if defined(NGLOG_OS_LINUX)
 TEST(Logging, ConcurrentFullDiskWrites) {
   constexpr int kFullDiskWriteCount = 100;
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
-  FLAGS_logtostdout = false;
-  FLAGS_log_file_header = false;
-  FLAGS_timestamp_in_logfile_name = false;
-  FLAGS_stop_logging_if_full_disk = true;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+  nglog::SetFlag(FLAGS_logtostdout, false);
+  nglog::SetFlag(FLAGS_log_file_header, false);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
+  nglog::SetFlag(FLAGS_stop_logging_if_full_disk, true);
   SetLogDestination(NGLOG_INFO, "/dev/full");
   SetLogDestination(NGLOG_WARNING, "/dev/full");
 
@@ -923,10 +1060,10 @@ TEST(Logging, ReprintFatalMessageDoesNotColorStderr) {
   ASSERT_EQ(setenv("CLICOLOR_FORCE", "1", 1), 0);
   unsetenv("NO_COLOR");
 
-  auto flags = internal::MakeFlagsScope(
-      internal::MakeFlagsScopePair(FLAGS_logtostderr, true),
-      internal::MakeFlagsScopePair(FLAGS_logtostdout, false),
-      internal::MakeFlagsScopePair(FLAGS_colorlogtostderr, true));
+  auto flags = nglog::MakeScopedFlags(
+      nglog::MakeScopedFlag(FLAGS_logtostderr, true),
+      nglog::MakeScopedFlag(FLAGS_logtostdout, false),
+      nglog::MakeScopedFlag(FLAGS_colorlogtostderr, true));
   const bool previous_exit_on_dfatal = base::internal::GetExitOnDFatal();
   base::internal::SetExitOnDFatal(true);
   auto restore_exit_on_dfatal = [previous_exit_on_dfatal] {
@@ -1040,6 +1177,7 @@ void TestSTREQ() {
   CHECK_STREQ(string("test").c_str(), (string("te") + string("st")).c_str());
 }
 
+#ifdef GTEST_HAS_DEATH_TEST
 TEST(DeathSTREQ, logging) {
   ASSERT_DEATH(CHECK_STREQ(nullptr, "this"), "");
   ASSERT_DEATH(CHECK_STREQ("this", "siht"), "");
@@ -1049,6 +1187,7 @@ TEST(DeathSTREQ, logging) {
   ASSERT_DEATH(CHECK_STRNE("this", "this"), "");
   ASSERT_DEATH(CHECK_STREQ((string("a") + "b").c_str(), "abc"), "");
 }
+#endif
 
 TEST(CheckNOTNULL, Simple) {
   int64 t;
@@ -1061,9 +1200,11 @@ TEST(CheckNOTNULL, Simple) {
   CHECK_NOTNULL(reinterpret_cast<int64*>(ptr));
 }
 
+#ifdef GTEST_HAS_DEATH_TEST
 TEST(DeathCheckNN, Simple) {
   ASSERT_DEATH(CHECK_NOTNULL(static_cast<void*>(nullptr)), "");
 }
+#endif
 
 // Get list of file names that match pattern
 static void GetFiles(const string& pattern, vector<string>* files) {
@@ -1078,8 +1219,11 @@ static void GetFiles(const string& pattern, vector<string>* files) {
     files->push_back(string(g.gl_pathv[i]));
   }
 #elif defined(NGLOG_OS_WINDOWS)
-  WIN32_FIND_DATAA data;
-  WindowsHandle handle{FindFirstFileA(pattern.c_str(), &data)};
+  std::wstring wide_pattern;
+  CHECK(nglog::internal::Utf8ToWide(pattern.data(), pattern.size(),
+                                    &wide_pattern));
+  WIN32_FIND_DATAW data;
+  WindowsHandle handle{FindFirstFileW(wide_pattern.c_str(), &data)};
   size_t index = pattern.rfind('\\');
   if (index == string::npos) {
     LOG(FATAL) << "No directory separator.";
@@ -1090,8 +1234,12 @@ static void GetFiles(const string& pattern, vector<string>* files) {
     return;
   }
   do {
-    files->push_back(dirname + data.cFileName);
-  } while (FindNextFileA(handle.get(), &data));
+    std::string filename;
+    const std::size_t filename_length = std::wcslen(data.cFileName);
+    CHECK(nglog::internal::WideToUtf8(data.cFileName, filename_length,
+                                      &filename));
+    files->push_back(dirname + filename);
+  } while (FindNextFileW(handle.get(), &data));
 #else
 #  error There is no way to do glob.
 #endif
@@ -1109,6 +1257,66 @@ static void DeleteFiles(const string& pattern) {
 TEST(Logging, DeleteFilesAcceptsNoMatches) {
   DeleteFiles(TestTmpDir() + "/nglog-file-that-does-not-exist-*");
 }
+
+#ifndef NGLOG_OS_WINDOWS
+// Other processes create and delete files in the system temporary directory
+// at any time. Emscripten ends a directory listing early when one of its
+// entries vanishes, so test files must not be listed in a shared directory.
+TEST(Logging, ListingIsUnaffectedBySharedTemporaryDirectory) {
+  constexpr int kFillerCount = 128;
+  constexpr int kAttempts = 1000;
+
+  const std::string target = TestTmpDir() + "/listing_target";
+  FileDescriptor target_file{
+      open(target.c_str(), O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR)};
+  ASSERT_TRUE(target_file) << strerror(errno);
+  target_file.reset();
+  const auto remove_target = [&target] { unlink(target.c_str()); };
+  const ScopedExit<decltype(remove_target)> target_cleanup{remove_target};
+
+  std::vector<std::string> fillers;
+  fillers.reserve(kFillerCount);
+  for (int i = 0; i < kFillerCount; ++i) {
+    fillers.push_back(SystemTmpDir() + "/nglog_listing_filler_" +
+                      std::to_string(getpid()) + '_' + std::to_string(i));
+  }
+  const auto remove_fillers = [&fillers] {
+    for (const std::string& filler : fillers) {
+      unlink(filler.c_str());
+    }
+  };
+  const ScopedExit<decltype(remove_fillers)> fillers_cleanup{remove_fillers};
+
+  std::atomic<bool> done{false};
+  std::thread churn{[&done, &fillers] {
+    while (!done.load(std::memory_order_relaxed)) {
+      for (const std::string& filler : fillers) {
+        FileDescriptor{
+            open(filler.c_str(), O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR)};
+      }
+      for (const std::string& filler : fillers) {
+        unlink(filler.c_str());
+      }
+    }
+  }};
+  const auto stop_churn = [&done, &churn] {
+    done.store(true, std::memory_order_relaxed);
+    churn.join();
+  };
+  const ScopedExit<decltype(stop_churn)> churn_cleanup{stop_churn};
+
+  int missed = 0;
+  for (int i = 0; i < kAttempts; ++i) {
+    vector<string> files;
+    GetFiles(target + "*", &files);
+    if (files.size() != 1) {
+      ++missed;
+    }
+  }
+
+  EXPECT_EQ(missed, 0) << "out of " << kAttempts << " listings";
+}
+#endif
 
 // check string is in file (or is *NOT*, depending on optional checkInFileOrNot)
 static void CheckFile(const string& name, const string& expected_string,
@@ -1145,48 +1353,46 @@ static void CheckNotInFile(const string& name, const string& unexpected) {
       << ": found " << unexpected << " in " << files[0];
 }
 
-TEST(FlagsScope, RestoresFlags) {
-  bool bool_flag = false;
-  std::string string_flag = "old";
+TEST(ScopedFlags, MoveTransfersRestoration) {
+  const bool original = nglog::GetFlag(FLAGS_logtostderr);
 
   {
-    auto flags = internal::MakeFlagsScope(
-        internal::MakeFlagsScopePair(bool_flag, true),
-        internal::MakeFlagsScopePair(string_flag, "new"));
-    EXPECT_TRUE(bool_flag);
-    EXPECT_EQ(string_flag, "new");
+    auto save = nglog::MakeScopedFlags(
+        nglog::MakeScopedFlag(FLAGS_logtostderr, !original));
+    auto moved_save = std::move(save);
+    EXPECT_EQ(!original, nglog::GetFlag(FLAGS_logtostderr));
   }
 
-  EXPECT_FALSE(bool_flag);
-  EXPECT_EQ(string_flag, "old");
+  EXPECT_EQ(original, nglog::GetFlag(FLAGS_logtostderr));
 }
 
-TEST(FlagsScope, MoveTransfersRestoration) {
-  int flag = 1;
+TEST(ScopedFlags, EmptyScopeRestoresAllFlags) {
+  const bool original = nglog::GetFlag(FLAGS_logtostderr);
 
   {
-    auto flags =
-        internal::MakeFlagsScope(internal::MakeFlagsScopePair(flag, 2));
-    auto moved_flags = std::move(flags);
-    EXPECT_EQ(flag, 2);
+    nglog::ScopedFlags<> save;
+    nglog::SetFlag(FLAGS_logtostderr, !original);
+    EXPECT_EQ(!original, nglog::GetFlag(FLAGS_logtostderr));
   }
 
-  EXPECT_EQ(flag, 1);
+  EXPECT_EQ(original, nglog::GetFlag(FLAGS_logtostderr));
 }
 
 TEST(Logging, MaxLogSizeWhenNoTimestamp) {
   // SetLogDestination() is a no-op while FLAGS_logtostderr is true.
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
   fprintf(stderr, "==== Test setting max log size without timestamp\n");
   const string dest = TestTmpDir() + "/logging_test_max_log_size";
   DeleteFiles(dest + "*");
 
   // Set max log size to 1MB.
-  auto original_max_log_size = std::exchange(FLAGS_max_log_size, 1);
-  auto original_timestamp_in_logfile_name =
-      std::exchange(FLAGS_timestamp_in_logfile_name, false);
+  const auto original_max_log_size = nglog::GetFlag(FLAGS_max_log_size);
+  nglog::SetFlag(FLAGS_max_log_size, 1U);
+  const auto original_timestamp_in_logfile_name =
+      nglog::GetFlag(FLAGS_timestamp_in_logfile_name);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
 
   // Set log destination
   SetLogDestination(NGLOG_INFO, dest.c_str());
@@ -1213,19 +1419,20 @@ TEST(Logging, MaxLogSizeWhenNoTimestamp) {
 
   // Verify file size is less than the max log size limit
   CHECK_LT(static_cast<std::size_t>(statbuf.st_size),
-           FLAGS_max_log_size << 20U);
+           nglog::GetFlag(FLAGS_max_log_size) << 20U);
 
   // Reset flag values to their original values
-  FLAGS_max_log_size = original_max_log_size;
-  FLAGS_timestamp_in_logfile_name = original_timestamp_in_logfile_name;
+  nglog::SetFlag(FLAGS_max_log_size, original_max_log_size);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name,
+                 original_timestamp_in_logfile_name);
 
   DeleteFiles(dest + "*");
 }
 
 TEST(Logging, MaxLogSizeAboveCapNotFlooredToMinimum) {
   // SetLogDestination() is a no-op while FLAGS_logtostderr is true.
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
   fprintf(stderr,
           "==== Test max log size above the cap is not floored to 1MB\n");
@@ -1235,14 +1442,15 @@ TEST(Logging, MaxLogSizeAboveCapNotFlooredToMinimum) {
   const string dest = TestTmpDir() + "/logging_test_uncapped_max_log_size";
   DeleteFiles(dest + "*");
 
-  auto original_max_log_size = FLAGS_max_log_size;
-  auto original_timestamp_in_logfile_name = FLAGS_timestamp_in_logfile_name;
+  const auto original_max_log_size = nglog::GetFlag(FLAGS_max_log_size);
+  const auto original_timestamp_in_logfile_name =
+      nglog::GetFlag(FLAGS_timestamp_in_logfile_name);
 
   // A value larger than the 4095MB cap used to be clamped to the 1MB minimum,
   // which would rotate the file after ~1MB. It must instead be capped to the
   // maximum, so the file is allowed to grow past 1MB without rotating.
-  FLAGS_max_log_size = 8000;
-  FLAGS_timestamp_in_logfile_name = false;
+  nglog::SetFlag(FLAGS_max_log_size, 8000U);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
 
   SetLogDestination(NGLOG_INFO, dest.c_str());
 
@@ -1267,15 +1475,16 @@ TEST(Logging, MaxLogSizeAboveCapNotFlooredToMinimum) {
   // No rotation at 1MB should have happened, so the file exceeds 1MB.
   CHECK_GT(static_cast<std::size_t>(statbuf.st_size), 1U << 20U);
 
-  FLAGS_max_log_size = original_max_log_size;
-  FLAGS_timestamp_in_logfile_name = original_timestamp_in_logfile_name;
+  nglog::SetFlag(FLAGS_max_log_size, original_max_log_size);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name,
+                 original_timestamp_in_logfile_name);
 
   DeleteFiles(dest + "*");
 }
 
 TEST(Logging, Basename) {
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
   fprintf(stderr, "==== Test setting log file basename\n");
   const string dest = TestTmpDir() + "/logging_test_basename";
@@ -1292,9 +1501,108 @@ TEST(Logging, Basename) {
   DeleteFiles(dest + "*");
 }
 
+#ifdef HAVE_POSIX_LONG_PATH_SUPPORT
+TEST(Logging, LongPosixPath) {
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
+
+  PosixLongPathTestDirectory directory;
+  const std::string directory_name =
+      "nglog_posix_long_path_" + std::to_string(getpid());
+  ASSERT_TRUE(directory.CreateInTemporaryDirectory(directory_name));
+  constexpr char kFilename[] = "logging_test_long_path";
+  const std::string destination = directory.ChildPath(kFilename);
+
+  SetLogDestination(NGLOG_INFO, destination.c_str());
+  LOG(INFO) << "message in long POSIX path";
+  FlushLogFiles(NGLOG_INFO);
+  LogToStderr();
+
+  EXPECT_THAT(directory.ReadChild(kFilename),
+              HasSubstr("message in long POSIX path"));
+}
+
+TEST(PosixPathOperations, LongRelativePath) {
+  PosixLongPathTestDirectory directory;
+  const std::string directory_name =
+      "nglog_posix_path_operations_" + std::to_string(getpid());
+  ASSERT_TRUE(directory.CreateInCurrentDirectory(directory_name));
+
+  constexpr char kFilename[] = "path_operations_file";
+  constexpr char kLinkName[] = "path_operations_link";
+  constexpr char kContents[] = "long path contents";
+  const std::string filename = directory.ChildPath(kFilename);
+  const std::string link_path = directory.ChildPath(kLinkName);
+  constexpr int kFileMode = S_IRUSR | S_IWUSR;
+  FileDescriptor fd{internal::OpenPosixPath(
+      filename, O_CREAT | O_WRONLY | O_TRUNC, kFileMode)};
+  ASSERT_TRUE(fd);
+  ASSERT_EQ(write(fd.get(), kContents, sizeof(kContents) - 1),
+            static_cast<ssize_t>(sizeof(kContents) - 1));
+  fd.reset();
+
+  struct stat status;
+  ASSERT_EQ(internal::StatPosixPath(filename, &status), 0);
+  EXPECT_EQ(status.st_size, static_cast<off_t>(sizeof(kContents) - 1));
+  EXPECT_EQ(internal::AccessPosixPath(filename, F_OK), 0);
+
+  std::vector<std::string> entries;
+  ASSERT_TRUE(internal::ListPosixDirectory(directory.path(), &entries));
+  EXPECT_THAT(entries, ::testing::Contains(kFilename));
+  EXPECT_THAT(entries, ::testing::Not(::testing::Contains(".")));
+  EXPECT_THAT(entries, ::testing::Not(::testing::Contains("..")));
+
+  ASSERT_EQ(
+      internal::SymlinkPosixPath(kFilename, sizeof(kFilename) - 1, link_path),
+      0);
+  ASSERT_EQ(internal::StatPosixPath(link_path, &status), 0);
+  EXPECT_EQ(status.st_size, static_cast<off_t>(sizeof(kContents) - 1));
+
+  ASSERT_EQ(internal::TruncatePosixPath(filename), 0);
+  ASSERT_EQ(internal::StatPosixPath(filename, &status), 0);
+  EXPECT_EQ(status.st_size, 0);
+
+  EXPECT_EQ(internal::UnlinkPosixPath(link_path), 0);
+  EXPECT_EQ(internal::UnlinkPosixPath(filename), 0);
+
+  std::string invalid_path = directory.ChildPath("invalid");
+  invalid_path.push_back('\0');
+  invalid_path += "suffix";
+  errno = 0;
+  EXPECT_EQ(internal::OpenPosixPath(invalid_path, O_RDONLY, 0), -1);
+  EXPECT_EQ(errno, EINVAL);
+}
+#endif
+
+TEST(Logging, LogfileMode) {
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+
+#ifdef NGLOG_OS_WINDOWS
+  constexpr std::uint32_t kLogfileMode = _S_IREAD | _S_IWRITE;
+#else
+  constexpr std::uint32_t kLogfileMode = S_IRUSR | S_IWUSR;
+#endif
+  nglog::SetFlag(FLAGS_logfile_mode, nglog::FileMode{kLogfileMode});
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
+
+  const string dest = TestTmpDir() + "/logging_test_file_mode";
+  DeleteFiles(dest + "*");
+
+  SetLogDestination(NGLOG_INFO, dest.c_str());
+  LOG(INFO) << "message with configured logfile mode";
+  FlushLogFiles(NGLOG_INFO);
+
+  CheckFile(dest, "message with configured logfile mode");
+
+  LogToStderr();
+  DeleteFiles(dest + "*");
+}
+
 TEST(Logging, BasenameAppendWhenNoTimestamp) {
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
   fprintf(stderr,
           "==== Test setting log file basename without timestamp and appending "
@@ -1309,11 +1617,11 @@ TEST(Logging, BasenameAppendWhenNoTimestamp) {
 
   CheckFile(dest, "test preexisting content");
 
-  FLAGS_timestamp_in_logfile_name = false;
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
   SetLogDestination(NGLOG_INFO, dest.c_str());
   LOG(INFO) << "message to new base, appending to preexisting file";
   FlushLogFiles(NGLOG_INFO);
-  FLAGS_timestamp_in_logfile_name = true;
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, true);
 
   // if the logging overwrites the file instead of appending it will fail.
   CheckFile(dest, "test preexisting content");
@@ -1326,15 +1634,16 @@ TEST(Logging, BasenameAppendWhenNoTimestamp) {
 
 TEST(Logging, HeaderFormatLineWithCustomPrefixFormatter) {
   // SetLogDestination() is a no-op while FLAGS_logtostderr is true.
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
   fprintf(stderr, "==== Test log file header format line\n");
   const string dest = TestTmpDir() + "/logging_test_header_format_line";
   DeleteFiles(dest + "*");
 
-  const bool saved_timestamp_in_logfile_name = FLAGS_timestamp_in_logfile_name;
-  FLAGS_timestamp_in_logfile_name = false;
+  const bool saved_timestamp_in_logfile_name =
+      nglog::GetFlag(FLAGS_timestamp_in_logfile_name);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
 
   // A custom prefix formatter is installed (see main). It determines the
   // actual log line format, so the header must not advertise the default
@@ -1361,7 +1670,8 @@ TEST(Logging, HeaderFormatLineWithCustomPrefixFormatter) {
   static string prefix_attacher_data = "good data";
   InstallPrefixFormatter(&PrefixAttacher, &prefix_attacher_data);
 
-  FLAGS_timestamp_in_logfile_name = saved_timestamp_in_logfile_name;
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name,
+                 saved_timestamp_in_logfile_name);
 
   // Release file handle for the destination file to unlock the file in Windows.
   LogToStderr();
@@ -1369,10 +1679,11 @@ TEST(Logging, HeaderFormatLineWithCustomPrefixFormatter) {
 }
 
 TEST(Logging, TwoProcessesWrite) {
-// The implementation relies on advisory file locking.
-#if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && defined(HAVE_FCNTL)
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+// The implementation relies on advisory file locking. Emscripten cannot fork.
+#if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && \
+    defined(HAVE_FCNTL) && !defined(NGLOG_OS_EMSCRIPTEN)
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
   fprintf(stderr,
           "==== Test setting log file basename and two processes writing - "
@@ -1382,7 +1693,7 @@ TEST(Logging, TwoProcessesWrite) {
   DeleteFiles(dest + "*");
 
   // make both processes write into the same file (easier test)
-  FLAGS_timestamp_in_logfile_name = false;
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
   SetLogDestination(NGLOG_INFO, dest.c_str());
   LOG(INFO) << "message to new base, parent";
   FlushLogFiles(NGLOG_INFO);
@@ -1406,7 +1717,7 @@ TEST(Logging, TwoProcessesWrite) {
   EXPECT_FALSE(std::getline(stderr_stream, extra_line));
   EXPECT_THAT(error_line,
               testing::ContainsRegex("^Could not create log file '[^']+': "));
-  FLAGS_timestamp_in_logfile_name = true;
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, true);
 
   CheckFile(dest, "message to new base, parent");
   CheckFile(dest,
@@ -1418,8 +1729,8 @@ TEST(Logging, TwoProcessesWrite) {
   LogToStderr();
   DeleteFiles(dest + "*");
 #elif defined(NGLOG_OS_WINDOWS)
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
   fprintf(stderr,
           "==== Test setting log file basename and two processes writing - "
@@ -1428,7 +1739,7 @@ TEST(Logging, TwoProcessesWrite) {
       TestTmpDir() + "/logging_test_basename_two_processes_writing";
   DeleteFiles(dest + "*");
 
-  FLAGS_timestamp_in_logfile_name = false;
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
   SetLogDestination(NGLOG_INFO, dest.c_str());
   LOG(INFO) << "message to new base, parent";
   FlushLogFiles(NGLOG_INFO);
@@ -1455,7 +1766,7 @@ TEST(Logging, TwoProcessesWrite) {
   EXPECT_TRUE(GetExitCodeProcess(process_handle.get(), &exit_code));
   EXPECT_EQ(exit_code, 0U);
 
-  FLAGS_timestamp_in_logfile_name = true;
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, true);
   CheckFile(dest, "message to new base, parent");
   CheckFile(dest,
             "message to new base, child - should only appear on STDERR not on "
@@ -1469,15 +1780,15 @@ TEST(Logging, TwoProcessesWrite) {
 
 TEST(Logging, FileLockIsHeldAcrossProcesses) {
 #ifdef NGLOG_OS_WINDOWS
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
   const std::string dest =
       TestTmpDir() + "/logging_test_file_lock_across_processes";
   const std::string ready = dest + ".ready";
   DeleteFiles(dest + "*");
 
-  FLAGS_timestamp_in_logfile_name = false;
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
   SetLogDestination(NGLOG_INFO, dest.c_str());
 
   std::string command = '"' + std::string(g_argv0) + "\" --nglog-log-child \"" +
@@ -1530,7 +1841,7 @@ TEST(Logging, FileLockIsHeldAcrossProcesses) {
   EXPECT_EQ(WaitForSingleObject(process_handle.get(), kReadyWaitMilliseconds),
             WAIT_OBJECT_0);
 
-  FLAGS_timestamp_in_logfile_name = true;
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, true);
   file_handle.reset();
   LogToStderr();
   DeleteFiles(dest + "*");
@@ -1539,11 +1850,10 @@ TEST(Logging, FileLockIsHeldAcrossProcesses) {
 
 TEST(Logging, LockedOversizedFileIsNotTruncated) {
 #ifdef NGLOG_OS_WINDOWS
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
-  auto flags = internal::MakeFlagsScope(
-      internal::MakeFlagsScopePair(FLAGS_timestamp_in_logfile_name, false),
-      internal::MakeFlagsScopePair(FLAGS_max_log_size, 1U));
+  auto save = nglog::MakeScopedFlags(
+      nglog::MakeScopedFlag(FLAGS_logtostderr, false),
+      nglog::MakeScopedFlag(FLAGS_timestamp_in_logfile_name, false),
+      nglog::MakeScopedFlag(FLAGS_max_log_size, 1U));
 
   const std::string dest = TestTmpDir() + "/logging_test_locked_oversized_file";
   const std::string ready = dest + ".ready";
@@ -1615,10 +1925,9 @@ TEST(Logging, LogFileIsNotInheritedByChildProcesses) {
   using namespace std::chrono_literals;
   constexpr auto kChildTimeout = 10s;
 
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
-  auto flags = internal::MakeFlagsScope(
-      internal::MakeFlagsScopePair(FLAGS_timestamp_in_logfile_name, false));
+  nglog::ScopedFlags<> saver;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
 
   const std::string dest = TestTmpDir() + "/logging_test_uninherited_file";
   DeleteFiles(dest + "*");
@@ -1654,10 +1963,9 @@ TEST(Logging, LogFileIsNotInheritedByChildProcesses) {
 
 TEST(Logging, FileLockFailureReportsWindowsError) {
 #ifdef NGLOG_OS_WINDOWS
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
-  auto flags = internal::MakeFlagsScope(
-      internal::MakeFlagsScopePair(FLAGS_timestamp_in_logfile_name, false));
+  auto save = nglog::MakeScopedFlags(
+      nglog::MakeScopedFlag(FLAGS_logtostderr, false),
+      nglog::MakeScopedFlag(FLAGS_timestamp_in_logfile_name, false));
 
   const std::string dest = TestTmpDir() + "/logging_test_lock_error";
   const std::string ready = dest + ".ready";
@@ -1718,10 +2026,50 @@ TEST(Logging, FileLockFailureReportsWindowsError) {
 }
 
 TEST(Logging, Symlink) {
-#ifndef NGLOG_OS_WINDOWS
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
+#ifdef NGLOG_OS_WINDOWS
+  fprintf(stderr, "==== Test setting Windows log file shortcut\n");
+  const string dest = TestTmpDir() + "\\logging_test_shortcut";
+  const string sym = TestTmpDir() + "\\symlinkbase";
+  const string link_dir = TestTmpDir() + "\\logging_links";
+  const string shortcut = sym + ".INFO.lnk";
+  const string external_shortcut = link_dir + "\\symlinkbase.INFO.lnk";
+  ASSERT_TRUE(CreateDirectoryA(link_dir.c_str(), nullptr) ||
+              GetLastError() == ERROR_ALREADY_EXISTS);
+  DeleteFiles(dest + "*");
+  ASSERT_TRUE(DeleteFileA(shortcut.c_str()) ||
+              GetLastError() == ERROR_FILE_NOT_FOUND);
+  ASSERT_TRUE(DeleteFileA(external_shortcut.c_str()) ||
+              GetLastError() == ERROR_FILE_NOT_FOUND);
+
+  nglog::SetFlag(FLAGS_log_link, link_dir);
+  SetLogSymlink(NGLOG_INFO, "symlinkbase");
+  SetLogDestination(NGLOG_INFO, dest.c_str());
+  LOG(INFO) << "message to new shortcut";
+  FlushLogFiles(NGLOG_INFO);
+
+  for (const string& path : {shortcut, external_shortcut}) {
+    std::ifstream file(path, std::ios::binary);
+    ASSERT_TRUE(file.is_open()) << path;
+    unsigned char header[4] = {};
+    file.read(reinterpret_cast<char*>(header), sizeof(header));
+    ASSERT_EQ(file.gcount(), static_cast<std::streamsize>(sizeof(header)));
+    EXPECT_EQ(header[0], 0x4c);
+    EXPECT_EQ(header[1], 0x00);
+    EXPECT_EQ(header[2], 0x00);
+    EXPECT_EQ(header[3], 0x00);
+  }
+
+  LogToStderr();
+  DeleteFiles(dest + "*");
+  ASSERT_TRUE(DeleteFileA(shortcut.c_str()) ||
+              GetLastError() == ERROR_FILE_NOT_FOUND);
+  ASSERT_TRUE(DeleteFileA(external_shortcut.c_str()) ||
+              GetLastError() == ERROR_FILE_NOT_FOUND);
+  ASSERT_TRUE(RemoveDirectoryA(link_dir.c_str()));
+#else
   fprintf(stderr, "==== Test setting log file symlink\n");
   string dest = TestTmpDir() + "/logging_test_symlink";
   string sym = TestTmpDir() + "/symlinkbase";
@@ -1742,8 +2090,8 @@ TEST(Logging, Symlink) {
 }
 
 TEST(Logging, Extension) {
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
   fprintf(stderr, "==== Test setting log file extension\n");
   string dest = TestTmpDir() + "/logging_test_extension";
@@ -1765,6 +2113,186 @@ TEST(Logging, Extension) {
   LogToStderr();
   DeleteFiles(dest + "*");
 }
+
+TEST(Logging, WritesToLongPath) {
+#ifdef NGLOG_OS_WINDOWS
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
+
+  nglog::testing_internal::LongPathTestDirectory directory;
+  const std::string directory_name =
+      "nglog_logging_long_path_" + std::to_string(_getpid());
+  ASSERT_TRUE(directory.CreateInTemporaryDirectory(directory_name));
+  const std::string path = directory.ChildPath("logging_test");
+
+  SetLogDestination(NGLOG_INFO, path.c_str());
+  LOG(INFO) << "message written through a long path";
+  FlushLogFiles(NGLOG_INFO);
+  LogToStderr();
+
+  struct stat file_status = {};
+  ASSERT_EQ(nglog::internal::StatUtf8(path.data(), path.size(), &file_status),
+            0);
+  EXPECT_GT(file_status.st_size, 0);
+  EXPECT_EQ(nglog::internal::UnlinkUtf8(path.data(), path.size()), 0);
+#else
+  GTEST_SKIP() << "Requires Windows";
+#endif
+}
+
+TEST(Logging, TruncatesLongPath) {
+#if defined(NGLOG_OS_WINDOWS) && defined(HAVE__CHSIZE_S)
+  nglog::testing_internal::LongPathTestDirectory directory;
+  const std::string directory_name =
+      "nglog_truncate_long_path_" + std::to_string(_getpid());
+  ASSERT_TRUE(directory.CreateInTemporaryDirectory(directory_name));
+  const std::string path = directory.ChildPath("truncate_test");
+
+  const int file_descriptor = nglog::internal::OpenUtf8(
+      path.data(), path.size(), O_RDWR | O_CREAT | O_TRUNC | O_BINARY,
+      _S_IREAD | _S_IWRITE);
+  ASSERT_NE(file_descriptor, -1);
+  constexpr char kContents[] = "discardkeep";
+  ASSERT_EQ(_write(file_descriptor, kContents, sizeof(kContents) - 1),
+            static_cast<int>(sizeof(kContents) - 1));
+  ASSERT_EQ(_close(file_descriptor), 0);
+
+  TruncateLogFile(path.c_str(), 10, 4);
+
+  struct stat file_status = {};
+  ASSERT_EQ(nglog::internal::StatUtf8(path.data(), path.size(), &file_status),
+            0);
+  EXPECT_EQ(file_status.st_size, 4);
+  EXPECT_EQ(nglog::internal::UnlinkUtf8(path.data(), path.size()), 0);
+#else
+  GTEST_SKIP() << "Requires Windows with _chsize_s";
+#endif
+}
+
+TEST(Logging, CleansLongPath) {
+#ifdef NGLOG_OS_WINDOWS
+  using namespace std::chrono_literals;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
+
+  nglog::testing_internal::LongPathTestDirectory directory;
+  const std::string directory_name =
+      "nglog_cleaner_long_path_" + std::to_string(_getpid());
+  ASSERT_TRUE(directory.CreateInTemporaryDirectory(directory_name));
+  const std::string path = directory.ChildPath("cleanup_test");
+
+  SetLogDestination(NGLOG_INFO, path.c_str());
+  LOG(INFO) << "message for long-path cleanup";
+  FlushLogFiles(NGLOG_INFO);
+  LogToStderr();
+
+  EnableLogCleaner(0h);
+  DisableLogCleaner();
+
+  const bool file_exists =
+      nglog::internal::AccessUtf8(path.data(), path.size(), 0) == 0;
+  EXPECT_FALSE(file_exists);
+  if (file_exists) {
+    EXPECT_EQ(nglog::internal::UnlinkUtf8(path.data(), path.size()), 0);
+  }
+#elif defined(HAVE_POSIX_LONG_PATH_SUPPORT)
+  using namespace std::chrono_literals;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, true);
+
+  PosixLongPathTestDirectory directory;
+  const std::string directory_name =
+      "nglog_cleaner_long_path_" + std::to_string(getpid());
+  ASSERT_TRUE(directory.CreateInTemporaryDirectory(directory_name));
+  constexpr char kLogBase[] = "cleanup_test";
+  const std::string path = directory.ChildPath(kLogBase);
+
+  SetLogDestination(NGLOG_INFO, path.c_str());
+  LOG(INFO) << "message for long-path cleanup";
+  FlushLogFiles(NGLOG_INFO);
+  LogToStderr();
+
+  const std::string stale_path =
+      tools::MakeLogFilename(path, "20200101-000000.1", std::string(), true);
+  FileDescriptor stale_file{
+      internal::OpenPosixPath(stale_path, O_WRONLY | O_CREAT, S_IRUSR)};
+  ASSERT_TRUE(stale_file);
+
+  EnableLogCleaner(0h);
+  DisableLogCleaner();
+
+  EXPECT_EQ(internal::AccessPosixPath(stale_path, F_OK), -1);
+  if (internal::AccessPosixPath(stale_path, F_OK) == 0) {
+    EXPECT_EQ(internal::UnlinkPosixPath(stale_path), 0);
+  }
+#else
+  GTEST_SKIP() << "Requires long path support";
+#endif
+}
+
+#ifdef HAVE_POSIX_LONG_PATH_SUPPORT
+TEST(PosixPathOperations, LongPathWithDotComponents) {
+  PosixLongPathTestDirectory directory;
+  const std::string directory_name =
+      "nglog_posix_dot_components_" + std::to_string(getpid());
+  ASSERT_TRUE(directory.CreateInCurrentDirectory(directory_name));
+
+  constexpr char kFilename[] = "dot_components_file";
+  std::string path = "./" + directory.path();
+  std::size_t separator = 0;
+  while ((separator = path.find('/', separator + 1)) != std::string::npos) {
+    path.insert(separator, "/.");
+    separator += 2;
+  }
+  path += "/./";
+  path += kFilename;
+
+  FileDescriptor fd{internal::OpenPosixPath(path, O_CREAT | O_WRONLY | O_TRUNC,
+                                            S_IRUSR | S_IWUSR)};
+  ASSERT_TRUE(fd) << std::strerror(errno);
+  fd.reset();
+  EXPECT_EQ(internal::AccessPosixPath(directory.ChildPath(kFilename), F_OK), 0);
+  EXPECT_EQ(internal::UnlinkPosixPath(path), 0);
+}
+
+TEST(PosixPathOperations, LongPathOfSeparatorsNamesRoot) {
+  constexpr long kDefaultPathLimit = 4096;
+  const long configured_path_limit = pathconf("/", _PC_PATH_MAX);
+  const std::size_t path_limit = static_cast<std::size_t>(
+      configured_path_limit > 0 ? configured_path_limit : kDefaultPathLimit);
+  const std::string path(path_limit + 1, '/');
+
+  struct stat status;
+  ASSERT_EQ(internal::StatPosixPath(path, &status), 0) << std::strerror(errno);
+  EXPECT_TRUE(S_ISDIR(status.st_mode));
+
+  struct stat root_status;
+  ASSERT_EQ(stat("/", &root_status), 0);
+  EXPECT_EQ(status.st_ino, root_status.st_ino);
+  EXPECT_EQ(status.st_dev, root_status.st_dev);
+}
+
+TEST(PosixPathOperations, SearchOnlyParents) {
+  PosixLongPathTestDirectory directory;
+  const std::string directory_name =
+      "nglog_posix_search_only_" + std::to_string(getpid());
+  ASSERT_TRUE(directory.CreateInTemporaryDirectory(directory_name));
+
+  constexpr char kFilename[] = "search_only_file";
+  const std::string filename = directory.ChildPath(kFilename);
+  FileDescriptor fd{internal::OpenPosixPath(
+      filename, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR)};
+  ASSERT_TRUE(fd) << std::strerror(errno);
+  fd.reset();
+  ASSERT_TRUE(directory.MakeSearchOnly());
+
+  fd.reset(internal::OpenPosixPath(filename, O_RDONLY, 0));
+  ASSERT_TRUE(fd) << std::strerror(errno);
+}
+#endif
 
 struct MyLogger : public base::Logger {
   string data;
@@ -1790,8 +2318,8 @@ struct MyLogger : public base::Logger {
 
 TEST(Logging, Wrapper) {
   // The configured logger is bypassed while FLAGS_logtostderr is true.
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
   fprintf(stderr, "==== Test log wrapper\n");
 
@@ -1864,8 +2392,33 @@ static void TestOneTruncate(const char* path, uint64 limit, uint64 keep,
   }
 }
 
+TEST(Logging, TruncateKeepsTrailingLinesByteForByte) {
+#if defined(HAVE_UNISTD_H) || defined(HAVE__CHSIZE_S)
+  const string path = TestTmpDir() + "/truncate_lines";
+  constexpr char kDiscarded[] = "discarded line\n";
+  constexpr char kKept[] = "kept line\n";
+  constexpr std::size_t kKeptLength = sizeof(kKept) - 1;
+  {
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    output << kDiscarded << kKept;
+    ASSERT_TRUE(output);
+  }
+
+  TruncateLogFile(path.c_str(), kKeptLength, kKeptLength);
+
+  std::ifstream input(path, std::ios::binary);
+  const std::string contents{std::istreambuf_iterator<char>(input),
+                             std::istreambuf_iterator<char>()};
+  EXPECT_EQ(contents, kKept);
+  input.close();
+  DeleteFiles(path);
+#else
+  GTEST_SKIP() << "Log truncation is not supported";
+#endif
+}
+
 TEST(Logging, Truncate) {
-#ifdef HAVE_UNISTD_H
+#if defined(HAVE_UNISTD_H) || defined(HAVE__CHSIZE_S)
   fprintf(stderr, "==== Test log truncation\n");
   string path = TestTmpDir() + "/truncatefile";
 
@@ -1884,8 +2437,10 @@ TEST(Logging, Truncate) {
 
   // MacOSX 10.4 doesn't fail in this case.
   // Windows doesn't have symlink.
+  // Emscripten follows symlinks despite O_NOFOLLOW.
   // Let's just ignore this test for these cases.
-#  if !defined(NGLOG_OS_MACOSX) && !defined(NGLOG_OS_WINDOWS)
+#  if !defined(NGLOG_OS_MACOSX) && !defined(NGLOG_OS_WINDOWS) && \
+      !defined(NGLOG_OS_EMSCRIPTEN)
   // Through a symlink should fail to truncate
   string linkname = path + ".link";
   unlink(linkname.c_str());
@@ -1906,10 +2461,41 @@ TEST(Logging, Truncate) {
 #endif
 }
 
+#ifdef NGLOG_OS_WINDOWS
+TEST(Logging, TruncateStdoutStderr) {
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_max_log_size, 1U);
+
+  constexpr std::size_t kKeptSize = 1U << 20U;
+  constexpr char kPending[] = "pending";
+  constexpr char kTail[] = "tail";
+
+  CaptureTestStdout();
+  const string message(2U << 20U, 'x');
+  ASSERT_EQ(fwrite(message.data(), message.size(), 1, stdout), 1U);
+  ASSERT_EQ(fflush(stdout), 0);
+  // Buffered output must be part of the kept data.
+  ASSERT_GE(fputs(kPending, stdout), 0);
+
+  TruncateStdoutStderr();
+  // Output after the truncation must continue at the new end of the file.
+  ASSERT_GE(fputs(kTail, stdout), 0);
+  ASSERT_EQ(fflush(stdout), 0);
+  const string output = GetCapturedTestStdout();
+
+  const string written = message + kPending;
+  const string expected = written.substr(written.size() - kKeptSize) + kTail;
+  // Avoid printing megabytes of output on failure.
+  ASSERT_EQ(output.size(), expected.size());
+  EXPECT_EQ(output.find('\0'), string::npos);
+  EXPECT_TRUE(output == expected);
+}
+#endif
+
 TEST(Logging, DropLogMemoryConcurrentWriters) {
 #if defined(NGLOG_OS_LINUX) && defined(HAVE_POSIX_FADVISE)
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 
   fprintf(stderr,
           "==== Test concurrent writers while drop_log_memory triggers "
@@ -1920,8 +2506,10 @@ TEST(Logging, DropLogMemoryConcurrentWriters) {
   // Force every write to flush and re-evaluate the drop_log_memory
   // threshold, so that posix_fadvise() is exercised multiple times while
   // other threads are concurrently appending to the same log file.
-  const bool old_drop_log_memory = std::exchange(FLAGS_drop_log_memory, true);
-  const int32 old_logbufsecs = std::exchange(FLAGS_logbufsecs, 0);
+  const bool old_drop_log_memory = nglog::GetFlag(FLAGS_drop_log_memory);
+  nglog::SetFlag(FLAGS_drop_log_memory, true);
+  const int32 old_logbufsecs = nglog::GetFlag(FLAGS_logbufsecs);
+  nglog::SetFlag(FLAGS_logbufsecs, 0);
 
   SetLogDestination(NGLOG_INFO, dest.c_str());
 
@@ -1967,15 +2555,15 @@ TEST(Logging, DropLogMemoryConcurrentWriters) {
   // Windows.
   LogToStderr();
   DeleteFiles(dest + "*");
-  FLAGS_drop_log_memory = old_drop_log_memory;
-  FLAGS_logbufsecs = old_logbufsecs;
+  nglog::SetFlag(FLAGS_drop_log_memory, old_drop_log_memory);
+  nglog::SetFlag(FLAGS_logbufsecs, old_logbufsecs);
 #endif
 }
 
 TEST(Logging, MessageCountDoesNotWaitForLogger) {
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
-  FLAGS_logtostdout = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+  nglog::SetFlag(FLAGS_logtostdout, false);
 
   base::Logger* old_logger = base::GetLogger(NGLOG_INFO);
   auto logger_owner = std::make_unique<BlockingLogger>();
@@ -1983,28 +2571,21 @@ TEST(Logging, MessageCountDoesNotWaitForLogger) {
   base::SetLogger(NGLOG_INFO, logger_owner.release());
 
   std::thread logging_thread([] { LOG(INFO) << "blocked logger"; });
-  ASSERT_TRUE(logger->WaitUntilEntered());
+  logger->WaitUntilEntered();
 
-  std::future<int64> message_count = std::async(
-      std::launch::async, [] { return LogMessage::num_messages(NGLOG_INFO); });
-  EXPECT_EQ(message_count.wait_for(std::chrono::milliseconds(100)),
-            std::future_status::ready);
+  // Hangs until the CTest timeout if counting waits for the blocked logger.
+  static_cast<void>(LogMessage::num_messages(NGLOG_INFO));
 
   logger->Release();
   logging_thread.join();
-  EXPECT_EQ(message_count.wait_for(std::chrono::seconds(1)),
-            std::future_status::ready);
-  if (message_count.valid()) {
-    message_count.get();
-  }
   base::SetLogger(NGLOG_INFO, old_logger);
 }
 
 TEST(Logging, DefaultFileDispatchDoesNotRelockFile) {
-  FlagSaver saver;
-  FLAGS_logtostderr = false;
-  FLAGS_logtostdout = false;
-  FLAGS_timestamp_in_logfile_name = false;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+  nglog::SetFlag(FLAGS_logtostdout, false);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
 
   const std::string destination =
       TestTmpDir() + "/logging_test_default_file_dispatch";
@@ -2368,7 +2949,7 @@ TEST(DVLog, Basic) {
   EXPECT_CALL(log, Log(NGLOG_INFO, StrEq(__FILE__), StrEq("debug log")));
 #endif
 
-  FLAGS_v = 1;
+  nglog::SetFlag(FLAGS_v, 1);
   DVLOG(1) << "debug log";
 }
 
@@ -2378,7 +2959,7 @@ TEST(DVLog, V0) {
   // We are expecting that nothing is logged.
   EXPECT_CALL(log, Log(_, _, _)).Times(0);
 
-  FLAGS_v = 0;
+  nglog::SetFlag(FLAGS_v, 0);
   DVLOG(1) << "debug log";
 }
 
@@ -2399,23 +2980,23 @@ TEST(LogAtLevel, Basic) {
 }
 
 TEST(Logging, DisabledConditionalLogDoesNotEvaluateArguments) {
-  const int saved_min_log_level = FLAGS_minloglevel;
-  FLAGS_minloglevel = NGLOG_ERROR;
+  const int saved_min_log_level = nglog::GetFlag(FLAGS_minloglevel);
+  nglog::SetFlag(FLAGS_minloglevel, static_cast<std::int32_t>(NGLOG_ERROR));
   testing::MockFunction<int()> disabled_log_argument;
   EXPECT_CALL(disabled_log_argument, Call()).Times(0);
 
   LOG_IF(INFO, true) << disabled_log_argument.AsStdFunction()();
 
-  FLAGS_minloglevel = saved_min_log_level;
+  nglog::SetFlag(FLAGS_minloglevel, saved_min_log_level);
 }
 
 TEST(Logging, FatalIgnoresMinimumLogLevel) {
-  const int saved_min_log_level = FLAGS_minloglevel;
-  FLAGS_minloglevel = NGLOG_FATAL + 1;
+  const int saved_min_log_level = nglog::GetFlag(FLAGS_minloglevel);
+  nglog::SetFlag(FLAGS_minloglevel, NGLOG_FATAL + 1);
   auto const fail_func = InstallFailureFunction(&ThrowFatalLogFailure);
   auto restore = [fail_func, saved_min_log_level] {
     InstallFailureFunction(fail_func);
-    FLAGS_minloglevel = saved_min_log_level;
+    nglog::SetFlag(FLAGS_minloglevel, saved_min_log_level);
   };
   ScopedExit<decltype(restore)> restore_state{restore};
 
@@ -2425,15 +3006,15 @@ TEST(Logging, FatalIgnoresMinimumLogLevel) {
 }
 
 TEST(Logging, DefaultPrefixFormatting) {
-  const bool saved_log_to_stderr = FLAGS_logtostderr;
-  const int saved_stderr_threshold = FLAGS_stderrthreshold;
-  const bool saved_log_prefix = FLAGS_log_prefix;
-  const int saved_min_log_level = FLAGS_minloglevel;
+  const bool saved_log_to_stderr = nglog::GetFlag(FLAGS_logtostderr);
+  const int saved_stderr_threshold = nglog::GetFlag(FLAGS_stderrthreshold);
+  const bool saved_log_prefix = nglog::GetFlag(FLAGS_log_prefix);
+  const int saved_min_log_level = nglog::GetFlag(FLAGS_minloglevel);
 
-  FLAGS_logtostderr = true;
-  FLAGS_stderrthreshold = NGLOG_INFO;
-  FLAGS_log_prefix = true;
-  FLAGS_minloglevel = NGLOG_INFO;
+  nglog::SetFlag(FLAGS_logtostderr, true);
+  nglog::SetFlag(FLAGS_stderrthreshold, static_cast<std::int32_t>(NGLOG_INFO));
+  nglog::SetFlag(FLAGS_log_prefix, true);
+  nglog::SetFlag(FLAGS_minloglevel, static_cast<std::int32_t>(NGLOG_INFO));
   InstallPrefixFormatter(nullptr);
 
   CaptureTestStderr();
@@ -2441,10 +3022,10 @@ TEST(Logging, DefaultPrefixFormatting) {
   const std::string output = GetCapturedTestStderr();
 
   InstallPrefixFormatter(&PrefixAttacher, &g_prefix_attacher_data);
-  FLAGS_logtostderr = saved_log_to_stderr;
-  FLAGS_stderrthreshold = saved_stderr_threshold;
-  FLAGS_log_prefix = saved_log_prefix;
-  FLAGS_minloglevel = saved_min_log_level;
+  nglog::SetFlag(FLAGS_logtostderr, saved_log_to_stderr);
+  nglog::SetFlag(FLAGS_stderrthreshold, saved_stderr_threshold);
+  nglog::SetFlag(FLAGS_log_prefix, saved_log_prefix);
+  nglog::SetFlag(FLAGS_minloglevel, saved_min_log_level);
 
   EXPECT_THAT(output, HasSubstr("] default prefix formatting\n"));
   EXPECT_THAT(output, testing::Not(HasSubstr("good data")));
@@ -2502,7 +3083,7 @@ static int kBacktraceAtLine = __LINE__ - 3;  // The line of the LOG(INFO) above
 TEST(LogBacktraceAt, DoesNotBacktraceWhenDisabled) {
   StrictMock<ScopedMockLog> log;
 
-  FLAGS_log_backtrace_at = "";
+  nglog::SetFlag(FLAGS_log_backtrace_at, std::string());
 
   EXPECT_CALL(log, Log(_, _, StrEq("Backtrace me")));
   EXPECT_CALL(log, Log(_, _, StrEq("Not me")));
@@ -2521,7 +3102,7 @@ TEST(LogBacktraceAt, DoesBacktraceAtRightLineWhenEnabled) {
   char where[100];
   std::snprintf(where, 100, "%s:%d", const_basename(__FILE__),
                 kBacktraceAtLine);
-  FLAGS_log_backtrace_at = where;
+  nglog::SetFlag(FLAGS_log_backtrace_at, std::string(where));
 
   // The LOG at the specified line should include a stacktrace which
   // includes the name of the containing function, followed by the log
@@ -2592,7 +3173,8 @@ TEST(LogMsgTime, gmtoff) {
   EXPECT_TRUE((gmtoff >= utc_min_offset) && (gmtoff <= utc_max_offset));
 }
 
-#ifndef NGLOG_OS_WINDOWS
+// Emscripten derives the time zone from the JavaScript host and ignores TZ.
+#if !defined(NGLOG_OS_WINDOWS) && !defined(NGLOG_OS_EMSCRIPTEN)
 TEST(LogMsgTime, gmtoffSubHour) {
   // The gmtoffset() API is documented to return seconds, so time zones whose
   // offset is not a whole number of hours (e.g. India at UTC+05:30) must be
@@ -2618,34 +3200,37 @@ TEST(LogMsgTime, gmtoffSubHour) {
 
   EXPECT_EQ(gmtoff, 5h + 30min);
 }
-#endif  // NGLOG_OS_WINDOWS
+#endif  // !defined(NGLOG_OS_WINDOWS) && !defined(NGLOG_OS_EMSCRIPTEN)
 
+// Emscripten cannot run a mailer.
+#ifndef NGLOG_OS_EMSCRIPTEN
 TEST(EmailLogging, ValidAddress) {
-  FlagSaver saver;
-  FLAGS_logmailer = EMAIL_TEST_HELPER_PATH;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logmailer, EMAIL_TEST_HELPER_PATH);
 
   EXPECT_TRUE(
       SendEmail("example@example.com", "Example subject", "Example body"));
 }
 
 TEST(EmailLogging, MultipleAddresses) {
-  FlagSaver saver;
-  FLAGS_logmailer = EMAIL_TEST_HELPER_PATH;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logmailer, EMAIL_TEST_HELPER_PATH);
 
   EXPECT_TRUE(SendEmail("example@example.com,foo@bar.com", "Example subject",
                         "Example body"));
 }
+#endif  // !NGLOG_OS_EMSCRIPTEN
 
 TEST(EmailLogging, InvalidAddress) {
-  FlagSaver saver;
-  FLAGS_logmailer = EMAIL_TEST_HELPER_PATH;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logmailer, EMAIL_TEST_HELPER_PATH);
 
   EXPECT_FALSE(SendEmail("hello world@foo", "Example subject", "Example body"));
 }
 
 TEST(EmailLogging, MaliciousAddress) {
-  FlagSaver saver;
-  FLAGS_logmailer = EMAIL_TEST_HELPER_PATH;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logmailer, EMAIL_TEST_HELPER_PATH);
 
   EXPECT_FALSE(
       SendEmail("!/bin/true@example.com", "Example subject", "Example body"));
@@ -2654,7 +3239,9 @@ TEST(EmailLogging, MaliciousAddress) {
 #ifdef HAVE_SUBPROCESS
 TEST(EmailLogging, SlowMailerDoesNotBlockOtherLoggingThreads) {
   using namespace std::chrono_literals;
-  constexpr auto kChildTimeout = 4s;
+  // Exceeds the CTest timeout, so that a blocked child is reported by CTest
+  // instead of failing spuriously on overloaded runners.
+  constexpr auto kChildTimeout = 120s;
   constexpr char kExpectedOutput[] = "passed\n";
 
   const std::string marker_path = TestTmpDir() + "/sleeping-mailer.started";
@@ -2732,12 +3319,12 @@ TEST(LoggingGoldenFile, Stderr) {
   EXPECT_TRUE(
       MungeAndDiffTestStderr(TestSrcDir() + "/src/logging_unittest.err"));
 
-  FLAGS_logtostderr = false;
+  nglog::SetFlag(FLAGS_logtostderr, false);
 }
 
 TEST(LoggingGoldenFile, Stdout) {
-  FLAGS_logtostdout = true;
-  FLAGS_stderrthreshold = NUM_SEVERITIES;
+  nglog::SetFlag(FLAGS_logtostdout, true);
+  nglog::SetFlag(FLAGS_stderrthreshold, NUM_SEVERITIES);
   CaptureTestStdout();
   TestRawLogging();
   TestLoggingLevels();
@@ -2756,7 +3343,7 @@ TEST(LoggingGoldenFile, Stdout) {
   TestSTREQ();
   EXPECT_TRUE(
       MungeAndDiffTestStdout(TestSrcDir() + "/src/logging_unittest.out"));
-  FLAGS_logtostdout = false;
+  nglog::SetFlag(FLAGS_logtostdout, false);
 }
 
 #if defined(__GNUC__)

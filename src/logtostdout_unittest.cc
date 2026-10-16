@@ -12,14 +12,9 @@
 #include <sstream>
 #include <string>
 
-#include "base/commandlineflags.h"
+#include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "testing_utilities.h"
-
-#ifdef NGLOG_USE_GFLAGS
-#  include <gflags/gflags.h>
-using namespace GFLAGS_NAMESPACE;
-#endif
 
 using namespace nglog;
 
@@ -27,19 +22,6 @@ namespace {
 
 constexpr char kInfoMessage[] = "buffered info message";
 constexpr char kWarningMessage[] = "unbuffered warning message";
-
-// Restores the flags this test changes even if it exits early.
-struct StdoutFlagSaver {
-  ~StdoutFlagSaver() {
-    FLAGS_logtostdout = logtostdout_;
-    FLAGS_colorlogtostdout = colorlogtostdout_;
-    FLAGS_logbuflevel = logbuflevel_;
-  }
-
-  bool logtostdout_{FLAGS_logtostdout};
-  bool colorlogtostdout_{FLAGS_colorlogtostdout};
-  decltype(FLAGS_logbuflevel) logbuflevel_{FLAGS_logbuflevel};
-};
 
 // Reads what has actually reached the capture file so far. Unlike
 // GetCapturedTestStdout(), this does not stop the capture and therefore does
@@ -65,7 +47,7 @@ std::string PeekCapturedStdout(const CapturedStream& capture) {
 // select it. Where it is reached, the Windows branch flushes unconditionally
 // anyway, so only the ANSI branch depends on the flush being applied.
 TEST(LogToStdout, HonorsLogbuflevel) {
-  const StdoutFlagSaver flag_saver;
+  nglog::ScopedFlags<> save;
 
   std::string after_info;
   std::string after_warning;
@@ -77,9 +59,10 @@ TEST(LogToStdout, HonorsLogbuflevel) {
     // that messages which are not explicitly flushed stay in the stdio buffer.
     setvbuf(stdout, nullptr, _IOFBF, BUFSIZ);
 
-    FLAGS_logtostdout = true;
-    FLAGS_colorlogtostdout = false;
-    FLAGS_logbuflevel = NGLOG_INFO;  // buffer INFO, flush WARNING and above
+    nglog::SetFlag(FLAGS_logtostdout, true);
+    nglog::SetFlag(FLAGS_colorlogtostdout, false);
+    nglog::SetFlag(FLAGS_logbuflevel, static_cast<std::int32_t>(NGLOG_INFO));
+    // Buffer INFO, flush WARNING and above.
 
     LOG(INFO) << kInfoMessage;
     after_info = PeekCapturedStdout(capture);
@@ -100,7 +83,7 @@ TEST(LogToStdout, HonorsLogbuflevel) {
 }
 
 int main(int argc, char** argv) {
-  FLAGS_colorlogtostderr = false;
+  nglog::SetFlag(FLAGS_colorlogtostderr, false);
 
   // Make sure stderr is not buffered as stderr seems to be buffered
   // on recent windows.
@@ -109,9 +92,8 @@ int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
   testing::InitGoogleMock(&argc, argv);
 
-#ifdef NGLOG_USE_GFLAGS
-  ParseCommandLineFlags(&argc, &argv, true);
-#endif
+  nglog::ParseCommandLineFlags(&argc, &argv,
+                               nglog::FlagParsingMode::kRemoveFlags);
 
   return RUN_ALL_TESTS();
 }

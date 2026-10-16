@@ -15,6 +15,7 @@
 #include <locale>
 
 #include "config.h"
+#include "internal/utf8.h"
 #include "ng-log/platform.h"
 
 #ifdef NGLOG_OS_WINDOWS
@@ -402,21 +403,22 @@ void FormatSymbolizedFrame(const char* symbol, std::size_t symbol_length,
 
 const std::string& CachedHostname() {
   static const std::string hostname = [] {
-    char buf[256] = "";
 #ifdef NGLOG_OS_WINDOWS
-    char name[MAX_COMPUTERNAME_LENGTH + 1];
-    DWORD len = sizeof(name) / sizeof(name[0]);
-    if (GetComputerNameA(name, &len)) {
-      std::copy_n(name, len, buf);
-      buf[len] = '\0';
+    std::string name;
+    if (GetComputerNameUtf8(&name)) {
+      return name;
     }
+    return std::string();
 #elif defined(HAVE_UNISTD_H)
+    char buf[256] = "";
     if (gethostname(buf, sizeof(buf)) != 0) {
       buf[0] = '\0';
     }
     buf[sizeof(buf) - 1] = '\0';
-#endif
     return std::string(buf);
+#else
+    return std::string();
+#endif
   }();
   return hostname;
 }
@@ -425,11 +427,14 @@ const std::string& CachedCwd() {
   static const std::string cwd = [] {
     char buf[512] = "";
 #ifdef NGLOG_OS_WINDOWS
-    const DWORD len = GetCurrentDirectoryA(sizeof(buf), buf);
-    if (len == 0 || len >= sizeof(buf)) {
-      buf[0] = '\0';
+    wchar_t wide_buf[sizeof(buf) / sizeof(buf[0])];
+    const DWORD len = GetCurrentDirectoryW(
+        static_cast<DWORD>(sizeof(wide_buf) / sizeof(wide_buf[0])), wide_buf);
+    if (len == 0 || len >= sizeof(wide_buf) / sizeof(wide_buf[0])) {
+      return std::string();
     }
-    return std::string(buf, len);
+    std::string converted;
+    return WideToUtf8(wide_buf, len, &converted) ? converted : std::string();
 #elif defined(HAVE_UNISTD_H)
     if (getcwd(buf, sizeof(buf)) == nullptr) {
       buf[0] = '\0';

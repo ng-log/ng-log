@@ -6,13 +6,23 @@
 
 #include "ng-log/flags.h"
 
+#include <cstdint>
 #include <cstdlib>
-#include <cstring>
+#include <string>
 
-#include "base/commandlineflags.h"
+#include "internal/flag_display.h"
 #include "ng-log/log_severity.h"
 
 namespace {
+
+constexpr std::int32_t kSecondsPerMinute = 60;
+constexpr std::int32_t kDefaultLogBufferSeconds = 30;
+constexpr std::int32_t kDefaultLogCleanupSeconds = 5 * kSecondsPerMinute;
+// Exceeds every severity level, which disables email by default.
+constexpr std::int32_t kDefaultEmailLevel = 999;
+constexpr std::uint32_t kDefaultLogFileMode = 0664;
+constexpr std::uint32_t kDefaultMaxLogSizeMiB = 1800;
+constexpr std::int32_t kDefaultAddr2lineTimeoutMs = 2000;
 
 // Compute the default value for --log_dir
 static const char* DefaultLogDir() {
@@ -26,43 +36,129 @@ static const char* DefaultLogDir() {
   return "";
 }
 
-bool BoolFromEnv(const char* varname, bool defval) {
-  const char* const valstr = getenv(varname);
-  if (!valstr) {
-    return defval;
-  }
-  return std::memchr("tTyY1\0", valstr[0], 6) != nullptr;
+void WriteLogToStderrHelp(nglog::HelpWriter& help) {
+  help.Write("Send log messages to ");
+  help.Write(nglog::HelpTextStyle::kStream, "stderr");
+  help.Write(" instead of log files.");
+}
+
+void WriteAlsoLogToStderrHelp(nglog::HelpWriter& help) {
+  help.Write("Also send log messages to ");
+  help.Write(nglog::HelpTextStyle::kStream, "stderr");
+  help.Write(" in addition to the log files.");
+}
+
+void WriteColorLogToStderrHelp(nglog::HelpWriter& help) {
+  help.Write("Color log messages written to ");
+  help.Write(nglog::HelpTextStyle::kStream, "stderr");
+  help.Write(". Coloring is disabled by ");
+  help.Write(nglog::HelpTextStyle::kEnvironmentVariable, "NO_COLOR");
+  help.Write(" or ");
+  help.Write(nglog::HelpTextStyle::kEnvironmentVariable, "TERM");
+  help.Write("=");
+  help.Write(nglog::HelpTextStyle::kValue, "dumb");
+  help.Write(".");
+}
+
+void WriteColorLogToStdoutHelp(nglog::HelpWriter& help) {
+  help.Write("Color log messages written to ");
+  help.Write(nglog::HelpTextStyle::kStream, "stdout");
+  help.Write(". Coloring is disabled by ");
+  help.Write(nglog::HelpTextStyle::kEnvironmentVariable, "NO_COLOR");
+  help.Write(" or ");
+  help.Write(nglog::HelpTextStyle::kEnvironmentVariable, "TERM");
+  help.Write("=");
+  help.Write(nglog::HelpTextStyle::kValue, "dumb");
+  help.Write(".");
+}
+
+void WriteLogToStdoutHelp(nglog::HelpWriter& help) {
+  help.Write("Send log messages to ");
+  help.Write(nglog::HelpTextStyle::kStream, "stdout");
+  help.Write(" instead of log files.");
+}
+
+void WriteStderrThresholdHelp(nglog::HelpWriter& help) {
+  help.Write("Copy log messages at or above this severity level to ");
+  help.Write(nglog::HelpTextStyle::kStream, "stderr");
+  help.Write(" in addition to the log files. This flag supersedes ");
+  help.Write(nglog::HelpTextStyle::kOptionPrefix, "--");
+  help.Write(nglog::HelpTextStyle::kOption, "alsologtostderr");
+  help.Write(".");
+}
+
+void WriteLogBacktraceAtHelp(nglog::HelpWriter& help) {
+  help.Write("Emit a backtrace when logging from ");
+  help.Write(nglog::HelpTextStyle::kMeta, "file:line");
+  help.Write(".");
+}
+
+void WriteVHelp(nglog::HelpWriter& help) {
+  help.Write(
+      "Show VLOG(m) messages when m is at most this value. Override "
+      "with ");
+  help.Write(nglog::HelpTextStyle::kOptionPrefix, "--");
+  help.Write(nglog::HelpTextStyle::kOption, "vmodule");
+  help.Write(".");
+}
+
+void WriteVmoduleHelp(nglog::HelpWriter& help) {
+  help.Write("Set per-module verbose levels with a comma-separated list of ");
+  help.Write(nglog::HelpTextStyle::kValue, "<module name>=<log level>");
+  help.Write(". ");
+  help.Write(nglog::HelpTextStyle::kValue, "<module name>");
+  help.Write(
+      " is a glob pattern matched against the source file base name before "
+      "its first period, with a trailing ");
+  help.Write(nglog::HelpTextStyle::kValue, "-inl");
+  help.Write(" suffix removed. ");
+  help.Write(nglog::HelpTextStyle::kValue, "<log level>");
+  help.Write(" overrides ");
+  help.Write(nglog::HelpTextStyle::kOptionPrefix, "--");
+  help.Write(nglog::HelpTextStyle::kOption, "v");
+  help.Write(".");
+}
+
+void WriteSymbolizeLineInfoHelp(nglog::HelpWriter& help) {
+  help.Write(
+      "Resolve source file names and line numbers in stack frames with ");
+  help.Write(nglog::HelpTextStyle::kExecutable, "addr2line");
+  help.Write(" or ");
+  help.Write(nglog::HelpTextStyle::kExecutable, "libbacktrace");
+  help.Write(", when available.");
+}
+
+void WriteSymbolizeHyperlinksHelp(nglog::HelpWriter& help) {
+  help.Write("Add hyperlinks to ");
+  help.Write(nglog::HelpTextStyle::kMeta, "file:line");
+  help.Write(
+      " references in colorized stack traces when supported by the "
+      "terminal. Set ");
+  help.Write(nglog::HelpTextStyle::kConstant, "false");
+  help.Write(" to disable them.");
+}
+
+void WriteAddr2lineTimeoutHelp(nglog::HelpWriter& help) {
+  help.Write("Wait no longer than this many milliseconds for ");
+  help.Write(nglog::HelpTextStyle::kExecutable, "addr2line");
+  help.Write(" to resolve one address.");
 }
 
 }  // namespace
 
-NGLOG_DEFINE_bool(timestamp_in_logfile_name,
-                  BoolFromEnv("NGLOG_TIMESTAMP_IN_LOGFILE_NAME", true),
-                  "put a timestamp at the end of the log file name");
-NGLOG_DEFINE_bool(logtostderr, BoolFromEnv("NGLOG_LOGTOSTDERR", false),
-                  "log messages go to stderr instead of logfiles");
-NGLOG_DEFINE_bool(alsologtostderr, BoolFromEnv("NGLOG_ALSOLOGTOSTDERR", false),
-                  "log messages go to stderr in addition to logfiles");
-NGLOG_DEFINE_bool(
-    colorlogtostderr, true,
-    "color messages logged to stderr; only takes effect if the terminal "
-    "is actually able to display colors safely, which is auto-detected "
-    "(a real terminal, not a pipe or file, and no NO_COLOR/TERM=dumb "
-    "opt-out)");
-NGLOG_DEFINE_bool(
-    colorlogtostdout, true,
-    "color messages logged to stdout; only takes effect if the terminal "
-    "is actually able to display colors safely, which is auto-detected "
-    "(a real terminal, not a pipe or file, and no NO_COLOR/TERM=dumb "
-    "opt-out)");
-NGLOG_DEFINE_bool(logtostdout, BoolFromEnv("NGLOG_LOGTOSTDOUT", false),
-                  "log messages go to stdout instead of logfiles");
+NGLOG_DEFINE(bool, timestamp_in_logfile_name, true,
+             "Add a timestamp to each log file name.");
+NGLOG_DEFINE(bool, logtostderr, false, WriteLogToStderrHelp);
+NGLOG_DEFINE(bool, alsologtostderr, false, WriteAlsoLogToStderrHelp);
+NGLOG_DEFINE(bool, colorlogtostderr, true, WriteColorLogToStderrHelp);
+NGLOG_DEFINE(bool, colorlogtostdout, true, WriteColorLogToStdoutHelp);
+NGLOG_DEFINE(bool, logtostdout, false, WriteLogToStdoutHelp);
 #ifdef NGLOG_OS_LINUX
-NGLOG_DEFINE_bool(
-    drop_log_memory, true,
+NGLOG_DEFINE(
+    bool, drop_log_memory, true,
     "Drop in-memory buffers of log contents. "
     "Logs can grow very quickly and they are rarely read before they "
-    "need to be evicted from memory. Instead, drop them from memory "
+    "need to be evicted from memory. Instead, release them from memory "
     "as soon as they are flushed to disk.");
 #endif
 
@@ -71,119 +167,124 @@ NGLOG_DEFINE_bool(
 //
 // The default is ERROR instead of FATAL so that users can see problems
 // when they run a program without having to look in another file.
-NGLOG_DEFINE_int32(
-    stderrthreshold, NGLOG_ERROR,
-    "log messages at or above this level are copied to stderr in "
-    "addition to logfiles.  This flag obsoletes --alsologtostderr.");
+NGLOG_DEFINE(std::int32_t, stderrthreshold, NGLOG_ERROR,
+             WriteStderrThresholdHelp);
 
-NGLOG_DEFINE_string(alsologtoemail, "",
-                    "log messages go to these email addresses "
-                    "in addition to logfiles");
-NGLOG_DEFINE_bool(log_file_header, true,
-                  "Write the file header at the start of each log file");
-NGLOG_DEFINE_bool(log_prefix, true,
-                  "Prepend the log prefix to the start of each log line");
-NGLOG_DEFINE_bool(log_year_in_prefix, true,
-                  "Include the year in the log prefix");
-NGLOG_DEFINE_int32(minloglevel, 0,
-                   "Messages logged at a lower level than this don't "
-                   "actually get logged anywhere");
-NGLOG_DEFINE_int32(logbuflevel, 0,
-                   "Buffer log messages logged at this level or lower"
-                   " (-1 means don't buffer; 0 means buffer INFO only;"
-                   " ...)");
-NGLOG_DEFINE_int32(logbufsecs, 30,
-                   "Buffer log messages for at most this many seconds");
+NGLOG_DEFINE(std::string, alsologtoemail, "",
+             "Send log messages to each address in this comma-separated list "
+             "in addition "
+             "to log files.");
+NGLOG_DEFINE(bool, log_file_header, true,
+             "Write a header at the beginning of each log file.");
+NGLOG_DEFINE(bool, log_prefix, true,
+             "Add the log prefix to the beginning of each log line.");
+NGLOG_DEFINE(bool, log_year_in_prefix, true,
+             "Include the year in each log line's prefix.");
+NGLOG_DEFINE(std::int32_t, minloglevel, 0,
+             "Discard messages below this severity level.");
+NGLOG_DEFINE(std::int32_t, logbuflevel, 0,
+             "Buffer messages at this severity level or below.");
+NGLOG_DEFINE(std::int32_t, logbufsecs, kDefaultLogBufferSeconds,
+             "Keep buffered log messages for no more than this many seconds.");
+NGLOG_DEFINE(
+    std::int32_t, logcleansecs, kDefaultLogCleanupSeconds,
+    "Check for and clean up overdue log files every this many seconds.");
+NGLOG_DEFINE(std::int32_t, logemaillevel, kDefaultEmailLevel,
+             "Email messages at this severity level or above.");
+NGLOG_DEFINE(std::string, logmailer, "",
+             "Use this program to send logging email.");
+NGLOG_DEFINE(nglog::FileMode, logfile_mode,
+             nglog::FileMode{kDefaultLogFileMode},
+             "Set the permissions for newly created log files.");
+NGLOG_DEFINE(std::string, log_dir, DefaultLogDir(),
+             "Write log files to this directory instead of the default logging "
+             "directory.");
+NGLOG_DEFINE(std::string, log_link, "",
+             "Create additional links to log files in this directory.");
+NGLOG_DEFINE(std::uint32_t, max_log_size, kDefaultMaxLogSizeMiB,
+             "Limit each log file to approximately this size in MiB. A value "
+             "of 0 is treated as 1 and values above 4095 are capped at 4095.");
+NGLOG_DEFINE(bool, stop_logging_if_full_disk, false,
+             "Stop writing log files when the disk is full.");
+NGLOG_DEFINE(std::string, log_backtrace_at, "", WriteLogBacktraceAtHelp);
+NGLOG_DEFINE(bool, log_utc_time, false, "Use UTC timestamps in log messages.");
+NGLOG_DEFINE(std::int32_t, v, 0, WriteVHelp);
+NGLOG_DEFINE(std::string, vmodule, "", WriteVmoduleHelp);
+NGLOG_DEFINE(bool, symbolize_stacktrace, true,
+             "Symbolize stack traces in crash reports.");
+NGLOG_DEFINE(std::string, symbolize_file_base_path, "",
+             "Use this base path to resolve relative source paths when "
+             "creating terminal hyperlinks.");
+NGLOG_DEFINE(bool, symbolize_line_info, true, WriteSymbolizeLineInfoHelp);
+NGLOG_DEFINE(bool, symbolize_hyperlinks, true, WriteSymbolizeHyperlinksHelp);
 
-NGLOG_DEFINE_int32(logcleansecs, 60 * 5,  // every 5 minutes
-                   "Clean overdue logs every this many seconds");
-
-NGLOG_DEFINE_int32(logemaillevel, 999,
-                   "Email log messages logged at this level or higher"
-                   " (0 means email all; 3 means email FATAL only;"
-                   " ...)");
-NGLOG_DEFINE_string(logmailer, "", "Mailer used to send logging email");
-
-NGLOG_DEFINE_int32(logfile_mode, 0664, "Log file mode/permissions.");
-
-NGLOG_DEFINE_string(
-    log_dir, DefaultLogDir(),
-    "If specified, logfiles are written into this directory instead "
-    "of the default logging directory.");
-NGLOG_DEFINE_string(log_link, "",
-                    "Put additional links to the log "
-                    "files in this directory");
-
-NGLOG_DEFINE_uint32(max_log_size, 1800,
-                    "approx. maximum log file size (in MB). A value of 0 will "
-                    "be silently overridden to 1. Values above 4095 are capped "
-                    "to 4095.");
-
-NGLOG_DEFINE_bool(stop_logging_if_full_disk, false,
-                  "Stop attempting to log to disk if the disk is full.");
-
-NGLOG_DEFINE_string(log_backtrace_at, "",
-                    "Emit a backtrace when logging at file:linenum.");
-
-NGLOG_DEFINE_bool(log_utc_time, false, "Use UTC time for logging.");
-
-NGLOG_DEFINE_int32(v, 0,
-                   "Show all VLOG(m) messages for m <= this."
-                   " Overridable by --vmodule.");
-
-NGLOG_DEFINE_string(
-    vmodule, "",
-    "per-module verbose level."
-    " Argument is a comma-separated list of <module name>=<log level>."
-    " <module name> is a glob pattern, matched against the source filename"
-    " base before the first period, with a trailing -inl suffix removed."
-    " <log level> overrides any value given by --v.");
-
-NGLOG_DEFINE_bool(symbolize_stacktrace, true,
-                  "Symbolize the stack trace in the tombstone");
-
-NGLOG_DEFINE_bool(symbolize_line_info, true,
-                  "Resolve file names and line numbers for symbolized "
-                  "stack frames using addr2line or libbacktrace, if "
-                  "available.");
-
-NGLOG_DEFINE_bool(
-    symbolize_hyperlinks, true,
-    "Wrap file:line references in a colorized stack trace with OSC 8 "
-    "terminal hyperlinks. Automatically has no effect unless the terminal "
-    "is detected as one of a known set of OSC 8-capable terminal "
-    "emulators; set to false to disable unconditionally.");
+NGLOG_DEFINE(std::int32_t, addr2line_timeout_ms, kDefaultAddr2lineTimeoutMs,
+             WriteAddr2lineTimeoutHelp);
 
 namespace {
 
-#ifdef NGLOG_USE_GFLAGS
-constexpr char kSymbolizeFileBasePathHelp[] =
-    "Base path used to resolve relative source file paths recorded in "
-    "debug info (e.g. the build directory) when generating OSC 8 "
-    "hyperlinks for a colorized stack trace. Absolute paths are used "
-    "as-is and never joined with this path. Relative paths are not "
-    "hyperlinked unless this is set to an absolute path.";
-#endif  // NGLOG_USE_GFLAGS
-std::string g_symbolize_file_base_path;
-std::string g_symbolize_file_base_path_default;
+const nglog::FlagModule kNglogFlagModule("ng-log", "Options provided by",
+                                         "NGLOG_");
 
-#ifdef NGLOG_USE_GFLAGS
-const GFLAGS_NAMESPACE::FlagRegisterer g_symbolize_file_base_path_registerer(
-    "symbolize_file_base_path", kSymbolizeFileBasePathHelp, __FILE__,
-    &g_symbolize_file_base_path, &g_symbolize_file_base_path_default);
-#endif  // NGLOG_USE_GFLAGS
+struct FlagMetadataInitializer {
+  FlagMetadataInitializer() {
+    const auto logging_group = kNglogFlagModule.AddGroup("Logging");
+    const auto verbose_logging_group =
+        kNglogFlagModule.AddGroup("Verbose logging");
+    const auto stack_traces_group = kNglogFlagModule.AddGroup("Stack traces");
+    struct Metadata {
+      nglog::FlagBase* flag;
+      const nglog::FlagGroup* group;
+      // Overrides the type shown by the generated help.
+      const char* type = nullptr;
+      // Unit appended to the default value shown by the generated help.
+      const char* unit = nullptr;
+    };
+    const Metadata metadata[] = {
+        {&FLAGS_timestamp_in_logfile_name, &logging_group},
+        {&FLAGS_logtostderr, &logging_group},
+        {&FLAGS_alsologtostderr, &logging_group},
+        {&FLAGS_colorlogtostderr, &logging_group},
+        {&FLAGS_colorlogtostdout, &logging_group},
+        {&FLAGS_logtostdout, &logging_group},
+#ifdef NGLOG_OS_LINUX
+        {&FLAGS_drop_log_memory, &logging_group},
+#endif
+        {&FLAGS_stderrthreshold, &logging_group},
+        {&FLAGS_alsologtoemail, &logging_group},
+        {&FLAGS_log_file_header, &logging_group},
+        {&FLAGS_log_prefix, &logging_group},
+        {&FLAGS_log_year_in_prefix, &logging_group},
+        {&FLAGS_minloglevel, &logging_group},
+        {&FLAGS_logbuflevel, &logging_group},
+        {&FLAGS_logbufsecs, &logging_group, nullptr, "s"},
+        {&FLAGS_logcleansecs, &logging_group, nullptr, "s"},
+        {&FLAGS_logemaillevel, &logging_group},
+        {&FLAGS_logmailer, &logging_group},
+        {&FLAGS_logfile_mode, &logging_group},
+        {&FLAGS_log_dir, &logging_group},
+        {&FLAGS_log_link, &logging_group},
+        {&FLAGS_max_log_size, &logging_group, nullptr, "MiB"},
+        {&FLAGS_stop_logging_if_full_disk, &logging_group},
+        {&FLAGS_log_backtrace_at, &logging_group},
+        {&FLAGS_log_utc_time, &logging_group},
+        {&FLAGS_v, &verbose_logging_group},
+        {&FLAGS_vmodule, &verbose_logging_group, "string[,string,...]"},
+        {&FLAGS_symbolize_stacktrace, &stack_traces_group},
+        {&FLAGS_symbolize_file_base_path, &stack_traces_group},
+        {&FLAGS_symbolize_line_info, &stack_traces_group},
+        {&FLAGS_symbolize_hyperlinks, &stack_traces_group},
+        {&FLAGS_addr2line_timeout_ms, &stack_traces_group, nullptr, "ms"},
+    };
+    for (const Metadata& entry : metadata) {
+      if (!entry.group->AddFlag(*entry.flag)) {
+        std::abort();
+      }
+      nglog::internal::SetFlagDisplay(*entry.flag, entry.type, entry.unit);
+    }
+  }
+};
+
+const FlagMetadataInitializer kFlagMetadataInitializer;
 
 }  // namespace
-
-namespace fLS {
-NGLOG_EXPORT std::string& FLAGS_symbolize_file_base_path =
-    g_symbolize_file_base_path;
-char FLAGS_nosymbolize_file_base_path;
-}  // namespace fLS
-
-using fLS::FLAGS_symbolize_file_base_path;
-
-NGLOG_DEFINE_int32(addr2line_timeout_ms, 2000,
-                   "Upper bound in milliseconds on how long to wait for "
-                   "addr2line to resolve a single address before giving "
-                   "up on it.");

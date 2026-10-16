@@ -34,6 +34,19 @@ enum class Role {
   kLogBracket,
   kErrnoMessage,
   kErrnoCode,
+  kHelpSectionHeading,
+  kHelpModuleHeader,
+  kHelpModuleName,
+  kHelpFlagName,
+  kHelpFlagType,
+  kHelpFlagValue,
+  kHelpText,
+  kHelpDescription,
+  kHelpCode,
+  kHelpEnvironmentVariable,
+  kHelpExecutable,
+  kHelpMeta,
+  kHelpStream,
   kNumRoles
 };
 

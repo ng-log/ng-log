@@ -134,8 +134,8 @@ cannot read the DWARF debug information a MinGW build emits by default. MSVC
 builds always use `dbghelp`, since neither backend understands MSVC's mangled
 names or debug information.
 
-Resolution can be disabled at runtime without recompiling by setting `#!cpp
-FLAGS_symbolize_line_info` to `false`, or `--symbolize_line_info=false` on the
-command line. The `#!cpp FLAGS_addr2line_timeout_ms` flag controls how long, in
-milliseconds, ng-log waits for `addr2line` to resolve a single address before
-giving up on it. It has no effect when `libbacktrace` is the active backend.
+Resolution can be disabled at runtime without recompiling by calling `#!cpp
+nglog::SetFlag(FLAGS_symbolize_line_info, false)`, or by passing
+`--symbolize_line_info=false` on the command line. The `#!cpp
+FLAGS_addr2line_timeout_ms` flag controls how long, in milliseconds, ng-log
+waits for `addr2line` to resolve a single address before giving up on it. It has no effect when `libbacktrace` is the active backend.

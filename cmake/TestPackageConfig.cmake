@@ -24,7 +24,8 @@ execute_process (
     ${_ADDITIONAL_ARGS}
     -DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=ON
     -DCMAKE_FIND_PACKAGE_NO_SYSTEM_PACKAGE_REGISTRY=ON
-    -Dng-log_ROOT=${PACKAGE_DIR}
+    # Unlike ng-log_ROOT, ng-log_DIR is not re-rooted into a sysroot.
+    -Dng-log_DIR=${PACKAGE_DIR}
     -S ${SOURCE_DIR}
     -B ${TEST_BINARY_DIR}
   RESULT_VARIABLE _GENERATE_SUCCEEDED

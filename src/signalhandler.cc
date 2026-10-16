@@ -10,9 +10,12 @@
 #include <algorithm>
 #include <atomic>
 #include <csignal>
+#include <cstddef>
 #include <cstring>
 #include <ctime>
+#include <cwchar>
 #include <sstream>
+#include <string>
 #include <thread>
 
 #include "config.h"
@@ -20,6 +23,7 @@
 #include "internal/styled_output.h"
 #include "internal/terminal_capabilities.h"
 #include "internal/theme.h"
+#include "internal/utf8.h"
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "ng-log/platform.h"
@@ -74,9 +78,7 @@ const struct {
     {SIGTERM, "SIGTERM"},
 };
 
-#if defined(NGLOG_OS_WINDOWS)
-static bool kFailureSignalHandlerInstalled = false;
-#endif  // defined(NGLOG_OS_WINDOWS)
+static bool g_failure_signal_handler_installed = false;
 
 #if !defined(NGLOG_OS_WINDOWS)
 // Returns the program counter from signal context, nullptr if unknown.
@@ -190,9 +192,13 @@ class MinimalFormatter {
 
 // Writes the given data with the size to the standard error.
 void WriteToStderr(const char* data, size_t size) {
+#ifdef NGLOG_OS_WINDOWS
+  internal::WriteSignalSafeToFileDescriptor(fileno(stderr), data, size);
+#else
   if (write(fileno(stderr), data, size) < 0) {
     // Ignore errors.
   }
+#endif
 }
 
 // The writer function can be changed by InstallFailureWriter().
@@ -215,11 +221,17 @@ bool GetThreadName(char* buffer, std::size_t buffer_size) {
       wide_name == nullptr) {
     return false;
   }
-  const int result =
-      WideCharToMultiByte(CP_UTF8, 0, wide_name, -1, buffer,
-                          static_cast<int>(buffer_size), nullptr, nullptr);
+  constexpr std::size_t kTerminatorLength = 1;
+  std::size_t utf8_name_length = 0;
+  const bool converted = internal::WideToUtf8Buffer(
+      wide_name, std::wcslen(wide_name), buffer,
+      buffer_size - kTerminatorLength, &utf8_name_length);
   LocalFree(wide_name);
-  return result > 1;
+  if (!converted || utf8_name_length == 0) {
+    return false;
+  }
+  buffer[utf8_name_length] = '\0';
+  return true;
 #  elif defined(HAVE_PTHREAD_GETNAME_NP)
   return pthread_getname_np(pthread_self(), buffer, buffer_size) == 0 &&
          buffer[0] != '\0';
@@ -252,13 +264,32 @@ bool g_stderr_hyperlinks = false;
 // since gethostname() is not async-signal-safe.
 char g_hostname[256] = "";
 
+// The value of --symbolize_file_base_path, used to resolve relative source
+// paths in stack trace hyperlinks. Copied once by InstallFailureSignalHandler()
+// because reading a string flag locks a mutex and allocates memory, neither of
+// which is async-signal-safe.
+constexpr std::size_t kSymbolizeFileBasePathSize = 1024;
+char g_symbolize_file_base_path[kSymbolizeFileBasePathSize] = "";
+
+// Returns false if the base path does not fit into its buffer. Hyperlinks are
+// disabled in that case because they would point to a truncated path.
+bool ComputeSymbolizeFileBasePath() {
+  const std::string base_path = nglog::GetFlag(FLAGS_symbolize_file_base_path);
+  if (base_path.size() >= sizeof(g_symbolize_file_base_path)) {
+    g_symbolize_file_base_path[0] = '\0';
+    return false;
+  }
+  std::memcpy(g_symbolize_file_base_path, base_path.c_str(),
+              base_path.size() + 1);
+  return true;
+}
+
 void ComputeHostname() {
 #ifdef NGLOG_OS_WINDOWS
-  char buf[MAX_COMPUTERNAME_LENGTH + 1];
-  DWORD len = sizeof(buf) / sizeof(buf[0]);
-  if (GetComputerNameA(buf, &len)) {
+  std::string hostname;
+  if (nglog::internal::GetComputerNameUtf8(&hostname)) {
     MinimalFormatter formatter(g_hostname, sizeof(g_hostname));
-    formatter.AppendString(buf);
+    formatter.AppendString(hostname.c_str());
   }
 #elif defined(HAVE_UNISTD_H)
   if (gethostname(g_hostname, sizeof(g_hostname)) != 0) {
@@ -277,16 +308,15 @@ void ComputeHostname() {
 char g_cwd[512] = "";
 
 void ComputeCwd() {
-#ifdef NGLOG_OS_WINDOWS
-  const DWORD len = GetCurrentDirectoryA(sizeof(g_cwd), g_cwd);
-  if (len == 0 || len >= sizeof(g_cwd)) {
+  // A directory that does not fit is omitted rather than truncated, since a
+  // truncated path could end within a multibyte UTF-8 sequence and would
+  // shorten frame paths to a misleading relative form.
+  const std::string& cwd = internal::CachedCwd();
+  if (cwd.size() < sizeof(g_cwd)) {
+    std::memcpy(g_cwd, cwd.c_str(), cwd.size() + 1);
+  } else {
     g_cwd[0] = '\0';
   }
-#elif defined(HAVE_UNISTD_H)
-  if (getcwd(g_cwd, sizeof(g_cwd)) == nullptr) {
-    g_cwd[0] = '\0';
-  }
-#endif  // NGLOG_OS_WINDOWS
 }
 
 // Dumps time information.  We don't dump human-readable time information
@@ -334,8 +364,10 @@ void DumpTimeInfo() {
   g_failure_writer(plain_buf, plain.num_bytes_written());
 }
 
-// TODO(hamaji): Use signal instead of sigaction?
 #if defined(HAVE_STACKTRACE) && defined(HAVE_SIGACTION)
+
+// sigaction is required here because signal() cannot provide siginfo_t or the
+// interrupted execution context used by the failure report.
 
 // Dumps information about the signal to STDERR. The crash address and the
 // PID/TID/LWP identifiers are colorized separately from the surrounding
@@ -434,7 +466,7 @@ void DumpSignalInfo(int signal_number, siginfo_t* siginfo) {
     WriteStyledField(theme.Get(Role::kMetaIdentifier), mode, g_failure_writer,
                      buf, formatter.num_bytes_written());
   }
-#  endif  // GLOG_OS_LINUX && HAVE_SYS_SYSCALL_H && HAVE_SYS_TYPES_H
+#  endif  // NGLOG_OS_LINUX && HAVE_SYS_SYSCALL_H && HAVE_SYS_TYPES_H
 
   char thread_name[kThreadNameBufferSize];
   if (GetThreadName(thread_name, sizeof(thread_name))) {
@@ -505,14 +537,13 @@ void DumpStackFrameInfoImpl(const char* prefix, void* pc) {
                              : ColorMode::kNone;
 #if defined(HAVE_SYMBOLIZE)
   const bool hyperlink = mode == ColorMode::kAnsi &&
-                         FLAGS_symbolize_hyperlinks && g_stderr_hyperlinks &&
-                         frame.file_line_length > 0;
+                         nglog::GetFlag(FLAGS_symbolize_hyperlinks) &&
+                         g_stderr_hyperlinks && frame.file_line_length > 0;
   char uri[1024];
   const char* uri_pointer = nullptr;
   if (hyperlink &&
       BuildFileUri(symbol + frame.file_line_offset, frame.file_line_length,
-                   FLAGS_symbolize_file_base_path.c_str(), g_hostname, uri,
-                   sizeof(uri))) {
+                   g_symbolize_file_base_path, g_hostname, uri, sizeof(uri))) {
     uri_pointer = uri;
   }
 #endif  // defined(HAVE_SYMBOLIZE)
@@ -684,10 +715,11 @@ static void HandleSignal(int signal_number
 #endif
 ) {
 
-  // This is the first time we enter the signal handler.  We are going to
-  // do some interesting stuff from here.
-  // TODO(satorux): We might want to set timeout here using alarm(), but
-  // mixing alarm() and sleep() can be a bad idea.
+  // This is the first time we enter the signal handler. We are going to do
+  // some interesting stuff from here.
+  // A timeout is intentionally not installed here. alarm() uses a
+  // process-wide timer and would interfere with application timers. It would
+  // also interrupt the sleep-based fallback in RelinquishTimeSlice().
 
   // First dump time info.
   DumpTimeInfo();
@@ -790,28 +822,20 @@ void DumpStackFrameInfo(const char* prefix, void* pc) {
 #endif
 
 bool IsFailureSignalHandlerInstalled() {
-#ifdef HAVE_SIGACTION
-  // TODO(andschwa): Return kFailureSignalHandlerInstalled?
-  struct sigaction sig_action;
-  memset(&sig_action, 0, sizeof(sig_action));
-  sigemptyset(&sig_action.sa_mask);
-  sigaction(SIGABRT, nullptr, &sig_action);
-  return sig_action.sa_sigaction == &FailureSignalHandler;
-#elif defined(NGLOG_OS_WINDOWS)
-  return kFailureSignalHandlerInstalled;
-#endif  // HAVE_SIGACTION
-  return false;
+  return g_failure_signal_handler_installed;
 }
 
 void InstallFailureSignalHandler() {
   // Decide once, now, whether/how stack frames dumped to stderr may be
-  // colorized/hyperlinked, and resolve the local hostname and current
-  // directory: getenv(), isatty(), gethostname(), and getcwd() are not
-  // async-signal-safe, so none of them can be called once a signal has
-  // actually fired.
-  g_stderr_color_mode =
-      FLAGS_colorlogtostderr ? StreamColorMode(stderr) : ColorMode::kNone;
-  g_stderr_hyperlinks = StreamSupportsHyperlinks(stderr);
+  // colorized/hyperlinked, and resolve the hyperlink base path, the local
+  // hostname, and the current directory: reading a string flag, getenv(),
+  // isatty(), gethostname(), and getcwd() are not async-signal-safe, so none
+  // of them can be called once a signal has actually fired.
+  g_stderr_color_mode = nglog::GetFlag(FLAGS_colorlogtostderr)
+                            ? StreamColorMode(stderr)
+                            : ColorMode::kNone;
+  g_stderr_hyperlinks =
+      ComputeSymbolizeFileBasePath() && StreamSupportsHyperlinks(stderr);
   ComputeHostname();
   ComputeCwd();
 #ifdef HAVE_SIGACTION
@@ -825,11 +849,12 @@ void InstallFailureSignalHandler() {
   for (auto kFailureSignal : kFailureSignals) {
     CHECK_ERR(sigaction(kFailureSignal.number, &sig_action, nullptr));
   }
+  g_failure_signal_handler_installed = true;
 #elif defined(NGLOG_OS_WINDOWS)
   for (size_t i = 0; i < ARRAYSIZE(kFailureSignals); ++i) {
     CHECK_NE(signal(kFailureSignals[i].number, &FailureSignalHandler), SIG_ERR);
   }
-  kFailureSignalHandlerInstalled = true;
+  g_failure_signal_handler_installed = true;
 #endif  // HAVE_SIGACTION
 }
 

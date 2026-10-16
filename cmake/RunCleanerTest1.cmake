@@ -7,7 +7,7 @@ set (RUNS 3)
 
 foreach (iter RANGE 1 ${RUNS})
   set (ENV{NGLOG_DIR} ${TEST_DIR})
-  execute_process (COMMAND ${LOGCLEANUP} RESULT_VARIABLE _RESULT)
+  execute_process (COMMAND ${EMULATOR} ${LOGCLEANUP} RESULT_VARIABLE _RESULT)
 
   if (NOT _RESULT EQUAL 0)
     message (FATAL_ERROR "Failed to run logcleanup_unittest (error: ${_RESULT})")

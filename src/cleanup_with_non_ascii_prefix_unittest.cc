@@ -2,27 +2,22 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <string>
-
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include "base/commandlineflags.h"
+#include <string>
+
 #include "mock-log.h"
+#include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "ng-log/raw_logging.h"
 #include "testing_utilities.h"
 
 #ifdef NGLOG_OS_WINDOWS
-#  include <direct.h>
+#  include <windows.h>
 #else
 #  include <sys/stat.h>
 #  include <sys/types.h>
-#endif
-
-#ifdef NGLOG_USE_GFLAGS
-#  include <gflags/gflags.h>
-using namespace GFLAGS_NAMESPACE;
 #endif
 
 // Introduce several symbols from gmock.
@@ -37,18 +32,17 @@ using testing::StrNe;
 
 using namespace nglog;
 
-// The directory name deliberately contains non-ASCII characters to exercise
-// the multi-byte to wide character path conversions performed by the log
-// cleaner on Windows (see https://github.com/google/glog/issues/786). The
-// bytes correspond to U+20AC (euro sign) in UTF-8. The directory is created
-// here instead of by the test driver so that its name is encoded consistently
-// with the narrow character strings the logging library passes to the
-// operating system.
+// The directory name deliberately contains U+20AC encoded as UTF-8.
 constexpr const char kLogDir[] = "cleanup_\xE2\x82\xAC_dir";
+#ifdef NGLOG_OS_WINDOWS
+constexpr wchar_t kLogDirWide[] = L"cleanup_\u20AC_dir";
+#endif
 
 static void MakeLogDir(const char* name) {
 #ifdef NGLOG_OS_WINDOWS
-  _mkdir(name);
+  static_cast<void>(name);
+  const BOOL created = CreateDirectoryW(kLogDirWide, nullptr);
+  ASSERT_TRUE(created || GetLastError() == ERROR_ALREADY_EXISTS);
 #else
   mkdir(name, 0777);
 #endif
@@ -70,11 +64,10 @@ TEST(CleanImmediatelyWithNonAsciiPrefix, logging) {
 }
 
 int main(int argc, char** argv) {
-  FLAGS_colorlogtostderr = false;
-  FLAGS_timestamp_in_logfile_name = true;
-#ifdef NGLOG_USE_GFLAGS
-  ParseCommandLineFlags(&argc, &argv, true);
-#endif
+  nglog::SetFlag(FLAGS_colorlogtostderr, false);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, true);
+  nglog::ParseCommandLineFlags(&argc, &argv,
+                               nglog::FlagParsingMode::kRemoveFlags);
   // Make sure stderr is not buffered as stderr seems to be buffered
   // on recent windows.
   setbuf(stderr, nullptr);

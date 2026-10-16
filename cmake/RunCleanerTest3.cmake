@@ -8,7 +8,7 @@ set (RUNS 3)
 file (MAKE_DIRECTORY ${TEST_DIR}/${TEST_SUBDIR})
 
 foreach (iter RANGE 1 ${RUNS})
-  execute_process (COMMAND ${LOGCLEANUP} -log_dir=${TEST_DIR}
+  execute_process (COMMAND ${EMULATOR} ${LOGCLEANUP} -log_dir=${TEST_DIR}
     RESULT_VARIABLE _RESULT)
 
   if (NOT _RESULT EQUAL 0)

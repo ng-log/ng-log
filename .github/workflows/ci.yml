@@ -1,0 +1,100 @@
+# SPDX-FileCopyrightText: 2026 The ng-log contributors
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+name: CI
+
+on: [push, pull_request]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+jobs:
+  emscripten:
+    if: &skip-duplicate-pull-request github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
+    name: Emscripten
+    uses: ./.github/workflows/emscripten.yml
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    secrets: inherit
+
+  linux:
+    if: *skip-duplicate-pull-request
+    name: Linux
+    uses: ./.github/workflows/linux.yml
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    secrets: inherit
+
+  macos:
+    if: *skip-duplicate-pull-request
+    name: macOS
+    uses: ./.github/workflows/macos.yml
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    secrets: inherit
+
+  windows:
+    if: *skip-duplicate-pull-request
+    name: Windows
+    uses: ./.github/workflows/windows.yml
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    secrets: inherit
+
+  # Uploading from a separate job keeps the code-quality write permission away
+  # from the jobs running the tests. Pull requests from forks cannot upload
+  # because their token is read-only, and pull requests from branches of this
+  # repository are covered by the push event of their head branch.
+  upload-coverage:
+    if: github.event_name == 'push'
+    needs: [emscripten, linux, macos, windows]
+    name: Upload Coverage to GitHub
+    runs-on: ubuntu-26.04
+    permissions:
+      code-quality: write
+      contents: read
+      pull-requests: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.x'
+
+      - name: Setup Dependencies
+        run: |
+          pip install -r .github/coverage/requirements.txt
+
+      - name: Download Coverage
+        uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-*
+          path: coverage
+
+      # Platforms define some functions on different lines and compilers name
+      # functions differently. Keep such definitions apart and count each
+      # source line only once.
+      - name: Merge Coverage
+        run: |
+          gcovr -a 'coverage/*/coverage.json' \
+                --merge-lines \
+                --merge-mode-functions=separate \
+                -s --cobertura coverage.xml
+
+      - name: Upload Coverage
+        uses: actions/upload-code-coverage@v1
+        with:
+          file: coverage.xml
+          language: C++
+          label: code-coverage/gcovr

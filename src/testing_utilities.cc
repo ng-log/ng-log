@@ -11,6 +11,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -21,6 +23,10 @@
 
 #ifdef HAVE_UNISTD_H
 #  include <unistd.h>
+#endif
+
+#ifndef NGLOG_OS_WINDOWS
+#  include <ftw.h>
 #endif
 
 namespace nglog {
@@ -42,6 +48,44 @@ std::string GetTempDir() {
   return temp_directories_list.front();
 }
 
+#ifndef NGLOG_OS_WINDOWS
+int RemoveDirectoryEntry(const char* path, const struct stat* /*status*/,
+                         int /*type*/, struct FTW* /*position*/) {
+  return std::remove(path);
+}
+
+//! Directory that is created on construction and removed with its contents.
+class PrivateDirectory final {
+ public:
+  explicit PrivateDirectory(const std::string& parent)
+      : path_{parent + "/nglog-test-XXXXXX"}, owner_{getpid()} {
+    if (mkdtemp(&path_[0]) == nullptr) {
+      std::perror(("Could not create directory in " + parent).c_str());
+      std::exit(EXIT_FAILURE);
+    }
+  }
+
+  ~PrivateDirectory() {
+    // Forked children run the same static destructors on exit and must not
+    // remove the directory of their parent.
+    if (getpid() == owner_) {
+      constexpr int kMaximumOpenDescriptors = 16;
+      nftw(path_.c_str(), RemoveDirectoryEntry, kMaximumOpenDescriptors,
+           FTW_DEPTH | FTW_PHYS);
+    }
+  }
+
+  PrivateDirectory(const PrivateDirectory& other) = delete;
+  PrivateDirectory& operator=(const PrivateDirectory& other) = delete;
+
+  const std::string& path() const noexcept { return path_; }
+
+ private:
+  std::string path_;
+  pid_t owner_;
+};
+#endif  // !NGLOG_OS_WINDOWS
+
 }  // namespace
 
 #if defined(NGLOG_OS_WINDOWS) && defined(_MSC_VER) && !defined(TEST_SRC_DIR)
@@ -55,9 +99,23 @@ static const char TEST_SRC_DIR[] = ".";
 
 namespace nglog {
 
-const std::string& TestTmpDir() {
+const std::string& SystemTmpDir() {
   static const std::string dir = GetTempDir();
   return dir;
+}
+
+const std::string& TestTmpDir() {
+#ifdef NGLOG_OS_WINDOWS
+  // No truncated directory listings have been observed on Windows, so the
+  // shared directory is kept there.
+  return SystemTmpDir();
+#else
+  // Emscripten ends a directory listing early when an entry vanishes while
+  // the listing is in progress. Each test process therefore uses a directory
+  // that no other process modifies.
+  static const PrivateDirectory dir{SystemTmpDir()};
+  return dir.path();
+#endif
 }
 
 const std::string& TestSrcDir() {
@@ -279,11 +337,18 @@ std::string Munge(const std::string& filename) {
     StringReplace(&line, "__NULLP__", null_str);
     StringReplace(&line, "__PTRTEST__", ptr_str);
 
-    StringReplace(&line, "__SUCCESS__", StrError(0));
-    StringReplace(&line, "__ENOENT__", StrError(ENOENT));
-    StringReplace(&line, "__EINTR__", StrError(EINTR));
-    StringReplace(&line, "__ENXIO__", StrError(ENXIO));
-    StringReplace(&line, "__ENOEXEC__", StrError(ENOEXEC));
+    // Error numbers differ between platforms. Describe the number PLOG
+    // printed in brackets.
+    constexpr char kStrErrorPlaceholder[] = "__STRERROR__";
+    const std::string::size_type strerror_pos = line.find(kStrErrorPlaceholder);
+    if (strerror_pos != std::string::npos) {
+      const std::string::size_type errnum_pos = line.find('[', strerror_pos);
+      CHECK(errnum_pos != std::string::npos)
+          << "missing error number after " << kStrErrorPlaceholder << " in "
+          << line;
+      const int errnum = std::atoi(line.c_str() + errnum_pos + 1);
+      StringReplace(&line, kStrErrorPlaceholder, StrError(errnum));
+    }
     result += line + "\n";
   }
   return result;

@@ -43,7 +43,33 @@ const Theme& DefaultTheme() {
           .Set(Role::kErrnoMessage,
                ColorSpec{Color::kDefault, TextStyle::kDim, Color::kDefault})
           .Set(Role::kErrnoCode,
-               ColorSpec{Color::kCyan, TextStyle::kBold, Color::kDefault});
+               ColorSpec{Color::kCyan, TextStyle::kBold, Color::kDefault})
+          .Set(Role::kHelpSectionHeading,
+               ColorSpec{Color::kGreen, TextStyle::kBold, Color::kDefault})
+          .Set(Role::kHelpModuleHeader,
+               ColorSpec{Color::kWhite, TextStyle::kNone, Color::kDefault})
+          .Set(Role::kHelpModuleName,
+               ColorSpec{Color::kWhite, TextStyle::kBold, Color::kDefault})
+          .Set(Role::kHelpFlagName,
+               ColorSpec{Color::kCyan, TextStyle::kBold, Color::kDefault})
+          .Set(Role::kHelpFlagType,
+               ColorSpec{Color::kYellow, TextStyle::kNone, Color::kDefault})
+          .Set(Role::kHelpFlagValue,
+               ColorSpec{Color::kMagenta, TextStyle::kNone, Color::kDefault})
+          .Set(Role::kHelpText,
+               ColorSpec{Color::kDefault, TextStyle::kNone, Color::kDefault})
+          .Set(Role::kHelpDescription,
+               ColorSpec{Color::kDefault, TextStyle::kDim, Color::kDefault})
+          .Set(Role::kHelpCode,
+               ColorSpec{Color::kYellow, TextStyle::kNone, Color::kDefault})
+          .Set(Role::kHelpEnvironmentVariable,
+               ColorSpec{Color::kBlue, TextStyle::kNone, Color::kDefault})
+          .Set(Role::kHelpExecutable,
+               ColorSpec{Color::kBlue, TextStyle::kNone, Color::kDefault})
+          .Set(Role::kHelpMeta,
+               ColorSpec{Color::kCyan, TextStyle::kNone, Color::kDefault})
+          .Set(Role::kHelpStream,
+               ColorSpec{Color::kBlue, TextStyle::kNone, Color::kDefault});
 
   return theme;
 }

@@ -6,16 +6,11 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include "base/commandlineflags.h"
 #include "mock-log.h"
+#include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "ng-log/raw_logging.h"
 #include "testing_utilities.h"
-
-#ifdef NGLOG_USE_GFLAGS
-#  include <gflags/gflags.h>
-using namespace GFLAGS_NAMESPACE;
-#endif
 
 // Introduce several symbols from gmock.
 using nglog::nglog_testing::ScopedMockLog;
@@ -47,11 +42,10 @@ TEST(CleanImmediatelyWithAbsolutePrefix, logging) {
 }
 
 int main(int argc, char** argv) {
-  FLAGS_colorlogtostderr = false;
-  FLAGS_timestamp_in_logfile_name = true;
-#ifdef NGLOG_USE_GFLAGS
-  ParseCommandLineFlags(&argc, &argv, true);
-#endif
+  nglog::SetFlag(FLAGS_colorlogtostderr, false);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, true);
+  nglog::ParseCommandLineFlags(&argc, &argv,
+                               nglog::FlagParsingMode::kRemoveFlags);
   // Make sure stderr is not buffered as stderr seems to be buffered
   // on recent windows.
   setbuf(stderr, nullptr);

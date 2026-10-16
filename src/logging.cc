@@ -3,9 +3,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+#include "ng-log/flags.h"
 #define _GNU_SOURCE 1  // needed for O_NOFOLLOW and pread()/pwrite()
-
-#include "ng-log/logging.h"
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -44,26 +43,26 @@
 #include "config.h"
 #include "internal/lock_metrics.h"
 #include "internal/log_cleaner.h"
+#include "internal/path.h"
 #include "internal/source_location.h"
 #include "internal/style_recorder.h"
 #include "internal/styled_output.h"
 #include "internal/terminal_capabilities.h"
 #include "internal/theme.h"
+#include "internal/utf8.h"
+#include "ng-log/logging.h"
 #include "ng-log/platform.h"
 #include "ng-log/raw_logging.h"
 #include "stacktrace.h"
 #include "utilities.h"
 
-#ifdef NGLOG_OS_WINDOWS
-#  include "windows/dirent.h"
-#else
-#  include <dirent.h>  // for automatic removal of old logs
-#endif
-
 #if defined(HAVE__CHSIZE_S) || defined(NGLOG_OS_WINDOWS)
 #  include <io.h>  // for truncate log file
 #endif
 #ifdef NGLOG_OS_WINDOWS
+#  include <objbase.h>
+#  include <shlguid.h>
+#  include <shobjidl.h>
 #  include <windows.h>
 #endif
 #ifdef HAVE_PWD_H
@@ -102,8 +101,6 @@ using std::fclose;
 using std::fflush;
 using std::FILE;
 using std::fprintf;
-using std::fputs;
-using std::fwrite;
 using std::perror;
 
 #ifdef __QNX__
@@ -143,11 +140,7 @@ static void GetHostName(string* hostname) {
   }
   *hostname = buf.nodename;
 #elif defined(NGLOG_OS_WINDOWS)
-  char buf[MAX_COMPUTERNAME_LENGTH + 1];
-  DWORD len = MAX_COMPUTERNAME_LENGTH + 1;
-  if (GetComputerNameA(buf, &len)) {
-    *hostname = buf;
-  } else {
+  if (!nglog::internal::GetComputerNameUtf8(hostname)) {
     hostname->clear();
   }
 #else
@@ -181,17 +174,17 @@ static Role SeverityToRole(LogSeverity severity) {
   NGLOG_UNREACHABLE;
 }
 
-// Safely get max_log_size. A value of 0 is overridden to the 1 MB minimum.
+// Safely get max_log_size. A value of 0 is overridden to the 1 MiB minimum.
 // Values large enough to overflow the "MaxLogSize() << 20" byte computation
-// are capped to the 4095 MB maximum instead of being silently reduced to the
+// are capped to the 4095 MiB maximum instead of being silently reduced to the
 // minimum, which would produce surprisingly tiny log files.
 static uint32 MaxLogSize() {
   constexpr uint32 max_megabytes = 4095;  // 4095 << 20 fits in a uint32.
-  if (FLAGS_max_log_size == 0) {
+  const uint32 max_log_size = nglog::GetFlag(FLAGS_max_log_size);
+  if (max_log_size == 0) {
     return 1;
   }
-  return FLAGS_max_log_size < max_megabytes ? FLAGS_max_log_size
-                                            : max_megabytes;
+  return max_log_size < max_megabytes ? max_log_size : max_megabytes;
 }
 
 // An arbitrary limit on the length of a single log message.  This
@@ -305,6 +298,79 @@ std::string WindowsErrorMessage(DWORD error) {
 
   return TrimTrailingCRLF(std::move(result));
 }
+
+template <typename Interface>
+struct ComInterfaceReleaser {
+  void operator()(Interface* pointer) const noexcept {
+    if (pointer != nullptr) pointer->Release();
+  }
+};
+
+// Converts a UTF-8 path into the absolute form the shell link API expects.
+// The API copies paths into buffers of MAX_PATH characters and does not
+// accept extended-length paths, so longer paths are rejected.
+bool GetShellLinkPath(const std::string& path, std::wstring* result) {
+  std::wstring wide_path;
+  if (!internal::Utf8ToWide(path.data(), path.size(), &wide_path) ||
+      wide_path.empty()) {
+    return false;
+  }
+
+  std::array<wchar_t, MAX_PATH> buffer;
+  const DWORD length =
+      GetFullPathNameW(wide_path.c_str(), static_cast<DWORD>(buffer.size()),
+                       buffer.data(), nullptr);
+  if (length == 0 || length >= buffer.size()) {
+    return false;
+  }
+  result->assign(buffer.data(), length);
+  return true;
+}
+
+bool CreateWindowsShortcut(const std::string& target,
+                           const std::string& shortcut) {
+  std::wstring wide_target;
+  std::wstring wide_shortcut;
+  if (!GetShellLinkPath(target, &wide_target) ||
+      !GetShellLinkPath(shortcut, &wide_shortcut)) {
+    return false;
+  }
+
+  const HRESULT initialization =
+      CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  if (FAILED(initialization) && initialization != RPC_E_CHANGED_MODE) {
+    return false;
+  }
+  const bool uninitialize = SUCCEEDED(initialization);
+
+  IShellLinkW* shell_link_raw = nullptr;
+  HRESULT result = CoCreateInstance(CLSID_ShellLink, nullptr,
+                                    CLSCTX_INPROC_SERVER, IID_IShellLinkW,
+                                    reinterpret_cast<void**>(&shell_link_raw));
+  std::unique_ptr<IShellLinkW, ComInterfaceReleaser<IShellLinkW>> shell_link{
+      shell_link_raw};
+  if (SUCCEEDED(result)) {
+    result = shell_link->SetPath(wide_target.c_str());
+  }
+  if (SUCCEEDED(result)) {
+    result = shell_link->SetRelativePath(wide_shortcut.c_str(), 0);
+  }
+
+  IPersistFile* persist_file_raw = nullptr;
+  std::unique_ptr<IPersistFile, ComInterfaceReleaser<IPersistFile>>
+      persist_file{nullptr};
+  if (SUCCEEDED(result)) {
+    result = shell_link->QueryInterface(
+        IID_IPersistFile, reinterpret_cast<void**>(&persist_file_raw));
+    persist_file.reset(persist_file_raw);
+  }
+  if (SUCCEEDED(result)) {
+    result = persist_file->Save(wide_shortcut.c_str(), TRUE);
+  }
+
+  if (uninitialize) CoUninitialize();
+  return SUCCEEDED(result);
+}
 #endif
 
 void AppendPrefixText(LogMessage::LogStream& stream, const char* text) {
@@ -348,7 +414,7 @@ void AppendDefaultPrefix(internal::LogMessageData& data, LogSeverity severity,
   LogMessage::LogStream& stream = data.stream_;
   stream.append(LogSeverityNames[severity], 1);
   data.prefix_severity_len_ = stream.pcount();
-  if (FLAGS_log_year_in_prefix) {
+  if (nglog::GetFlag(FLAGS_log_year_in_prefix)) {
     AppendPrefixNumber(stream, 1900 + time.year(), kPrefixYearWidth);
   }
   AppendPrefixNumber(stream, 1 + time.month(), kPrefixMonthWidth);
@@ -738,7 +804,8 @@ inline void LogDestination::SetStderrLogging(LogSeverity min_severity) {
   // Prevent any subtle race conditions by wrapping a mutex lock around
   // all this stuff.
   std::lock_guard<internal::LogMutex> l{log_mutex};
-  FLAGS_stderrthreshold = min_severity;
+  nglog::SetFlag(FLAGS_stderrthreshold,
+                 static_cast<std::int32_t>(min_severity));
 }
 
 inline void LogDestination::LogToStderr() {
@@ -760,16 +827,16 @@ inline void LogDestination::SetEmailLogging(LogSeverity min_severity,
   LogDestination::addresses_ = addresses;
 }
 
-// A minimal adapter satisfying color.h's "Formatter" concept
-// (AppendString(const char*)), so WithColor()/Hyperlink::Wrap() can be used
-// against a plain FILE* stream. Only used to emit the small, fixed
-// escape/hyperlink sequences themselves: the colored content is always
-// written straight to "output" via fwrite() inside the body lambda they
-// wrap, not through this adapter.
+// Adapts a FILE* stream to the formatter that WithColor() in
+// internal/styled_output.h and Hyperlink::Wrap() expect. It only emits the
+// escape and hyperlink sequences. The body lambda they wrap writes the
+// colored content to the stream directly.
 namespace {
 struct FileFormatter {
   FILE* output;
-  void AppendString(const char* s) { fputs(s, output); }
+  void AppendString(const char* text, size_t len) {
+    internal::WriteUtf8(output, text, len);
+  }
 };
 }  // namespace
 
@@ -788,17 +855,18 @@ static void WriteTerminalField(FILE* output, FileFormatter& formatter,
   }
   if (mode == ColorMode::kAnsi) {
     WithColor(formatter, spec, true,
-              [text, len, output] { fwrite(text, len, 1, output); });
+              [text, len, output] { internal::WriteUtf8(output, text, len); });
     return;
   }
 #ifdef NGLOG_OS_WINDOWS
   if (mode == ColorMode::kLegacyConsole) {
-    WithLegacyConsoleAttribute(
-        output, spec, [text, len, output] { fwrite(text, len, 1, output); });
+    WithLegacyConsoleAttribute(output, spec, [text, len, output] {
+      internal::WriteUtf8(output, text, len);
+    });
     return;
   }
 #endif  // NGLOG_OS_WINDOWS
-  fwrite(text, len, 1, output);
+  internal::WriteUtf8(output, text, len);
 }
 
 static void WriteStyledLogField(FILE* output, FileFormatter& formatter,
@@ -831,17 +899,18 @@ constexpr std::size_t kLogFileUriBufferSize = 1024;
 
 static void WriteLogFileCreationError(const std::string& filename,
                                       const std::string& error_message) {
-  const ColorMode mode =
-      FLAGS_colorlogtostderr ? StreamColorMode(stderr) : ColorMode::kNone;
+  const ColorMode mode = nglog::GetFlag(FLAGS_colorlogtostderr)
+                             ? StreamColorMode(stderr)
+                             : ColorMode::kNone;
   const bool hyperlinks_enabled = mode == ColorMode::kAnsi &&
-                                  FLAGS_symbolize_hyperlinks &&
+                                  nglog::GetFlag(FLAGS_symbolize_hyperlinks) &&
                                   StreamSupportsHyperlinks(stderr);
 
   char uri[kLogFileUriBufferSize];
   const char* uri_pointer = nullptr;
   if (hyperlinks_enabled &&
       BuildFileUri(filename.c_str(), filename.size(),
-                   FLAGS_symbolize_file_base_path.c_str(),
+                   nglog::GetFlag(FLAGS_symbolize_file_base_path).c_str(),
                    CachedHostname().c_str(), uri, kLogFileUriBufferSize)) {
     uri_pointer = uri;
   }
@@ -905,7 +974,7 @@ static void WriteStyledLogBody(FILE* output, FileFormatter& formatter,
 // held back indefinitely even with buffering disabled
 // (--logbuflevel=-1).
 static void MaybeFlushStdout(FILE* output, LogSeverity severity) {
-  if (output == stdout && severity > FLAGS_logbuflevel) {
+  if (output == stdout && severity > nglog::GetFlag(FLAGS_logbuflevel)) {
     fflush(output);
   }
 }
@@ -921,13 +990,14 @@ static void MaybeFlushStdout(FILE* output, LogSeverity severity) {
 static void ColoredWriteToStderrOrStdout(FILE* output, LogSeverity severity,
                                          const char* message, size_t len) {
   const bool is_stdout = (output == stdout);
-  const bool want_color = (!is_stdout && FLAGS_colorlogtostderr) ||
-                          (is_stdout && FLAGS_colorlogtostdout);
+  const bool want_color =
+      (!is_stdout && nglog::GetFlag(FLAGS_colorlogtostderr)) ||
+      (is_stdout && nglog::GetFlag(FLAGS_colorlogtostdout));
   const ColorMode mode =
       want_color ? StreamColorMode(output) : ColorMode::kNone;
 
   if (mode == ColorMode::kNone) {
-    fwrite(message, len, 1, output);
+    internal::WriteUtf8(output, message, len);
     MaybeFlushStdout(output, severity);
     return;
   }
@@ -938,7 +1008,7 @@ static void ColoredWriteToStderrOrStdout(FILE* output, LogSeverity severity,
                        spec.style != TextStyle::kNone;
 
   if (!colored) {
-    fwrite(message, len, 1, output);
+    internal::WriteUtf8(output, message, len);
     MaybeFlushStdout(output, severity);
     return;
   }
@@ -954,7 +1024,7 @@ static void ColoredWriteToStdout(LogSeverity severity, const char* message,
   FILE* output = stdout;
   // We also need to send logs to the stderr when the severity is
   // higher or equal to the stderr threshold.
-  if (severity >= FLAGS_stderrthreshold) {
+  if (severity >= nglog::GetFlag(FLAGS_stderrthreshold)) {
     output = stderr;
   }
   ColoredWriteToStderrOrStdout(output, severity, message, len);
@@ -978,12 +1048,13 @@ static void ColoredWriteToStderrOrStdoutWithFields(
     FILE* output, const internal::LogMessageData& data) {
   if (!data.has_default_prefix_) {
     const bool is_stdout = (output == stdout);
-    const bool want_color = (!is_stdout && FLAGS_colorlogtostderr) ||
-                            (is_stdout && FLAGS_colorlogtostdout);
+    const bool want_color =
+        (!is_stdout && nglog::GetFlag(FLAGS_colorlogtostderr)) ||
+        (is_stdout && nglog::GetFlag(FLAGS_colorlogtostdout));
     const ColorMode mode =
         want_color ? StreamColorMode(output) : ColorMode::kNone;
     if (mode == ColorMode::kNone) {
-      fwrite(data.message_text_, data.num_chars_to_log_, 1, output);
+      internal::WriteUtf8(output, data.message_text_, data.num_chars_to_log_);
       MaybeFlushStdout(output, data.severity_);
       return;
     }
@@ -991,9 +1062,10 @@ static void ColoredWriteToStderrOrStdoutWithFields(
     const Theme& theme = DefaultTheme();
     const ColorSpec text_spec = theme.Get(SeverityToRole(data.severity_));
     FileFormatter formatter{output};
-    const bool hyperlinks_enabled = mode == ColorMode::kAnsi &&
-                                    FLAGS_symbolize_hyperlinks &&
-                                    StreamSupportsHyperlinks(output);
+    const bool hyperlinks_enabled =
+        mode == ColorMode::kAnsi &&
+        nglog::GetFlag(FLAGS_symbolize_hyperlinks) &&
+        StreamSupportsHyperlinks(output);
     if (data.styles_.size() == 0) {
       WriteStyledLogField(output, formatter, mode,
                           TextAttributes{text_spec, Hyperlink()}, false,
@@ -1008,8 +1080,9 @@ static void ColoredWriteToStderrOrStdoutWithFields(
   }
 
   const bool is_stdout = (output == stdout);
-  const bool want_color = (!is_stdout && FLAGS_colorlogtostderr) ||
-                          (is_stdout && FLAGS_colorlogtostdout);
+  const bool want_color =
+      (!is_stdout && nglog::GetFlag(FLAGS_colorlogtostderr)) ||
+      (is_stdout && nglog::GetFlag(FLAGS_colorlogtostdout));
   const char* const message = data.message_text_;
   const size_t len = data.num_chars_to_log_;
   const ColorMode mode =
@@ -1018,7 +1091,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
   // Avoid using cerr from this module since we may get called during
   // exit code, and cerr may be partially or fully destroyed by then.
   if (mode == ColorMode::kNone) {
-    fwrite(message, len, 1, output);
+    internal::WriteUtf8(output, message, len);
     MaybeFlushStdout(output, data.severity_);
     return;
   }
@@ -1046,7 +1119,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
       TextAttributes{theme.Get(Role::kShellCommand), Hyperlink()}, false,
       message + pos, data.prefix_timestamp_len_);
   pos += data.prefix_timestamp_len_;
-  fwrite(message + pos, 1, 1, output);  // The space before the thread id.
+  internal::WriteUtf8(output, message + pos, 1);
   pos += 1;
 
   WriteStyledLogField(
@@ -1054,21 +1127,22 @@ static void ColoredWriteToStderrOrStdoutWithFields(
       TextAttributes{theme.Get(Role::kLogThreadId), Hyperlink()}, false,
       message + pos, data.prefix_threadid_len_);
   pos += data.prefix_threadid_len_;
-  fwrite(message + pos, 1, 1, output);  // The space before "file:line".
+  internal::WriteUtf8(output, message + pos, 1);
   pos += 1;
 
   char uri[1024];
   const char* uri_pointer = nullptr;
 
-  if (mode == ColorMode::kAnsi && FLAGS_symbolize_hyperlinks &&
+  if (mode == ColorMode::kAnsi && nglog::GetFlag(FLAGS_symbolize_hyperlinks) &&
       StreamSupportsHyperlinks(output)) {
     char span[600];
     const int span_len =
         std::snprintf(span, sizeof(span), "%s:%d", data.fullname_, data.line_);
     if (span_len > 0 && static_cast<size_t>(span_len) < sizeof(span)) {
-      if (BuildFileLineUri(span, static_cast<size_t>(span_len),
-                           FLAGS_symbolize_file_base_path.c_str(),
-                           CachedHostname().c_str(), uri, sizeof(uri))) {
+      if (BuildFileLineUri(
+              span, static_cast<size_t>(span_len),
+              nglog::GetFlag(FLAGS_symbolize_file_base_path).c_str(),
+              CachedHostname().c_str(), uri, sizeof(uri))) {
         uri_pointer = uri;
       }
     }
@@ -1086,17 +1160,17 @@ static void ColoredWriteToStderrOrStdoutWithFields(
                       TextAttributes{theme.Get(Role::kLogBracket), Hyperlink()},
                       false, message + pos, 1);  // The "]" closing the prefix.
   pos += 1;
-  fwrite(message + pos, 1, 1, output);  // The space after "]".
+  internal::WriteUtf8(output, message + pos, 1);
   pos += 1;
 
   if (!text_colored && data.styles_.size() == 0) {
-    fwrite(message + pos, len - pos, 1, output);
+    internal::WriteUtf8(output, message + pos, len - pos);
     MaybeFlushStdout(output, data.severity_);
     return;
   }
 
   const bool hyperlinks_enabled = mode == ColorMode::kAnsi &&
-                                  FLAGS_symbolize_hyperlinks &&
+                                  nglog::GetFlag(FLAGS_symbolize_hyperlinks) &&
                                   StreamSupportsHyperlinks(output);
   WriteStyledLogBody(output, formatter, mode, data.styles_, text_spec,
                      hyperlinks_enabled, message, pos, len);
@@ -1108,7 +1182,7 @@ static void ColoredWriteToStdoutWithFields(
   FILE* output = stdout;
   // We also need to send logs to the stderr when the severity is
   // higher or equal to the stderr threshold.
-  if (data.severity_ >= FLAGS_stderrthreshold) {
+  if (data.severity_ >= nglog::GetFlag(FLAGS_stderrthreshold)) {
     output = stderr;
   }
   ColoredWriteToStderrOrStdoutWithFields(output, data);
@@ -1122,7 +1196,7 @@ static void ColoredWriteToStderrWithFields(
 static void WriteToStderr(const char* message, size_t len) {
   // Avoid using cerr from this module since we may get called during
   // exit code, and cerr may be partially or fully destroyed by then.
-  fwrite(message, len, 1, stderr);
+  internal::WriteUtf8(stderr, message, len);
 }
 
 static void WritePreInitializationWarning() {
@@ -1133,8 +1207,9 @@ static void WritePreInitializationWarning() {
   constexpr char kStream[] = "STDERR";
   constexpr char kNewline[] = "\n";
 
-  const ColorMode mode =
-      FLAGS_colorlogtostderr ? StreamColorMode(stderr) : ColorMode::kNone;
+  const ColorMode mode = nglog::GetFlag(FLAGS_colorlogtostderr)
+                             ? StreamColorMode(stderr)
+                             : ColorMode::kNone;
   const Theme& theme = DefaultTheme();
   const auto write_content = [](const char* text, size_t) {
     WriteRawToStderr(text);
@@ -1155,10 +1230,12 @@ static void WritePreInitializationWarning() {
 
 inline void LogDestination::MaybeLogToStderr(
     const internal::LogMessageData& data) {
-  if ((data.severity_ >= FLAGS_stderrthreshold) || FLAGS_alsologtostderr) {
+  if ((data.severity_ >= nglog::GetFlag(FLAGS_stderrthreshold)) ||
+      nglog::GetFlag(FLAGS_alsologtostderr)) {
     ColoredWriteToStderrWithFields(data);
     AlsoErrorWrite(data.severity_, tools::ProgramInvocationShortName(),
-                   data.message_text_ + data.num_prefix_chars_);
+                   data.message_text_ + data.num_prefix_chars_,
+                   data.num_chars_to_log_ - data.num_prefix_chars_);
   }
 }
 
@@ -1177,7 +1254,7 @@ inline void LogDestination::MaybeLogToLogfile(
     LogSeverity severity,
     const std::chrono::system_clock::time_point& timestamp, const char* message,
     size_t len) {
-  const bool should_flush = severity > FLAGS_logbuflevel;
+  const bool should_flush = severity > nglog::GetFlag(FLAGS_logbuflevel);
   LogDestination* destination = log_destination(severity);
   destination->logger_->Write(should_flush, timestamp, message, len);
 }
@@ -1186,7 +1263,7 @@ inline void LogDestination::MaybeLogToLogfileLocked(
     LogSeverity severity,
     const std::chrono::system_clock::time_point& timestamp, const char* message,
     size_t len) {
-  const bool should_flush = severity > FLAGS_logbuflevel;
+  const bool should_flush = severity > nglog::GetFlag(FLAGS_logbuflevel);
   LogDestination* destination = log_destination(severity);
   if (destination->logger_ == &destination->fileobject_) {
     destination->fileobject_.WriteUnlocked(should_flush, timestamp, message,
@@ -1200,9 +1277,10 @@ inline void LogDestination::LogToAllLogfiles(
     LogSeverity severity,
     const std::chrono::system_clock::time_point& timestamp, const char* message,
     size_t len) {
-  if (FLAGS_logtostdout) {  // global flag: never log to file
+  if (nglog::GetFlag(FLAGS_logtostdout)) {  // global flag: never log to file
     ColoredWriteToStdout(severity, message, len);
-  } else if (FLAGS_logtostderr) {  // global flag: never log to file
+  } else if (nglog::GetFlag(
+                 FLAGS_logtostderr)) {  // global flag: never log to file
     ColoredWriteToStderr(severity, message, len);
   } else {
     for (int i = severity; i >= 0; --i) {
@@ -1216,9 +1294,9 @@ inline void LogDestination::LogToAllLogfilesLocked(
     LogSeverity severity,
     const std::chrono::system_clock::time_point& timestamp, const char* message,
     size_t len) {
-  if (FLAGS_logtostdout) {
+  if (nglog::GetFlag(FLAGS_logtostdout)) {
     ColoredWriteToStdout(severity, message, len);
-  } else if (FLAGS_logtostderr) {
+  } else if (nglog::GetFlag(FLAGS_logtostderr)) {
     ColoredWriteToStderr(severity, message, len);
   } else {
     for (int i = severity; i >= 0; --i) {
@@ -1383,6 +1461,14 @@ constexpr char possible_dir_delim[] = "\\/";
 constexpr char possible_dir_delim[] = "/";
 #endif
 
+bool IsRegularFile(const struct stat& statbuf) {
+#ifdef NGLOG_OS_WINDOWS
+  return (statbuf.st_mode & _S_IFMT) == _S_IFREG;
+#else
+  return S_ISREG(statbuf.st_mode);
+#endif
+}
+
 string PrettyDuration(const std::chrono::duration<int>& secs) {
   std::stringstream result;
   int mins = secs.count() / 60;
@@ -1456,7 +1542,7 @@ void LogFileObject::FlushUnlocked(
   // Figure out when we are due for another flush.
   next_flush_time_ =
       now + std::chrono::duration_cast<std::chrono::system_clock::duration>(
-                std::chrono::duration<int32>{FLAGS_logbufsecs});
+                std::chrono::duration<int32>{nglog::GetFlag(FLAGS_logbufsecs)});
 }
 
 bool LogFileObject::CreateLogfile(const std::string& filename) {
@@ -1475,7 +1561,7 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
   flags |= O_NOINHERIT;
   bool truncate_file = false;
 #endif
-  if (FLAGS_timestamp_in_logfile_name) {
+  if (nglog::GetFlag(FLAGS_timestamp_in_logfile_name)) {
     // demand that the file is unique for our timestamp (fail if it exists).
     flags = flags | O_EXCL;
   } else {
@@ -1483,7 +1569,7 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
     // the first time or a file is being recreated due to exceeding max size
 
     struct stat statbuf;
-    if (stat(filename.c_str(), &statbuf) == 0) {
+    if (internal::StatPath(filename, &statbuf) == 0) {
       // truncate the file if it exceeds the max size
       if ((static_cast<std::size_t>(statbuf.st_size) >> 20U) >= MaxLogSize()) {
 #if defined(NGLOG_OS_WINDOWS)
@@ -1498,8 +1584,9 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
     }
   }
 
-  FileDescriptor fd{
-      open(filename.c_str(), flags, static_cast<mode_t>(FLAGS_logfile_mode))};
+  FileDescriptor fd{internal::OpenPath(
+      filename, flags,
+      static_cast<int>(nglog::GetFlag(FLAGS_logfile_mode).value()))};
   if (!fd) {
 #ifdef NGLOG_OS_WINDOWS
     create_error_message_ = StrError(errno);
@@ -1561,16 +1648,17 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
 #ifdef NGLOG_OS_WINDOWS
     create_error_message_ = StrError(errno);
 #endif
-    if (FLAGS_timestamp_in_logfile_name) {
-      unlink(filename.c_str());  // Erase the half-baked evidence: an unusable
-                                 // log file, only if we just created it.
+    if (nglog::GetFlag(FLAGS_timestamp_in_logfile_name)) {
+      // Erase the half-baked evidence: an unusable log file, only if we just
+      // created it.
+      internal::UnlinkPath(filename);
     }
     return false;
   }
 #ifdef NGLOG_OS_WINDOWS
   // https://github.com/golang/go/issues/27638 - make sure we seek to the end to
   // append empirically replicated with wine over mingw build
-  if (!FLAGS_timestamp_in_logfile_name) {
+  if (!nglog::GetFlag(FLAGS_timestamp_in_logfile_name)) {
     if (fseek(file_.get(), 0, SEEK_END) != 0) {
 #  ifdef NGLOG_OS_WINDOWS
       create_error_message_ = StrError(errno);
@@ -1595,10 +1683,23 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
       linkpath = filename.substr(0, separator + 1);
     }
     linkpath += linkname;
-    unlink(linkpath.c_str());  // delete old one if it exists
+    internal::UnlinkPath(linkpath);  // delete old one if it exists
 
 #if defined(NGLOG_OS_WINDOWS)
-    // TODO(hamaji): Create lnk file on Windows?
+    const string shortcut_path = linkpath + ".lnk";
+    internal::UnlinkPath(shortcut_path);
+    if (!CreateWindowsShortcut(filename, shortcut_path)) {
+      internal::UnlinkPath(shortcut_path);
+    }
+
+    const std::string log_link = nglog::GetFlag(FLAGS_log_link);
+    if (!log_link.empty()) {
+      const string external_linkpath = log_link + "/" + linkname + ".lnk";
+      internal::UnlinkPath(external_linkpath);
+      if (!CreateWindowsShortcut(filename, external_linkpath)) {
+        internal::UnlinkPath(external_linkpath);
+      }
+    }
 #elif defined(HAVE_UNISTD_H)
     // We must have unistd.h.
     // Make the symlink be relative (in the same dir) so that if the
@@ -1606,16 +1707,20 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
     const char* linkdest = separator != std::string::npos
                                ? filename.c_str() + separator + 1
                                : filename.c_str();
-    if (symlink(linkdest, linkpath.c_str()) != 0) {
+    const std::size_t linkdest_length =
+        filename.size() - (separator == std::string::npos ? 0 : separator + 1);
+    if (internal::SymlinkPosixPath(linkdest, linkdest_length, linkpath) != 0) {
       // silently ignore failures
     }
 
     // Make an additional link to the log file in a place specified by
     // FLAGS_log_link, if indicated
-    if (!FLAGS_log_link.empty()) {
-      linkpath = FLAGS_log_link + "/" + linkname;
-      unlink(linkpath.c_str());  // delete old one if it exists
-      if (symlink(filename.c_str(), linkpath.c_str()) != 0) {
+    const std::string log_link = nglog::GetFlag(FLAGS_log_link);
+    if (!log_link.empty()) {
+      linkpath = log_link + "/" + linkname;
+      internal::UnlinkPath(linkpath);  // delete old one if it exists
+      if (internal::SymlinkPosixPath(filename.data(), filename.size(),
+                                     linkpath) != 0) {
         // silently ignore failures
       }
     }
@@ -1663,7 +1768,7 @@ void LogFileObject::WriteUnlocked(
     struct ::tm tm_time;
     std::time_t t = std::chrono::system_clock::to_time_t(timestamp);
 
-    if (FLAGS_log_utc_time) {
+    if (nglog::GetFlag(FLAGS_log_utc_time)) {
       gmtime_r(&t, &tm_time);
     } else {
       localtime_r(&t, &tm_time);
@@ -1680,9 +1785,9 @@ void LogFileObject::WriteUnlocked(
 
     std::string filename;
     if (filename_source_ == internal::LogFilenameSource::kSelected) {
-      filename = tools::MakeLogFilename(base_filename_, time_pid_string,
-                                        filename_extension_,
-                                        FLAGS_timestamp_in_logfile_name);
+      filename = tools::MakeLogFilename(
+          base_filename_, time_pid_string, filename_extension_,
+          GetFlag(FLAGS_timestamp_in_logfile_name));
       if (!CreateLogfile(filename)) {
 #ifdef NGLOG_OS_WINDOWS
         const std::string& error_message = create_error_message_;
@@ -1727,16 +1832,16 @@ void LogFileObject::WriteUnlocked(
       bool success = false;
       for (const auto& log_dir : log_dirs) {
         base_filename_ = log_dir + stripped_filename;
-        filename = tools::MakeLogFilename(base_filename_, time_pid_string,
-                                          filename_extension_,
-                                          FLAGS_timestamp_in_logfile_name);
+        filename = tools::MakeLogFilename(
+            base_filename_, time_pid_string, filename_extension_,
+            GetFlag(FLAGS_timestamp_in_logfile_name));
         if (CreateLogfile(filename)) {
           success = true;
           break;
         }
       }
       // If we never succeeded, we have to give up
-      if (success == false) {
+      if (!success) {
 #ifdef NGLOG_OS_WINDOWS
         const std::string& error_message = create_error_message_;
         WriteLogFileCreationError(create_filename_, error_message);
@@ -1755,10 +1860,10 @@ void LogFileObject::WriteUnlocked(
         filename_source_, base_filename_, filename,
         tools::MakeLogFilenameMatcher(
             tools::const_basename(base_filename_.c_str()), filename_extension_,
-            FLAGS_timestamp_in_logfile_name));
+            GetFlag(FLAGS_timestamp_in_logfile_name)));
 
     // Write a header message into the log file
-    if (FLAGS_log_file_header) {
+    if (nglog::GetFlag(FLAGS_log_file_header)) {
       ostringstream file_header_stream;
       file_header_stream.fill('0');
       file_header_stream << "Log file created at: " << 1900 + tm_time.tm_year
@@ -1766,7 +1871,8 @@ void LogFileObject::WriteUnlocked(
                          << setw(2) << tm_time.tm_mday << ' ' << setw(2)
                          << tm_time.tm_hour << ':' << setw(2) << tm_time.tm_min
                          << ':' << setw(2) << tm_time.tm_sec
-                         << (FLAGS_log_utc_time ? " UTC\n" : "\n")
+                         << (nglog::GetFlag(FLAGS_log_utc_time) ? " UTC\n"
+                                                                : "\n")
                          << "Running on machine: " << LogDestination::hostname()
                          << '\n';
 
@@ -1784,16 +1890,17 @@ void LogFileObject::WriteUnlocked(
       // user-installed prefix formatter the actual line format is unknown
       // here, so advertising the default one would be wrong.
       if (g_prefix_formatter == nullptr) {
-        const char* const date_time_format = FLAGS_log_year_in_prefix
-                                                 ? "yyyymmdd hh:mm:ss.uuuuuu"
-                                                 : "mmdd hh:mm:ss.uuuuuu";
+        const char* const date_time_format =
+            nglog::GetFlag(FLAGS_log_year_in_prefix)
+                ? "yyyymmdd hh:mm:ss.uuuuuu"
+                : "mmdd hh:mm:ss.uuuuuu";
         file_header_stream << "Log line format: [IWEF]" << date_time_format
                            << " threadid file:line] msg" << '\n';
       }
       const string& file_header_string = file_header_stream.str();
 
       const size_t header_len = file_header_string.size();
-      fwrite(file_header_string.data(), 1, header_len, file_.get());
+      std::fwrite(file_header_string.data(), 1, header_len, file_.get());
       file_length_ += header_len;
       bytes_since_flush_ += header_len;
     }
@@ -1807,8 +1914,8 @@ void LogFileObject::WriteUnlocked(
     // 4096 bytes. fwrite() returns 4096 for message lengths that are
     // greater than 4096, thereby indicating an error.
     errno = 0;
-    fwrite(message, 1, message_len, file_.get());
-    if (FLAGS_stop_logging_if_full_disk &&
+    std::fwrite(message, 1, message_len, file_.get());
+    if (nglog::GetFlag(FLAGS_stop_logging_if_full_disk) &&
         errno == ENOSPC) {  // disk full, stop writing to disk
       stop_writing.store(true, std::memory_order_relaxed);  // until the disk is
       return;
@@ -1830,7 +1937,7 @@ void LogFileObject::WriteUnlocked(
     FlushUnlocked(timestamp);
 #ifdef NGLOG_OS_LINUX
     // Only consider files >= 3MiB
-    if (FLAGS_drop_log_memory && file_length_ >= (3U << 20U)) {
+    if (nglog::GetFlag(FLAGS_drop_log_memory) && file_length_ >= (3U << 20U)) {
       // Don't evict the most recent 1-2MiB so as not to impact a tailer
       // of the log file and to avoid page rounding issue on linux < 4.7
       std::size_t total_drop_length =
@@ -2008,7 +2115,7 @@ void LogMessage::Init(const char* file, int line, LogSeverity severity,
   //    I20201018 160715 f5d4fbb0 logging.cc:1153]
   //    (log level, GMT year, month, date, time, thread_id, file basename, line)
   // We exclude the thread_id for the default thread.
-  if (FLAGS_log_prefix && (line != kNoLogPrefix)) {
+  if (nglog::GetFlag(FLAGS_log_prefix) && (line != kNoLogPrefix)) {
     if (g_prefix_formatter == nullptr) {
       AppendDefaultPrefix(*data_, severity, time_);
     } else {
@@ -2023,13 +2130,15 @@ void LogMessage::Init(const char* file, int line, LogSeverity severity,
   data_->num_prefix_chars_ = data_->stream_.pcount();
 
 #ifdef HAVE_STACKTRACE
-  if (!FLAGS_log_backtrace_at.empty()) {
+  // Checking emptiness first avoids locking the flag for every message.
+  if (!internal::FlagValueAccess::Empty(FLAGS_log_backtrace_at)) {
+    const std::string log_backtrace_at = nglog::GetFlag(FLAGS_log_backtrace_at);
     char fileline[128];
     const int fileline_len = std::snprintf(fileline, sizeof(fileline), "%s:%d",
                                            data_->basename_, line);
     if (fileline_len >= 0 &&
         static_cast<std::size_t>(fileline_len) < sizeof(fileline) &&
-        FLAGS_log_backtrace_at == fileline) {
+        log_backtrace_at == fileline) {
       string stacktrace = GetStackTrace();
       stream() << " (stacktrace:\n" << stacktrace << ") ";
     }
@@ -2060,10 +2169,16 @@ LogMessage::~LogMessage() noexcept(false) {
 
   if (fail) {
     const char* message = "*** Check failure stack trace: ***\n";
-    if (write(fileno(stderr), message, strlen(message)) < 0) {
+#ifdef NGLOG_OS_WINDOWS
+    internal::WriteUtf8ToFileDescriptor(fileno(stderr), message,
+                                        std::strlen(message));
+#else
+    if (write(fileno(stderr), message, std::strlen(message)) < 0) {
       // Ignore errors.
     }
-    AlsoErrorWrite(NGLOG_FATAL, tools::ProgramInvocationShortName(), message);
+#endif
+    AlsoErrorWrite(NGLOG_FATAL, tools::ProgramInvocationShortName(), message,
+                   std::strlen(message));
 #if defined(__cpp_lib_uncaught_exceptions) && \
     (__cpp_lib_uncaught_exceptions >= 201411L)
     if (std::uncaught_exceptions() == 0)
@@ -2110,7 +2225,8 @@ void LogMessage::AppendText(const char* text, std::size_t length,
 // Flush buffered message, called by the destructor, or any other function
 // that needs to synchronize the log.
 void LogMessage::Flush() {
-  if (data_->has_been_flushed_ || data_->severity_ < FLAGS_minloglevel) {
+  if (data_->has_been_flushed_ ||
+      data_->severity_ < nglog::GetFlag(FLAGS_minloglevel)) {
     return;
   }
 
@@ -2121,7 +2237,8 @@ void LogMessage::Flush() {
 
   // Do we need to add a \n to the end of this message?
   bool append_newline =
-      (data_->message_text_[data_->num_chars_to_log_ - 1] != '\n');
+      data_->num_chars_to_log_ == 0 ||
+      data_->message_text_[data_->num_chars_to_log_ - 1] != '\n';
   char original_final_char = '\0';
 
   // If we do need to add a \n, we'll do it by violating the memory of the
@@ -2160,12 +2277,12 @@ void LogMessage::Flush() {
   if (send_method != &LogMessage::SendToSink) {
     // Protect the shared logging destinations while dispatching the message.
     std::lock_guard<internal::LogMutex> l{log_mutex};
-    if (send_to_registered_sinks && !FLAGS_logtostderr && !FLAGS_logtostdout &&
-        IsLoggingInitialized() &&
+    if (send_to_registered_sinks && !nglog::GetFlag(FLAGS_logtostderr) &&
+        !nglog::GetFlag(FLAGS_logtostdout) && IsLoggingInitialized() &&
         (data_->severity_ >= LogDestination::email_logging_severity_ ||
-         data_->severity_ >= FLAGS_logemaillevel)) {
+         data_->severity_ >= nglog::GetFlag(FLAGS_logemaillevel))) {
       should_send_email = true;
-      email_to = FLAGS_alsologtoemail;
+      email_to = nglog::GetFlag(FLAGS_alsologtoemail);
       if (!LogDestination::addresses_.empty()) {
         if (!email_to.empty()) {
           email_to += ",";
@@ -2173,7 +2290,7 @@ void LogMessage::Flush() {
         email_to += LogDestination::addresses_;
       }
       email_host = LogDestination::hostname();
-      email_mailer = FLAGS_logmailer;
+      email_mailer = nglog::GetFlag(FLAGS_logmailer);
     }
     if (send_method == &LogMessage::SendToSinkAndLog) {
       SendToLog();
@@ -2232,7 +2349,7 @@ void ReprintFatalMessage() {
     const size_t n = strlen(fatal_message);
     // Also write to stderr without color.
     WriteToStderr(fatal_message, n);
-    if (!FLAGS_logtostderr) {
+    if (!nglog::GetFlag(FLAGS_logtostderr)) {
       LogDestination::LogToAllLogfiles(NGLOG_ERROR, fatal_time, fatal_message,
                                        n);
     }
@@ -2255,10 +2372,11 @@ void LogMessage::SendToLog() NGLOG_LOCKS_REQUIRED(log_mutex) {
   }
 
   // global flag: never log to file if set.  Also -- don't log to a
-  // file if we haven't parsed the command line flags to get the
+  // file if we haven't parsed the command-line options to get the
   // program name.
-  if (FLAGS_logtostderr || FLAGS_logtostdout || !IsLoggingInitialized()) {
-    if (FLAGS_logtostdout) {
+  if (nglog::GetFlag(FLAGS_logtostderr) || nglog::GetFlag(FLAGS_logtostdout) ||
+      !IsLoggingInitialized()) {
+    if (nglog::GetFlag(FLAGS_logtostdout)) {
       ColoredWriteToStdoutWithFields(*data_);
     } else {
       ColoredWriteToStderrWithFields(*data_);
@@ -2293,7 +2411,8 @@ void LogMessage::SendToLog() NGLOG_LOCKS_REQUIRED(log_mutex) {
       fatal_time = time_.when();
     }
 
-    if (!FLAGS_logtostderr && !FLAGS_logtostdout) {
+    if (!nglog::GetFlag(FLAGS_logtostderr) &&
+        !nglog::GetFlag(FLAGS_logtostdout)) {
       for (auto& log_destination : LogDestination::log_destinations_) {
         if (log_destination) {
           log_destination->logger_->Write(
@@ -2489,7 +2608,7 @@ string LogSink::ToString(LogSeverity severity, const char* file, int line,
   stream.fill('0');
 
   stream << LogSeverityNames[severity][0];
-  if (FLAGS_log_year_in_prefix) {
+  if (nglog::GetFlag(FLAGS_log_year_in_prefix)) {
     stream << setw(4) << 1900 + time.year();
   }
   stream << setw(2) << 1 + time.month() << setw(2) << time.day() << ' '
@@ -2650,7 +2769,7 @@ static bool SendEmailInternal(const char* dest, const char* subject,
       // expression that HTML5 uses[1], except that we require the address to
       // start with an alpha-numeric character. This is because we don't want to
       // allow email addresses that start with a special character, such as a
-      // pipe or dash, which could be misunderstood as a command-line flag by
+      // pipe or dash, which could be misunderstood as a command-line option by
       // certain versions of `mail` that are vulnerable to command injection.[2]
       // [1]
       // https://html.spec.whatwg.org/multipage/input.html#valid-e-mail-address
@@ -2706,7 +2825,7 @@ static bool SendEmailInternal(const char* dest, const char* subject,
     if (pipe != nullptr) {
       // Add the body if we have one
       if (body) {
-        fwrite(body, sizeof(char), strlen(body), pipe.get());
+        std::fwrite(body, sizeof(char), std::strlen(body), pipe.get());
       }
       pipe.reset();
       const bool ok = pclose_status != -1;
@@ -2740,7 +2859,7 @@ static bool SendEmailInternal(const char* dest, const char* subject,
 }
 
 bool SendEmail(const char* dest, const char* subject, const char* body) {
-  const std::string mailer = FLAGS_logmailer;
+  const std::string mailer = nglog::GetFlag(FLAGS_logmailer);
   return SendEmailInternal(dest, subject, body, true, mailer);
 }
 
@@ -2751,8 +2870,8 @@ static void GetTempDirectories(vector<string>& list) {
   //   C:/Documents & Settings/whomever/TEMP (or whatever GetTempPath() is)
   //   C:/TMP/
   //   C:/TEMP/
-  char tmp[MAX_PATH];
-  if (GetTempPathA(MAX_PATH, tmp)) list.push_back(tmp);
+  string tmp;
+  if (internal::GetTempPathUtf8(&tmp)) list.push_back(tmp);
   list.push_back("C:\\TMP\\");
   list.push_back("C:\\TEMP\\");
 #else
@@ -2781,7 +2900,7 @@ static void GetTempDirectories(vector<string>& list) {
     list.push_back(dstr);
 
     struct stat statbuf;
-    if (!stat(d, &statbuf) && S_ISDIR(statbuf.st_mode)) {
+    if (internal::StatPath(dstr, &statbuf) == 0 && S_ISDIR(statbuf.st_mode)) {
       // We found a dir that exists - we're done.
       return;
     }
@@ -2796,19 +2915,19 @@ const vector<string>& GetLoggingDirectories() {
   if (logging_directories_list == nullptr) {
     logging_directories_list = std::make_unique<std::vector<std::string>>();
 
-    if (!FLAGS_log_dir.empty()) {
+    const std::string log_dir = nglog::GetFlag(FLAGS_log_dir);
+    if (!log_dir.empty()) {
       // Ensure the specified path ends with a directory delimiter.
-      if (FLAGS_log_dir.find_last_of(possible_dir_delim) !=
-          FLAGS_log_dir.size() - 1) {
-        logging_directories_list->push_back(FLAGS_log_dir + "/");
+      if (log_dir.find_last_of(possible_dir_delim) != log_dir.size() - 1) {
+        logging_directories_list->push_back(log_dir + "/");
       } else {
-        logging_directories_list->push_back(FLAGS_log_dir);
+        logging_directories_list->push_back(log_dir);
       }
     } else {
       GetTempDirectories(*logging_directories_list);
 #ifdef NGLOG_OS_WINDOWS
-      char tmp[MAX_PATH];
-      if (GetWindowsDirectoryA(tmp, MAX_PATH))
+      string tmp;
+      if (internal::GetWindowsDirectoryUtf8(&tmp))
         logging_directories_list->push_back(tmp);
       logging_directories_list->push_back(".\\");
 #else
@@ -2829,7 +2948,7 @@ void GetExistingTempDirectories(vector<string>& list) {
   while (i_dir != list.end()) {
     // zero arg to access means test for existence; no constant
     // defined on windows
-    if (access(i_dir->c_str(), 0)) {
+    if (internal::AccessPath(*i_dir, 0) != 0) {
       i_dir = list.erase(i_dir);
     } else {
       ++i_dir;
@@ -2837,42 +2956,13 @@ void GetExistingTempDirectories(vector<string>& list) {
   }
 }
 
-void TruncateLogFile(const char* path, uint64 limit, uint64 keep) {
 #if defined(HAVE_UNISTD_H) || defined(HAVE__CHSIZE_S)
+static void TruncateLogFileDescriptor(FileDescriptor fd, const char* path,
+                                      uint64 limit, uint64 keep) {
   struct stat statbuf;
   const int kCopyBlockSize = 8 << 10;
   char copybuf[kCopyBlockSize];
   off_t read_offset, write_offset;
-  // Don't follow symlinks unless they're our own fd symlinks in /proc
-  int flags = O_RDWR;
-  // TODO(hamaji): Support other environments.
-#  ifdef NGLOG_OS_LINUX
-  const char* procfd_prefix = "/proc/self/fd/";
-  if (strncmp(procfd_prefix, path, strlen(procfd_prefix))) flags |= O_NOFOLLOW;
-#  endif
-
-  FileDescriptor fd{open(path, flags)};
-  if (!fd) {
-    if (errno == EFBIG) {
-      // The log file in question has got too big for us to open. The
-      // real fix for this would be to compile logging.cc (or probably
-      // all of base/...) with -D_FILE_OFFSET_BITS=64 but that's
-      // rather scary.
-      // Instead just truncate the file to something we can manage
-#  ifdef HAVE__CHSIZE_S
-      if (_chsize_s(fd.get(), 0) != 0) {
-#  else
-      if (truncate(path, 0) == -1) {
-#  endif
-        PLOG(ERROR) << "Unable to truncate " << path;
-      } else {
-        LOG(ERROR) << "Truncated " << path << " due to EFBIG error";
-      }
-    } else {
-      PLOG(ERROR) << "Unable to open " << path;
-    }
-    return;
-  }
 
   if (fstat(fd.get(), &statbuf) == -1) {
     PLOG(ERROR) << "Unable to fstat()";
@@ -2881,7 +2971,9 @@ void TruncateLogFile(const char* path, uint64 limit, uint64 keep) {
 
   // See if the path refers to a regular file bigger than the
   // specified limit
-  if (!S_ISREG(statbuf.st_mode)) return;
+  if (!IsRegularFile(statbuf)) {
+    return;
+  }
   if (statbuf.st_size <= static_cast<off_t>(limit)) return;
   if (statbuf.st_size <= static_cast<off_t>(keep)) return;
 
@@ -2917,6 +3009,100 @@ void TruncateLogFile(const char* path, uint64 limit, uint64 keep) {
 #  endif
     PLOG(ERROR) << "Unable to truncate " << path;
   }
+}
+
+#  ifdef NGLOG_OS_WINDOWS
+static bool TruncateWindowsFile(const std::string& path, uint64 size) {
+  std::wstring wide_path;
+  std::wstring prepared_path;
+  if (!internal::Utf8ToWide(path.data(), path.size(), &wide_path) ||
+      !internal::PrepareWindowsPath(wide_path.data(), wide_path.size(),
+                                    &prepared_path)) {
+    return false;
+  }
+  HANDLE handle =
+      CreateFileW(prepared_path.c_str(), GENERIC_WRITE,
+                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                  nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (handle == INVALID_HANDLE_VALUE) return false;
+
+  LARGE_INTEGER file_size;
+  file_size.QuadPart = static_cast<LONGLONG>(size);
+  const bool success =
+      SetFilePointerEx(handle, file_size, nullptr, FILE_BEGIN) != FALSE &&
+      SetEndOfFile(handle) != FALSE;
+  CloseHandle(handle);
+  return success;
+}
+
+static bool GetWindowsFilePath(HANDLE handle, std::string* path) {
+  constexpr DWORD kInitialPathBufferSize = MAX_PATH;
+  std::vector<wchar_t> buffer(kInitialPathBufferSize);
+  while (true) {
+    const DWORD length = GetFinalPathNameByHandleW(
+        handle, buffer.data(), static_cast<DWORD>(buffer.size()),
+        FILE_NAME_NORMALIZED);
+    if (length == 0) return false;
+    if (length < buffer.size()) {
+      if (!internal::WideToUtf8(buffer.data(), length, path)) return false;
+      break;
+    }
+    buffer.resize(static_cast<std::size_t>(length) + 1);
+  }
+
+  constexpr char kExtendedPathPrefix[] = "\\\\?\\";
+  constexpr char kExtendedUncPrefix[] = "\\\\?\\UNC\\";
+  if (path->compare(0, sizeof(kExtendedUncPrefix) - 1, kExtendedUncPrefix) ==
+      0) {
+    *path = "\\\\" + path->substr(sizeof(kExtendedUncPrefix) - 1);
+  } else if (path->compare(0, sizeof(kExtendedPathPrefix) - 1,
+                           kExtendedPathPrefix) == 0) {
+    path->erase(0, sizeof(kExtendedPathPrefix) - 1);
+  }
+  return true;
+}
+#  endif
+#endif
+
+void TruncateLogFile(const char* path, uint64 limit, uint64 keep) {
+#if defined(HAVE_UNISTD_H) || defined(HAVE__CHSIZE_S)
+  // Do not follow symlinks unless they are the process file descriptors used
+  // by TruncateStdoutStderr on Linux.
+  int flags = O_RDWR;
+#  ifdef O_BINARY
+  // Offsets are byte offsets, so text-mode translation would corrupt the copy.
+  flags |= O_BINARY;
+#  endif
+#  ifdef NGLOG_OS_LINUX
+  const char* procfd_prefix = "/proc/self/fd/";
+  if (strncmp(procfd_prefix, path, strlen(procfd_prefix))) flags |= O_NOFOLLOW;
+#  endif
+
+  const string path_string(path);
+  FileDescriptor fd{internal::OpenPath(path_string, flags, 0)};
+  if (!fd) {
+    if (errno == EFBIG) {
+      // The log file may be too large for the platform's regular open path.
+#  ifdef NGLOG_OS_WINDOWS
+      if (!TruncateWindowsFile(path_string, 0)) {
+        LOG(ERROR) << "Unable to truncate " << path;
+      } else {
+        LOG(ERROR) << "Truncated " << path << " due to EFBIG error";
+      }
+#  else
+      if (internal::TruncatePosixPath(path_string) == -1) {
+        PLOG(ERROR) << "Unable to truncate " << path;
+      } else {
+        LOG(ERROR) << "Truncated " << path << " due to EFBIG error";
+      }
+#  endif
+    } else {
+      PLOG(ERROR) << "Unable to open " << path;
+    }
+    return;
+  }
+
+  TruncateLogFileDescriptor(std::move(fd), path, limit, keep);
 
 #else
   LOG(ERROR) << "No log truncation support.";
@@ -2924,9 +3110,40 @@ void TruncateLogFile(const char* path, uint64 limit, uint64 keep) {
 }
 
 void TruncateStdoutStderr() {
-#ifdef HAVE_UNISTD_H
   uint64 limit = MaxLogSize() << 20U;
   uint64 keep = 1U << 20U;
+#ifdef NGLOG_OS_WINDOWS
+#  if defined(HAVE_UNISTD_H) || defined(HAVE__CHSIZE_S)
+  const std::array<FILE*, 2> outputs = {stdout, stderr};
+  for (FILE* output : outputs) {
+    const intptr_t native_handle = _get_osfhandle(_fileno(output));
+    if (native_handle == -1) {
+      PLOG(ERROR) << "Unable to get the handle for "
+                  << (output == stdout ? "stdout" : "stderr");
+      continue;
+    }
+    const HANDLE handle = reinterpret_cast<HANDLE>(native_handle);
+    if (GetFileType(handle) != FILE_TYPE_DISK) continue;
+    std::string path;
+    if (!GetWindowsFilePath(handle, &path)) {
+      LOG(ERROR) << "Unable to get the path for "
+                 << (output == stdout ? "stdout" : "stderr");
+      continue;
+    }
+    // Truncation uses another descriptor. Buffered output must reach the file
+    // first, and the stream must continue at the new end of the file instead
+    // of leaving a gap at its old position.
+    std::fflush(output);
+    TruncateLogFile(path.c_str(), limit, keep);
+    if (std::fseek(output, 0, SEEK_END) != 0) {
+      PLOG(ERROR) << "Unable to seek to the end of "
+                  << (output == stdout ? "stdout" : "stderr");
+    }
+  }
+#  else
+  LOG(ERROR) << "No log truncation support.";
+#  endif
+#elif defined(HAVE_UNISTD_H)
   TruncateLogFile("/proc/self/fd/1", limit, keep);
   TruncateLogFile("/proc/self/fd/2", limit, keep);
 #else
@@ -3157,7 +3374,7 @@ struct BreakdownImpl {
     std::tm tm_utc;
     int isdst = 0;
 
-    if (FLAGS_log_utc_time) {
+    if (nglog::GetFlag(FLAGS_log_utc_time)) {
       gmtime_r(&timestamp, &tm_local);
       localtime_r(&timestamp, &tm_utc);
       isdst = tm_utc.tm_isdst;
@@ -3188,7 +3405,7 @@ struct BreakdownImpl<T, true> {
     std::time_t timestamp = std::chrono::system_clock::to_time_t(now);
     T tm;
 
-    if (FLAGS_log_utc_time) {
+    if (nglog::GetFlag(FLAGS_log_utc_time)) {
       gmtime_r(&timestamp, &tm);
     } else {
       localtime_r(&timestamp, &tm);

@@ -5,15 +5,10 @@
 
 name: Emscripten
 
-on: [push, pull_request]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+on: workflow_call
 
 jobs:
   build-linux:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
     defaults:
       run:
         shell: bash
@@ -31,30 +26,76 @@ jobs:
         lib: [static]
         std: [14, 17, 20, 23]
 
+    env:
+      # Tests require threads and exceptions which Emscripten disables by default.
+      EMSCRIPTEN_FLAGS: -pthread -fexceptions
+
     steps:
       - uses: actions/checkout@v7
 
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
+      - uses: actions/checkout@v7
         with:
-          languages: cpp
+          repository: google/googletest
+          ref: v1.17.0
+          path: googletest
 
       - name: Setup Dependencies
         run: |
           sudo apt-get update
           DEBIAN_FRONTEND=noninteractive sudo apt-get install -y \
             cmake \
-            ninja-build
+            gpg \
+            ninja-build \
+            python3-venv
 
+      - name: Setup Coverage Dependencies
+        if: matrix.build_type == 'Debug'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> $GITHUB_PATH
+          "$RUNNER_TEMP/venv/bin/pip" install -r .github/coverage/requirements.txt
+
+      - name: Setup Environment
+        if: matrix.build_type == 'Debug'
+        run: |
+          echo 'CXXFLAGS=--coverage -fprofile-update=atomic' >> $GITHUB_ENV
+          echo 'LDFLAGS=--coverage' >> $GITHUB_ENV
+
+      # GoogleTest is built with GTEST_HAS_PTHREAD=1 which its headers do not
+      # detect under Emscripten. Tests must define it as well.
+      - name: Build GoogleTest
+        env:
+          CXXFLAGS: ${{env.EMSCRIPTEN_FLAGS}}
+          LDFLAGS: ${{env.EMSCRIPTEN_FLAGS}}
+        run: |
+          emcmake cmake -S googletest -B build_googletest \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/googletest" \
+            -G Ninja
+          cmake --build build_googletest --target install
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: cpp
+
+      # Tests need the exit code, coverage data, host file system and
+      # environment in Node. The flags are per configuration because
+      # EXIT_RUNTIME breaks the CMake configuration checks.
       - name: Configure
         env:
-          CXXFLAGS: -Wall -Wextra -Wsign-conversion -Wtautological-compare -Wformat-nonliteral -Wundef -Werror -Wno-error=wasm-exception-spec ${{env.CXXFLAGS}}
+          CXXFLAGS: -DGTEST_HAS_PTHREAD=1 ${{env.EMSCRIPTEN_FLAGS}} -Wall -Wextra -Wsign-conversion -Wtautological-compare -Wformat-nonliteral -Wundef -Werror -Wno-error=wasm-exception-spec ${{env.CXXFLAGS}}
+          LDFLAGS: ${{env.EMSCRIPTEN_FLAGS}} ${{env.LDFLAGS}}
         run: |
+          BUILD_TYPE=${{matrix.build_type}}
           emcmake cmake -S . -B build_${{matrix.build_type}} \
             -DBUILD_SHARED_LIBS=${{matrix.lib == 'shared'}} \
+            -DCMAKE_BUILD_TYPE=${{matrix.build_type}} \
             -DCMAKE_CXX_STANDARD=${{matrix.std}} \
             -DCMAKE_CXX_STANDARD_REQUIRED=ON \
-            -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/install \
+            "-DCMAKE_EXE_LINKER_FLAGS_${BUILD_TYPE^^}=-sEXIT_RUNTIME -sNODERAWFS -sPROXY_TO_PTHREAD" \
+            -DCMAKE_FIND_ROOT_PATH="$RUNNER_TEMP/googletest" \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install" \
             -G Ninja \
             -Werror=author
 
@@ -62,6 +103,37 @@ jobs:
         run: |
           cmake --build build_${{matrix.build_type}} \
                 --config ${{matrix.build_type}}
+
+      - name: Test
+        run: |
+          ctest --test-dir build_${{matrix.build_type}} -j$(nproc) --output-on-failure
+
+      - name: Generate Coverage
+        if: matrix.build_type == 'Debug'
+        run: |
+          cd build_${{matrix.build_type}}
+          rm -r Tests/
+          gcovr -r .. . -s \
+                --gcov-executable "$EMSDK/upstream/bin/llvm-cov gcov" \
+                --cobertura coverage.xml \
+                --json coverage.json
+
+      - name: Upload Coverage to Codecov
+        if: matrix.build_type == 'Debug'
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: build_${{matrix.build_type}}/coverage.xml
+          fail_ci_if_error: true
+          verbose: true
+
+      - name: Archive Coverage
+        if: matrix.build_type == 'Debug'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-emscripten-cxx${{matrix.std}}-${{matrix.lib}}
+          path: build_${{matrix.build_type}}/coverage.json
+          retention-days: 1
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4

@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 //
 // Test helpers that are not provided by GoogleTest itself: golden-file
-// stdout/stderr capture and diffing, and a flag saver for non-gflags builds.
+// stdout/stderr capture and diffing.
 
 #ifndef NGLOG_SRC_TESTING_UTILITIES_H_
 #define NGLOG_SRC_TESTING_UTILITIES_H_
@@ -26,12 +26,9 @@ extern void (*g_logging_fail_func)();
 extern int posix_strerror_r(int err, char* buf, size_t len);
 extern std::string StrError(int err);
 
-// Directory for temporary test files, and the root of the source tree
-// (used to locate golden files). Function-local statics rather than
-// DECLARE_string/DEFINE_string flags: nothing needs these to be real
-// command-line-settable gflags flags, and this sidesteps any
-// cross-translation-unit extern-linkage or initialization-order concerns
-// entirely.
+//! System temporary directory that other processes modify concurrently.
+const std::string& SystemTmpDir();
+// Directory for temporary test files and the root of the source tree.
 const std::string& TestTmpDir();
 const std::string& TestSrcDir();
 
@@ -79,30 +76,6 @@ std::string GetCapturedTestStderr();
 // given golden file.
 bool MungeAndDiffTestStdout(const std::string& golden_filename);
 bool MungeAndDiffTestStderr(const std::string& golden_filename);
-
-// Save flags used from logging_unittest.cc.
-#ifndef NGLOG_USE_GFLAGS
-struct FlagSaver {
-  FlagSaver()
-      : v_(FLAGS_v),
-        stderrthreshold_(FLAGS_stderrthreshold),
-        logtostderr_(FLAGS_logtostderr),
-        alsologtostderr_(FLAGS_alsologtostderr),
-        logmailer_(FLAGS_logmailer) {}
-  ~FlagSaver() {
-    FLAGS_v = v_;
-    FLAGS_stderrthreshold = stderrthreshold_;
-    FLAGS_logtostderr = logtostderr_;
-    FLAGS_alsologtostderr = alsologtostderr_;
-    FLAGS_logmailer = logmailer_;
-  }
-  int v_;
-  int stderrthreshold_;
-  bool logtostderr_;
-  bool alsologtostderr_;
-  std::string logmailer_;
-};
-#endif  // !NGLOG_USE_GFLAGS
 
 // Add hook for operator new to ensure there are no memory allocation.
 extern void (*g_new_hook)();

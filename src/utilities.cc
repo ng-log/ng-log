@@ -9,24 +9,35 @@
 
 #include "utilities.h"
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <cerrno>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cwchar>
+#include <limits>
+#include <string>
+#include <vector>
 
 #include "addr2line.h"
 #include "config.h"
 #include "initializer.h"
 #include "internal/emscripten_console.h"
 #include "internal/source_location.h"
+#include "internal/utf8.h"
 #include "libbacktrace.h"
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "stacktrace.h"
 #include "symbolize.h"
 
+#ifdef NGLOG_OS_WINDOWS
+#  include <lmcons.h>
+#  include <windows.h>
+#endif
 #ifdef NGLOG_OS_ANDROID
 #  include <android/log.h>
 #endif
@@ -63,6 +74,39 @@ namespace {
 constexpr char log_filename_timestamp_pattern[] = "[0-9]{8}-[0-9]{6}\\.[0-9]+";
 constexpr char log_filename_never_match_pattern[] = "a^";
 
+#if defined(NGLOG_OS_WINDOWS)
+constexpr std::size_t kTerminatorLength = 1;
+constexpr std::size_t kDebuggerBufferLength =
+    nglog::internal::kMaximumWideChunkLength + kTerminatorLength;
+
+bool WriteWideToDebugger(const wchar_t* input, std::size_t input_length,
+                         std::size_t* written, void*) {
+  std::array<wchar_t, kDebuggerBufferLength> buffer = {};
+  if (input_length >= buffer.size()) {
+    return false;
+  }
+
+  std::copy_n(input, input_length, buffer.data());
+  buffer[input_length] = L'\0';
+  ::OutputDebugStringW(buffer.data());
+  *written = input_length;
+  return true;
+}
+
+// OutputDebugStringW() stops at the first null character, so embedded null
+// characters are skipped rather than truncating the remaining text.
+bool WriteWideToDebuggerSkippingNulls(const wchar_t* input,
+                                      std::size_t input_length,
+                                      std::size_t* written, void* context) {
+  if (!nglog::internal::WriteWideAsChunks(input, input_length,
+                                          WriteWideToDebugger, context)) {
+    return false;
+  }
+  *written = input_length;
+  return true;
+}
+#endif
+
 std::string EscapeRegexCharacters(const std::string& input) {
   constexpr char regex_characters[] = "\\.^$|()[]{}*+?";
   std::string result;
@@ -77,8 +121,6 @@ std::string EscapeRegexCharacters(const std::string& input) {
 }
 
 }  // namespace
-
-using std::string;
 
 namespace nglog {
 
@@ -122,13 +164,14 @@ std::regex MakeLogFilenameMatcher(const std::string& base_filename,
   return std::regex(pattern);
 }
 
-void AlsoErrorWrite(LogSeverity severity, const char* tag,
-                    const char* message) noexcept {
+void AlsoErrorWrite(LogSeverity severity, const char* tag, const char* message,
+                    std::size_t message_length) noexcept {
 #if defined(NGLOG_OS_WINDOWS)
   (void)severity;
   (void)tag;
   // On Windows, also output to the debugger
-  ::OutputDebugStringA(message);
+  internal::WriteUtf8AsWide(message, message_length,
+                            WriteWideToDebuggerSkippingNulls, nullptr);
 #elif defined(NGLOG_OS_ANDROID)
   constexpr int android_log_levels[] = {
       ANDROID_LOG_INFO,
@@ -137,15 +180,18 @@ void AlsoErrorWrite(LogSeverity severity, const char* tag,
       ANDROID_LOG_FATAL,
   };
 
+  (void)message_length;
   __android_log_write(android_log_levels[severity], tag, message);
 #elif defined(NGLOG_OS_EMSCRIPTEN)
   (void)tag;
+  (void)message_length;
   internal::WriteEmscriptenLog(
       internal::EmscriptenLogLevelForSeverity(severity), message);
 #else
   (void)severity;
   (void)tag;
   (void)message;
+  (void)message_length;
 #endif
 }
 
@@ -185,7 +231,7 @@ void SetThreadName(const char* name) {
 // The following APIs are all internal.
 #ifdef HAVE_STACKTRACE
 
-#  include "base/commandlineflags.h"
+#  include "ng-log/flags.h"
 #  include "stacktrace.h"
 #  include "symbolize.h"
 
@@ -199,14 +245,19 @@ static const int kPrintfPointerFieldWidth = 2 + 2 * sizeof(void*);
 
 static void DebugWriteToStderr(const char* data, void*) {
   // This one is signal-safe.
-  if (write(fileno(stderr), data, strlen(data)) < 0) {
+#  ifdef NGLOG_OS_WINDOWS
+  internal::WriteUtf8ToFileDescriptor(fileno(stderr), data, std::strlen(data));
+#  else
+  if (write(fileno(stderr), data, std::strlen(data)) < 0) {
     // Ignore errors.
   }
-  AlsoErrorWrite(NGLOG_FATAL, tools::ProgramInvocationShortName(), data);
+#  endif
+  AlsoErrorWrite(NGLOG_FATAL, tools::ProgramInvocationShortName(), data,
+                 std::strlen(data));
 }
 
 static void DebugWriteToString(const char* data, void* arg) {
-  reinterpret_cast<string*>(arg)->append(data);
+  reinterpret_cast<std::string*>(arg)->append(data);
 }
 
 #  ifdef HAVE_SYMBOLIZE
@@ -258,7 +309,7 @@ static void DumpStackTrace(int skip_count, DebugWriter* writerfn, void* arg) {
   int depth = GetStackTrace(stack, ARRAYSIZE(stack), skip_count + 1);
   for (int i = 0; i < depth; i++) {
 #  if defined(HAVE_SYMBOLIZE)
-    if (FLAGS_symbolize_stacktrace) {
+    if (nglog::GetFlag(FLAGS_symbolize_stacktrace)) {
       DumpPCAndSymbol(writerfn, arg, stack[i], "    ");
     } else {
       DumpPC(writerfn, arg, stack[i], "    ");
@@ -272,19 +323,10 @@ static void DumpStackTrace(int skip_count, DebugWriter* writerfn, void* arg) {
 [[noreturn]] static void DumpStackTraceAndExit() {
   DumpStackTrace(1, DebugWriteToStderr, nullptr);
 
-  // TODO(hamaji): Use signal instead of sigaction?
   if (IsFailureSignalHandlerInstalled()) {
     // Set the default signal handler for SIGABRT, to avoid invoking our
     // own signal handler installed by InstallFailureSignalHandler().
-#  ifdef HAVE_SIGACTION
-    struct sigaction sig_action;
-    memset(&sig_action, 0, sizeof(sig_action));
-    sigemptyset(&sig_action.sa_mask);
-    sig_action.sa_handler = SIG_DFL;
-    sigaction(SIGABRT, &sig_action, nullptr);
-#  elif defined(NGLOG_OS_WINDOWS)
     signal(SIGABRT, SIG_DFL);
-#  endif  // HAVE_SIGACTION
   }
 
   abort();
@@ -350,36 +392,93 @@ bool PidHasChanged() {
   return true;
 }
 
-static string g_my_user_name;
-const string& MyUserName() { return g_my_user_name; }
-static void MyUserNameInitializer() {
-  // TODO(hamaji): Probably this is not portable.
+static std::string g_my_user_name;
+const std::string& MyUserName() { return g_my_user_name; }
+
+namespace {
+
+std::string GetSystemUserName() {
 #if defined(NGLOG_OS_WINDOWS)
-  const char* user = getenv("USERNAME");
-#else
-  const char* user = getenv("USER");
-#endif
-  if (user != nullptr) {
-    g_my_user_name = user;
-  } else {
-#if defined(HAVE_PWD_H) && defined(HAVE_UNISTD_H)
+  constexpr std::size_t kNullTerminatorSize = 1;
+  constexpr DWORD kUserNameBufferSize = UNLEN + kNullTerminatorSize;
+  wchar_t user_name[kUserNameBufferSize];
+  DWORD user_name_size = ARRAYSIZE(user_name);
+  std::string result;
+  if (GetUserNameW(user_name, &user_name_size) != 0 && user_name_size > 0 &&
+      internal::WideToUtf8(user_name, user_name_size - kNullTerminatorSize,
+                           &result)) {
+    return result;
+  }
+  return std::string{};
+#elif defined(HAVE_PWD_H) && defined(HAVE_UNISTD_H)
+  constexpr std::size_t kInitialPasswordBufferSize = 1024;
+  constexpr std::size_t kPasswordBufferGrowthFactor = 2;
+  const uid_t uid = geteuid();
+  std::size_t buffer_size = kInitialPasswordBufferSize;
+#  if defined(_SC_GETPW_R_SIZE_MAX)
+  const long configured_buffer_size = sysconf(_SC_GETPW_R_SIZE_MAX);
+  if (configured_buffer_size > 0) {
+    buffer_size = static_cast<std::size_t>(configured_buffer_size);
+  }
+#  endif
+
+  for (;;) {
     struct passwd pwd;
     struct passwd* result = nullptr;
-    char buffer[1024] = {'\0'};
-    uid_t uid = geteuid();
-    int pwuid_res = getpwuid_r(uid, &pwd, buffer, sizeof(buffer), &result);
-    if (pwuid_res == 0 && result) {
-      g_my_user_name = pwd.pw_name;
-    } else {
-      std::snprintf(buffer, sizeof(buffer), "uid%d", uid);
-      g_my_user_name = buffer;
+    std::vector<char> buffer(buffer_size);
+    const int error =
+        getpwuid_r(uid, &pwd, buffer.data(), buffer.size(), &result);
+    if (error == 0 && result != nullptr) {
+      return result->pw_name;
     }
-#endif
-    if (g_my_user_name.empty()) {
-      g_my_user_name = "invalid-user";
+    if (error != ERANGE ||
+        buffer_size > std::numeric_limits<std::size_t>::max() /
+                          kPasswordBufferGrowthFactor) {
+      break;
     }
+    buffer_size *= kPasswordBufferGrowthFactor;
   }
+  // Users without a passwd entry, such as in containers, still get distinct
+  // log file names.
+  return "uid" + std::to_string(uid);
+#else
+  return std::string{};
+#endif
 }
+
+std::string GetEnvironmentUserName() {
+#if defined(NGLOG_OS_WINDOWS)
+  // The narrow environment uses the ANSI code page, but ng-log requires UTF-8
+  // because the user name becomes part of log file names.
+  const wchar_t* user = _wgetenv(L"USERNAME");
+  std::string result;
+  if (user != nullptr &&
+      internal::WideToUtf8(user, std::wcslen(user), &result)) {
+    return result;
+  }
+  return std::string{};
+#else
+  const char* user = std::getenv("USER");
+  return user != nullptr ? user : std::string{};
+#endif
+}
+
+std::string GetMyUserName() {
+  std::string user_name = GetEnvironmentUserName();
+  if (!user_name.empty()) {
+    return user_name;
+  }
+
+  user_name = GetSystemUserName();
+  if (user_name.empty()) {
+    user_name = "invalid-user";
+  }
+  return user_name;
+}
+
+}  // namespace
+
+static void MyUserNameInitializer() { g_my_user_name = GetMyUserName(); }
 REGISTER_MODULE_INITIALIZER(utilities, MyUserNameInitializer())
 
 // We use an atomic operation to prevent problems with calling CrashReason
@@ -399,11 +498,11 @@ void InitializeLoggingUtilities(const char* argv0) {
   InstallFailureFunction(&DumpStackTraceAndExit);
 #endif
 #ifdef HAVE_LIBBACKTRACE
-  if (FLAGS_symbolize_line_info) {
+  if (nglog::GetFlag(FLAGS_symbolize_line_info)) {
     InstallLibbacktraceSymbolizeCallback();
   }
 #elif defined(HAVE_ADDR2LINE)
-  if (FLAGS_symbolize_line_info) {
+  if (nglog::GetFlag(FLAGS_symbolize_line_info)) {
     InstallAddr2LineSymbolizeCallback();
   }
 #endif

@@ -19,11 +19,6 @@
 #include "symbolize.h"
 #include "utilities.h"
 
-#ifdef NGLOG_USE_GFLAGS
-#  include <gflags/gflags.h>
-using namespace GFLAGS_NAMESPACE;
-#endif  // NGLOG_USE_GFLAGS
-
 using namespace nglog;
 
 // Tests for FormatLibbacktraceLocation.
@@ -94,7 +89,7 @@ const char* TrySymbolize(void* pc, char* out, std::size_t out_size) {
 }  // namespace
 
 TEST(LibbacktraceSymbolizeCallback, ResolvesFileAndLine) {
-  FLAGS_symbolize_line_info = true;
+  nglog::SetFlag(FLAGS_symbolize_line_info, true);
   EXPECT_TRUE(InstallLibbacktraceSymbolizeCallback());
 
   char symbol[4096];
@@ -114,7 +109,7 @@ TEST(LibbacktraceSymbolizeCallback, ResolvesFileAndLine) {
 }
 
 TEST(LibbacktraceSymbolizeCallback, DisabledByFlag) {
-  FLAGS_symbolize_line_info = false;
+  nglog::SetFlag(FLAGS_symbolize_line_info, false);
   EXPECT_TRUE(InstallLibbacktraceSymbolizeCallback());
 
   char symbol[4096];
@@ -126,12 +121,12 @@ TEST(LibbacktraceSymbolizeCallback, DisabledByFlag) {
   EXPECT_NE(nullptr,
             std::strstr(result, "FunctionSymbolizedForLibbacktraceTest"));
 
-  FLAGS_symbolize_line_info = true;
+  nglog::SetFlag(FLAGS_symbolize_line_info, true);
   InstallSymbolizeCallback(nullptr);
 }
 
 TEST(LibbacktraceSymbolizeCallback, NoDebugInfoForAddress) {
-  FLAGS_symbolize_line_info = true;
+  nglog::SetFlag(FLAGS_symbolize_line_info, true);
   EXPECT_TRUE(InstallLibbacktraceSymbolizeCallback());
 
   char symbol[4096];
@@ -158,19 +153,19 @@ TEST(Symbolize, RejectsZeroSizedOutputBuffer) {
 TEST(Symbolize, RejectsTruncatedSymbolName) {
   constexpr std::size_t kOutputSize = 8;
   char out[kOutputSize];
-  FLAGS_symbolize_line_info = false;
+  nglog::SetFlag(FLAGS_symbolize_line_info, false);
   InstallLibbacktraceSymbolizeCallback();
 
   EXPECT_FALSE(
       Symbolize(reinterpret_cast<void*>(&FunctionSymbolizedForLibbacktraceTest),
                 out, sizeof(out), SymbolizeOptions::kNoLineNumbers));
 
-  FLAGS_symbolize_line_info = true;
+  nglog::SetFlag(FLAGS_symbolize_line_info, true);
   InstallSymbolizeCallback(nullptr);
 }
 
 int main(int argc, char** argv) {
-  FLAGS_logtostderr = true;
+  nglog::SetFlag(FLAGS_logtostderr, true);
   InitializeLogging(argv[0]);
   testing::InitGoogleTest(&argc, argv);
   // Independent from whatever InitializeLogging() may have installed via

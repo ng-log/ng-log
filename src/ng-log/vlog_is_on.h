@@ -51,25 +51,26 @@
 // it's either FLAGS_v or an appropriate internal variable
 // matching the current source file that represents results of
 // parsing of --vmodule flag and/or SetVLOGLevel calls.
-#  define VLOG_IS_ON(verboselevel)                                         \
-    __extension__({                                                        \
-      static nglog::SiteFlag vlocal__;                                     \
-      nglog::int32 verbose_level__ = (verboselevel);                       \
-      ({                                                                   \
-        std::atomic<nglog::int32>* level =                                 \
-            vlocal__.level.load(std::memory_order_acquire);                \
-        level == nullptr                                                   \
-            ? (vlocal__.initialized.load(std::memory_order_acquire)        \
-                   ? *vlocal__.default_level >= verbose_level__            \
-                   : nglog::InitializeVLOG3(&vlocal__, &FLAGS_v, __FILE__, \
-                                            verbose_level__))              \
-            : level->load(std::memory_order_relaxed) >= verbose_level__;   \
-      });                                                                  \
+#  define VLOG_IS_ON(verboselevel)                                       \
+    __extension__({                                                      \
+      static nglog::SiteFlag vlocal__;                                   \
+      nglog::int32 verbose_level__ = (verboselevel);                     \
+      ({                                                                 \
+        std::atomic<nglog::int32>* level =                               \
+            vlocal__.level.load(std::memory_order_acquire);              \
+        level == nullptr                                                 \
+            ? (vlocal__.initialized.load(std::memory_order_acquire)      \
+                   ? nglog::GetFlag(*vlocal__.default_level) >=          \
+                         verbose_level__                                 \
+                   : nglog::InitializeVLOG3(vlocal__, FLAGS_v, __FILE__, \
+                                            verbose_level__))            \
+            : level->load(std::memory_order_relaxed) >= verbose_level__; \
+      });                                                                \
     })
 #else
 // GNU extensions not available, so we do not support --vmodule.
 // Dynamic value of FLAGS_v always controls the logging level.
-#  define VLOG_IS_ON(verboselevel) (FLAGS_v >= (verboselevel))
+#  define VLOG_IS_ON(verboselevel) (nglog::GetFlag(FLAGS_v) >= (verboselevel))
 #endif
 
 namespace nglog {
@@ -89,7 +90,7 @@ extern NGLOG_EXPORT int SetVLOGLevel(const char* module_pattern, int log_level);
 struct SiteFlag {
   // The pointer selects either the default or the module-specific level.
   std::atomic<std::atomic<int32>*> level;
-  int32* default_level;
+  const nglog::Flag<std::int32_t>* default_level;
   std::atomic<bool> initialized;
   const char* base_name;
   std::size_t base_len;
@@ -97,14 +98,15 @@ struct SiteFlag {
 };
 
 // Helper routine which determines the logging info for a particular VLOG site.
-//   site_flag     is the address of the site-local verbosity cache
-//   site_default  is the default verbosity level
+//   site_flag     is the site-local verbosity cache
+//   site_default  is the synchronized default verbosity flag
 //   fname         is the current source file name
 //   verbose_level is the argument to VLOG_IS_ON
 // We will return the return value for VLOG_IS_ON
 // and if possible set the site cache appropriately.
-extern NGLOG_EXPORT bool InitializeVLOG3(SiteFlag* site_flag,
-                                         int32* site_default, const char* fname,
+extern NGLOG_EXPORT bool InitializeVLOG3(SiteFlag& site_flag,
+                                         const Flag<std::int32_t>& site_default,
+                                         const char* fname,
                                          int32 verbose_level);
 }  // namespace nglog
 

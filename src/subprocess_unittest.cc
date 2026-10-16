@@ -13,11 +13,22 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstring>
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
+
+#ifdef NGLOG_OS_WINDOWS
+#  include <process.h>
+#  include <windows.h>
+
+#  include "internal/utf8.h"
+#  include "long_path_test.h"
+#endif
 
 #if !defined(NGLOG_OS_WINDOWS) && defined(HAVE__FORK) && defined(HAVE_EXECV)
 #  include <pthread.h>
@@ -187,6 +198,230 @@ TYPED_TEST(SubprocessTest, SpawnFailsForANonExistentProgram) {
 
   EXPECT_FALSE(process.Spawn(argv, envp));
 }
+
+#ifdef NGLOG_OS_WINDOWS
+namespace {
+
+// Restores the current directory and PATH of this process when a test that
+// changes them returns, including through a failed assertion.
+class ScopedProcessEnvironment final {
+ public:
+  ScopedProcessEnvironment()
+      : directory_(GetCurrentDirectoryW(0, nullptr)),
+        path_(GetEnvironmentVariableW(L"PATH", nullptr, 0)) {
+    has_directory_ =
+        !directory_.empty() &&
+        GetCurrentDirectoryW(static_cast<DWORD>(directory_.size()),
+                             directory_.data()) < directory_.size();
+    has_path_ = !path_.empty() &&
+                GetEnvironmentVariableW(L"PATH", path_.data(),
+                                        static_cast<DWORD>(path_.size())) <
+                    path_.size();
+  }
+  ScopedProcessEnvironment(const ScopedProcessEnvironment&) = delete;
+  ScopedProcessEnvironment& operator=(const ScopedProcessEnvironment&) = delete;
+
+  ~ScopedProcessEnvironment() {
+    SetEnvironmentVariableW(L"PATH", has_path_ ? path_.data() : nullptr);
+    if (has_directory_) {
+      SetCurrentDirectoryW(directory_.data());
+    }
+  }
+
+ private:
+  std::vector<wchar_t> directory_;
+  std::vector<wchar_t> path_;
+  bool has_directory_ = false;
+  bool has_path_ = false;
+};
+
+}  // namespace
+
+TEST(Subprocess, SpawnsFromUtf8ExecutablePath) {
+  std::string temporary_path;
+  ASSERT_TRUE(nglog::internal::GetTempPathUtf8(&temporary_path));
+  temporary_path += "nglog_subprocess_\xE2\x82\xAC_" +
+                    std::to_string(_getpid()) + "_" +
+                    std::to_string(GetTickCount64());
+
+  std::wstring wide_directory;
+  ASSERT_TRUE(nglog::internal::Utf8ToWide(
+      temporary_path.data(), temporary_path.size(), &wide_directory));
+  ASSERT_TRUE(CreateDirectoryW(wide_directory.c_str(), nullptr));
+
+  std::wstring source_path;
+  ASSERT_TRUE(nglog::internal::Utf8ToWide(SUBPROCESS_HELPER_PATH,
+                                          std::strlen(SUBPROCESS_HELPER_PATH),
+                                          &source_path));
+  const std::wstring copied_path = wide_directory + L"\\helper.exe";
+  ASSERT_TRUE(CopyFileW(source_path.c_str(), copied_path.c_str(), FALSE));
+
+  std::string executable_path;
+  ASSERT_TRUE(nglog::internal::WideToUtf8(
+      copied_path.data(), copied_path.size(), &executable_path));
+  std::vector<char> executable(executable_path.begin(), executable_path.end());
+  executable.push_back('\0');
+  char* argv[] = {executable.data(), nullptr};
+  char* envp[] = {nullptr};
+  Subprocess<> process;
+  const bool spawned = process.Spawn(argv, envp);
+  const DWORD spawn_error = GetLastError();
+  if (spawned) {
+    process.CloseStdin();
+    process.Wait(kTimeout);
+  }
+  EXPECT_TRUE(DeleteFileW(copied_path.c_str()));
+  EXPECT_TRUE(RemoveDirectoryW(wide_directory.c_str()));
+  ASSERT_TRUE(spawned) << "CreateProcessW error " << spawn_error;
+}
+
+TEST(Subprocess, PassesUtf8Arguments) {
+  char program[] = SUBPROCESS_HELPER_PATH;
+  char option[] = "--echo-arg";
+  char argument[] = "argument_\xE2\x82\xAC";
+  char* argv[] = {program, option, argument, nullptr};
+  char* envp[] = {nullptr};
+
+  Subprocess<> process;
+  ASSERT_TRUE(process.Spawn(argv, envp));
+  process.CloseStdin();
+
+  char output[kOutputBufferSize] = {};
+  const std::size_t bytes_read =
+      process.ReadStdout(output, sizeof(output), kTimeout);
+  EXPECT_EQ(std::string(output, bytes_read), argument);
+  process.Wait(kTimeout);
+}
+
+TEST(Subprocess, AppendsExecutableExtensionToPath) {
+  std::string program_path = SUBPROCESS_HELPER_PATH;
+  constexpr char kExecutableExtension[] = ".exe";
+  constexpr std::size_t kExecutableExtensionLength =
+      sizeof(kExecutableExtension) - 1;
+  ASSERT_GT(program_path.size(), kExecutableExtensionLength);
+  ASSERT_EQ(
+      program_path.compare(program_path.size() - kExecutableExtensionLength,
+                           kExecutableExtensionLength, kExecutableExtension),
+      0);
+  program_path.resize(program_path.size() - kExecutableExtensionLength);
+
+  std::vector<char> program(program_path.begin(), program_path.end());
+  program.push_back('\0');
+  char* argv[] = {program.data(), nullptr};
+  char* envp[] = {nullptr};
+  Subprocess<> process;
+  const bool spawned = process.Spawn(argv, envp);
+  const DWORD spawn_error = GetLastError();
+  if (spawned) {
+    process.CloseStdin();
+    process.Wait(kTimeout);
+  }
+  ASSERT_TRUE(spawned) << "CreateProcessW error " << spawn_error;
+}
+
+TEST(Subprocess, ResolvesBareNameFromApplicationDirectory) {
+  const std::string helper_path = SUBPROCESS_HELPER_PATH;
+  const std::size_t separator = helper_path.find_last_of("\\/");
+  ASSERT_NE(separator, std::string::npos);
+  std::string helper_name = helper_path.substr(separator + 1);
+  constexpr char kExecutableExtension[] = ".exe";
+  constexpr std::size_t kExecutableExtensionLength =
+      sizeof(kExecutableExtension) - 1;
+  if (helper_name.size() > kExecutableExtensionLength &&
+      helper_name.compare(helper_name.size() - kExecutableExtensionLength,
+                          kExecutableExtensionLength,
+                          kExecutableExtension) == 0) {
+    helper_name.resize(helper_name.size() - kExecutableExtensionLength);
+  }
+
+  // Neither the search path nor the current directory contains the helper,
+  // which resides next to this test executable.
+  std::array<wchar_t, MAX_PATH> temporary_directory = {};
+  ASSERT_NE(GetTempPathW(static_cast<DWORD>(temporary_directory.size()),
+                         temporary_directory.data()),
+            0U);
+  const ScopedProcessEnvironment saved_environment;
+  ASSERT_TRUE(SetCurrentDirectoryW(temporary_directory.data()));
+  ASSERT_TRUE(SetEnvironmentVariableW(L"PATH", nullptr));
+
+  std::vector<char> program(helper_name.begin(), helper_name.end());
+  program.push_back('\0');
+  char* argv[] = {program.data(), nullptr};
+  char* envp[] = {nullptr};
+  Subprocess<> process;
+  const bool spawned = process.Spawn(argv, envp);
+  const DWORD spawn_error = GetLastError();
+  if (spawned) {
+    process.CloseStdin();
+    process.Wait(kTimeout);
+  }
+  ASSERT_TRUE(spawned) << "CreateProcessW error " << spawn_error;
+}
+
+TEST(Subprocess, ResolvesExecutableBeyondMaxPath) {
+  nglog::testing_internal::LongPathTestDirectory directory;
+  const std::string directory_name = "nglog_subprocess_long_path_" +
+                                     std::to_string(_getpid()) + "_" +
+                                     std::to_string(GetTickCount64());
+  ASSERT_TRUE(directory.CreateInTemporaryDirectory(directory_name));
+
+  std::wstring helper_path;
+  ASSERT_TRUE(nglog::internal::Utf8ToWide(SUBPROCESS_HELPER_PATH,
+                                          std::strlen(SUBPROCESS_HELPER_PATH),
+                                          &helper_path));
+  constexpr wchar_t kHelperNameWide[] = L"long_path_helper.exe";
+  const std::wstring copied_helper =
+      directory.ExtendedChildPath(kHelperNameWide);
+  ASSERT_TRUE(CopyFileW(helper_path.c_str(), copied_helper.c_str(), FALSE));
+
+  const ScopedProcessEnvironment saved_environment;
+  ASSERT_TRUE(
+      SetEnvironmentVariableW(L"PATH", directory.extended_path().c_str()));
+
+  char helper_name[] = "long_path_helper";
+  char empty_path[] = "PATH=";
+  char* argv[] = {helper_name, nullptr};
+  char* envp[] = {empty_path, nullptr};
+  Subprocess<> process;
+  const bool spawned = process.Spawn(argv, envp);
+  const DWORD spawn_error = GetLastError();
+  if (spawned) {
+    process.CloseStdin();
+    process.Wait(kTimeout);
+  }
+  if (!spawned && spawn_error == ERROR_INVALID_NAME &&
+      nglog::testing_internal::IsWine()) {
+    EXPECT_TRUE(DeleteFileW(copied_helper.c_str()));
+    GTEST_SKIP() << "Wine does not launch executables through extended paths";
+  }
+  if (!spawned) {
+    EXPECT_TRUE(DeleteFileW(copied_helper.c_str()));
+  }
+  ASSERT_TRUE(spawned) << "CreateProcessW error " << spawn_error;
+
+  std::string copied_helper_utf8;
+  ASSERT_TRUE(nglog::internal::WideToUtf8(
+      copied_helper.data(), copied_helper.size(), &copied_helper_utf8));
+  std::vector<char> explicit_helper(copied_helper_utf8.begin(),
+                                    copied_helper_utf8.end());
+  explicit_helper.push_back('\0');
+  char* explicit_argv[] = {explicit_helper.data(), nullptr};
+  Subprocess<> explicit_process;
+  const bool explicit_spawned = explicit_process.Spawn(explicit_argv, envp);
+  const DWORD explicit_spawn_error = GetLastError();
+  if (explicit_spawned) {
+    explicit_process.CloseStdin();
+    explicit_process.Wait(kTimeout);
+  }
+  EXPECT_TRUE(DeleteFileW(copied_helper.c_str()));
+  if (!explicit_spawned && explicit_spawn_error == ERROR_INVALID_NAME &&
+      nglog::testing_internal::IsWine()) {
+    GTEST_SKIP() << "Wine does not launch executables through extended paths";
+  }
+  ASSERT_TRUE(explicit_spawned)
+      << "CreateProcessW error " << explicit_spawn_error;
+}
+#endif
 
 TYPED_TEST(SubprocessTest, OperatorBoolReflectsSpawnState) {
   typename TestFixture::Process process;

@@ -14,11 +14,6 @@
 #include "internal/lock_metrics.h"
 #include "ng-log/logging.h"
 
-#ifdef NGLOG_USE_GFLAGS
-#  include <gflags/gflags.h>
-using namespace GFLAGS_NAMESPACE;
-#endif
-
 using namespace nglog;
 
 namespace {
@@ -190,12 +185,11 @@ int main(int argc, char** argv) {
   if (benchmark::ReportUnrecognizedArguments(argc, argv)) {
     return 1;
   }
-#ifdef NGLOG_USE_GFLAGS
-  ParseCommandLineFlags(&argc, &argv, true);
-#endif
+  nglog::ParseCommandLineFlags(&argc, &argv,
+                               nglog::FlagParsingMode::kRemoveFlags);
 
-  FLAGS_logtostderr = false;
-  FLAGS_logtostdout = false;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+  nglog::SetFlag(FLAGS_logtostdout, false);
   base::Logger* old_logger = base::GetLogger(NGLOG_INFO);
   auto logger = std::make_unique<NullLogger>();
   base::SetLogger(NGLOG_INFO, logger.release());

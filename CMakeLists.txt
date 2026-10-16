@@ -45,7 +45,6 @@ include (CMakePackageConfigHelpers)
 include (CMakePushCheckState)
 include (CPack)
 include (CTest)
-include (DetermineGflagsNamespace)
 include (GenerateExportHeader)
 include (GetCacheVariables)
 include (GNUInstallDirs)
@@ -56,7 +55,6 @@ option (WITH_LOCK_METRICS
   "Enable internal lock contention metrics" OFF)
 option (PRINT_UNSYMBOLIZED_STACK_TRACES
   "Print file offsets in traces instead of symbolizing" OFF)
-option (WITH_GFLAGS "Use gflags" ON)
 option (WITH_PKGCONFIG "Enable pkg-config support" OFF)
 option (WITH_SYMBOLIZE "Enable symbolize module" ON)
 
@@ -124,15 +122,6 @@ endif (BUILD_TESTING)
 # Benchmarks are optional and are skipped when Google Benchmark is not
 # available.
 find_package (benchmark 1.6 NO_MODULE)
-
-if (WITH_GFLAGS)
-  find_package (gflags 2.2.2)
-
-  if (gflags_FOUND)
-    set (HAVE_LIB_GFLAGS 1)
-    determine_gflags_namespace (gflags_NAMESPACE)
-  endif (gflags_FOUND)
-endif (WITH_GFLAGS)
 
 find_package (Threads REQUIRED)
 find_package (Unwind)
@@ -233,6 +222,35 @@ check_cxx_symbol_exists (sched_yield sched.h HAVE_SCHED_YIELD)
 check_cxx_symbol_exists (sigaction signal.h HAVE_SIGACTION)
 check_cxx_symbol_exists (sigaltstack signal.h HAVE_SIGALTSTACK)
 check_cxx_symbol_exists (waitpid sys/wait.h HAVE_WAITPID)
+
+# Emscripten emulates descriptor-relative operations by resolving complete
+# pathnames, which remain subject to the same length limit.
+if (NOT EMSCRIPTEN)
+  check_cxx_source_compiles ([=[
+#ifndef _GNU_SOURCE
+#  define _GNU_SOURCE 1
+#endif
+
+#include <dirent.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+int main() {
+  struct stat status;
+  int fd = open(".", O_RDONLY | O_DIRECTORY);
+  int child_fd = openat(fd, ".", O_RDONLY | O_DIRECTORY);
+  static_cast<void>(fstatat(fd, ".", &status, 0));
+  static_cast<void>(faccessat(fd, ".", F_OK, 0));
+  static_cast<void>(unlinkat(fd, "missing", 0));
+  static_cast<void>(symlinkat("missing", fd, "link"));
+  DIR* directory = fdopendir(fd);
+  static_cast<void>(directory);
+  static_cast<void>(close(child_fd));
+  return 0;
+}
+]=] HAVE_POSIX_LONG_PATH_SUPPORT)
+endif (NOT EMSCRIPTEN)
 
 if (WIN32)
   check_cxx_symbol_exists (GetThreadDescription
@@ -569,7 +587,6 @@ set (NGLOG_SRCS
   ${NGLOG_PUBLIC_H}
   src/addr2line.cc
   src/addr2line.h
-  src/base/commandlineflags.h
   src/demangle.cc
   src/demangle.h
   src/flags.cc
@@ -579,11 +596,18 @@ set (NGLOG_SRCS
   src/internal/color_format.cc
   src/internal/emscripten_console.cc
   src/internal/emscripten_console.h
+  src/internal/flag_display.h
+  src/internal/flag_registry.cc
   src/internal/hyperlink.cc
+  src/internal/levenshtein.cc
   src/internal/lock_metrics.cc
   src/internal/lock_metrics.h
   src/internal/log_cleaner.cc
   src/internal/log_cleaner.h
+  src/internal/path.cc
+  src/internal/path.h
+  src/internal/process_flag_registry.cc
+  src/internal/process_flag_registry.h
   src/internal/source_location.cc
   src/internal/source_location.h
   src/internal/style_recorder.cc
@@ -594,6 +618,8 @@ set (NGLOG_SRCS
   src/internal/terminal_capabilities.h
   src/internal/theme.cc
   src/internal/theme.h
+  src/internal/utf8.cc
+  src/internal/utf8.h
   src/libbacktrace.cc
   src/libbacktrace.h
   src/logging.cc
@@ -637,6 +663,13 @@ add_library (ng-log_internal OBJECT
 target_compile_features (ng-log_internal PUBLIC $<TARGET_PROPERTY:ng-log,COMPILE_FEATURES>)
 set_target_properties (ng-log_internal PROPERTIES DEFINE_SYMBOL ng_log_EXPORTS)
 
+# GCC emits GNU unique symbols for some standard library templates, and glibc
+# never unloads a module that defines such a symbol. Without them, a module
+# that links ng-log statically can be unloaded and releases its flags.
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND NOT WIN32 AND NOT APPLE)
+  target_compile_options (ng-log_internal PRIVATE -fno-gnu-unique)
+endif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND NOT WIN32 AND NOT APPLE)
+
 if (WITH_LOCK_METRICS)
   target_compile_definitions (ng-log_internal PRIVATE NGLOG_ENABLE_LOCK_METRICS)
 endif (WITH_LOCK_METRICS)
@@ -668,11 +701,6 @@ if (WIN32)
   target_compile_definitions (ng-log PRIVATE WIN32_LEAN_AND_MEAN)
 endif (WIN32)
 
-if (HAVE_LIB_GFLAGS)
-  target_compile_definitions (ng-log PUBLIC NGLOG_USE_GFLAGS)
-  set (ng-log_pkgconfig_compile_options -DNGLOG_USE_GFLAGS)
-endif (HAVE_LIB_GFLAGS)
-
 if (HAVE_UNWIND OR HAVE_LIBUNWIND)
   target_link_libraries (ng-log PRIVATE unwind::unwind)
   set (ng-log_libraries_options_for_static_linking "${ng-log_libraries_options_for_static_linking} -lunwind")
@@ -690,22 +718,17 @@ if (HAVE_DBGHELP)
   set (ng-log_libraries_options_for_static_linking "${ng-log_libraries_options_for_static_linking} -ldbghelp")
 endif (HAVE_DBGHELP)
 
+if (WIN32)
+  target_link_libraries (ng-log PRIVATE advapi32 ole32 pathcch shell32 uuid)
+  set (ng-log_libraries_options_for_static_linking
+    "${ng-log_libraries_options_for_static_linking} -ladvapi32 -lole32 -lpathcch -lshell32 -luuid")
+endif (WIN32)
+
 target_link_libraries (ng-log PRIVATE Threads::Threads)
 
 if (CMAKE_THREAD_LIBS_INIT)
   set (ng-log_libraries_options_for_static_linking "${ng-log_libraries_options_for_static_linking} ${CMAKE_THREAD_LIBS_INIT}")
 endif (CMAKE_THREAD_LIBS_INIT)
-
-if (gflags_FOUND)
-  # Prefer the gflags target that uses double colon convention
-  if (TARGET gflags::gflags)
-    target_link_libraries (ng-log PUBLIC gflags::gflags)
-  else (TARGET gflags::gflags)
-    target_link_libraries (ng-log PUBLIC gflags)
-  endif (TARGET gflags::gflags)
-
-  set (ng-log_libraries_options_for_static_linking "${ng-log_libraries_options_for_static_linking} -lgflags")
-endif (gflags_FOUND)
 
 if (ANDROID)
   target_link_libraries (ng-log PRIVATE log)
@@ -716,13 +739,6 @@ set_target_properties (ng-log PROPERTIES VERSION ${ng-log_VERSION})
 set_target_properties (ng-log PROPERTIES SOVERSION 0)
 
 set (_ng-log_SPDX_LICENSE BSD-3-Clause)
-
-# The Windows port compiles the MIT licensed dirent implementation into the
-# library.
-if (WIN32)
-  string (APPEND _ng-log_SPDX_LICENSE " AND MIT")
-endif (WIN32)
-
 set_property (TARGET ng-log PROPERTY SPDX_LICENSE ${_ng-log_SPDX_LICENSE})
 
 if (CYGWIN OR WIN32)
@@ -862,6 +878,108 @@ if (BUILD_TESTING AND GTest_FOUND)
     DISCOVERY_MODE PRE_TEST
   )
 
+  add_executable (flags_unittest
+    src/flags_unittest.cc
+  )
+
+  target_link_libraries (flags_unittest PRIVATE ng-log_test)
+
+  add_executable (flags_external_unittest
+    src/flags_external_unittest.cc
+  )
+
+  target_link_libraries (flags_external_unittest PRIVATE ng-log GTest::gtest)
+
+  gtest_discover_tests (flags_external_unittest
+    TEST_PREFIX "flags.external."
+  )
+
+  add_executable (flags_environment_unittest
+    src/flags_environment_unittest.cc
+  )
+
+  target_link_libraries (flags_environment_unittest PRIVATE ng-log_test)
+
+  # The environment must be in place before static initialization, and a list
+  # valued property cannot be forwarded through gtest_discover_tests.
+  add_test (NAME flags.environment COMMAND flags_environment_unittest)
+  set_tests_properties (flags.environment PROPERTIES
+    ENVIRONMENT
+      "NGLOG_logtostderr=1;NGLOG_log_prefix=FaLsE;NGLOG_log_year_in_prefix=not-a-boolean;NGLOG_v=0x10;NGLOG_logfile_mode=0600"
+  )
+
+  # Separate copies of ng-log coordinate their flag names only where the
+  # operating system provides an object that is private to the process.
+  if (WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Each module carries its own copy of the ng-log objects.
+    foreach (_ng-log_library_copy first second)
+      add_library (flags_library_copy_${_ng-log_library_copy} MODULE
+        src/flags_library_copy.cc
+        $<TARGET_OBJECTS:ng-log_internal>
+      )
+      # The objects were compiled for export, the module source was not.
+      target_compile_definitions (flags_library_copy_${_ng-log_library_copy}
+        PRIVATE NGLOG_STATIC_DEFINE)
+    endforeach (_ng-log_library_copy)
+
+    set (_ng-log_library_copy_value 0)
+    foreach (_ng-log_library_copy first second)
+      math (EXPR _ng-log_library_copy_value "${_ng-log_library_copy_value} + 1")
+      set (_ng-log_library_copy_target flags_library_copy_${_ng-log_library_copy})
+      target_compile_definitions (${_ng-log_library_copy_target} PRIVATE
+        NGLOG_LIBRARY_COPY_VALUE=${_ng-log_library_copy_value}
+        $<TARGET_PROPERTY:ng-log,COMPILE_DEFINITIONS>)
+      target_compile_features (${_ng-log_library_copy_target} PRIVATE
+        $<TARGET_PROPERTY:ng-log,COMPILE_FEATURES>)
+      target_include_directories (${_ng-log_library_copy_target} PRIVATE
+        $<TARGET_PROPERTY:ng-log,INCLUDE_DIRECTORIES>)
+      target_link_libraries (${_ng-log_library_copy_target} PRIVATE
+        $<TARGET_PROPERTY:ng-log,LINK_LIBRARIES>)
+    endforeach (_ng-log_library_copy)
+
+    # The loader must not link ng-log. Otherwise its own copy would collide
+    # with every loaded module.
+    add_executable (flags_library_copies_unittest
+      src/flags_library_copies_unittest.cc
+    )
+    target_link_libraries (flags_library_copies_unittest PRIVATE GTest::gtest
+      ${CMAKE_DL_LIBS})
+    if (WIN32)
+      # LoadLibrary finds the modules next to the executable.
+      target_compile_definitions (flags_library_copies_unittest PRIVATE
+        "NGLOG_LIBRARY_COPY_FIRST=\"$<TARGET_FILE_NAME:flags_library_copy_first>\""
+        "NGLOG_LIBRARY_COPY_SECOND=\"$<TARGET_FILE_NAME:flags_library_copy_second>\"")
+    else (WIN32)
+      target_compile_definitions (flags_library_copies_unittest PRIVATE
+        "NGLOG_LIBRARY_COPY_FIRST=\"$<TARGET_FILE:flags_library_copy_first>\""
+        "NGLOG_LIBRARY_COPY_SECOND=\"$<TARGET_FILE:flags_library_copy_second>\"")
+    endif (WIN32)
+    add_dependencies (flags_library_copies_unittest flags_library_copy_first
+      flags_library_copy_second)
+
+    gtest_discover_tests (flags_library_copies_unittest
+      TEST_PREFIX flags.copies.
+      DISCOVERY_TIMEOUT 30
+      DISCOVERY_MODE PRE_TEST
+    )
+  endif (WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
+
+  gtest_discover_tests (flags_unittest
+    TEST_PREFIX flags.
+    DISCOVERY_TIMEOUT 30
+    DISCOVERY_MODE PRE_TEST
+    PROPERTIES
+      RESOURCE_LOCK captured_stream
+  )
+
+  add_executable (flags_static_initialization_unittest
+    src/flags_static_initialization_unittest.cc
+  )
+  target_link_libraries (flags_static_initialization_unittest PRIVATE
+    ng-log_test)
+  add_test (NAME flags.static_initialization
+    COMMAND flags_static_initialization_unittest)
+
   add_executable (preinit_warning_unittest
     src/preinit_warning_unittest.cc
   )
@@ -983,7 +1101,7 @@ if (BUILD_TESTING AND GTest_FOUND)
     if (MINGW)
       # Keep the child independent of MinGW runtime DLLs on PATH.
       target_link_options (subprocess_test_helper PRIVATE
-        -static -static-libgcc -static-libstdc++)
+        -municode -static -static-libgcc -static-libstdc++)
     endif (MINGW)
   endif (HAVE_SUBPROCESS)
 
@@ -1158,6 +1276,9 @@ if (BUILD_TESTING AND GTest_FOUND)
     TEST_PREFIX mock-log.
     DISCOVERY_TIMEOUT 30
     DISCOVERY_MODE PRE_TEST
+    PROPERTIES
+      # Reports deadlocks without failing slow runs on overloaded runners.
+      TIMEOUT 60
   )
 
   # Generate an initial cache
@@ -1243,6 +1364,7 @@ if (BUILD_TESTING AND GTest_FOUND)
   add_test (NAME cleanup_immediately COMMAND
     ${CMAKE_COMMAND}
     -DLOGCLEANUP=$<TARGET_FILE:cleanup_immediately_unittest>
+    "-DEMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
     # NOTE The trailing slash is important
     -DTEST_DIR=${CLEANUP_LOG_DIR}/
     -P ${ng-log_SOURCE_DIR}/cmake/RunCleanerTest1.cmake
@@ -1250,12 +1372,14 @@ if (BUILD_TESTING AND GTest_FOUND)
   add_test (NAME cleanup_with_absolute_prefix COMMAND
     ${CMAKE_COMMAND}
     -DLOGCLEANUP=$<TARGET_FILE:cleanup_with_absolute_prefix_unittest>
+    "-DEMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
     -DTEST_DIR=${ng-log_BINARY_DIR}/
     -P ${ng-log_SOURCE_DIR}/cmake/RunCleanerTest2.cmake
     WORKING_DIRECTORY ${ng-log_BINARY_DIR})
   add_test (NAME cleanup_with_relative_prefix COMMAND
     ${CMAKE_COMMAND}
     -DLOGCLEANUP=$<TARGET_FILE:cleanup_with_relative_prefix_unittest>
+    "-DEMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
     -DTEST_DIR=${ng-log_BINARY_DIR}/
     -DTEST_SUBDIR=test_subdir/
     -P ${ng-log_SOURCE_DIR}/cmake/RunCleanerTest3.cmake
@@ -1263,7 +1387,9 @@ if (BUILD_TESTING AND GTest_FOUND)
   add_test (NAME cleanup_with_non_ascii_prefix COMMAND
     ${CMAKE_COMMAND}
     -DLOGCLEANUP=$<TARGET_FILE:cleanup_with_non_ascii_prefix_unittest>
+    "-DEMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
     -DTEST_DIR=${ng-log_BINARY_DIR}/
+    -DTEST_ON_WINDOWS=${WIN32}
     -P ${ng-log_SOURCE_DIR}/cmake/RunCleanerTest4.cmake
     WORKING_DIRECTORY ${ng-log_BINARY_DIR})
 
@@ -1333,6 +1459,42 @@ if (BUILD_TESTING AND GTest_FOUND)
     DISCOVERY_TIMEOUT 30
     DISCOVERY_MODE PRE_TEST
     PROPERTIES RESOURCE_LOCK captured_stream
+  )
+
+  add_test (NAME flags_declaration COMMAND ${CMAKE_CTEST_COMMAND}
+    --build-config $<CONFIG>
+    --build-and-test
+    "${ng-log_SOURCE_DIR}/src/flags_declaration_unittest"
+    "${ng-log_BINARY_DIR}/Tests/flags_declaration"
+    --build-generator ${CMAKE_GENERATOR}
+    --build-makeprogram ${CMAKE_MAKE_PROGRAM}
+    --build-target ng-log_flags_declaration
+    --build-options
+    -DCMAKE_BUILD_TYPE=$<CONFIG>
+    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+    -DCMAKE_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}
+    -DCMAKE_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}
+    -Dng-log_DIR=${ng-log_BINARY_DIR}
+  )
+
+  add_test (NAME flags_builtin_redeclaration COMMAND ${CMAKE_CTEST_COMMAND}
+    --build-config $<CONFIG>
+    --build-and-test
+    "${ng-log_SOURCE_DIR}/src/flags_declaration_unittest"
+    "${ng-log_BINARY_DIR}/Tests/flags_builtin_redeclaration"
+    --build-generator ${CMAKE_GENERATOR}
+    --build-makeprogram ${CMAKE_MAKE_PROGRAM}
+    --build-target ng-log_flags_builtin_redeclaration
+    --build-options
+    -DCMAKE_BUILD_TYPE=$<CONFIG>
+    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+    -DCMAKE_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}
+    -DCMAKE_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}
+    -Dng-log_DIR=${ng-log_BINARY_DIR}
+  )
+  # The static assertion message is part of the diagnostic of every compiler.
+  set_tests_properties (flags_builtin_redeclaration PROPERTIES
+    PASS_REGULAR_EXPRESSION "is a built-in ng-log flag"
   )
 
   add_test (NAME log_severity_constants COMMAND ${CMAKE_CTEST_COMMAND}
@@ -1552,6 +1714,11 @@ if (BUILD_EXAMPLES)
 
   add_executable (color_stacktrace_example examples/color_stacktrace.cc)
   target_link_libraries (color_stacktrace_example PRIVATE ng-log::ng-log)
+
+  if (EMSCRIPTEN)
+    target_link_options (custom_sink_example PRIVATE "-sEXIT_RUNTIME=1")
+    target_link_options (color_stacktrace_example PRIVATE "-sEXIT_RUNTIME=1")
+  endif (EMSCRIPTEN)
 endif (BUILD_EXAMPLES)
 
 install (TARGETS ng-log
@@ -1580,19 +1747,6 @@ if (WITH_PKGCONFIG)
 endif (WITH_PKGCONFIG)
 
 set (ng-log_CMake_VERSION ${CMAKE_MINIMUM_REQUIRED_VERSION})
-
-if (gflags_FOUND)
-  # Ensure clients locate only the package config and not third party find
-  # modules having the same name. This avoid cmake_policy PUSH/POP errors.
-  set (gflags_DEPENDENCY
-    "find_dependency (gflags ${gflags_VERSION} NO_MODULE)")
-  if (TARGET gflags::gflags)
-    string (CONCAT gflags_DEPENDENCY
-      "set (GFLAGS_USE_TARGET_NAMESPACE TRUE)\n"
-      "${gflags_DEPENDENCY}\n"
-      "unset (GFLAGS_USE_TARGET_NAMESPACE)")
-  endif (TARGET gflags::gflags)
-endif (gflags_FOUND)
 
 configure_package_config_file (ng-log-config.cmake.in
   ${ng-log_BINARY_DIR}/ng-log-config.cmake

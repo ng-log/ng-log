@@ -5,15 +5,10 @@
 
 name: Windows
 
-on: [push, pull_request]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+on: workflow_call
 
 jobs:
   build-msvc:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
     name: ${{matrix.msvc}}-${{matrix.arch}}-C++${{matrix.std}}-${{matrix.build_type}}-${{matrix.lib}}
     runs-on: ${{matrix.os}}
     permissions:
@@ -76,40 +71,10 @@ jobs:
                 --config ${{matrix.build_type}} `
                 --target install
 
-      - name: Cache gflags
-        id: cache-gflags
-        uses: actions/cache@v6
-        with:
-          path: gflags/
-          key: ${{matrix.msvc}}-gflags-2.2.2-C++${{matrix.std}}-${{matrix.lib}}-${{matrix.arch}}-${{matrix.build_type}}
-
-      - name: Download gflags
-        if: steps.cache-gflags.outputs.cache-hit != 'true'
-        run: |
-          (New-Object System.Net.WebClient).DownloadFile("https://github.com/gflags/gflags/archive/refs/tags/v2.2.2.zip", "v2.2.2.zip")
-          Expand-Archive v2.2.2.zip .
-
-      - name: Build gflags
-        if: steps.cache-gflags.outputs.cache-hit != 'true'
-        run: |
-          cmake -S gflags-2.2.2 -B build-gflags `
-                -A ${{matrix.arch}} `
-                -DBUILD_SHARED_LIBS=${{matrix.lib == 'shared'}} `
-                -DCMAKE_CXX_STANDARD=${{matrix.std}} `
-                -DCMAKE_CXX_STANDARD_REQUIRED=ON `
-                -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/gflags `
-                -DCMAKE_POLICY_VERSION_MINIMUM="3.22" `
-                -G "${{matrix.generator}}"
-          cmake --build build-gflags `
-                --config ${{matrix.build_type}} `
-                --target install
-
       - name: Setup Environment
         run: |
           echo "GTest_ROOT=$((Get-Item .).FullName)/gtest" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "gflags_ROOT=$((Get-Item .).FullName)/gflags" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           echo "${{github.workspace}}/gtest/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          echo "${{github.workspace}}/gflags/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Setup Release Environment
         if: matrix.build_type != 'Debug'
@@ -155,7 +120,6 @@ jobs:
           category: language:cpp
 
   build-mingw:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
     name: ${{matrix.sys}}-${{matrix.env}}-C++${{matrix.std}}-${{matrix.build_type}}-${{matrix.lib}}
     runs-on: windows-2025
     permissions:
@@ -193,7 +157,6 @@ jobs:
             mingw-w64-${{matrix.env}}-benchmark
             mingw-w64-${{matrix.env}}-cmake
             mingw-w64-${{matrix.env}}-gcc
-            mingw-w64-${{matrix.env}}-gflags
             mingw-w64-${{matrix.env}}-gtest
             mingw-w64-${{matrix.env}}-ninja
             mingw-w64-${{matrix.env}}-python-jinja
@@ -204,7 +167,7 @@ jobs:
       - name: Setup Coverage Dependencies
         if: matrix.build_type == 'Debug'
         run: |
-          pip install 'gcovr==7.0'
+          pip install -r .github/coverage/requirements.txt
 
       - name: Setup Environment
         if: matrix.build_type == 'Debug'
@@ -246,7 +209,7 @@ jobs:
         if: matrix.build_type == 'Debug'
         run: |
           cd build_${{matrix.build_type}}
-          gcovr -r .. . -s --cobertura coverage.xml
+          gcovr -r .. . -s --cobertura coverage.xml --json coverage.json
 
       - name: Upload Coverage to Codecov
         if: matrix.build_type == 'Debug'
@@ -256,6 +219,14 @@ jobs:
           files: build_${{matrix.build_type}}/coverage.xml
           fail_ci_if_error: true
           verbose: true
+
+      - name: Archive Coverage
+        if: matrix.build_type == 'Debug'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-mingw-cxx${{matrix.std}}-${{matrix.lib}}
+          path: build_${{matrix.build_type}}/coverage.json
+          retention-days: 1
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
