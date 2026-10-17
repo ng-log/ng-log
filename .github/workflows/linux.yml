@@ -66,6 +66,7 @@ jobs:
         run: |
           cmake -S . -B build_${{matrix.build_type}} \
             -DBUILD_SHARED_LIBS=${{matrix.lib == 'shared'}} \
+            -DCMAKE_BUILD_TYPE=${{matrix.build_type}} \
             -DCMAKE_CXX_STANDARD=${{matrix.std}} \
             -DCMAKE_CXX_STANDARD_REQUIRED=ON \
             -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/install \
@@ -140,3 +141,168 @@ jobs:
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
+
+  sanitize-linux:
+    defaults:
+      run:
+        shell: bash
+    name: GCC-${{matrix.sanitizer.name}}
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer:
+          - name: ASan-UBSan
+            flags: -fsanitize=address,undefined -fno-sanitize-recover=all
+            # Lock metrics have tests of their own that only exist when the
+            # metrics are compiled in.
+            options: -DWITH_LOCK_METRICS=ON
+          - name: TSan
+            flags: -fsanitize=thread
+            options: ''
+    env:
+      # The tests that build separate projects through ctest read the flags
+      # from the environment, so they apply to every step.
+      CXXFLAGS: ${{matrix.sanitizer.flags}} -fno-omit-frame-pointer -Werror
+      LDFLAGS: ${{matrix.sanitizer.flags}}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Dependencies
+        run: |
+          sudo apt-get update
+          DEBIAN_FRONTEND=noninteractive sudo apt-get install -y --no-install-suggests --no-install-recommends \
+            g++ \
+            cmake \
+            libgmock-dev \
+            libgtest-dev \
+            ninja-build
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            ${{matrix.sanitizer.options}} \
+            -G Ninja \
+            -Werror=author
+
+      - name: Build
+        run: |
+          cmake --build build
+
+      - name: Test
+        run: |
+          ctest --test-dir build -j"$(nproc)" --output-on-failure
+
+  msan-linux:
+    defaults:
+      run:
+        shell: bash
+    name: Clang-MSan
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    env:
+      CC: clang-21
+      CXX: clang++-21
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Paths
+        run: |
+          # MemorySanitizer cannot see stores of uninstrumented code, so the
+          # C++ standard library and GoogleTest are built with it as well.
+          echo "RUNTIMES_DIR=${RUNNER_TEMP}/msan-runtimes" >> "$GITHUB_ENV"
+
+      - name: Setup Dependencies
+        run: |
+          sudo apt-get update
+          DEBIAN_FRONTEND=noninteractive sudo apt-get install -y --no-install-suggests --no-install-recommends \
+            clang-21 \
+            cmake \
+            libclang-rt-21-dev \
+            libgmock-dev \
+            libgtest-dev \
+            ninja-build
+
+      - name: Determine LLVM Version
+        id: llvm
+        run: |
+          echo "version=$(${CXX} --version | sed -n 's/.*clang version \([0-9][0-9.]*\).*/\1/p')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Instrumented libc++
+        id: cache-libcxx
+        uses: actions/cache@v6
+        with:
+          path: ${{env.RUNTIMES_DIR}}
+          # The workflow holds the options of the build below.
+          key: msan-libcxx-${{steps.llvm.outputs.version}}-${{hashFiles('.github/workflows/linux.yml')}}
+
+      - name: Build Instrumented libc++
+        if: steps.cache-libcxx.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch llvmorg-${{steps.llvm.outputs.version}} \
+            --filter=blob:none --sparse https://github.com/llvm/llvm-project.git \
+            ${{runner.temp}}/llvm-project
+          git -C ${{runner.temp}}/llvm-project sparse-checkout set cmake libc \
+            libcxx libcxxabi llvm/cmake llvm/utils/llvm-lit runtimes third-party
+          # The unwinder of LLVM reads register contexts that MemorySanitizer
+          # considers uninitialized, so the system unwinder remains in use.
+          cmake -S ${{runner.temp}}/llvm-project/runtimes -B ${{runner.temp}}/llvm-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DCMAKE_INSTALL_PREFIX=${RUNTIMES_DIR}" \
+            -DLIBCXXABI_USE_LLVM_UNWINDER=OFF \
+            -DLIBCXX_INCLUDE_BENCHMARKS=OFF \
+            -DLIBCXX_INCLUDE_TESTS=OFF \
+            -DLIBCXXABI_INCLUDE_TESTS=OFF \
+            -DLLVM_ENABLE_RUNTIMES='libcxx;libcxxabi' \
+            -DLLVM_USE_SANITIZER=MemoryWithOrigins \
+            -G Ninja
+          cmake --build ${{runner.temp}}/llvm-build
+          cmake --install ${{runner.temp}}/llvm-build
+
+      - name: Setup Environment
+        run: |
+          TRIPLE=$(${CXX} -print-target-triple)
+          LIBDIR=${RUNTIMES_DIR}/lib
+          TARGET_LIBDIR=${RUNTIMES_DIR}/lib/${TRIPLE}
+          # The tests that build separate projects through ctest read the
+          # flags from the environment, so they apply to every step. Without
+          # optimization, instrumented code runs several times slower and
+          # tests exceed their timeouts.
+          echo "CXXFLAGS=-fsanitize=memory -fsanitize-memory-track-origins -fno-omit-frame-pointer -O1 -nostdinc++ -isystem ${RUNTIMES_DIR}/include/c++/v1 -isystem ${RUNTIMES_DIR}/include/${TRIPLE}/c++/v1 -Werror" >> "$GITHUB_ENV"
+          echo "LDFLAGS=-fsanitize=memory -nostdlib++ -L${LIBDIR} -L${TARGET_LIBDIR} -Wl,-rpath,${LIBDIR} -Wl,-rpath,${TARGET_LIBDIR} -lc++ -lc++abi" >> "$GITHUB_ENV"
+
+      - name: Build GoogleTest
+        run: |
+          cmake -S /usr/src/googletest -B ${{runner.temp}}/gtest-build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_INSTALL_PREFIX=${{runner.temp}}/gtest \
+            -G Ninja
+          cmake --build ${{runner.temp}}/gtest-build
+          cmake --install ${{runner.temp}}/gtest-build
+
+      - name: Configure
+        run: |
+          # The system libunwind is not instrumented. Line tables suffice for
+          # addr2line, which takes long to read full debug information for
+          # every frame that crash tests symbolize.
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS_DEBUG=-gline-tables-only \
+            -DCMAKE_PREFIX_PATH=${{runner.temp}}/gtest \
+            -DWITH_UNWIND=OFF \
+            -G Ninja \
+            -Werror=author
+
+      - name: Build
+        run: |
+          cmake --build build
+
+      - name: Test
+        run: |
+          ctest --test-dir build -j"$(nproc)" --output-on-failure

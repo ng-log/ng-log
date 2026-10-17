@@ -193,6 +193,9 @@ class ScopedAllocationCounter final {
 std::unique_ptr<int> g_escaped;
 
 TEST_F(ExperimentalLogging, AllocationCounterObservesAllocations) {
+#ifdef NGLOG_TEST_NO_ALLOCATION_HOOKS
+  GTEST_SKIP() << "the allocation hooks are unavailable";
+#endif
   int allocations = 0;
   {
     const ScopedAllocationCounter counter;
@@ -226,6 +229,9 @@ constexpr int kSpecifiedIntegerAllocations = 0;
 // Each argument type is counted separately, so that a failure names the type
 // whose formatting allocates.
 TEST_F(ExperimentalLogging, SignalSafeLogDoesNotAllocate) {
+#ifdef NGLOG_TEST_NO_ALLOCATION_HOOKS
+  GTEST_SKIP() << "the allocation hooks are unavailable";
+#endif
   const std::string text = "string";
   const int value = 7;
   const void* const pointer = &value;
@@ -282,6 +288,9 @@ TEST_F(ExperimentalLogging, SignalSafeLogDoesNotAllocate) {
 // Messages longer than the internal buffers of std::format implementations,
 // which libc++ grows on the heap for other output iterators, do not allocate.
 TEST_F(ExperimentalLogging, LongSignalSafeLogDoesNotAllocate) {
+#ifdef NGLOG_TEST_NO_ALLOCATION_HOOKS
+  GTEST_SKIP() << "the allocation hooks are unavailable";
+#endif
   constexpr std::size_t kLength = 1000;
   const std::string text(kLength, 'x');
   int allocations = -1;
@@ -369,6 +378,9 @@ TEST_F(ExperimentalLogging, SignalSafeLogFormatsFloatsLikeStdFormat) {
 }
 
 TEST_F(ExperimentalLogging, SignalSafeFloatsDoNotAllocate) {
+#ifdef NGLOG_TEST_NO_ALLOCATION_HOOKS
+  GTEST_SKIP() << "the allocation hooks are unavailable";
+#endif
   // Exceeds the range of double where long double is wider.
   constexpr long double kLongDouble = std::numeric_limits<long double>::max();
   int allocations = -1;

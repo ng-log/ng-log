@@ -683,6 +683,9 @@ TEST(SignalHandler, ColorlogtostderrDisablesAnsi) {
 #  if defined(HAVE_STACKTRACE) && defined(HAVE_SYMBOLIZE) && \
       (defined(HAVE_ADDR2LINE) || defined(HAVE_LIBBACKTRACE))
 TEST(SignalHandler, HyperlinkedStackFramesDoNotAllocate) {
+#    ifdef NGLOG_TEST_NO_ALLOCATION_HOOKS
+  GTEST_SKIP() << "the allocation hooks are unavailable";
+#    endif
   // Hyperlinks need source locations, which builds without debug information
   // lack.
   char symbol[kSymbolBufferSize];

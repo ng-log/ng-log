@@ -156,6 +156,14 @@ class ScopedStreamCapture final {
   FileDescriptor original_;
 };
 
+// MemorySanitizer defines the global allocation functions itself, so a program
+// cannot replace them to observe allocations.
+#if defined(__has_feature)
+#  if __has_feature(memory_sanitizer)
+#    define NGLOG_TEST_NO_ALLOCATION_HOOKS 1
+#  endif
+#endif
+
 // Add hook for operator new to ensure there are no memory allocation.
 extern void (*g_new_hook)();
 // Receives the size of every allocation through operator new.
