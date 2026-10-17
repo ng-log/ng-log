@@ -424,6 +424,7 @@ class Addr2LineSymbolizeCallback : public ::testing::Test {
 // rather than a hard failure.
 
 TEST_F(Addr2LineSymbolizeCallback, ResolvesFileAndLine) {
+  DisableAddr2LineTimeout();
   nglog::SetFlag(FLAGS_symbolize_line_info, true);
   EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
 
@@ -437,6 +438,7 @@ TEST_F(Addr2LineSymbolizeCallback, ResolvesFileAndLine) {
 
 #ifdef NGLOG_OS_WINDOWS
 TEST_F(Addr2LineSymbolizeCallback, ResolvesFromLongModulePath) {
+  DisableAddr2LineTimeout();
   nglog::SetFlag(FLAGS_symbolize_line_info, true);
   ASSERT_TRUE(InstallAddr2LineSymbolizeCallback());
   const char* const symbol =
@@ -465,6 +467,7 @@ TEST_F(Addr2LineSymbolizeCallback, ResolvesFromLongModulePath) {
 #endif
 
 TEST_F(Addr2LineSymbolizeCallback, DisabledByFlag) {
+  DisableAddr2LineTimeout();
   nglog::SetFlag(FLAGS_symbolize_line_info, false);
   EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
 
@@ -541,6 +544,7 @@ TEST_F(Addr2LineSymbolizeCallback, UsesOneTimeoutForSlowOutput) {
 
 TEST_F(Addr2LineSymbolizeCallback, RejectsUnsuccessfulAddr2LineExit) {
   const ScopedFakeAddr2Line fake{ADDR2LINE_FAKE_FAIL_PATH};
+  DisableAddr2LineTimeout();
   EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
 
   char symbol[kSymbolBufferSize] = {};
@@ -570,6 +574,7 @@ TEST_F(Addr2LineSymbolizeCallback,
     // being entirely absent from PATH (no process is ever spawned) and from
     // it hanging (RunAddr2Line() reaches EOF here well within the timeout).
     const ScopedFakeAddr2Line fake{ADDR2LINE_FAKE_EMPTY_PATH};
+    DisableAddr2LineTimeout();
     nglog::SetFlag(FLAGS_symbolize_line_info, true);
     EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
 

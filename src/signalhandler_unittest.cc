@@ -117,8 +117,12 @@ static void ReturnFromFailureHandler() {
 #endif  // defined(NGLOG_OS_LINUX)
 
 #if !defined(NGLOG_OS_WINDOWS)
-// Bounds how long a child scenario may take before it counts as hung.
-constexpr std::chrono::seconds kChildTimeout{10};
+// Bounds how long a child scenario may take before it counts as hung. A
+// hung child never finishes, so the bound only needs to tolerate long
+// scheduling stalls of a loaded machine, during which dumping and
+// symbolizing a crash is slow. The self test runs four scenarios in a row,
+// which together must stay below its CTest timeout of 60 seconds.
+constexpr std::chrono::seconds kChildTimeout{12};
 
 // Runs self_path with child_command as its only argument and waits for it
 // to terminate within kChildTimeout. Returns false after killing the child

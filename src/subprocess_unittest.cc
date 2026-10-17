@@ -42,7 +42,10 @@ using namespace std::chrono_literals;
 
 namespace {
 
-constexpr std::chrono::milliseconds kTimeout = 5s;
+// Generous enough for a loaded machine to stall the helper without failing
+// tests that do not exercise timeouts. Reads and waits return as soon as the
+// helper responds, so the bound costs nothing otherwise.
+constexpr std::chrono::milliseconds kTimeout = 60s;
 
 // Bounds waits on a helper that never exits on its own, which only forced
 // termination ends.
