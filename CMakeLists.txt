@@ -513,10 +513,7 @@ endif (_ng-log_STACKTRACE_SOURCE)
 
 configure_file (src/config.h.cmake.in config.h)
 
-set (_ng-log_CMake_BINDIR ${CMAKE_INSTALL_BINDIR})
-set (_ng-log_CMake_INCLUDE_DIR ${CMAKE_INSTALL_INCLUDEDIR})
-set (_ng-log_CMake_LIBDIR ${CMAKE_INSTALL_LIBDIR})
-set (_ng-log_CMake_INSTALLDIR ${_ng-log_CMake_LIBDIR}/cmake/ng-log)
+set (_ng-log_CMake_INSTALLDIR ${CMAKE_INSTALL_LIBDIR}/cmake/ng-log)
 
 # The package configuration locates the find modules relative to its own
 # location, both in the build tree and in the installation.
@@ -538,6 +535,13 @@ endforeach (_ng-log_FIND_MODULE)
 set (NGLOG_PUBLIC_H
   ${ng-log_BINARY_DIR}/ng-log/export.h
   src/ng-log/flags.h
+  src/ng-log/internal/color.h
+  src/ng-log/internal/color_spec.h
+  src/ng-log/internal/hyperlink.h
+  src/ng-log/internal/style_markers.h
+  src/ng-log/internal/styled_value.h
+  src/ng-log/internal/text_attributes.h
+  src/ng-log/internal/text_style.h
   src/ng-log/log_severity.h
   src/ng-log/logging.h
   src/ng-log/platform.h
@@ -587,13 +591,6 @@ set (NGLOG_SRCS
   src/libbacktrace.cc
   src/libbacktrace.h
   src/logging.cc
-  src/ng-log/internal/color.h
-  src/ng-log/internal/color_spec.h
-  src/ng-log/internal/hyperlink.h
-  src/ng-log/internal/style_markers.h
-  src/ng-log/internal/styled_value.h
-  src/ng-log/internal/text_attributes.h
-  src/ng-log/internal/text_style.h
   src/raw_logging.cc
   src/signalhandler.cc
   src/stacktrace.h
@@ -707,12 +704,17 @@ if (CYGWIN OR WIN32)
   target_compile_definitions (ng-log PUBLIC NGLOG_NO_ABBREVIATED_SEVERITIES)
 endif (CYGWIN OR WIN32)
 
-set_target_properties (ng-log PROPERTIES PUBLIC_HEADER "${NGLOG_PUBLIC_H}")
+# The header set installs the headers with their directory layout and adds
+# the installed include directory to the exported usage requirements.
+target_sources (ng-log PUBLIC
+  FILE_SET HEADERS
+  BASE_DIRS ${ng-log_BINARY_DIR} ${ng-log_SOURCE_DIR}/src
+  FILES ${NGLOG_PUBLIC_H}
+)
 
 target_include_directories (ng-log BEFORE PUBLIC
   "$<BUILD_INTERFACE:${ng-log_BINARY_DIR}>"
   "$<BUILD_INTERFACE:${ng-log_SOURCE_DIR}/src>"
-  "$<INSTALL_INTERFACE:${_ng-log_CMake_INCLUDE_DIR}>"
   PRIVATE ${ng-log_BINARY_DIR}
   PRIVATE ${ng-log_SOURCE_DIR}/src)
 
@@ -1685,26 +1687,13 @@ endif (BUILD_EXAMPLES)
 
 install (TARGETS ng-log
   EXPORT ng-log-targets
-  RUNTIME DESTINATION ${_ng-log_CMake_BINDIR}
-  PUBLIC_HEADER DESTINATION ${_ng-log_CMake_INCLUDE_DIR}/ng-log
-  LIBRARY DESTINATION ${_ng-log_CMake_LIBDIR}
-  ARCHIVE DESTINATION ${_ng-log_CMake_LIBDIR})
-
-install (FILES
-  src/ng-log/internal/color.h
-  src/ng-log/internal/color_spec.h
-  src/ng-log/internal/hyperlink.h
-  src/ng-log/internal/style_markers.h
-  src/ng-log/internal/styled_value.h
-  src/ng-log/internal/text_attributes.h
-  src/ng-log/internal/text_style.h
-  DESTINATION ${_ng-log_CMake_INCLUDE_DIR}/ng-log/internal
-  COMPONENT Development)
+  FILE_SET HEADERS
+)
 
 if (WITH_PKGCONFIG)
   install (
     FILES "${ng-log_BINARY_DIR}/libng-log.pc"
-    DESTINATION "${_ng-log_CMake_LIBDIR}/pkgconfig"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig"
   )
 endif (WITH_PKGCONFIG)
 
