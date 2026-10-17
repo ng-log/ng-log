@@ -12,10 +12,11 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <cerrno>
 #include <csignal>
 #include <cstdint>
 #include <cstring>
-#include <iostream>
+#include <fstream>
 #include <limits>
 #include <string>
 
@@ -25,18 +26,21 @@
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "ng-log/platform.h"
+#include "testing_utilities.h"
 
 #ifdef HAVE_UNISTD_H
 #  include <unistd.h>
 #endif
 
 #if defined(HAVE_LINK_H) && !defined(HAVE_LIBBACKTRACE)
+#  include <fcntl.h>
 #  include <sys/mman.h>
 #  include <sys/stat.h>
 #  include <sys/types.h>
 
 #  include <cstdlib>
 #  include <iterator>
+#  include <memory>
 #  include <utility>
 #  include <vector>
 
@@ -135,6 +139,74 @@ testing::Matcher<const char*> IsStaticFuncSymbol() {
   return AnyOf(StrEq("static_func"), StrEq("static_func()"));
 }
 
+#    if defined(NGLOG_OS_LINUX) && defined(MAP_FIXED_NOREPLACE)
+// A mapping line longer than the buffer of the maps reader, listed before the
+// module of the symbol, must not stop symbolization. An address inside the
+// mapping of such a line is attributed to no file.
+TEST(Symbolize, ToleratesLongMappingLines) {
+  constexpr std::size_t kComponentLength = 200;
+  constexpr int kComponents = 6;
+  constexpr mode_t kDirectoryMode = 0700;
+  constexpr mode_t kFileMode = 0600;
+  // Below the usual load addresses of executables and libraries.
+  constexpr std::uintptr_t kLowAddress = 0x200000;
+  constexpr int kHexadecimalBase = 16;
+
+  std::string path = TestTmpDir();
+  for (int i = 0; i < kComponents; ++i) {
+    path += '/' + std::string(kComponentLength, 'd');
+    ASSERT_EQ(mkdir(path.c_str(), kDirectoryMode), 0) << strerror(errno);
+  }
+  path += "/mapped";
+  const long page_size = sysconf(_SC_PAGESIZE);
+  ASSERT_GT(page_size, 0);
+  FileDescriptor fd{open(path.c_str(), O_RDWR | O_CREAT, kFileMode)};
+  ASSERT_TRUE(fd) << strerror(errno);
+  ASSERT_EQ(ftruncate(fd.get(), page_size), 0) << strerror(errno);
+  void* const mapping = mmap(
+      reinterpret_cast<void*>(kLowAddress), static_cast<std::size_t>(page_size),
+      PROT_READ | PROT_EXEC, MAP_PRIVATE | MAP_FIXED_NOREPLACE, fd.get(), 0);
+  if (mapping == MAP_FAILED) {
+    GTEST_SKIP() << "cannot map a file at a low address: " << strerror(errno);
+  }
+  // Unmaps the file even if an assertion below ends the test early.
+  const auto unmap = [page_size](void* address) {
+    munmap(address, static_cast<std::size_t>(page_size));
+  };
+  const std::unique_ptr<void, decltype(unmap)> mapping_owner{mapping, unmap};
+
+  EXPECT_STREQ("nonstatic_func",
+               TrySymbolize(reinterpret_cast<void*>(&nonstatic_func)));
+
+  // The maps reader of the symbolizer keeps this many bytes of a line,
+  // including the terminating null character.
+  constexpr std::size_t kMapsLineBufferSize = 1024;
+  std::ifstream maps{"/proc/self/maps"};
+  std::string line;
+  std::string truncated_path;
+  while (std::getline(maps, line)) {
+    if (std::strtoull(line.c_str(), nullptr, kHexadecimalBase) == kLowAddress) {
+      const std::string kept = line.substr(0, kMapsLineBufferSize - 1);
+      truncated_path = kept.substr(kept.find('/'));
+      break;
+    }
+  }
+  ASSERT_FALSE(truncated_path.empty());
+  ASSERT_LT(truncated_path.size(), path.size());
+  // A valid object file at the truncated path must not be mistaken for the
+  // module, whose name is cut off.
+  {
+    std::ifstream executable{"/proc/self/exe", std::ios::binary};
+    std::ofstream decoy{truncated_path, std::ios::binary};
+    decoy << executable.rdbuf();
+  }
+  constexpr std::size_t kNameBufferSize = 256;
+  char name[kNameBufferSize];
+  EXPECT_FALSE(Symbolize(mapping, name, sizeof(name))) << name;
+  unlink(truncated_path.c_str());
+}
+#    endif
+
 TEST(Symbolize, Symbolize) {
   // We do C-style cast since GCC 2.95.3 doesn't allow
   // reinterpret_cast<void *>(&func).
@@ -197,6 +269,19 @@ int NoopSymbolizeCallback(int /*fd*/, void* /*pc*/, char* /*out*/,
                           std::size_t /*out_size*/,
                           std::uint64_t /*relocation*/) {
   return -1;
+}
+
+// Writes a file:line prefix the way the addr2line and libbacktrace callbacks
+// do.
+int FileLineSymbolizeCallback(int /*fd*/, void* /*pc*/, char* out,
+                              std::size_t out_size,
+                              std::uint64_t /*relocation*/) {
+  constexpr char kFileLine[] = "synthetic.cc:1 ";
+  if (out_size < sizeof(kFileLine)) {
+    return -1;
+  }
+  std::memcpy(out, kFileLine, sizeof(kFileLine));
+  return static_cast<int>(sizeof(kFileLine) - 1);
 }
 
 void* SyntheticProgramCounter() {
@@ -606,6 +691,23 @@ TEST_F(SyntheticElfSymbolize, RejectsInvalidSectionEntrySize) {
   InstallCallbacks();
 
   EXPECT_THAT(SyntheticProgramCounter(), Not(SymbolizesTo(_)));
+}
+
+// The frame describes the output only if symbolization succeeds, so callers
+// never apply the location of a discarded output to a fallback name.
+TEST_F(SyntheticElfSymbolize, FailureReportsNoLocation) {
+  g_synthetic_elf_file = CreateSyntheticElf();
+  ASSERT_NE(g_synthetic_elf_file, -1);
+  ASSERT_TRUE(ModifySyntheticObject<ElfHeader>(
+      0, [](ElfHeader& header) { --header.e_shentsize; }));
+  InstallSymbolizeCallback(FileLineSymbolizeCallback);
+  InstallSymbolizeOpenObjectFileCallback(OpenSyntheticElf);
+
+  char symbol[kSymbolBufferSize];
+  nglog::tools::SymbolizedFrame frame;
+  EXPECT_FALSE(Symbolize(SyntheticProgramCounter(), symbol, sizeof(symbol),
+                         nglog::SymbolizeOptions::kNone, &frame));
+  EXPECT_EQ(frame.file_line_length, 0U);
 }
 
 TEST_F(SyntheticElfSymbolize, RejectsZeroSymbolEntrySize) {
