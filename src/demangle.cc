@@ -177,9 +177,16 @@ struct State {
   std::uint32_t encoding_level;
   std::uint32_t type_level;
   std::uint32_t parse_depth;
+  // Shared by all copies of the state that backtracking restores, so that
+  // retried alternatives use up the same budget.
+  std::uint32_t* steps_remaining;
 };
 
 constexpr std::uint32_t kMaxParseDepth = 64;
+// Bounds the total work of the backtracking parser, whose retries of nested
+// alternatives would otherwise take exponential time on short inputs. Valid
+// symbols need far fewer steps.
+constexpr std::uint32_t kMaxParseSteps = std::uint32_t{1} << 17;
 constexpr std::uint32_t kMaxEncodingLevel = 64;
 constexpr std::uint32_t kMaxTypeLevel = 64;
 constexpr std::uint32_t kMaxTemplateArgumentLevel = 64;
@@ -213,7 +220,27 @@ class ParseLevelGuard {
   std::uint32_t* const level_;
 };
 
-using ParseDepthGuard = ParseLevelGuard<&State::parse_depth, kMaxParseDepth>;
+// Limits the nesting depth and counts a step of the parse.
+class ParseDepthGuard {
+ public:
+  explicit ParseDepthGuard(State* state) noexcept
+      : guard_(state), counted_(guard_ && *state->steps_remaining > 0) {
+    if (counted_) {
+      --*state->steps_remaining;
+    }
+  }
+
+  ParseDepthGuard(const ParseDepthGuard&) = delete;
+  ParseDepthGuard& operator=(const ParseDepthGuard&) = delete;
+  ParseDepthGuard(ParseDepthGuard&&) = delete;
+  ParseDepthGuard& operator=(ParseDepthGuard&&) = delete;
+
+  explicit operator bool() const noexcept { return counted_; }
+
+ private:
+  ParseLevelGuard<&State::parse_depth, kMaxParseDepth> guard_;
+  const bool counted_;
+};
 using ParseEncodingGuard =
     ParseLevelGuard<&State::encoding_level, kMaxEncodingLevel>;
 using ParseTypeGuard = ParseLevelGuard<&State::type_level, kMaxTypeLevel>;
@@ -243,7 +270,7 @@ bool StrPrefix(const char* str, const char* prefix) {
 }
 
 void InitState(State* state, const char* mangled, char* out,
-               std::size_t out_size) {
+               std::size_t out_size, std::uint32_t* steps_remaining) {
   state->mangled_cur = mangled;
   state->out_cur = out;
   state->out_begin = out;
@@ -261,6 +288,7 @@ void InitState(State* state, const char* mangled, char* out,
   state->encoding_level = 0;
   state->type_level = 0;
   state->parse_depth = 0;
+  state->steps_remaining = steps_remaining;
 }
 
 // Returns true and advances "mangled_cur" if we find "one_char_token"
@@ -1495,6 +1523,9 @@ bool ParseTemplateArgs(State* state) {
   if (ParseOneCharToken(state, 'I') && OneOrMore(ParseTemplateArg, state) &&
       Optional(ParseRequiresClause(state)) && ParseOneCharToken(state, 'E')) {
     RestoreAppend(state, copy.append);
+    // A lambda among the arguments must not swallow the separator after
+    // them, since the arguments are not printed.
+    state->skip_separator = copy.skip_separator;
     MaybeAppend(state, "<>");
     return true;
   }
@@ -2302,8 +2333,15 @@ bool Demangle(const char* mangled, char* out, std::size_t out_size) {
   return false;
 #else
   State state;
-  InitState(&state, mangled, out, out_size);
-  return ParseTopLevelMangledName(&state) && !state.overflowed;
+  std::uint32_t steps_remaining = kMaxParseSteps;
+  InitState(&state, mangled, out, out_size, &steps_remaining);
+  if (ParseTopLevelMangledName(&state) && !state.overflowed) {
+    return true;
+  }
+  // A failed parse can leave partial output without a terminating null
+  // character.
+  out[0] = '\0';
+  return false;
 #endif
 }
 

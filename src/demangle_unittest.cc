@@ -12,6 +12,8 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <cstdlib>
 #include <iostream>
 #include <string>
 #include <utility>  // IWYU pragma: keep
@@ -20,6 +22,10 @@
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "ng-log/platform.h"
+
+#ifdef HAVE_UNISTD_H
+#  include <unistd.h>
+#endif
 
 NGLOG_DEFINE(bool, demangle_filter, false,
              "Run demangle_unittest in filter mode");
@@ -230,6 +236,10 @@ INSTANTIATE_TEST_SUITE_P(
                     DemangleCase{"_Z1fIiEDtgs1xEv", "f<>()"},
                     DemangleCase{"_Z1fIiEDtsrT_IiE1xET_", "f<>()"},
                     DemangleCase{"_ZN1SIiE1xMUlvE_E", "S<>::x"},
+                    DemangleCase{"_ZN1AIUlvE_E1BEv", "A<>::B()"},
+                    DemangleCase{"_ZNSt17_Function_handlerIFvvEZ4mainEUlvE_E9_"
+                                 "M_invokeERKSt9_Any_data",
+                                 "std::_Function_handler<>::_M_invoke()"},
                     DemangleCase{"_ZZN1S1fEiiEd0_UlvE_", "S::f()::"},
                     DemangleCase{"_Z3foov.vendor_suffix", "foo()"},
                     DemangleCase{"_Z3fooA999999999999999999999_i", "foo()"},
@@ -569,10 +579,64 @@ TEST(Demangle, ThreadLocalSpecialNames) {
   EXPECT_THAT("_ZTHN2ns3varE", DemanglesTo("TLS init function for ns::var"));
 }
 
+#  if defined(HAVE_UNISTD_H) && defined(GTEST_HAS_DEATH_TEST)
+namespace {
+
+// Builds a template argument that nests |depth| conversions of decltype
+// expressions, each of which the parser tries to read in two ways.
+std::string NestedConversions(int depth) {
+  std::string expression = "T_";
+  for (int i = 0; i < depth; ++i) {
+    expression = "cvDt" + expression + "E_E";
+  }
+  return "_Z1fIX" + expression + "EEv";
+}
+
+}  // namespace
+
+// The backtracking parser retries alternatives of nested constructs, which
+// takes exponential time for short inputs. Since the demangler runs in crash
+// handlers, it must give up instead.
+TEST(Demangle, BoundsTheWorkForNestedInputs) {
+  // Reports a hang before the CTest timeout, with ample room for a loaded
+  // machine.
+  using namespace std::chrono_literals;
+  constexpr std::chrono::seconds kTimeout = 20s;
+  constexpr int kLocalNameDepth = 16;
+  constexpr int kConversionDepth = 30;
+  const std::string local_names =
+      "_Z1f" + std::string(kLocalNameDepth, 'Z') + "v";
+  const std::string conversions = NestedConversions(kConversionDepth);
+  EXPECT_EXIT(
+      {
+        alarm(static_cast<unsigned>(kTimeout.count()));
+        char out[kDemangleBufferSize];
+        Demangle(local_names.c_str(), out, sizeof(out));
+        Demangle(conversions.c_str(), out, sizeof(out));
+        std::exit(EXIT_SUCCESS);
+      },
+      testing::ExitedWithCode(EXIT_SUCCESS), "");
+}
+#  endif
+
 TEST(Demangle, FailedParseClearsOutput) {
   char tmp[8] = {'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x'};
   EXPECT_FALSE(Demangle("_Z", tmp, sizeof(tmp)));
   EXPECT_EQ(tmp[0], '\0');
+}
+
+// Output that overflowed the buffer before the parse failed must not remain,
+// since it lacks its terminating null character.
+TEST(Demangle, FailedParseAfterOverflowClearsOutput) {
+  constexpr std::size_t kTlsInitOutputSize = 19;
+  char tls_init[kTlsInitOutputSize];
+  EXPECT_FALSE(Demangle("_ZTHE", tls_init, sizeof(tls_init)));
+  EXPECT_EQ(tls_init[0], '\0');
+
+  constexpr std::size_t kShortOutputSize = 4;
+  char function[kShortOutputSize];
+  EXPECT_FALSE(Demangle("_Z2fooDF32x", function, sizeof(function)));
+  EXPECT_EQ(function[0], '\0');
 }
 
 TEST(Demangle, UnnamedTypes) { EXPECT_THAT("_Z1fN1SUt_E", DemanglesTo("f()")); }
