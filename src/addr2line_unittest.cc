@@ -19,12 +19,16 @@
 #else
 #  include <sys/stat.h>
 #  include <sys/types.h>
+#  include <unistd.h>
 #endif  // NGLOG_OS_WINDOWS
 
 #include <chrono>
+#include <csignal>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <string>
@@ -529,6 +533,39 @@ TEST_F(Addr2LineSymbolizeCallback, SkipsGracefullyWhenUnavailable) {
   EXPECT_THAT(symbol, NamesFunctionWithoutLocation());
 }
 
+#if !defined(NGLOG_OS_WINDOWS) && defined(GTEST_HAS_DEATH_TEST)
+// Empty and relative PATH entries refer to the current directory, from which
+// a planted addr2line would run in the crash handler.
+TEST_F(Addr2LineSymbolizeCallback, IgnoresRelativePathEntries) {
+  const std::string directory = MakeScratchDirectory();
+  MakeFakeAddr2Line(directory, ADDR2LINE_FAKE_FAIL_PATH);
+  // A directory of its own keeps the link from outliving the test.
+  const std::string link_directory = MakeScratchDirectory();
+  for (const char* path : {":", ".", "relative"}) {
+    EXPECT_EXIT(
+        {
+          if (chdir(directory.c_str()) != 0) {
+            std::exit(EXIT_FAILURE);
+          }
+          if (std::strcmp(path, "relative") == 0 &&
+              (chdir(link_directory.c_str()) != 0 ||
+               symlink(directory.c_str(), "relative") != 0)) {
+            std::exit(EXIT_FAILURE);
+          }
+          setenv("PATH", path, 1);
+          InstallAddr2LineSymbolizeCallback();
+          constexpr std::size_t kCachedPathSize = 4096;
+          char cached[kCachedPathSize];
+          std::exit(CopyCachedAddr2LinePath(cached, sizeof(cached))
+                        ? EXIT_FAILURE
+                        : EXIT_SUCCESS);
+        },
+        ::testing::ExitedWithCode(EXIT_SUCCESS), "")
+        << "PATH=" << path;
+  }
+}
+#endif
+
 TEST_F(Addr2LineSymbolizeCallback, DoesNotHangOnAnUnresponsiveAddr2Line) {
   // Short enough to keep this test fast, while still giving the helper
   // plenty of time to be seen as unresponsive.
@@ -599,6 +636,27 @@ TEST_F(Addr2LineSymbolizeCallback, KeepsExecutableAfterPathChanges) {
   EXPECT_TRUE(ResolveInMissingModule(symbol));
   EXPECT_STREQ("slow", symbol);
 }
+
+#  ifdef GTEST_HAS_DEATH_TEST
+// An application that ignores SIGCHLD leaves no exit status to check, since
+// the system reaps the child itself. The output then decides. The child
+// process of the death test keeps the disposition from other tests.
+TEST_F(Addr2LineSymbolizeCallback, AcceptsOutputWithoutExitStatus) {
+  const ScopedFakeAddr2Line fake{ADDR2LINE_FAKE_SLOW_PATH};
+  DisableAddr2LineTimeout();
+  EXPECT_EXIT(
+      {
+        std::signal(SIGCHLD, SIG_IGN);
+        char symbol[kSymbolBufferSize] = {};
+        std::exit(InstallAddr2LineSymbolizeCallback() &&
+                          ResolveInMissingModule(symbol) &&
+                          std::strcmp(symbol, "slow") == 0
+                      ? EXIT_SUCCESS
+                      : EXIT_FAILURE);
+      },
+      testing::ExitedWithCode(EXIT_SUCCESS), "");
+}
+#  endif
 #endif  // NGLOG_OS_WINDOWS
 
 TEST_F(Addr2LineSymbolizeCallback,

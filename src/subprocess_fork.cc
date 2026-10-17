@@ -12,7 +12,7 @@
 // multithreaded process must use only async-signal-safe functions because other
 // threads may have held locks. See signal-safety(7) and pthread_atfork(3).
 //
-// The signal-safe specialization uses _Fork() and execv(). _Fork(3) excludes
+// The signal-safe specialization uses _Fork() and execve(). _Fork(3) excludes
 // pthread_atfork handlers, and signal-safety(7) lists both functions as safe.
 // It uses a cached absolute path. Normal subprocesses use posix_spawn(), or the
 // shared fork() and execvp() setup without the signal-safe guarantee.
@@ -30,7 +30,7 @@
 
 #  include <cerrno>
 #  include <chrono>
-#  include <cstddef>
+#  include <cstring>
 #  include <limits>
 #  include <utility>
 
@@ -42,6 +42,12 @@ namespace nglog {
 namespace {
 
 constexpr int kChildExecFailureStatus = 127;
+#  if defined(HAVE_FORK)
+// Directories that execvp() searches when PATH is not set.
+constexpr char kDefaultSearchPath[] = "/bin:/usr/bin";
+// Longest path to a program that a PATH search tries.
+constexpr std::size_t kMaxCandidatePathLength = 4096;
+#  endif
 #  if defined(HAVE__FORK) && defined(HAVE_EXECV)
 constexpr int kWaitPollIntervalMilliseconds = 10;
 #  endif
@@ -156,20 +162,80 @@ bool DuplicateForChild(int source, int target) noexcept {
 namespace internal {
 
 #  if defined(HAVE_EXECV)
-int ExecuteWithExecv(char* const argv[], char* const[] /*envp*/) {
+int ExecuteWithExecv(char* const argv[], char* const envp[],
+                     const char* /*search_path*/) {
+#    if defined(HAVE_EXECVE)
+  // signal-safety(7) lists execve() as well, so the child receives the
+  // environment the caller chose instead of the one of this process.
+  return ::execve(argv[0], argv, envp);
+#    else
+  static_cast<void>(envp);
   return ::execv(argv[0], argv);
+#    endif
 }
 #  endif
 
 #  if defined(HAVE_FORK)
-int ExecuteWithExecvp(char* const argv[], char* const[] /*envp*/) {
-  return ::execvp(argv[0], argv);
+int ExecuteWithExecvp(char* const argv[], char* const envp[],
+                      const char* search_path) {
+  // execvp() would pass the environment of this process. Search PATH the same
+  // way, like posix_spawnp() does, and pass envp to execve() instead.
+  const char* const program = argv[0];
+  if (std::strchr(program, '/') != nullptr) {
+    return ::execve(program, argv, envp);
+  }
+
+  if (search_path == nullptr) {
+    search_path = kDefaultSearchPath;
+  }
+
+  const std::size_t program_length = std::strlen(program);
+  char candidate[kMaxCandidatePathLength];
+  if (program_length >= sizeof(candidate)) {
+    errno = ENAMETOOLONG;
+    return -1;
+  }
+  // Directories with their separator must stay shorter than this to leave
+  // room for the program name and the terminating null character.
+  const std::size_t max_prefix_length = sizeof(candidate) - program_length;
+  bool access_denied = false;
+  int error = ENOENT;
+  for (const char* directory = search_path;;) {
+    const char* const end = std::strchr(directory, ':');
+    const std::size_t directory_length =
+        end != nullptr ? static_cast<std::size_t>(end - directory)
+                       : std::strlen(directory);
+    // An empty entry denotes the current directory.
+    const std::size_t prefix_length =
+        directory_length != 0 ? directory_length + 1 : 0;
+    if (prefix_length < max_prefix_length) {
+      std::memcpy(candidate, directory, directory_length);
+      if (prefix_length != 0) {
+        candidate[directory_length] = '/';
+      }
+      std::memcpy(candidate + prefix_length, program, program_length + 1);
+      ::execve(candidate, argv, envp);
+      error = errno;
+      if (error == EACCES) {
+        access_denied = true;
+      } else if (error != ENOENT && error != ENOTDIR) {
+        return -1;
+      }
+    }
+    if (end == nullptr) {
+      break;
+    }
+    directory = end + 1;
+  }
+
+  errno = access_denied ? EACCES : error;
+  return -1;
 }
 #  endif
 
-pid_t SpawnProcessWithFork(char* const argv[], char* const envp[], int stdin_fd,
-                           int stdout_fd, int exec_error_fd,
-                           ForkFunction fork_process,
+pid_t SpawnProcessWithFork(char* const argv[], char* const envp[],
+                           const char* search_path, int stdin_fd, int stdout_fd,
+                           int exec_error_fd, ForkFunction fork_process,
                            ExecFunction exec_process) noexcept {
   const pid_t pid = fork_process();
 
@@ -185,12 +251,18 @@ pid_t SpawnProcessWithFork(char* const argv[], char* const envp[], int stdin_fd,
       _exit(kChildExecFailureStatus);
     }
 
-    const int dev_null = open("/dev/null", O_WRONLY);
+    // The program receives only the duplicate as its stderr. Without a
+    // stderr, the null device opens in its place and must lose close-on-exec
+    // as well.
+    const int dev_null = open("/dev/null", O_WRONLY | O_CLOEXEC);
     if (dev_null >= 0) {
-      dup2(dev_null, STDERR_FILENO);
+      DuplicateForChild(dev_null, STDERR_FILENO);
+      if (dev_null != STDERR_FILENO) {
+        close(dev_null);
+      }
     }
 
-    exec_process(argv, envp);
+    exec_process(argv, envp, search_path);
     const int error = errno;
     WriteExecError(exec_error_fd, error);
     _exit(kChildExecFailureStatus);
@@ -298,8 +370,8 @@ bool Subprocess<SubprocessMode::kSignalSafe>::Spawn(
   }
 
   const pid_t pid = internal::SpawnProcessWithFork(
-      argv, envp, stdin_fds[0], stdout_fds[1], exec_error_fds[1], &_Fork,
-      &internal::ExecuteWithExecv);
+      argv, envp, /*search_path=*/nullptr, stdin_fds[0], stdout_fds[1],
+      exec_error_fds[1], &_Fork, &internal::ExecuteWithExecv);
 
   ::close(stdin_fds[0]);
   ::close(stdout_fds[1]);
@@ -400,6 +472,12 @@ SubprocessWaitResult Subprocess<SubprocessMode::kSignalSafe>::Wait(
     }
 
     if (result < 0) {
+      if (errno == ECHILD) {
+        // Another waiter reaped the process. Its ID may belong to another
+        // process by now, so it must not be killed.
+        pid_ = -1;
+        return SubprocessWaitResult::Unavailable();
+      }
       wait_failed = true;
       break;
     }
@@ -424,10 +502,14 @@ SubprocessWaitResult Subprocess<SubprocessMode::kSignalSafe>::Wait(
     const int kill_result = RetryKill(pid, SIGKILL);
     const int kill_error = errno;
     const pid_t wait_result = RetryWaitPid(pid, &status, 0);
+    const int wait_error = errno;
     pid_ = -1;
 
     if (wait_result != pid) {
-      return SubprocessWaitResult::Failed();
+      // With SIGCHLD ignored, the system reaps the killed child itself.
+      return kill_result == 0 && wait_error == ECHILD
+                 ? SubprocessWaitResult::TimedOut()
+                 : SubprocessWaitResult::Failed();
     }
     if (wait_failed || (kill_result < 0 && kill_error != ESRCH)) {
       return SubprocessWaitResult::Failed();

@@ -50,6 +50,14 @@ std::size_t FormatAddr2LineOutput(const char* input, std::size_t input_len,
 NGLOG_NO_EXPORT
 bool InstallAddr2LineSymbolizeCallback();
 
+#  ifndef NGLOG_OS_WINDOWS
+// Copies the addr2line path that InstallAddr2LineSymbolizeCallback() cached
+// to |out|. Returns false if no executable was found or the path does not fit
+// into |out_size| bytes.
+NGLOG_NO_EXPORT
+bool CopyCachedAddr2LinePath(char* out, std::size_t out_size) noexcept;
+#  endif
+
 // Points to the function-name and "file:line" fields split out of an
 // "addr2line --functions" two-line output by
 // SplitAddr2LineFunctionsOutput().

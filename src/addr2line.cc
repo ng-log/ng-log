@@ -12,7 +12,6 @@
 #  include <cctype>
 #  include <chrono>
 #  include <cstdint>
-#  include <cstdio>
 #  include <cstdlib>
 #  include <cstring>
 #  include <iterator>
@@ -26,6 +25,7 @@
 #  include "ng-log/platform.h"
 #  include "subprocess.h"
 #  include "symbolize.h"
+#  include "utilities.h"
 
 namespace nglog {
 inline namespace tools {
@@ -47,7 +47,7 @@ std::size_t g_addr2line_path_length = 0;
 void CacheAddr2LinePath() {
   g_addr2line_path_length = 0;
 
-  const char* path = std::getenv("PATH");
+  const char* path = TrustsEnvironment() ? std::getenv("PATH") : nullptr;
   char default_path[kMaxObjectPathLength];
   if (path == nullptr) {
     const std::size_t default_path_length =
@@ -65,19 +65,17 @@ void CacheAddr2LinePath() {
     const std::size_t entry_length =
         separator == nullptr ? std::strlen(entry)
                              : static_cast<std::size_t>(separator - entry);
-    const std::size_t directory_length = entry_length == 0 ? 1 : entry_length;
     const std::size_t candidate_length =
-        directory_length + 1 + sizeof(kAddr2LineName) - 1;
+        entry_length + 1 + sizeof(kAddr2LineName) - 1;
 
-    if (candidate_length + 1 <= kMaxObjectPathLength) {
+    // Empty and relative entries refer to the current directory, from which
+    // a planted program would run in the crash handler.
+    if (entry_length != 0 && entry[0] == '/' &&
+        candidate_length + 1 <= kMaxObjectPathLength) {
       char candidate[kMaxObjectPathLength];
-      if (entry_length == 0) {
-        candidate[0] = '.';
-      } else {
-        std::memcpy(candidate, entry, entry_length);
-      }
-      candidate[directory_length] = '/';
-      std::memcpy(candidate + directory_length + 1, kAddr2LineName,
+      std::memcpy(candidate, entry, entry_length);
+      candidate[entry_length] = '/';
+      std::memcpy(candidate + entry_length + 1, kAddr2LineName,
                   sizeof(kAddr2LineName));
 
       if (access(candidate, X_OK) == 0) {
@@ -99,15 +97,38 @@ void CacheAddr2LinePath() {
     entry = separator + 1;
   }
 }
-
-bool CopyCachedAddr2LinePath(char* out, std::size_t out_size) noexcept {
-  if (g_addr2line_path_length == 0 || g_addr2line_path_length + 1 > out_size) {
-    return false;
-  }
-  std::memcpy(out, g_addr2line_path, g_addr2line_path_length + 1);
-  return true;
-}
 #  endif  // NGLOG_OS_WINDOWS
+
+// Copies |source| into |out|, truncated to |out_size| bytes including the
+// null character. Unlike snprintf(), it is async-signal-safe.
+void CopyTruncated(const char* source, char* out, std::size_t out_size) {
+  const std::size_t length = std::min(std::strlen(source), out_size - 1);
+  std::memcpy(out, source, length);
+  out[length] = '\0';
+}
+
+// Formats |value| as "0x" followed by lowercase hexadecimal digits. Unlike
+// snprintf(), it is async-signal-safe.
+template <std::size_t N>
+void FormatHexAddress(std::uint64_t value, char (&out)[N]) {
+  constexpr char kHexDigits[] = "0123456789abcdef";
+  constexpr unsigned kHexDigitBits = 4;
+  constexpr std::uint64_t kHexDigitMask = 0xf;
+  char digits[2 * sizeof(value)];
+  std::size_t count = 0;
+  do {
+    digits[count++] = kHexDigits[value & kHexDigitMask];
+    value >>= kHexDigitBits;
+  } while (value != 0 && count < sizeof(digits));
+  static_assert(N >= 2 + sizeof(digits) + 1, "buffer too small");
+  char* cursor = out;
+  *cursor++ = '0';
+  *cursor++ = 'x';
+  while (count > 0) {
+    *cursor++ = digits[--count];
+  }
+  *cursor = '\0';
+}
 
 #  if defined(NGLOG_OS_WINDOWS)
 using Addr2LineSubprocess = Subprocess<>;
@@ -116,6 +137,16 @@ using Addr2LineSubprocess = Subprocess<SubprocessMode::kSignalSafe>;
 #  endif  // NGLOG_OS_WINDOWS
 
 }  // namespace
+
+#  ifndef NGLOG_OS_WINDOWS
+bool CopyCachedAddr2LinePath(char* out, std::size_t out_size) noexcept {
+  if (g_addr2line_path_length == 0 || g_addr2line_path_length + 1 > out_size) {
+    return false;
+  }
+  std::memcpy(out, g_addr2line_path, g_addr2line_path_length + 1);
+  return true;
+}
+#  endif  // NGLOG_OS_WINDOWS
 
 std::size_t FormatAddr2LineOutput(const char* input, std::size_t input_len,
                                   char* out, std::size_t out_size) {
@@ -218,9 +249,9 @@ namespace {
 // forcibly terminates a hung addr2line rather than blocking the
 // crash-reporting path forever.
 std::size_t RunAddr2Line(char* const argv[], char* out, std::size_t out_size) {
-  // The normal subprocess mode receives a minimal environment so addr2line
-  // cannot use settings such as DEBUGINFOD_URLS during a crash. The POSIX
-  // signal-safe mode uses execv(), which necessarily inherits the environment.
+  // addr2line receives a minimal environment, so that it cannot use settings
+  // such as DEBUGINFOD_URLS that would make it access the network during a
+  // crash.
   char* envp[] = {nullptr};
 
   const std::chrono::milliseconds timeout{
@@ -265,11 +296,13 @@ std::size_t RunAddr2Line(char* const argv[], char* out, std::size_t out_size) {
         std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
   }
   const SubprocessWaitResult wait_result = process.Wait(remaining);
-  if (wait_result.status != SubprocessWaitResult::kExited ||
-      wait_result.exit_code != 0) {
-    return 0;
-  }
-  return total_read;
+  // Without an exit status, as when the application ignores SIGCHLD, the
+  // output is all there is to judge, and the parsers reject unusable output.
+  const bool succeeded =
+      wait_result.status == SubprocessWaitResult::kExited
+          ? wait_result.exit_code == 0
+          : wait_result.status == SubprocessWaitResult::kUnavailable;
+  return succeeded ? total_read : 0;
 }
 
 int Addr2LineSymbolizeCallback(int /*fd*/, void* pc, char* out,
@@ -290,12 +323,11 @@ int Addr2LineSymbolizeCallback(int /*fd*/, void* pc, char* out,
   }
 
   char object_path[kMaxObjectPathLength];
-  std::snprintf(object_path, sizeof(object_path), "%s", out + 1);
+  CopyTruncated(out + 1, object_path, sizeof(object_path));
 
   const auto pc0 = reinterpret_cast<std::uintptr_t>(pc);
-  char address_buf[2 + 2 * sizeof(std::uintptr_t) + 1];  // "0x" + hex digits.
-  std::snprintf(address_buf, sizeof(address_buf), "0x%llx",
-                static_cast<unsigned long long>(pc0 - relocation));
+  char address_buf[2 + 2 * sizeof(std::uint64_t) + 1];  // "0x" + hex digits.
+  FormatHexAddress(pc0 - relocation, address_buf);
 
   // Subprocess::Spawn() requires a non-const char* const argv[], even
   // though it does not modify the strings, so these are plain mutable
@@ -398,12 +430,11 @@ bool ResolveFunctionAndLine(const char* object_path, void* pc,
                             std::size_t out_size, SymbolizeOptions options,
                             SymbolizedFrame* frame) {
   char object_path_buf[kMaxObjectPathLength];
-  std::snprintf(object_path_buf, sizeof(object_path_buf), "%s", object_path);
+  CopyTruncated(object_path, object_path_buf, sizeof(object_path_buf));
 
   const auto pc0 = reinterpret_cast<std::uintptr_t>(pc);
-  char address_buf[2 + 2 * sizeof(std::uintptr_t) + 1];  // "0x" + hex digits.
-  std::snprintf(address_buf, sizeof(address_buf), "0x%llx",
-                static_cast<unsigned long long>(pc0 - relocation));
+  char address_buf[2 + 2 * sizeof(std::uint64_t) + 1];  // "0x" + hex digits.
+  FormatHexAddress(pc0 - relocation, address_buf);
 
 #  ifdef NGLOG_OS_WINDOWS
   char argv0[] = "addr2line";
