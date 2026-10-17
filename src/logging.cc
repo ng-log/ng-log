@@ -518,6 +518,14 @@ class LogFileObject : public base::Logger {
     return static_cast<uint32>(file_length_);
   }
 
+  // Closes a file inherited from the parent process without writing the
+  // parent's buffered lines.
+  void DiscardInheritedFile();
+
+  // Discards the file if this process inherited it. Writing, flushing and
+  // closing all write the buffered lines, which belong to the parent.
+  void DiscardFileIfInherited();
+
   // Internal flush routine.  Exposed so that FlushLogFilesUnsafe()
   // can avoid grabbing a lock.  Usually Flush() calls it after
   // acquiring lock_.
@@ -532,6 +540,9 @@ class LogFileObject : public base::Logger {
   string symlink_basename_;
   string filename_extension_;  // option users can specify (eg to add port#)
   std::unique_ptr<FILE> file_;
+  // Process that opened file_. A child process created by fork() must write
+  // to its own file.
+  int32 file_pid_{0};
   LogSeverity severity_;
   std::size_t bytes_since_flush_{0};
   std::size_t dropped_mem_length_{0};
@@ -1597,6 +1608,7 @@ LogFileObject::LogFileObject(LogSeverity severity, const char* base_filename)
 
 LogFileObject::~LogFileObject() {
   std::lock_guard<internal::FileMutex> l{mutex_};
+  DiscardFileIfInherited();
   file_ = nullptr;
 }
 
@@ -1605,9 +1617,8 @@ void LogFileObject::SetBasename(const char* basename) {
   filename_source_ = internal::LogFilenameSource::kSelected;
   if (base_filename_ != basename) {
     // Get rid of old log file since we are changing names
-    if (file_ != nullptr) {
-      file_ = nullptr;
-    }
+    DiscardFileIfInherited();
+    file_ = nullptr;
     file_length_ = bytes_since_flush_ = dropped_mem_length_ = 0;
     rollover_attempt_ = kRolloverAttemptFrequency - 1;
     base_filename_ = basename;
@@ -1618,9 +1629,8 @@ void LogFileObject::SetExtension(const char* ext) {
   std::lock_guard<internal::FileMutex> l{mutex_};
   if (filename_extension_ != ext) {
     // Get rid of old log file since we are changing names
-    if (file_ != nullptr) {
-      file_ = nullptr;
-    }
+    DiscardFileIfInherited();
+    file_ = nullptr;
     file_length_ = bytes_since_flush_ = dropped_mem_length_ = 0;
     rollover_attempt_ = kRolloverAttemptFrequency - 1;
     filename_extension_ = ext;
@@ -1642,6 +1652,7 @@ void LogFileObject::Flush() {
 
 void LogFileObject::FlushUnlocked(
     const std::chrono::system_clock::time_point& now) {
+  DiscardFileIfInherited();
   if (file_ != nullptr) {
     fflush(file_.get());
     bytes_since_flush_ = 0;
@@ -1661,13 +1672,29 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
 #endif
   // only write to files, create if non-existent.
   int flags = O_WRONLY | O_CREAT;
+#ifdef O_NOFOLLOW
+  // A predictable log file name must not let a planted symbolic link redirect
+  // the output into, or the truncation onto, another file. The standard
+  // streams, which the system provides as links, remain valid destinations.
+  constexpr const char* kStandardStreams[] = {"/dev/stdout", "/dev/stderr"};
+  if (std::none_of(
+          std::begin(kStandardStreams), std::end(kStandardStreams),
+          [&filename](const char* stream) { return filename == stream; })) {
+    flags |= O_NOFOLLOW;
+  }
+#endif
+#ifdef O_CLOEXEC
+  flags |= O_CLOEXEC;
+#endif
 #if defined(NGLOG_OS_WINDOWS)
   // Keep child processes, such as the mailer, from inheriting the handle and
   // thereby holding the log file open. This is the counterpart of
   // FD_CLOEXEC on other platforms.
   flags |= O_NOINHERIT;
-  bool truncate_file = false;
 #endif
+  // Truncating before the lock is held would destroy the file of another
+  // process that holds the lock.
+  bool truncate_file = false;
   if (nglog::GetFlag(FLAGS_timestamp_in_logfile_name)) {
     // demand that the file is unique for our timestamp (fail if it exists).
     flags = flags | O_EXCL;
@@ -1679,11 +1706,7 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
     if (internal::StatPath(filename, &statbuf) == 0) {
       // truncate the file if it exceeds the max size
       if ((static_cast<std::size_t>(statbuf.st_size) >> 20U) >= MaxLogSize()) {
-#if defined(NGLOG_OS_WINDOWS)
         truncate_file = true;
-#else
-        flags |= O_TRUNC;
-#endif
       }
 
       // update file length to sync file size
@@ -1746,6 +1769,14 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
   int wlock_ret = fcntl(fd.get(), F_SETLK, &w_lock);
   if (wlock_ret == -1) {
     return false;
+  }
+#endif
+#if !defined(NGLOG_OS_WINDOWS) && defined(HAVE_UNISTD_H)
+  if (truncate_file) {
+    if (ftruncate(fd.get(), 0) == -1) {
+      return false;
+    }
+    file_length_ = 0;
   }
 #endif
 
@@ -1837,6 +1868,32 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
   return true;  // Everything worked
 }
 
+void LogFileObject::DiscardFileIfInherited() {
+  if (file_ != nullptr && file_pid_ != static_cast<int32>(getpid())) {
+    DiscardInheritedFile();
+  }
+}
+
+void LogFileObject::DiscardInheritedFile() {
+#if defined(HAVE_UNISTD_H) && !defined(NGLOG_OS_WINDOWS)
+  // Closing the stream flushes its buffer, which holds lines that the parent
+  // process writes itself. Redirect the descriptor of this process to the
+  // null device first so that the lines are not written twice.
+#  ifdef O_CLOEXEC
+  constexpr int kNullDeviceFlags = O_WRONLY | O_CLOEXEC;
+#  else
+  constexpr int kNullDeviceFlags = O_WRONLY;
+#  endif
+  const FileDescriptor null_fd{open("/dev/null", kNullDeviceFlags)};
+  if (null_fd) {
+    dup2(null_fd.get(), fileno(file_.get()));
+  }
+#endif
+  file_ = nullptr;
+  file_length_ = bytes_since_flush_ = dropped_mem_length_ = 0;
+  rollover_attempt_ = kRolloverAttemptFrequency - 1;
+}
+
 void LogFileObject::Write(
     bool force_flush, const std::chrono::system_clock::time_point& timestamp,
     const char* message, size_t message_len) {
@@ -1858,7 +1915,11 @@ void LogFileObject::WriteUnlocked(
     return;
   }
 
-  if (file_length_ >> 20U >= MaxLogSize() || PidHasChanged()) {
+  const int32 pid = static_cast<int32>(getpid());
+  if (file_ != nullptr && file_pid_ != pid) {
+    DiscardInheritedFile();
+  }
+  if (file_length_ >> 20U >= MaxLogSize()) {
     file_ = nullptr;
     file_length_ = bytes_since_flush_ = dropped_mem_length_ = 0;
     rollover_attempt_ = kRolloverAttemptFrequency - 1;
@@ -1882,12 +1943,14 @@ void LogFileObject::WriteUnlocked(
     }
 
     // The logfile's filename will have the date/time & pid in it
+    const int32 pid = static_cast<int32>(getpid());
     ostringstream time_pid_stream;
     time_pid_stream.fill('0');
     time_pid_stream << 1900 + tm_time.tm_year << setw(2) << 1 + tm_time.tm_mon
                     << setw(2) << tm_time.tm_mday << '-' << setw(2)
                     << tm_time.tm_hour << setw(2) << tm_time.tm_min << setw(2)
-                    << tm_time.tm_sec << '.' << GetMainThreadPid();
+                    << tm_time.tm_sec << '.' << pid;
+    file_pid_ = pid;
     const string& time_pid_string = time_pid_stream.str();
 
     std::string filename;

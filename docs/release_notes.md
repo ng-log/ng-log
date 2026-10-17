@@ -35,6 +35,8 @@ SPDX-License-Identifier: BSD-3-Clause
 - Move `DFATAL_LEVEL` and `IF_DEBUG_MODE` to `ng-log/logging.h`.
   `ng-log/log_severity.h` provides `NGLOG_DFATAL_LEVEL` and
   `NGLOG_IF_DEBUG_MODE`
+- Refuse symbolic links as log files on POSIX, except `/dev/stdout` and
+  `/dev/stderr`
 
 #### Features
 
@@ -72,6 +74,8 @@ SPDX-License-Identifier: BSD-3-Clause
 - Fix a data race on concurrent initialization of `VLOG` call sites
 - Serialize log file creation across processes on Windows
 - Fix `TruncateLogFile` corrupting log files with line breaks on Windows
+- Fix truncating oversized log files before locking them
+- Reopen log files in processes created by `fork`
 - Fix `RAW_LOG` truncating messages that exactly fill its buffer
 - Deliver email outside the logging lock
 - Make Windows log file handles non-inheritable

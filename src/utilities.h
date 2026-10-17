@@ -138,9 +138,6 @@ inline std::string TrimTrailingCharacters(std::string input,
 
 const char* ProgramInvocationShortName();
 
-int32 GetMainThreadPid();
-bool PidHasChanged();
-
 const std::string& MyUserName();
 
 // Get the part of filepath after the last path separator.
