@@ -41,9 +41,11 @@ constexpr auto CheckedAdd(const T left, const T right, T& result)
   return true;
 }
 
-// Multiplies left and right if their product fits in T.
+// Multiplies left and right if their product fits in T. The overflow check
+// only holds for unsigned types.
 template <typename T>
-constexpr bool CheckedMultiply(const T left, const T right, T& result) {
+constexpr auto CheckedMultiply(const T left, const T right, T& result)
+    -> std::enable_if_t<std::is_unsigned<T>::value, bool> {
   if (left != 0 && right > std::numeric_limits<T>::max() / left) {
     return false;
   }

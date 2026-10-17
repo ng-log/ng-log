@@ -103,6 +103,7 @@ SPDX-License-Identifier: BSD-3-Clause
 - Keep `IsFailureSignalHandlerInstalled` independent of later signal
   disposition changes
 - Report a zero UTC offset with `log_utc_time`
+- Fix shadowing warnings from `VLOG_IS_ON`
 - Keep `BUILD_SHARED_LIBS` from changing the library type of embedding
   projects
 

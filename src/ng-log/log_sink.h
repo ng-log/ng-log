@@ -58,8 +58,9 @@ class NGLOG_EXPORT LogSink {
   virtual ~LogSink();
 
   // Sink's logging logic (message_len is such as to exclude '\n' at the end).
-  // This method can't use LOG() or CHECK() as logging system mutex(s) are held
-  // during this call.
+  // No logging mutex is held during this call, so the method may use LOG()
+  // and CHECK(). A message logged here reaches this sink again, so the method
+  // must not log in turn for its own messages.
   virtual void send(LogSeverity severity, const char* full_filename,
                     const char* base_filename, int line,
                     const LogMessageTime& time, const char* message,

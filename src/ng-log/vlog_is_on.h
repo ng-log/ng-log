@@ -55,7 +55,7 @@ namespace nglog {
 // level if module_pattern matches their module.
 extern NGLOG_EXPORT int SetVLOGLevel(const char* module_pattern, int log_level);
 
-// Various declarations needed for VLOG_IS_ON below: =========================
+// Declarations needed by VLOG_IS_ON below.
 
 struct SiteFlag {
   // The pointer selects either the default or the module-specific level.
@@ -108,10 +108,10 @@ inline bool IsVLogOn(SiteFlag& site_flag, std::int32_t verbose_level,
 // it's either FLAGS_v or an appropriate internal variable
 // matching the current source file that represents results of
 // parsing of --vmodule flag and/or SetVLOGLevel calls.
-#  define VLOG_IS_ON(verboselevel)                                   \
-    __extension__({                                                  \
-      static nglog::SiteFlag vlocal__;                               \
-      nglog::internal::IsVLogOn(vlocal__, (verboselevel), __FILE__); \
+#  define VLOG_IS_ON(verboselevel)                                           \
+    __extension__({                                                          \
+      static nglog::SiteFlag nglog_vlog_site_;                               \
+      nglog::internal::IsVLogOn(nglog_vlog_site_, (verboselevel), __FILE__); \
     })
 #else
 // GNU extensions not available, so we do not support --vmodule.

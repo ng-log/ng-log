@@ -12,6 +12,8 @@
 #ifndef NGLOG_RAW_LOGGING_H
 #define NGLOG_RAW_LOGGING_H
 
+#include <cstdlib>
+
 #include "ng-log/export.h"
 #include "ng-log/log_severity.h"  // IWYU pragma: export
 #include "ng-log/platform.h"
@@ -95,7 +97,7 @@ namespace nglog {
 #  define RAW_LOG_FATAL(...)             \
     do {                                 \
       nglog::RawLogStub(0, __VA_ARGS__); \
-      exit(EXIT_FAILURE);                \
+      std::exit(EXIT_FAILURE);           \
     } while (0)
 #endif  // NGLOG_STRIP_LOG <= 3
 

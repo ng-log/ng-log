@@ -536,9 +536,9 @@ inline std::ostream& operator<<(std::ostream& os,
   return os;
 }
 
-// This class happens to be thread-hostile because all instances share
-// a single data buffer, but since it can only be created just before
-// the process dies, we don't worry so much.
+// The first fatal message keeps its data in a buffer reserved for it, so
+// that the crash reason stays available. Later fatal messages use a buffer of
+// their thread.
 class NGLOG_EXPORT LogMessageFatal : public LogMessage {
  public:
   LogMessageFatal(const char* file, int line);

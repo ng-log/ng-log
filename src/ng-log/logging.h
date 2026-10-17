@@ -167,16 +167,16 @@
 //   mm               The month (zero padded; ie May is '05')
 //   dd               The day (zero padded)
 //   hh:mm:ss.uuuuuu  Time in hours, minutes and fractional seconds
-//   threadid         The space-padded thread ID as returned by GetTID()
-//                    (this matches the PID on Linux)
+//   threadid         The space-padded ID of the calling thread as formatted
+//                    by std::thread::id
 //   file             The file name
 //   line             The line number
 //   msg              The user-supplied message
 //
 // Example:
 //
-//   I1103 11:57:31.739339 24395 google.cc:2341] Command line: ./some_prog
-//   I1103 11:57:31.739403 24395 google.cc:2342] Process id 24395
+//   I20261103 11:57:31.739339 140195849348928 example.cc:41] Starting up
+//   W20261103 11:57:31.739403 140195849348928 example.cc:42] Disk is full
 //
 // NOTE: although the microseconds are useful for comparing events on
 // a single machine, clocks on different machines may not be well
