@@ -772,7 +772,7 @@ if (WITH_PKGCONFIG)
   set (includedir ${CMAKE_INSTALL_FULL_INCLUDEDIR})
 
   configure_file (
-    "${ng-log_SOURCE_DIR}/libng-log.pc.in"
+    "${ng-log_SOURCE_DIR}/cmake/libng-log.pc.in"
     "${ng-log_BINARY_DIR}/libng-log.pc"
     @ONLY
   )
@@ -1736,7 +1736,7 @@ endif (WITH_PKGCONFIG)
 
 set (ng-log_CMake_VERSION ${CMAKE_MINIMUM_REQUIRED_VERSION})
 
-configure_package_config_file (ng-log-config.cmake.in
+configure_package_config_file (cmake/ng-log-config.cmake.in
   ${ng-log_BINARY_DIR}/ng-log-config.cmake
   INSTALL_DESTINATION ${_ng-log_CMake_INSTALLDIR}
   NO_CHECK_REQUIRED_COMPONENTS_MACRO)
@@ -1762,7 +1762,7 @@ get_filename_component (ng-log_REL_CMake_DATADIR ${ng-log_REL_CMake_MODULES}
 set (ng-log_FULL_CMake_DATADIR
   ${ng-log_BINARY_DIR}/${_ng-log_CMake_DATADIR})
 
-configure_file (ng-log-modules.cmake.in
+configure_file (cmake/ng-log-modules.cmake.in
   ${ng-log_BINARY_DIR}/ng-log-modules.cmake @ONLY)
 
 install (CODE
@@ -1774,7 +1774,7 @@ if (NOT IS_ABSOLUTE ${_ng-log_CMake_INSTALLDIR})
   set (ng-log_DATADIR_DESTINATION \"\${CMAKE_INSTALL_PREFIX}/\${ng-log_DATADIR_DESTINATION}\")
 endif (NOT IS_ABSOLUTE ${_ng-log_CMake_INSTALLDIR})
 
-configure_file (\"${ng-log_SOURCE_DIR}/ng-log-modules.cmake.in\"
+configure_file (\"${ng-log_SOURCE_DIR}/cmake/ng-log-modules.cmake.in\"
   \"${ng-log_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/CMakeTmp/ng-log-modules.cmake\" @ONLY)
 file (INSTALL
   \"${ng-log_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/CMakeTmp/ng-log-modules.cmake\"
