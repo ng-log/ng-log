@@ -185,6 +185,35 @@ void InitializeTestLogging(const char* program) {
   InitializeLogging(program);
 }
 
+bool SetEnvironmentValue(const char* name, const char* value) {
+#ifdef NGLOG_OS_WINDOWS
+  // An empty value removes the variable on Windows.
+  return _putenv_s(name, value != nullptr ? value : "") == 0;
+#else
+  if (value != nullptr) {
+    return setenv(name, value, 1) == 0;
+  }
+  return unsetenv(name) == 0;
+#endif  // NGLOG_OS_WINDOWS
+}
+
+ScopedEnvironmentVariable::ScopedEnvironmentVariable(const char* name,
+                                                     const char* value)
+    : name_{name} {
+  const char* const previous = std::getenv(name);
+  had_previous_ = previous != nullptr;
+  if (had_previous_) {
+    previous_ = previous;
+  }
+  CHECK(SetEnvironmentValue(name, value)) << ": cannot set " << name_;
+}
+
+ScopedEnvironmentVariable::~ScopedEnvironmentVariable() {
+  CHECK(SetEnvironmentValue(name_.c_str(),
+                            had_previous_ ? previous_.c_str() : nullptr))
+      << ": cannot restore " << name_;
+}
+
 const std::string& TestSrcDir() {
   static const std::string dir = TEST_SRC_DIR;
   return dir;

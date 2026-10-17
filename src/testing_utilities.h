@@ -4,10 +4,13 @@
 // SPDX-License-Identifier: BSD-3-Clause
 //
 // Test helpers that are not provided by GoogleTest itself: golden-file
-// stdout/stderr capture and diffing.
+// stdout/stderr capture and diffing, environment overrides and names of
+// parameterized test instances.
 
 #ifndef NGLOG_SRC_TESTING_UTILITIES_H_
 #define NGLOG_SRC_TESTING_UTILITIES_H_
+
+#include <gtest/gtest.h>
 
 #include <cstdint>
 #include <string>
@@ -39,6 +42,35 @@ const std::string& TestSrcDir();
  * stderr.
  */
 void InitializeTestLogging(const char* program);
+
+//! Sets an environment variable, or removes it if the value is null.
+bool SetEnvironmentValue(const char* name, const char* value);
+
+/**
+ * Sets an environment variable, or removes it if the value is null, and
+ * restores the previous state on destruction.
+ */
+class ScopedEnvironmentVariable final {
+ public:
+  ScopedEnvironmentVariable(const char* name, const char* value);
+  ScopedEnvironmentVariable(const ScopedEnvironmentVariable& other) = delete;
+  ScopedEnvironmentVariable& operator=(const ScopedEnvironmentVariable& other) =
+      delete;
+  ~ScopedEnvironmentVariable();
+
+ private:
+  std::string name_;
+  std::string previous_;
+  bool had_previous_;
+};
+
+//! Names each instance of a parameterized test after the name of its case.
+struct CaseName {
+  template <typename Case>
+  std::string operator()(const testing::TestParamInfo<Case>& info) const {
+    return info.param.name;
+  }
+};
 
 // Placeholder pointer value logged by tests so that Munge() can normalize
 // it to a fixed golden-file placeholder regardless of the actual pointer

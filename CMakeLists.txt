@@ -829,6 +829,7 @@ if (BUILD_TESTING AND GTest_FOUND)
     $<TARGET_PROPERTY:ng-log,COMPILE_FEATURES>)
   target_include_directories (ng-log_testing_utilities PRIVATE
     $<TARGET_PROPERTY:ng-log,INCLUDE_DIRECTORIES>)
+  target_link_libraries (ng-log_testing_utilities PRIVATE GTest::gtest)
 
   add_library (ng-log_test INTERFACE)
   target_link_libraries (ng-log_test INTERFACE $<TARGET_OBJECTS:ng-log_internal>
