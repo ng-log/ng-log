@@ -198,6 +198,7 @@ jobs:
             mingw-w64-${{matrix.env}}-gcc
             mingw-w64-${{matrix.env}}-gtest
             mingw-w64-${{matrix.env}}-ninja
+            mingw-w64-${{matrix.env}}-pkgconf
             mingw-w64-${{matrix.env}}-python-jinja
             mingw-w64-${{matrix.env}}-python-lxml
             mingw-w64-${{matrix.env}}-python-pip
@@ -243,6 +244,7 @@ jobs:
                 -DCMAKE_CXX_STANDARD=${{matrix.std}} \
                 -DCMAKE_CXX_STANDARD_REQUIRED=ON \
                 -DCMAKE_INSTALL_PREFIX:PATH=./install \
+                -DWITH_PKGCONFIG=ON \
                 -G Ninja \
                 -Werror=author
 

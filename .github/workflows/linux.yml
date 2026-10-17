@@ -53,7 +53,8 @@ jobs:
             libgmock-dev \
             libgtest-dev \
             libunwind-dev \
-            ninja-build
+            ninja-build \
+            pkgconf
 
       - name: Setup Compiler Cache
         if: ${{ !matrix.codeql }}
@@ -93,6 +94,7 @@ jobs:
             -DCMAKE_CXX_STANDARD=${{matrix.std}} \
             -DCMAKE_CXX_STANDARD_REQUIRED=ON \
             -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/install \
+            -DWITH_PKGCONFIG=ON \
             -G Ninja \
             -Werror=author
 

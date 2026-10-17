@@ -13,4 +13,4 @@ Description: C++ logging framework
 Version: @VERSION@
 Libs: -L${libdir} -l@library@
 Libs.private: @libs_private@
-Cflags: -I${includedir}
+Cflags: @cflags@

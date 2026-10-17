@@ -673,6 +673,8 @@ endif (HAVE_EXPERIMENTAL_LOGGING)
 
 # Libraries that a static ng-log requires, for the pkg-config file.
 set (_ng-log_PKGCONFIG_LIBS_PRIVATE)
+# Compile options that consumers of the pkg-config file need.
+set (_ng-log_PKGCONFIG_CFLAGS)
 
 if (WIN32)
   target_compile_definitions (ng-log PRIVATE
@@ -735,6 +737,8 @@ set_property (TARGET ng-log PROPERTY SPDX_LICENSE ${_ng-log_SPDX_LICENSE})
 
 if (CYGWIN OR WIN32)
   target_compile_definitions (ng-log PUBLIC NGLOG_NO_ABBREVIATED_SEVERITIES)
+  # Consumers that use pkg-config need the definition as well.
+  list (APPEND _ng-log_PKGCONFIG_CFLAGS -DNGLOG_NO_ABBREVIATED_SEVERITIES)
 endif (CYGWIN OR WIN32)
 
 # The header set installs the headers with their directory layout and adds
@@ -906,6 +910,8 @@ if (WITH_PKGCONFIG)
   block (SCOPE_FOR VARIABLES)
     set (VERSION ${ng-log_VERSION})
     list (JOIN _ng-log_PKGCONFIG_LIBS_PRIVATE " " libs_private)
+    set (cflags "-I\${includedir}" ${_ng-log_PKGCONFIG_CFLAGS})
+    list (JOIN cflags " " cflags)
     set (library $<TARGET_LINKER_FILE_BASE_NAME:ng-log>)
 
     # Locating the installation relative to the file keeps it valid wherever
@@ -1940,6 +1946,25 @@ logging libraries\"\n#endif\n")
   target_link_libraries (cleanup_with_non_ascii_prefix_unittest PRIVATE ng-log_test)
 
   set (CLEANUP_LOG_DIR ${ng-log_BINARY_DIR}/cleanup_tests)
+
+  if (WITH_PKGCONFIG AND NOT IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}" AND
+      NOT IS_ABSOLUTE "${CMAKE_INSTALL_INCLUDEDIR}")
+    find_program (PKG_CONFIG_EXECUTABLE NAMES pkgconf pkg-config)
+
+    if (PKG_CONFIG_EXECUTABLE)
+      add_test (NAME pkgconfig_relocatable COMMAND
+        ${CMAKE_COMMAND}
+        -DBINARY_DIR=${ng-log_BINARY_DIR}
+        -DCONFIG=$<CONFIG>
+        "-DDEFINITIONS=$<TARGET_PROPERTY:ng-log,INTERFACE_COMPILE_DEFINITIONS>"
+        -DPKG_CONFIG=${PKG_CONFIG_EXECUTABLE}
+        -DLIBDIR=${CMAKE_INSTALL_LIBDIR}
+        -DINCLUDEDIR=${CMAKE_INSTALL_INCLUDEDIR}
+        -DTEST_DIR=${ng-log_BINARY_DIR}/pkgconfig_relocatable
+        -P ${ng-log_SOURCE_DIR}/cmake/RunPkgConfigTest.cmake)
+    endif (PKG_CONFIG_EXECUTABLE)
+  endif (WITH_PKGCONFIG AND NOT IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}" AND
+    NOT IS_ABSOLUTE "${CMAKE_INSTALL_INCLUDEDIR}")
 
   add_test (NAME cleanup_init COMMAND
     ${CMAKE_COMMAND} -E make_directory ${CLEANUP_LOG_DIR})

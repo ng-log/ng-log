@@ -124,6 +124,8 @@ SPDX-License-Identifier: BSD-3-Clause
 - Honor `CMAKE_DEBUG_POSTFIX` set by the user
 - Prefer the bundled find modules over modules of the same name on
   `CMAKE_MODULE_PATH`
+- Define `NGLOG_NO_ABBREVIATED_SEVERITIES` on Windows in the pkg-config
+  file
 
 [@devtejasx]: https://github.com/devtejasx
 
