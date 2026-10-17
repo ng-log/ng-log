@@ -37,6 +37,8 @@ SPDX-License-Identifier: BSD-3-Clause
   `NGLOG_IF_DEBUG_MODE`
 - Remove the `nglog::int32`, `nglog::uint32`, `nglog::int64` and
   `nglog::uint64` aliases in favor of the `<cstdint>` types
+- Refuse symbolic links as log files on POSIX, except `/dev/stdout` and
+  `/dev/stderr`
 - Terminate on severities outside `NGLOG_INFO` through `NGLOG_FATAL`
   instead of reading out of bounds
 - Remove `ng-log/types.h` with `NGLOG_IFDEF_THREAD_SANITIZER` and the
@@ -91,6 +93,8 @@ SPDX-License-Identifier: BSD-3-Clause
 - Log the first `LOG_EVERY_T` occurrence right after system start
 - Serialize log file creation across processes on Windows
 - Fix `TruncateLogFile` corrupting log files with line breaks on Windows
+- Fix truncating oversized log files before locking them
+- Reopen log files in processes created by `fork`
 - Fix `RAW_LOG` truncating messages that exactly fill its buffer
 - Deliver email outside the logging lock
 - Keep `SendEmail` from raising `SIGPIPE` when the mailer exits early

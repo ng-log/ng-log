@@ -21,6 +21,10 @@
 #include "ng-log/logging.h"
 #include "utilities.h"
 
+#ifdef HAVE_UNISTD_H
+#  include <unistd.h>
+#endif
+
 namespace nglog {
 
 //! Message written repeatedly to fill the log files.
@@ -40,7 +44,7 @@ inline std::vector<std::string> ListOwnLogFiles(const std::string& directory,
     std::vector<std::string> names;
   };
 
-  Context context{'.' + std::to_string(GetMainThreadPid()) + extension, {}};
+  Context context{'.' + std::to_string(getpid()) + extension, {}};
 
   const bool listed = internal::ForEachDirectoryPath(
       directory,
