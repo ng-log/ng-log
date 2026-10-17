@@ -15,7 +15,10 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <deque>
 #include <string>
+#include <unordered_map>
+#include <utility>
 
 #include "ng-log/logging.h"
 
@@ -81,22 +84,20 @@ class ScopedMockLog : public nglog::LogSink {
   // Google C++ Mocking Framework code, which would reenter send() while it
   // handles the current message.
   //
-  // Hence, we save the message for WaitTillSent() which will be called after
-  // the lock on send() is released, and we'll call Log() inside
-  // WaitTillSent(). Since while a single send() call may be running at a
-  // time, multiple WaitTillSent() calls (along with the one send() call) may
-  // be running simultaneously, we ensure thread-safety of the exchange between
-  // send() and WaitTillSent(), and that for each message, LOG(), send(),
-  // WaitTillSent() and Log() are executed in the same thread.
+  // Hence, we save the message for WaitTillSent(), which runs after send() in
+  // the same thread, and call Log() there. Threads that log concurrently call
+  // send() concurrently as well, so the saved messages are kept per thread. A
+  // message logged to this sink explicitly while it is registered as well
+  // reaches send() twice before the first WaitTillSent(), so each sink keeps a
+  // queue.
   void send(nglog::LogSeverity severity, const char* full_filename,
             const char* /*base_filename*/, int /*line*/,
             const LogMessageTime& /*logmsgtime*/, const char* message,
             std::size_t message_len) override {
     // We are only interested in the log severity, full file name, and
     // log message.
-    message_info_.severity = severity;
-    message_info_.file_path = full_filename;
-    message_info_.message.assign(message, message_len);
+    PendingMessages()[this].push_back(MessageInfo{
+        severity, full_filename, std::string(message, message_len)});
   }
 
   // Implements the WaitTillSent() virtual function in class LogSink.
@@ -105,12 +106,23 @@ class ScopedMockLog : public nglog::LogSink {
   // within) may also issue LOG() statements.
   //
   // LOG(), send(), WaitTillSent() and Log() will occur in the same thread for
-  // a given log message.
+  // a given log message. Messages logged directly to another sink call
+  // WaitTillSent() of every registered sink as well, without a send() to this
+  // one, so only a saved message is reported.
   void WaitTillSent() override {
-    // First, and very importantly, we save a copy of the message being
-    // processed before calling Log(), since Log() may indirectly call send()
-    // and WaitTillSent() in the same thread again.
-    const MessageInfo message_info = message_info_;
+    // First, and very importantly, we take the message being processed out
+    // before calling Log(), since Log() may indirectly call send() and
+    // WaitTillSent() in the same thread again.
+    auto& pending_messages = PendingMessages();
+    const auto pending = pending_messages.find(this);
+    if (pending == pending_messages.end()) {
+      return;
+    }
+    const MessageInfo message_info = std::move(pending->second.front());
+    pending->second.pop_front();
+    if (pending->second.empty()) {
+      pending_messages.erase(pending);
+    }
     Log(message_info.severity, message_info.file_path, message_info.message);
   }
 
@@ -121,7 +133,15 @@ class ScopedMockLog : public nglog::LogSink {
     std::string file_path;
     std::string message;
   };
-  MessageInfo message_info_;
+  // Returns the messages that send() saved in the calling thread, keyed by
+  // the sink that has yet to report them in the order received.
+  static std::unordered_map<const ScopedMockLog*, std::deque<MessageInfo>>&
+  PendingMessages() {
+    thread_local std::unordered_map<const ScopedMockLog*,
+                                    std::deque<MessageInfo>>
+        pending_messages;
+    return pending_messages;
+  }
 };
 
 }  // namespace nglog_testing

@@ -35,6 +35,7 @@
 #include "ng-log/logging.h"
 #include "ng-log/platform.h"
 #include "stacktrace.h"
+#include "symbolize.h"
 #include "testing_utilities.h"
 #include "utilities.h"
 
@@ -67,6 +68,7 @@ using namespace nglog;
     defined(HAVE_SYMBOLIZE) &&                             \
     (defined(HAVE_ADDR2LINE) || defined(HAVE_LIBBACKTRACE))
 constexpr std::size_t kSignalBasePathLength = 173;
+constexpr std::size_t kSymbolBufferSize = 1024;
 constexpr int kAllocationInSignalHandler = 42;
 
 // The failure signal handler must not allocate memory.
@@ -681,6 +683,15 @@ TEST(SignalHandler, ColorlogtostderrDisablesAnsi) {
 #  if defined(HAVE_STACKTRACE) && defined(HAVE_SYMBOLIZE) && \
       (defined(HAVE_ADDR2LINE) || defined(HAVE_LIBBACKTRACE))
 TEST(SignalHandler, HyperlinkedStackFramesDoNotAllocate) {
+  // Hyperlinks need source locations, which builds without debug information
+  // lack.
+  char symbol[kSymbolBufferSize];
+  SymbolizedFrame frame;
+  if (!Symbolize(reinterpret_cast<void*>(&CrashInThread), symbol,
+                 sizeof(symbol), SymbolizeOptions::kNone, &frame) ||
+      frame.file_line_length == 0) {
+    GTEST_SKIP() << "source locations are unavailable";
+  }
   EXPECT_EXIT(
       {
         unsetenv("NO_COLOR");
@@ -694,7 +705,8 @@ TEST(SignalHandler, HyperlinkedStackFramesDoNotAllocate) {
         nglog::g_new_hook = &ReportSignalHandlerAllocation;
         raise(SIGSEGV);
       },
-      testing::KilledBySignal(SIGSEGV), "");
+      // The dump must contain hyperlinks, or the test checks nothing.
+      testing::KilledBySignal(SIGSEGV), "\\]8;;file://");
 }
 #  endif
 
@@ -708,6 +720,9 @@ TEST(SignalHandler, ThreadNameInFailureDump) {
 int main(int argc, char** argv) {
 #if defined(HAVE_STACKTRACE) && defined(HAVE_SYMBOLIZE)
   g_self_path = argv[0];
+  // The tests match plain dumps, whatever color settings the environment
+  // carries. Tests of colored dumps override this themselves.
+  const nglog::ScopedEnvironmentVariable no_color{"NO_COLOR", "1"};
   InitializeLogging(argv[0]);
   // A shared GoogleMock library carries its own copy of GoogleTest, which
   // InitGoogleMock initializes instead of the one the tests run in.
