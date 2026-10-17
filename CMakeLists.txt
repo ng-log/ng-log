@@ -34,7 +34,6 @@ include (CMakePackageConfigHelpers)
 include (CMakePushCheckState)
 include (CTest)
 include (GenerateExportHeader)
-include (GetCacheVariables)
 include (GNUInstallDirs)
 
 # An embedding project owns the global library type. Default to a shared
@@ -794,6 +793,64 @@ if (BUILD_TESTING AND GTest_FOUND)
   # executing test programs.
   set (CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE PRE_TEST)
 
+  # Configures and builds a target of a separate project against the ng-log
+  # build tree. The test optionally runs a command of that project afterwards.
+  function (nglog_add_build_test _NAME)
+    cmake_parse_arguments (PARSE_ARGV 1 _ARGS "" "SOURCE_DIR;TARGET;CONFIG"
+      "TEST_COMMAND")
+
+    if (DEFINED _ARGS_UNPARSED_ARGUMENTS OR NOT DEFINED _ARGS_SOURCE_DIR OR
+        NOT DEFINED _ARGS_TARGET)
+      message (FATAL_ERROR "nglog_add_build_test (${_NAME}) expects "
+        "SOURCE_DIR and TARGET but got: ${ARGN}")
+    endif (DEFINED _ARGS_UNPARSED_ARGUMENTS OR NOT DEFINED _ARGS_SOURCE_DIR OR
+        NOT DEFINED _ARGS_TARGET)
+
+    if (NOT DEFINED _ARGS_CONFIG)
+      set (_ARGS_CONFIG $<CONFIG>)
+    endif (NOT DEFINED _ARGS_CONFIG)
+
+    set (_OPTIONS)
+
+    # Cross compiling needs the same toolchain in the nested build.
+    if (DEFINED CMAKE_TOOLCHAIN_FILE)
+      list (APPEND _OPTIONS -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE})
+    endif (DEFINED CMAKE_TOOLCHAIN_FILE)
+
+    set (_TEST_COMMAND)
+
+    if (DEFINED _ARGS_TEST_COMMAND)
+      if (CMAKE_CROSSCOMPILING AND DEFINED CMAKE_CROSSCOMPILING_EMULATOR)
+        # The nested CTest neither knows the executable suffix of the target
+        # nor runs the program through the emulator.
+        list (POP_FRONT _ARGS_TEST_COMMAND _PROGRAM)
+        list (PREPEND _ARGS_TEST_COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR}
+          ${_PROGRAM}${CMAKE_EXECUTABLE_SUFFIX})
+      endif (CMAKE_CROSSCOMPILING AND DEFINED CMAKE_CROSSCOMPILING_EMULATOR)
+
+      set (_TEST_COMMAND --test-command ${_ARGS_TEST_COMMAND})
+    endif (DEFINED _ARGS_TEST_COMMAND)
+
+    add_test (NAME ${_NAME} COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-config ${_ARGS_CONFIG}
+      --build-and-test
+      "${ng-log_SOURCE_DIR}/${_ARGS_SOURCE_DIR}"
+      "${ng-log_BINARY_DIR}/Tests/${_NAME}"
+      --build-generator ${CMAKE_GENERATOR}
+      --build-generator-platform "${CMAKE_GENERATOR_PLATFORM}"
+      --build-generator-toolset "${CMAKE_GENERATOR_TOOLSET}"
+      --build-makeprogram ${CMAKE_MAKE_PROGRAM}
+      --build-target ${_ARGS_TARGET}
+      --build-options
+      -DCMAKE_BUILD_TYPE=${_ARGS_CONFIG}
+      -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+      -DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=ON
+      -Dng-log_DIR=${ng-log_BINARY_DIR}
+      ${_OPTIONS}
+      ${_TEST_COMMAND}
+    )
+  endfunction (nglog_add_build_test)
+
   add_library (ng-log_testing_utilities OBJECT
     src/testing_utilities.cc
   )
@@ -1240,59 +1297,10 @@ if (BUILD_TESTING AND GTest_FOUND)
       TIMEOUT 60
   )
 
-  # Generate an initial cache
-
-  get_cache_variables (_CACHEVARS)
-
-  set (_INITIAL_CACHE
-    ${ng-log_BINARY_DIR}/test_package_config/ng-log_package_config_initial_cache.cmake)
-
-  # Package config test
-
-  add_test (NAME cmake_package_config_init COMMAND ${CMAKE_COMMAND}
-    -DTEST_BINARY_DIR=${ng-log_BINARY_DIR}/test_package_config
-    -DINITIAL_CACHE=${_INITIAL_CACHE}
-    -DCACHEVARS=${_CACHEVARS}
-    -P ${ng-log_SOURCE_DIR}/cmake/TestInitPackageConfig.cmake
+  nglog_add_build_test (cmake_package_config
+    SOURCE_DIR src/package_config_unittest/working_config
+    TARGET ng-log_package_config
   )
-
-  add_test (NAME cmake_package_config_generate COMMAND ${CMAKE_COMMAND}
-    -DGENERATOR=${CMAKE_GENERATOR}
-    -DGENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}
-    -DGENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}
-    -DINITIAL_CACHE=${_INITIAL_CACHE}
-    -DPACKAGE_DIR=${ng-log_BINARY_DIR}
-    -DPATH=$ENV{PATH}
-    -DSOURCE_DIR=${ng-log_SOURCE_DIR}/src/package_config_unittest/working_config
-    -DTEST_BINARY_DIR=${ng-log_BINARY_DIR}/test_package_config/working_config
-    -P ${ng-log_SOURCE_DIR}/cmake/TestPackageConfig.cmake
-  )
-
-  add_test (NAME cmake_package_config_build COMMAND
-    ${CMAKE_COMMAND} --build ${ng-log_BINARY_DIR}/test_package_config/working_config
-                     --config $<CONFIG>
-  )
-
-  add_test (NAME cmake_package_config_cleanup COMMAND ${CMAKE_COMMAND} -E
-    remove_directory
-    ${ng-log_BINARY_DIR}/test_package_config
-  )
-
-  # Fixtures setup
-  set_tests_properties (cmake_package_config_init PROPERTIES FIXTURES_SETUP
-    cmake_package_config)
-  set_tests_properties (cmake_package_config_generate PROPERTIES FIXTURES_SETUP
-    cmake_package_config_working)
-
-  # Fixtures cleanup
-  set_tests_properties (cmake_package_config_cleanup PROPERTIES FIXTURES_CLEANUP
-    cmake_package_config)
-
-  # Fixture requirements
-  set_tests_properties (cmake_package_config_generate PROPERTIES
-    FIXTURES_REQUIRED cmake_package_config)
-  set_tests_properties (cmake_package_config_build PROPERTIES
-    FIXTURES_REQUIRED "cmake_package_config;cmake_package_config_working")
 
   add_executable (cleanup_immediately_unittest
     src/cleanup_immediately_unittest.cc)
@@ -1402,64 +1410,6 @@ if (BUILD_TESTING AND GTest_FOUND)
     TEST_PREFIX striplog10.
     DISCOVERY_TIMEOUT 30
   )
-
-  # Configures and builds a target of a separate project against the ng-log
-  # build tree. The test optionally runs a command of that project afterwards.
-  function (nglog_add_build_test _NAME)
-    cmake_parse_arguments (PARSE_ARGV 1 _ARGS "" "SOURCE_DIR;TARGET;CONFIG"
-      "TEST_COMMAND")
-
-    if (DEFINED _ARGS_UNPARSED_ARGUMENTS OR NOT DEFINED _ARGS_SOURCE_DIR OR
-        NOT DEFINED _ARGS_TARGET)
-      message (FATAL_ERROR "nglog_add_build_test (${_NAME}) expects "
-        "SOURCE_DIR and TARGET but got: ${ARGN}")
-    endif (DEFINED _ARGS_UNPARSED_ARGUMENTS OR NOT DEFINED _ARGS_SOURCE_DIR OR
-        NOT DEFINED _ARGS_TARGET)
-
-    if (NOT DEFINED _ARGS_CONFIG)
-      set (_ARGS_CONFIG $<CONFIG>)
-    endif (NOT DEFINED _ARGS_CONFIG)
-
-    set (_OPTIONS)
-
-    # Cross compiling needs the same toolchain in the nested build.
-    if (DEFINED CMAKE_TOOLCHAIN_FILE)
-      list (APPEND _OPTIONS -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE})
-    endif (DEFINED CMAKE_TOOLCHAIN_FILE)
-
-    set (_TEST_COMMAND)
-
-    if (DEFINED _ARGS_TEST_COMMAND)
-      if (CMAKE_CROSSCOMPILING AND DEFINED CMAKE_CROSSCOMPILING_EMULATOR)
-        # The nested CTest neither knows the executable suffix of the target
-        # nor runs the program through the emulator.
-        list (POP_FRONT _ARGS_TEST_COMMAND _PROGRAM)
-        list (PREPEND _ARGS_TEST_COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR}
-          ${_PROGRAM}${CMAKE_EXECUTABLE_SUFFIX})
-      endif (CMAKE_CROSSCOMPILING AND DEFINED CMAKE_CROSSCOMPILING_EMULATOR)
-
-      set (_TEST_COMMAND --test-command ${_ARGS_TEST_COMMAND})
-    endif (DEFINED _ARGS_TEST_COMMAND)
-
-    add_test (NAME ${_NAME} COMMAND ${CMAKE_CTEST_COMMAND}
-      --build-config ${_ARGS_CONFIG}
-      --build-and-test
-      "${ng-log_SOURCE_DIR}/${_ARGS_SOURCE_DIR}"
-      "${ng-log_BINARY_DIR}/Tests/${_NAME}"
-      --build-generator ${CMAKE_GENERATOR}
-      --build-generator-platform "${CMAKE_GENERATOR_PLATFORM}"
-      --build-generator-toolset "${CMAKE_GENERATOR_TOOLSET}"
-      --build-makeprogram ${CMAKE_MAKE_PROGRAM}
-      --build-target ${_ARGS_TARGET}
-      --build-options
-      -DCMAKE_BUILD_TYPE=${_ARGS_CONFIG}
-      -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-      -DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=ON
-      -Dng-log_DIR=${ng-log_BINARY_DIR}
-      ${_OPTIONS}
-      ${_TEST_COMMAND}
-    )
-  endfunction (nglog_add_build_test)
 
   nglog_add_build_test (flags_declaration
     SOURCE_DIR src/flags_declaration_unittest
