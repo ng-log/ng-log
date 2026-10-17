@@ -770,6 +770,7 @@ TEST(SourceLocation, CachesWorkingDirectory) {
 TEST(StyledOutput, WritesRawText) {
   constexpr char kText[] = "raw \033[1mtext";
   ScopedStreamCapture capture{StandardStream::kStderr};
+  WriteRawToStderr("");
   WriteRawToStderr(kText);
   EXPECT_EQ(capture.Stop(), kText);
 }
