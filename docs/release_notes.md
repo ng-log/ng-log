@@ -42,6 +42,8 @@ SPDX-License-Identifier: BSD-3-Clause
 - Remove `ng-log/types.h` with `NGLOG_IFDEF_THREAD_SANITIZER` and the
   `AnnotateBenignRaceSized` declaration. Logging macros no longer exempt
   their counters from ThreadSanitizer
+- Fail `SendEmail` unless the mailer receives the whole message and exits
+  with status 0
 
 #### Features
 
@@ -91,6 +93,7 @@ SPDX-License-Identifier: BSD-3-Clause
 - Fix `TruncateLogFile` corrupting log files with line breaks on Windows
 - Fix `RAW_LOG` truncating messages that exactly fill its buffer
 - Deliver email outside the logging lock
+- Keep `SendEmail` from raising `SIGPIPE` when the mailer exits early
 - Make Windows log file handles non-inheritable
 - Fix log cleanup in non-ASCII Windows directories by [@devtejasx]
 - Encode Windows user names in log file names as UTF-8
