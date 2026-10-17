@@ -3,66 +3,27 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
+#include <chrono>
 
-#include "mock-log.h"
-#include "ng-log/flags.h"
-#include "ng-log/logging.h"
-#include "ng-log/raw_logging.h"
-#include "testing_utilities.h"
-
-// Introduce several symbols from gmock.
-using nglog::nglog_testing::ScopedMockLog;
-using testing::_;
-using testing::AllOf;
-using testing::AnyNumber;
-using testing::HasSubstr;
-using testing::InitGoogleMock;
-using testing::StrictMock;
-using testing::StrNe;
-
-using namespace nglog;
+#include "cleanup_test.h"
 
 TEST(CleanImmediatelyWithAbsolutePrefix, logging) {
   using namespace std::chrono_literals;
+  constexpr unsigned kInfoMessageCount = 1000;
+  constexpr unsigned kErrorMessageCount = 10;
   nglog::EnableLogCleaner(0h);
   nglog::SetLogFilenameExtension(".barfoo");
   nglog::SetLogDestination(NGLOG_INFO, "test_cleanup_");
 
-  for (unsigned i = 0; i < 1000; ++i) {
-    LOG(INFO) << "cleanup test";
+  for (unsigned i = 0; i < kInfoMessageCount; ++i) {
+    LOG(INFO) << nglog::kCleanupTestMessage;
   }
 
-  for (unsigned i = 0; i < 10; ++i) {
-    LOG(ERROR) << "cleanup test";
+  for (unsigned i = 0; i < kErrorMessageCount; ++i) {
+    LOG(ERROR) << nglog::kCleanupTestMessage;
   }
 
   nglog::DisableLogCleaner();
 }
 
-int main(int argc, char** argv) {
-  nglog::SetFlag(FLAGS_colorlogtostderr, false);
-  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, true);
-  nglog::ParseCommandLineFlags(&argc, &argv,
-                               nglog::FlagParsingMode::kRemoveFlags);
-  // Make sure stderr is not buffered as stderr seems to be buffered
-  // on recent windows.
-  setbuf(stderr, nullptr);
-
-  // Test some basics before InitializeLogging:
-  CaptureTestStderr();
-  const std::string early_stderr = GetCapturedTestStderr();
-
-  EXPECT_FALSE(IsLoggingInitialized());
-
-  InitializeLogging(argv[0]);
-
-  EXPECT_TRUE(IsLoggingInitialized());
-
-  testing::InitGoogleTest(&argc, argv);
-  InitGoogleMock(&argc, argv);
-
-  // so that death tests run before we use threads
-  CHECK_EQ(RUN_ALL_TESTS(), 0);
-}
+int main(int argc, char** argv) { return nglog::CleanupTestMain(argc, argv); }
