@@ -3107,20 +3107,23 @@ static void GetTempDirectories(vector<string>& list) {
 #else
   // Directories, in order of preference. If we find a dir that
   // exists, we stop adding other less-preferred dirs
+  const bool trusted = TrustsEnvironment();
   const char* candidates[] = {
       // Non-null only during unittest/regtest
-      getenv("TEST_TMPDIR"),
+      trusted ? getenv("TEST_TMPDIR") : nullptr,
 
       // Explicitly-supplied temp dirs
-      getenv("TMPDIR"),
-      getenv("TMP"),
+      trusted ? getenv("TMPDIR") : nullptr,
+      trusted ? getenv("TMP") : nullptr,
 
       // If all else fails
       "/tmp",
   };
 
   for (auto d : candidates) {
-    if (!d) continue;  // Empty env var
+    if (d == nullptr || d[0] == '\0') {
+      continue;  // Unset or empty env var
+    }
 
     // Make sure we don't surprise anyone who's expecting a '/'
     string dstr = d;

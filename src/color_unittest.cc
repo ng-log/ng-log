@@ -7,7 +7,9 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <cerrno>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <type_traits>
@@ -28,6 +30,10 @@
 #  include <vector>
 
 #  include "internal/utf8.h"
+#else
+#  include <sys/stat.h>
+#  include <sys/types.h>
+#  include <unistd.h>
 #endif
 
 #ifdef NGLOG_OS_EMSCRIPTEN
@@ -356,6 +362,32 @@ TEST(BuildFileUriWithoutLine, AcceptsPosixAbsolutePath) {
   EXPECT_STREQ("file://localhost/src/foo.cc", uri);
 }
 
+#ifdef NGLOG_OS_WINDOWS
+// Windows accepts forward slashes in UNC paths as well, unlike POSIX systems,
+// where such a path is an ordinary absolute one.
+TEST(BuildFileLineUri, WindowsUncPathWithForwardSlashesNamesTheServer) {
+  constexpr char kSpan[] = "//server/share/foo.cc:42";
+  char uri[kUriBufferSize];
+  ASSERT_TRUE(BuildFileLineUri(kSpan, std::strlen(kSpan), /*base_path=*/nullptr,
+                               /*host=*/nullptr, uri, sizeof(uri)));
+  EXPECT_STREQ("file://server/share/foo.cc", uri);
+}
+
+// Device prefixes with forward slashes denote local paths as well.
+TEST(BuildFileLineUri, WindowsDevicePathsWithForwardSlashesAreLocal) {
+  constexpr const char* kSpans[] = {"//?/C:/src/foo.cc:42",
+                                    "//./C:/src/foo.cc:42"};
+  for (const char* span : kSpans) {
+    char uri[kUriBufferSize];
+    ASSERT_TRUE(BuildFileLineUri(span, std::strlen(span),
+                                 /*base_path=*/nullptr, /*host=*/nullptr, uri,
+                                 sizeof(uri)))
+        << span;
+    EXPECT_STREQ("file://localhost/C:/src/foo.cc", uri) << span;
+  }
+}
+#endif
+
 struct FileLineUriCase {
   const char* name;
   const char* span;
@@ -385,6 +417,20 @@ INSTANTIATE_TEST_SUITE_P(
         FileLineUriCase{"EncodesPathCharactersReservedByUris",
                         "/src/a file#part?.cc:42", nullptr, nullptr,
                         "file://localhost/src/a%20file%23part%3F.cc"},
+        FileLineUriCase{"WindowsUncPathNamesTheServer",
+                        "\\\\server\\share\\foo.cc:42", nullptr, nullptr,
+                        "file://server/share/foo.cc"},
+        FileLineUriCase{"WindowsExtendedLengthPath",
+                        "\\\\?\\C:\\src\\foo.cc:42", nullptr, nullptr,
+                        "file://localhost/C:/src/foo.cc"},
+        FileLineUriCase{"WindowsExtendedLengthUncPath",
+                        "\\\\?\\UNC\\server\\share\\foo.cc:42", nullptr,
+                        nullptr, "file://server/share/foo.cc"},
+        FileLineUriCase{"WindowsExtendedLengthUncPathIgnoresCase",
+                        "\\\\?\\unc\\server\\share\\foo.cc:42", nullptr,
+                        nullptr, "file://server/share/foo.cc"},
+        FileLineUriCase{"WindowsDevicePath", "\\\\.\\C:\\src\\foo.cc:42",
+                        nullptr, nullptr, "file://localhost/C:/src/foo.cc"},
         FileLineUriCase{"EncodesWindowsPathSeparators", "C:\\src\\a file.cc:42",
                         nullptr, nullptr,
                         "file://localhost/C:/src/a%20file.cc"},
@@ -393,6 +439,9 @@ INSTANTIATE_TEST_SUITE_P(
                         "file://localhost/C:/build/src/foo.cc"},
         FileLineUriCase{"UsesSuppliedHost", "/src/foo.cc:42", nullptr,
                         "my-host", "file://my-host/src/foo.cc"},
+        FileLineUriCase{"WindowsUncServerTakesPrecedenceOverSuppliedHost",
+                        "\\\\server\\share\\foo.cc:42", nullptr, "my-host",
+                        "file://server/share/foo.cc"},
         FileLineUriCase{"ResolvesRelativePathAgainstBasePath", "src/foo.cc:42",
                         "/build", nullptr, "file://localhost/build/src/foo.cc"},
         FileLineUriCase{"DoesNotDuplicateSeparatorWhenJoiningBasePath",
@@ -434,6 +483,15 @@ INSTANTIATE_TEST_SUITE_P(
                     FileLineUriCase{"RelativeBasePath", "src/foo.cc:42",
                                     "relative/build", nullptr, nullptr},
                     FileLineUriCase{"MissingLineNumber", "/src/foo.cc", nullptr,
+                                    nullptr, nullptr},
+                    // A server name is copied into the URI authority as is, so
+                    // it must not carry characters that terminals or URIs
+                    // interpret, such as the BEL that ends a hyperlink.
+                    FileLineUriCase{"WindowsUncServerWithControlCharacters",
+                                    "\\\\a\a\x1b[2J\\share\\foo.cc:42", nullptr,
+                                    nullptr, nullptr},
+                    FileLineUriCase{"WindowsUncServerWithSpace",
+                                    "\\\\my server\\share\\foo.cc:42", nullptr,
                                     nullptr, nullptr}),
     CaseName{});
 
@@ -608,6 +666,40 @@ TEST(SourceLocation, CachesHostAndWorkingDirectory) {
   EXPECT_EQ(&CachedHostname(), &CachedHostname());
   EXPECT_EQ(&CachedCwd(), &CachedCwd());
 }
+
+#if !defined(NGLOG_OS_WINDOWS) && !defined(NGLOG_OS_EMSCRIPTEN) && \
+    defined(GTEST_HAS_DEATH_TEST)
+// Exits successfully if the cached working directory of a fresh process
+// matches a working directory longer than common fixed-size buffers.
+[[noreturn]] void CheckLongWorkingDirectory() {
+  constexpr std::size_t kMinimumLength = 1024;
+  constexpr mode_t kDirectoryMode = 0700;
+  const std::string component(64, 'd');
+  if (chdir(TestTmpDir().c_str()) != 0) {
+    std::exit(EXIT_FAILURE);
+  }
+  std::string cwd = TestTmpDir();
+  while (cwd.size() < kMinimumLength) {
+    if ((mkdir(component.c_str(), kDirectoryMode) != 0 && errno != EEXIST) ||
+        chdir(component.c_str()) != 0) {
+      std::exit(EXIT_FAILURE);
+    }
+    cwd += '/' + component;
+  }
+  char* const actual = getcwd(nullptr, 0);
+  const bool matches = actual != nullptr && CachedCwd() == actual;
+  std::free(actual);
+  std::exit(matches ? EXIT_SUCCESS : EXIT_FAILURE);
+}
+
+TEST(SourceLocation, CachesLongWorkingDirectory) {
+  // The working directory is cached on first use, so the check needs a
+  // process that has not used it yet.
+  const ScopedDeathTestStyle style{"threadsafe"};
+  EXPECT_EXIT(CheckLongWorkingDirectory(),
+              testing::ExitedWithCode(EXIT_SUCCESS), "");
+}
+#endif
 
 #ifdef NGLOG_OS_WINDOWS
 TEST(SourceLocation, UsesUtf8ComputerName) {

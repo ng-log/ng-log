@@ -71,7 +71,13 @@ SPDX-License-Identifier: BSD-3-Clause
 - Fix a `RAW_LOG` deadlock in signal handlers under a non-classic global
   locale
 - Fix an out-of-bounds read when flushing an empty message
+- Fix an out-of-bounds read for empty `TEST_TMPDIR`, `TMPDIR` and `TMP`
+  values
 - Reject malformed ELF symbol tables
+- Ignore `USER`, `USERNAME`, `NGLOG_DIR`, `TEST_TMPDIR`, `TMPDIR` and `TMP`
+  in programs started with elevated privileges
+- Ignore `USER` and `USERNAME` values that are not a single file name
+  component
 - Fix a data race between `EnableLogCleaner` and logging threads by [@devtejasx]
 - Fix a data race on concurrent initialization of `VLOG` call sites
 - Fix miscounting periodic and first-N log macros under concurrency

@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <regex>
 #include <string>
 
@@ -149,16 +150,16 @@ std::string ExpectedUserName() {
 }
 
 /**
- * Runs this test binary with an empty @c USER variable and captures the user
+ * Runs this test binary with the given @c USER variable and captures the user
  * name it reports.
  *
  * @param setup Runs in the child before the binary is executed. The child
  *   exits with @ref kChildUnsupportedExitCode if it returns @c false.
+ * @param user Value of the @c USER variable of the child.
  * @param output Receives the reported user name without the line break.
  * @return The exit status of the child, or -1 if it did not exit normally.
  */
-int RunPrintUserName(ChildSetup setup, std::string* output) {
-  constexpr char kEmptyUserName[] = "";
+int RunPrintUserName(ChildSetup setup, const char* user, std::string* output) {
   constexpr std::size_t kReadBufferSize = 256;
 
   int pipe_fds[2];
@@ -181,7 +182,7 @@ int RunPrintUserName(ChildSetup setup, std::string* output) {
     if (!setup()) {
       _exit(kChildUnsupportedExitCode);
     }
-    if (setenv("USER", kEmptyUserName, 1) != 0) {
+    if (setenv("USER", user, 1) != 0) {
       _exit(EXIT_FAILURE);
     }
     execl(g_self_path, g_self_path, kPrintUserName,
@@ -211,10 +212,26 @@ int RunPrintUserName(ChildSetup setup, std::string* output) {
 
 }  // namespace
 
+// The tests run without elevated privileges, so the environment applies. A
+// program started with elevated privileges cannot be run from a unit test.
+TEST(utilities, UnprivilegedProgramTrustsTheEnvironment) {
+  EXPECT_TRUE(TrustsEnvironment());
+}
+
 TEST(utilities, EmptyUserEnvironmentUsesSystemUserName) {
   std::string output;
-  ASSERT_EQ(RunPrintUserName(&NoChildSetup, &output), EXIT_SUCCESS);
+  ASSERT_EQ(RunPrintUserName(&NoChildSetup, "", &output), EXIT_SUCCESS);
   EXPECT_EQ(output, ExpectedUserName());
+}
+
+// The user name becomes part of log file names, so it must not lead them into
+// other directories.
+TEST(utilities, UserEnvironmentWithPathComponentsUsesSystemUserName) {
+  for (const char* user : {"a/../../elsewhere", "..", "."}) {
+    std::string output;
+    ASSERT_EQ(RunPrintUserName(&NoChildSetup, user, &output), EXIT_SUCCESS);
+    EXPECT_EQ(output, ExpectedUserName()) << "USER=" << user;
+  }
 }
 
 #  ifdef NGLOG_OS_LINUX
@@ -252,7 +269,7 @@ TEST(utilities, UserWithoutPasswdEntryUsesUserId) {
 
   std::string output;
   const int status =
-      RunPrintUserName(&EnterUserNamespaceAsUnknownUser, &output);
+      RunPrintUserName(&EnterUserNamespaceAsUnknownUser, "", &output);
   if (status == kChildUnsupportedExitCode) {
     GTEST_SKIP() << "Unprivileged user namespaces are unavailable";
   }
@@ -354,6 +371,15 @@ TEST(EmscriptenConsole, MapsSeverityToConsoleLevel) {
   // as warnings in browsers.
   EXPECT_EQ(internal::EmscriptenLogLevelForSeverity(NGLOG_FATAL),
             internal::EmscriptenLogLevel::kError);
+}
+
+TEST(utilities, BasenameFollowsTheLastSeparator) {
+  EXPECT_STREQ(nglog::tools::const_basename("dir/file.cc"), "file.cc");
+  EXPECT_STREQ(nglog::tools::const_basename("file.cc"), "file.cc");
+#ifdef NGLOG_OS_WINDOWS
+  EXPECT_STREQ(nglog::tools::const_basename("C:\\src/sub\\file.cc"), "file.cc");
+  EXPECT_STREQ(nglog::tools::const_basename("./build\\app.exe"), "app.exe");
+#endif
 }
 
 TEST(utilities, TrimTrailingCRLFRemovesTrailingNewlines) {

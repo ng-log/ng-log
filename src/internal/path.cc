@@ -292,8 +292,14 @@ bool ForEachPosixDirectory(const std::string& path,
     return false;
   }
 
-  errno = 0;
-  while (const struct dirent* entry = readdir(directory.get())) {
+  // readdir() reports errors only through errno, which callbacks may change,
+  // so it is cleared before every call.
+  for (;;) {
+    errno = 0;
+    const struct dirent* const entry = readdir(directory.get());
+    if (entry == nullptr) {
+      break;
+    }
     if (std::strcmp(entry->d_name, ".") == 0 ||
         std::strcmp(entry->d_name, "..") == 0) {
       continue;

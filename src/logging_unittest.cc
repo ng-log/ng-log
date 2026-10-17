@@ -21,6 +21,7 @@
 #include <ctime>
 #include <fstream>
 #include <functional>
+#include <initializer_list>
 #include <iomanip>
 #include <iterator>
 #include <limits>
@@ -3450,6 +3451,35 @@ TEST(Logging, CleansLongPath) {
   GTEST_SKIP() << "Requires long path support";
 #endif
 }
+
+#if !defined(NGLOG_OS_WINDOWS) && defined(HAVE_UNISTD_H)
+// A callback may leave errno set while it succeeds, for example after a stat()
+// of an entry that disappeared meanwhile.
+TEST(PosixPathOperations, DirectoryEnumerationIgnoresErrnoOfCallbacks) {
+  const std::string directory =
+      TestTmpDir() + "/logging_test_enumerated_directory";
+  constexpr mode_t kDirectoryMode = 0700;
+  ASSERT_EQ(mkdir(directory.c_str(), kDirectoryMode), 0) << strerror(errno);
+  for (const char* name : {"/first", "/second"}) {
+    std::ofstream{directory + name};
+  }
+
+  int visited = 0;
+  const bool enumerated = internal::ForEachPosixDirectory(
+      directory,
+      [](const char*, std::size_t, void* context) {
+        ++*static_cast<int*>(context);
+        errno = ENOENT;
+        return true;
+      },
+      &visited);
+
+  EXPECT_TRUE(enumerated);
+  EXPECT_EQ(visited, 2);
+  DeleteFiles(directory + "/*");
+  rmdir(directory.c_str());
+}
+#endif
 
 #ifdef HAVE_POSIX_LONG_PATH_SUPPORT
 TEST(PosixPathOperations, LongPathWithDotComponents) {

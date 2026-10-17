@@ -61,6 +61,9 @@
 #ifdef HAVE_PWD_H
 #  include <pwd.h>
 #endif
+#ifdef HAVE_GETAUXVAL
+#  include <sys/auxv.h>
+#endif
 #ifdef HAVE_PTHREAD_SETNAME_NP
 #  include <pthread.h>
 #endif
@@ -376,11 +379,15 @@ std::string TrimTrailingCRLF(std::string message) {
 }
 
 const char* const_basename(const char* filepath) {
-  const char* base = strrchr(filepath, '/');
-#ifdef NGLOG_OS_WINDOWS  // Look for either path separator in Windows
-  if (!base) base = strrchr(filepath, '\\');
+  const char* base = std::strrchr(filepath, '/');
+#ifdef NGLOG_OS_WINDOWS
+  // Windows accepts either separator, also mixed within one path.
+  const char* const backslash = std::strrchr(filepath, '\\');
+  if (backslash != nullptr && (base == nullptr || backslash > base)) {
+    base = backslash;
+  }
 #endif
-  return base ? (base + 1) : filepath;
+  return base != nullptr ? base + 1 : filepath;
 }
 
 const char* ProgramInvocationShortName() {
@@ -471,9 +478,22 @@ std::string GetEnvironmentUserName() {
 #endif
 }
 
+// The user name becomes part of log file names, so it must be a single file
+// name component.
+bool IsFileNameComponent(const std::string& name) {
+#if defined(NGLOG_OS_WINDOWS)
+  constexpr char kForbiddenCharacters[] = "/\\:*?\"<>|";
+#else
+  constexpr char kForbiddenCharacters[] = "/";
+#endif
+  return !name.empty() && name != "." && name != ".." &&
+         name.find_first_of(kForbiddenCharacters) == std::string::npos;
+}
+
 std::string GetMyUserName() {
-  std::string user_name = GetEnvironmentUserName();
-  if (!user_name.empty()) {
+  std::string user_name =
+      TrustsEnvironment() ? GetEnvironmentUserName() : std::string{};
+  if (IsFileNameComponent(user_name)) {
     return user_name;
   }
 
@@ -485,6 +505,26 @@ std::string GetMyUserName() {
 }
 
 }  // namespace
+
+bool TrustsEnvironment() {
+  // The system marks programs that it started with elevated privileges, such
+  // as setuid programs and programs with file capabilities, even after they
+  // set their real IDs to the effective ones.
+#if defined(HAVE_GETAUXVAL) && defined(AT_SECURE)
+  if (getauxval(AT_SECURE) != 0) {
+    return false;
+  }
+#elif defined(HAVE_ISSETUGID)
+  if (issetugid() != 0) {
+    return false;
+  }
+#endif
+#if defined(HAVE_UNISTD_H) && !defined(NGLOG_OS_WINDOWS)
+  return getuid() == geteuid() && getgid() == getegid();
+#else
+  return true;
+#endif
+}
 
 static void MyUserNameInitializer() { g_my_user_name = GetMyUserName(); }
 REGISTER_MODULE_INITIALIZER(utilities, MyUserNameInitializer())
