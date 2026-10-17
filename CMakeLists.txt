@@ -968,8 +968,6 @@ if (BUILD_TESTING AND GTest_FOUND)
     TEST_PREFIX flags.
     DISCOVERY_TIMEOUT 30
     DISCOVERY_MODE PRE_TEST
-    PROPERTIES
-      RESOURCE_LOCK captured_stream
   )
 
   add_executable (flags_static_initialization_unittest
@@ -1002,8 +1000,6 @@ if (BUILD_TESTING AND GTest_FOUND)
     TEST_PREFIX logtostdout.
     DISCOVERY_TIMEOUT 30
     DISCOVERY_MODE PRE_TEST
-    PROPERTIES
-      RESOURCE_LOCK captured_stream
   )
 
   add_executable (stl_logging_unittest
@@ -1142,8 +1138,6 @@ if (BUILD_TESTING AND GTest_FOUND)
     TEST_PREFIX color.
     DISCOVERY_TIMEOUT 30
     DISCOVERY_MODE PRE_TEST
-    PROPERTIES
-      RESOURCE_LOCK captured_stream
   )
 
   if (HAVE_STACKTRACE)
@@ -1185,10 +1179,6 @@ if (BUILD_TESTING AND GTest_FOUND)
     PROPERTIES
       TIMEOUT 30
       SKIP_REGULAR_EXPRESSION "${logging_unittest_SKIP_REGULAR_EXPRESSION}"
-      # CaptureTestStdout()/CaptureTestStderr() always write to the same
-      # fixed path under TestTmpDir(), so tests using them must not run
-      # concurrently with each other or with the cleanup_* tests below.
-      RESOURCE_LOCK captured_stream
   )
 
   gtest_discover_tests (preinit_warning_unittest
@@ -1200,8 +1190,6 @@ if (BUILD_TESTING AND GTest_FOUND)
   gtest_discover_tests (color_attributes_unittest
     TEST_PREFIX color_attributes.
     DISCOVERY_TIMEOUT 30
-    PROPERTIES
-      RESOURCE_LOCK captured_stream
   )
 
   if (TARGET signalhandler_unittest)
@@ -1413,17 +1401,6 @@ if (BUILD_TESTING AND GTest_FOUND)
     PROPERTIES FIXTURES_REQUIRED logcleanuptest
   )
 
-  # These use CaptureTestStderr(), which always writes to the same fixed
-  # path under TestTmpDir(): they must not run concurrently with each
-  # other or with the logging_unittest tests above.
-  set_tests_properties (
-    cleanup_immediately
-    cleanup_with_absolute_prefix
-    cleanup_with_non_ascii_prefix
-    cleanup_with_relative_prefix
-    PROPERTIES RESOURCE_LOCK captured_stream
-  )
-
   add_executable (striplog0_unittest
     src/striplog_unittest.cc
   )
@@ -1434,7 +1411,6 @@ if (BUILD_TESTING AND GTest_FOUND)
     TEST_PREFIX striplog0.
     DISCOVERY_TIMEOUT 30
     DISCOVERY_MODE PRE_TEST
-    PROPERTIES RESOURCE_LOCK captured_stream
   )
 
   add_executable (striplog2_unittest
@@ -1447,7 +1423,6 @@ if (BUILD_TESTING AND GTest_FOUND)
     TEST_PREFIX striplog2.
     DISCOVERY_TIMEOUT 30
     DISCOVERY_MODE PRE_TEST
-    PROPERTIES RESOURCE_LOCK captured_stream
   )
 
   add_executable (striplog10_unittest
@@ -1465,7 +1440,6 @@ if (BUILD_TESTING AND GTest_FOUND)
     TEST_PREFIX striplog10.
     DISCOVERY_TIMEOUT 30
     DISCOVERY_MODE PRE_TEST
-    PROPERTIES RESOURCE_LOCK captured_stream
   )
 
   add_test (NAME flags_declaration COMMAND ${CMAKE_CTEST_COMMAND}
