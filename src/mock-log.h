@@ -78,8 +78,8 @@ class ScopedMockLog : public nglog::LogSink {
   //
   // We still cannot call Log() directly, as it may invoke other LOG()
   // messages, either due to an action, or due to an error logged in
-  // Google C++ Mocking Framework code, which would trigger a deadlock
-  // since a lock is held during send().
+  // Google C++ Mocking Framework code, which would reenter send() while it
+  // handles the current message.
   //
   // Hence, we save the message for WaitTillSent() which will be called after
   // the lock on send() is released, and we'll call Log() inside

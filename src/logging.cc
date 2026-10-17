@@ -641,15 +641,27 @@ class LogDestination {
                          const LogMessageTime& time, const char* message,
                          size_t message_len);
 
-  static std::shared_ptr<const std::vector<LogSink*>> GetSinksForCall();
+  static std::shared_ptr<const std::vector<LogSink*>> GetSinks();
+  // Counts a call of a sink that is still registered and returns whether the
+  // sink may be called.
+  static bool BeginSinkCall(LogSink* sink);
   static void EndSinkCall(LogSink* sink);
   static void WaitForSinkCalls(LogSink* sink);
   static void WaitForAllSinkCalls();
 
   class SinkCallGuard {
    public:
-    explicit SinkCallGuard(LogSink* sink) : sink_(sink) {}
-    ~SinkCallGuard() { LogDestination::EndSinkCall(sink_); }
+    explicit SinkCallGuard(LogSink* sink)
+        : sink_(LogDestination::BeginSinkCall(sink) ? sink : nullptr) {}
+    ~SinkCallGuard() {
+      if (sink_ != nullptr) {
+        LogDestination::EndSinkCall(sink_);
+      }
+    }
+    SinkCallGuard(const SinkCallGuard&) = delete;
+    SinkCallGuard& operator=(const SinkCallGuard&) = delete;
+
+    explicit operator bool() const noexcept { return sink_ != nullptr; }
 
    private:
     LogSink* sink_;
@@ -684,9 +696,14 @@ class LogDestination {
   // Protects the vector sinks_,
   // but not the LogSink objects its elements reference.
   static SinkMutex sink_mutex_;
+  // Protects the call counts. Replacing sinks_ also requires this mutex, so
+  // that holding it alone suffices to read sinks_.
   static std::mutex sink_call_mutex_;
   static std::condition_variable sink_call_cond_;
   static std::unordered_map<LogSink*, size_t> sink_call_counts_;
+  // Calls of each sink made by threads that wait for the calls of that sink
+  // to end. Such calls cannot end before the wait does.
+  static std::unordered_map<LogSink*, size_t> sink_waiting_call_counts_;
 
   // Disallow
   LogDestination(const LogDestination&) = delete;
@@ -706,6 +723,7 @@ LogDestination::SinkMutex LogDestination::sink_mutex_;
 std::mutex LogDestination::sink_call_mutex_;
 std::condition_variable LogDestination::sink_call_cond_;
 std::unordered_map<LogSink*, size_t> LogDestination::sink_call_counts_;
+std::unordered_map<LogSink*, size_t> LogDestination::sink_waiting_call_counts_;
 thread_local std::unordered_map<LogSink*, size_t> sink_call_counts_for_thread;
 std::once_flag LogDestination::hostname_once_;
 
@@ -784,7 +802,12 @@ inline void LogDestination::AddLogSink(LogSink* destination) {
   SinkLock l{sink_mutex_};
   std::vector<LogSink*> sinks = sinks_ ? *sinks_ : std::vector<LogSink*>{};
   sinks.push_back(destination);
-  sinks_ = std::make_shared<const std::vector<LogSink*>>(std::move(sinks));
+  auto updated =
+      std::make_shared<const std::vector<LogSink*>>(std::move(sinks));
+  {
+    std::lock_guard<std::mutex> call_lock{sink_call_mutex_};
+    sinks_ = std::move(updated);
+  }
   sinks_present_.store(true, std::memory_order_release);
 }
 
@@ -798,8 +821,14 @@ inline void LogDestination::RemoveLogSink(LogSink* destination) {
       std::vector<LogSink*> sinks = *sinks_;
       sinks.erase(std::remove(sinks.begin(), sinks.end(), destination),
                   sinks.end());
-      sinks_ = std::make_shared<const std::vector<LogSink*>>(std::move(sinks));
-      sinks_present_.store(!sinks_->empty(), std::memory_order_release);
+      const bool present = !sinks.empty();
+      auto updated =
+          std::make_shared<const std::vector<LogSink*>>(std::move(sinks));
+      {
+        std::lock_guard<std::mutex> call_lock{sink_call_mutex_};
+        sinks_ = std::move(updated);
+      }
+      sinks_present_.store(present, std::memory_order_release);
     }
   }
   WaitForSinkCalls(destination);
@@ -1313,12 +1342,9 @@ inline void LogDestination::MaybeLogToLogfileLocked(
     size_t len) {
   const bool should_flush = severity > nglog::GetFlag(FLAGS_logbuflevel);
   LogDestination* destination = log_destination(severity);
-  if (destination->logger_ == &destination->fileobject_) {
-    destination->fileobject_.WriteUnlocked(should_flush, timestamp, message,
-                                           len, nullptr);
-  } else {
-    destination->logger_->Write(should_flush, timestamp, message, len);
-  }
+  // The default logger also takes the mutex of its file, which it shares with
+  // direct calls through the logger interface.
+  destination->logger_->Write(should_flush, timestamp, message, len);
 }
 
 inline void LogDestination::LogToAllLogfiles(
@@ -1360,16 +1386,18 @@ inline bool LogDestination::LogToSinks(LogSeverity severity,
                                        const LogMessageTime& time,
                                        const char* message,
                                        size_t message_len) {
-  const auto sinks = GetSinksForCall();
+  const auto sinks = GetSinks();
   if (!sinks) {
     return false;
   }
   for (size_t i = sinks->size(); i-- > 0;) {
     LogSink* sink = (*sinks)[i];
     SinkCallGuard guard{sink};
-    sink->send(severity, full_filename, base_filename, line, time, message,
-               message_len);
-    sink->WaitTillSent();
+    if (guard) {
+      sink->send(severity, full_filename, base_filename, line, time, message,
+                 message_len);
+      sink->WaitTillSent();
+    }
   }
   return true;
 }
@@ -1377,12 +1405,14 @@ inline bool LogDestination::LogToSinks(LogSeverity severity,
 inline void LogDestination::WaitForSinks(internal::LogMessageData* data,
                                          bool wait_for_registered_sinks) {
   if (wait_for_registered_sinks) {
-    const auto sinks = GetSinksForCall();
+    const auto sinks = GetSinks();
     if (sinks) {
       for (size_t i = sinks->size(); i-- > 0;) {
         LogSink* sink = (*sinks)[i];
         SinkCallGuard guard{sink};
-        sink->WaitTillSent();
+        if (guard) {
+          sink->WaitTillSent();
+        }
       }
     }
   }
@@ -1394,22 +1424,27 @@ inline void LogDestination::WaitForSinks(internal::LogMessageData* data,
   }
 }
 
-std::shared_ptr<const std::vector<LogSink*>> LogDestination::GetSinksForCall() {
+std::shared_ptr<const std::vector<LogSink*>> LogDestination::GetSinks() {
   if (!sinks_present_.load(std::memory_order_acquire)) {
     return nullptr;
   }
 
   std::shared_lock<SinkMutex> l{sink_mutex_};
-  const auto sinks = sinks_;
-  if (sinks) {
-    std::lock_guard<std::mutex> call_lock{sink_call_mutex_};
-    for (size_t i = sinks->size(); i-- > 0;) {
-      LogSink* sink = (*sinks)[i];
-      ++sink_call_counts_[sink];
-      ++sink_call_counts_for_thread[sink];
-    }
+  return sinks_;
+}
+
+bool LogDestination::BeginSinkCall(LogSink* sink) {
+  // A snapshot of the sinks can outlive the removal of one of them. Counting
+  // the call only while the sink is registered lets RemoveLogSink() wait for
+  // every call that can still reach the sink, and only for those.
+  std::lock_guard<std::mutex> l{sink_call_mutex_};
+  if (!sinks_ ||
+      std::find(sinks_->begin(), sinks_->end(), sink) == sinks_->end()) {
+    return false;
   }
-  return sinks;
+  ++sink_call_counts_[sink];
+  ++sink_call_counts_for_thread[sink];
+  return true;
 }
 
 void LogDestination::EndSinkCall(LogSink* sink) {
@@ -1433,15 +1468,33 @@ void LogDestination::EndSinkCall(LogSink* sink) {
 
 void LogDestination::WaitForSinkCalls(LogSink* sink) {
   std::unique_lock<std::mutex> l{sink_call_mutex_};
+  const auto thread_it = sink_call_counts_for_thread.find(sink);
+  const size_t thread_count =
+      thread_it == sink_call_counts_for_thread.end() ? 0 : thread_it->second;
+  if (thread_count == 0) {
+    // No callback waits for a thread that is not inside one, so it can wait
+    // for every call to end.
+    sink_call_cond_.wait(l, [sink] {
+      return sink_call_counts_.find(sink) == sink_call_counts_.end();
+    });
+    return;
+  }
+  // Calls made by threads that wait here themselves, such as several threads
+  // removing a sink from within its callback, would otherwise wait for each
+  // other forever.
+  sink_waiting_call_counts_[sink] += thread_count;
+  sink_call_cond_.notify_all();
   sink_call_cond_.wait(l, [sink] {
     const auto global_it = sink_call_counts_.find(sink);
-    const auto thread_it = sink_call_counts_for_thread.find(sink);
-    const size_t thread_count =
-        thread_it == sink_call_counts_for_thread.end() ? 0 : thread_it->second;
     const size_t global_count =
         global_it == sink_call_counts_.end() ? 0 : global_it->second;
-    return global_count == thread_count;
+    return global_count == sink_waiting_call_counts_[sink];
   });
+  const auto waiting_it = sink_waiting_call_counts_.find(sink);
+  waiting_it->second -= thread_count;
+  if (waiting_it->second == 0) {
+    sink_waiting_call_counts_.erase(waiting_it);
+  }
 }
 
 void LogDestination::WaitForAllSinkCalls() {
@@ -1484,7 +1537,10 @@ void LogDestination::DeleteLogDestinations() {
   }
   {
     SinkLock l{sink_mutex_};
-    sinks_.reset();
+    {
+      std::lock_guard<std::mutex> call_lock{sink_call_mutex_};
+      sinks_.reset();
+    }
     sinks_present_.store(false, std::memory_order_release);
   }
   WaitForAllSinkCalls();
@@ -1576,6 +1632,9 @@ void LogFileObject::SetSymlinkBasename(const char* symlink_basename) {
   symlink_basename_ = symlink_basename;
 }
 
+// The public methods take only the mutex of the file. Loggers that wrap the
+// file logger may forward to it from another thread while the global logging
+// mutex is held, so taking that mutex here could deadlock.
 void LogFileObject::Flush() {
   std::lock_guard<internal::FileMutex> l{mutex_};
   FlushUnlocked(std::chrono::system_clock::now());
@@ -2004,8 +2063,10 @@ void LogFileObject::WriteUnlocked(
         // posix_fadvise() can block for a substantial amount of time (e.g.,
         // due to kernel-internal LRU draining or writeback under I/O
         // pressure). Duplicate the descriptor and release mutex_ while the
-        // syscall runs so that other threads logging to this file are not
-        // serialized behind it. The duplicate keeps the underlying open
+        // syscall runs so that threads that write to or flush this file
+        // through the logger interface are not serialized behind it. Messages
+        // dispatched by LOG() still wait for the global logging mutex, which
+        // the caller holds. The duplicate keeps the underlying open
         // file description alive even if this file gets rolled over while
         // the lock is released and preserves the close-on-exec flag set on
         // the original descriptor.
@@ -2131,6 +2192,11 @@ void LogMessage::Init(const char* file, int line, LogSeverity severity,
       data_ = &fatal_msg_data_exclusive;
       data_->first_fatal_ = true;
     } else {
+      // The buffer is reused by every later fatal message of this thread,
+      // which only returns here if the failure function does not end the
+      // process. Start each message from an empty stream.
+      fatal_msg_data_shared.~LogMessageData();
+      new (&fatal_msg_data_shared) internal::LogMessageData;
       data_ = &fatal_msg_data_shared;
       data_->first_fatal_ = false;
     }
@@ -2204,15 +2270,25 @@ const char* LogMessage::basename() const noexcept { return data_->basename_; }
 const LogMessageTime& LogMessage::time() const noexcept { return time_; }
 
 LogMessage::~LogMessage() noexcept(false) {
-  Flush();
-  const bool fail = data_->severity_ == NGLOG_FATAL &&
-                    exit_on_dfatal.load(std::memory_order_relaxed);
-  const char* const tag = MessageTag(*data_);
-  if (data_ == static_cast<void*>(&thread_msg_data)) {
-    data_->~LogMessageData();
-    thread_data_available = true;
-  } else {
-    allocated_.reset();
+  bool fail = false;
+  const char* tag = nullptr;
+  {
+    // Releases the message data even if a sink or a logger throws.
+    struct DataReleaser {
+      LogMessage& message;
+      ~DataReleaser() {
+        if (message.data_ == static_cast<void*>(&thread_msg_data)) {
+          message.data_->~LogMessageData();
+          thread_data_available = true;
+        } else {
+          message.allocated_.reset();
+        }
+      }
+    } releaser{*this};
+    Flush();
+    fail = data_->severity_ == NGLOG_FATAL &&
+           exit_on_dfatal.load(std::memory_order_relaxed);
+    tag = MessageTag(*data_);
   }
 
   if (fail) {

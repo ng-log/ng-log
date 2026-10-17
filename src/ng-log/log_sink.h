@@ -88,6 +88,9 @@ class NGLOG_EXPORT LogSink {
 };
 
 // Add or remove a LogSink as a consumer of logging data.  Thread-safe.
+// RemoveLogSink() returns once no other thread calls the sink. Called from
+// within a callback of the sink, it does not wait for threads that remove the
+// sink from within its callback as well, since they would wait for each other.
 NGLOG_EXPORT void AddLogSink(LogSink* destination);
 NGLOG_EXPORT void RemoveLogSink(LogSink* destination);
 
