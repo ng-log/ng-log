@@ -76,7 +76,6 @@ class ScopedEnvironmentVariable final {
   bool had_previous_;
 };
 
-//! Groups the digits of numbers in threes like many locales do.
 class GroupingPunctuation : public std::numpunct<char> {
  protected:
   char do_thousands_sep() const override { return ','; }
