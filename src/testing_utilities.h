@@ -4,15 +4,13 @@
 // SPDX-License-Identifier: BSD-3-Clause
 //
 // Test helpers that are not provided by GoogleTest itself: standard stream
-// capture, golden file comparison, environment overrides and names of
-// parameterized test instances.
+// capture, environment overrides and names of parameterized test instances.
 
 #ifndef NGLOG_SRC_TESTING_UTILITIES_H_
 #define NGLOG_SRC_TESTING_UTILITIES_H_
 
 #include <gtest/gtest.h>
 
-#include <cstdint>
 #include <cstdio>
 #include <string>
 
@@ -31,9 +29,8 @@ extern std::string StrError(int err);
 
 //! System temporary directory that other processes modify concurrently.
 const std::string& SystemTmpDir();
-// Directory for temporary test files and the root of the source tree.
+//! Directory for temporary test files.
 const std::string& TestTmpDir();
-const std::string& TestSrcDir();
 
 /**
  * Initializes logging with log files in the private temporary directory of
@@ -73,11 +70,6 @@ struct CaseName {
   }
 };
 
-// Placeholder pointer value logged by tests so that Munge() can normalize
-// it to a fixed golden-file placeholder regardless of the actual pointer
-// value produced at runtime.
-constexpr std::uint32_t kPtrTestValue = 0x12345678;
-
 //! Standard stream that a capture redirects.
 enum class StandardStream { kStdout, kStderr };
 
@@ -110,15 +102,6 @@ class ScopedStreamCapture final {
   std::string filename_;
   FileDescriptor original_;
 };
-
-/**
- * Checks that output equals the contents of a golden file once dates, times,
- * line numbers, thread identifiers, pointers and error descriptions are
- * normalized. A mismatch is explained by a diff of the lines around each
- * change.
- */
-testing::AssertionResult MatchesGoldenFile(const std::string& output,
-                                           const std::string& golden_filename);
 
 // Add hook for operator new to ensure there are no memory allocation.
 extern void (*g_new_hook)();

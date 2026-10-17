@@ -71,6 +71,7 @@
 #endif
 #include "testing_utilities.h"
 #include "utilities.h"
+#include "vlog_module_test_helper.h"
 
 #ifdef NGLOG_OS_WINDOWS
 struct WindowsHandleDeleter {
@@ -92,15 +93,19 @@ constexpr DWORD kLogFileLockLength = 1;
 
 // Introduce several symbols from gmock.
 using nglog::nglog_testing::ScopedMockLog;
+using nglog::testing_internal::IsVerboseInTestModule;
+using nglog::testing_internal::kVlogTestModule;
 using testing::_;
 using testing::AllOf;
 using testing::AnyOf;
 using testing::Contains;
 using testing::ElementsAre;
+using testing::ElementsAreArray;
 using testing::EndsWith;
 using testing::Ge;
 using testing::HasSubstr;
 using testing::InitGoogleMock;
+using testing::IsEmpty;
 using testing::Le;
 using testing::MatchesRegex;
 using testing::Not;
@@ -126,8 +131,6 @@ void SetExitOnDFatal(bool value);
 static void TestLogging(bool check_counts);
 static void TestRawLogging();
 static void LogWithLevels(int v, int severity, bool err, bool alsoerr);
-static void TestLoggingLevels();
-static void TestVLogModule();
 static void TestLogString();
 static void TestLogSink();
 static void TestLogToString();
@@ -187,8 +190,11 @@ class ScopedExitOnDFatal final {
   bool previous_;
 };
 
-// Captured pre-init, re-emitted by LoggingGoldenFile.Stderr.
+//! Output that main() captures before logging is initialized.
 std::string early_stderr;
+
+//! Pointer value that TestRawLogging() formats using the %p conversion.
+constexpr std::uintptr_t kRawLogPointerValue = 0x12345678;
 
 // argv[0] and the prefix formatter context, kept so
 // Logging.CustomLoggerDeletionOnShutdown can restore both after its own
@@ -206,6 +212,158 @@ std::string ReadFileContents(const std::string& path) {
   EXPECT_TRUE(input.is_open()) << "could not open " << path;
   return std::string{std::istreambuf_iterator<char>{input},
                      std::istreambuf_iterator<char>{}};
+}
+
+//! Splits text into lines without their line terminators.
+std::vector<std::string> SplitLines(const std::string& text) {
+  std::vector<std::string> lines;
+  std::istringstream input{text};
+  std::string line;
+  while (std::getline(input, line)) {
+    lines.push_back(line);
+  }
+  return lines;
+}
+
+//! Text that separates the prefix of a log line from its message.
+constexpr char kPrefixEnd[] = "] ";
+constexpr std::size_t kPrefixEndLength = sizeof(kPrefixEnd) - 1;
+//! Base name of this file as the prefix of a log line names it.
+constexpr char kSourceBasename[] = "logging_unittest.cc";
+//! Regular expression that matches kSourceBasename.
+constexpr char kSourceBasenamePattern[] = "logging_unittest\\.cc";
+
+using LineMatcher = testing::Matcher<const std::string&>;
+
+/**
+ * Matches a log line whose prefix starts with the given severity character
+ * and names this file, and whose message matches `message`. The date, time,
+ * thread identifier and line number in the prefix differ between runs and are
+ * therefore ignored.
+ */
+MATCHER_P2(LogLine, severity, message,
+           std::string{"is a log line of severity "} + severity +
+               " whose message " +
+               testing::DescribeMatcher<const std::string&>(message)) {
+  if (arg.empty() || arg.front() != severity) {
+    *result_listener << "whose severity is not " << severity;
+    return false;
+  }
+  const std::string::size_type prefix_end = arg.find(kPrefixEnd);
+  if (prefix_end == std::string::npos) {
+    *result_listener << "which lacks the end of a log prefix";
+    return false;
+  }
+  const std::string file = std::string{" "} + kSourceBasename + ":";
+  if (arg.rfind(file, prefix_end) == std::string::npos) {
+    *result_listener << "whose prefix does not name " << kSourceBasename;
+    return false;
+  }
+  return testing::ExplainMatchResult(LineMatcher{message},
+                                     arg.substr(prefix_end + kPrefixEndLength),
+                                     result_listener);
+}
+
+/**
+ * Matches text that starts with `leading` and continues with a match of
+ * `rest`.
+ */
+MATCHER_P2(StartsWithThen, leading, rest,
+           std::string{"starts with \""} + leading +
+               "\" followed by text that " +
+               testing::DescribeMatcher<const std::string&>(rest)) {
+  const std::string expected_start{leading};
+  if (arg.compare(0, expected_start.size(), expected_start) != 0) {
+    *result_listener << "which does not start with \"" << expected_start << '"';
+    return false;
+  }
+  return testing::ExplainMatchResult(
+      LineMatcher{rest}, arg.substr(expected_start.size()), result_listener);
+}
+
+//! Severity character and message of a log line that a test expects.
+struct ExpectedLine {
+  char severity;
+  const char* message;
+};
+
+//! Matches the lines in the given order.
+std::vector<LineMatcher> LogLines(const std::vector<ExpectedLine>& lines) {
+  std::vector<LineMatcher> matchers;
+  matchers.reserve(lines.size());
+  for (const ExpectedLine& line : lines) {
+    matchers.emplace_back(LogLine(line.severity, line.message));
+  }
+  return matchers;
+}
+
+//! Formats a pointer the way RAW_LOG formats the %p conversion.
+std::string FormatPointer(const void* pointer) {
+  constexpr std::size_t kBufferSize = 64;
+  char buffer[kBufferSize];
+  std::snprintf(buffer, sizeof(buffer), "%p", pointer);
+  return buffer;
+}
+
+#if defined(GTEST_USES_POSIX_RE) && GTEST_USES_POSIX_RE
+// POSIX regular expressions lack the shorthand for digits.
+constexpr char kDigitPattern[] = "[0-9]";
+#else
+constexpr char kDigitPattern[] = "\\d";
+#endif
+
+//! Regular expression that matches exactly `count` decimal digits.
+std::string DigitsPattern(std::size_t count) {
+  std::string pattern;
+  for (std::size_t i = 0; i < count; ++i) {
+    pattern += kDigitPattern;
+  }
+  return pattern;
+}
+
+//! Identifier of the calling thread as a stream prints it.
+std::string CurrentThreadId() {
+  std::ostringstream id;
+  id << std::this_thread::get_id();
+  return id.str();
+}
+
+/**
+ * Returns a regular expression that matches the default prefix
+ * "<severity><yyyymmdd> <hh:mm:ss.uuuuuu> <thread id> <file>:<line>] " of a
+ * message that the calling thread logs at the given line of this file.
+ */
+std::string DefaultPrefixPattern(char severity, int line) {
+  constexpr std::size_t kDateDigits = 8;
+  constexpr std::size_t kTimeFieldDigits = 2;
+  constexpr std::size_t kMicrosecondDigits = 6;
+  return std::string(1, severity) + DigitsPattern(kDateDigits) + ' ' +
+         DigitsPattern(kTimeFieldDigits) + ':' +
+         DigitsPattern(kTimeFieldDigits) + ':' +
+         DigitsPattern(kTimeFieldDigits) + "\\." +
+         DigitsPattern(kMicrosecondDigits) + " +" + CurrentThreadId() + ' ' +
+         kSourceBasenamePattern + ':' + std::to_string(line) + "\\] ";
+}
+
+/**
+ * Makes log messages reach only the given standard stream and resets the
+ * other flags that change which messages are written or how they look.
+ */
+void RouteLogMessagesTo(StandardStream stream) {
+  const bool to_stdout = stream == StandardStream::kStdout;
+  nglog::SetFlag(FLAGS_logtostdout, to_stdout);
+  nglog::SetFlag(FLAGS_logtostderr, !to_stdout);
+  nglog::SetFlag(FLAGS_stderrthreshold,
+                 to_stdout ? static_cast<std::int32_t>(NUM_SEVERITIES)
+                           : static_cast<std::int32_t>(NGLOG_ERROR));
+  nglog::SetFlag(FLAGS_alsologtostderr, false);
+  nglog::SetFlag(FLAGS_colorlogtostderr, false);
+  nglog::SetFlag(FLAGS_colorlogtostdout, false);
+  nglog::SetFlag(FLAGS_minloglevel, static_cast<std::int32_t>(NGLOG_INFO));
+  nglog::SetFlag(FLAGS_v, 0);
+  nglog::SetFlag(FLAGS_log_prefix, true);
+  nglog::SetFlag(FLAGS_log_year_in_prefix, true);
+  nglog::SetFlag(FLAGS_log_backtrace_at, std::string{});
 }
 
 #ifdef NGLOG_OS_WINDOWS
@@ -575,8 +733,8 @@ int main(int argc, char** argv) {
 
   EXPECT_FALSE(IsLoggingInitialized());
 
-  // Setting a custom prefix generator (it will use the default format so that
-  // the golden outputs can be reused):
+  // Install a custom prefix formatter that produces the default layout. Tests
+  // can therefore check the same prefix with either formatter.
   g_prefix_attacher_data = "good data";
   InitializeTestLogging(argv[0]);
   RestoreTestPrefixFormatter();
@@ -699,7 +857,7 @@ void TestRawLogging() {
   RAW_LOG(WARNING, "%s", s);
   const char const_s[] = "const array";
   RAW_LOG(INFO, "%s", const_s);
-  void* p = reinterpret_cast<void*>(kPtrTestValue);
+  void* p = reinterpret_cast<void*>(kRawLogPointerValue);
   RAW_LOG(INFO, "ptr %p", p);
   p = nullptr;
   RAW_LOG(INFO, "ptr %p", p);
@@ -820,37 +978,6 @@ void LogWithLevels(int v, int severity, bool err, bool alsoerr) {
   c = 6;
   VLOG_IF_EVERY_N(100, c -= 6, 3) << "don't vlog_if 100 every 1 expr";
   EXPECT_EQ(c, 0);
-}
-
-void TestLoggingLevels() {
-  LogWithLevels(0, NGLOG_INFO, false, false);
-  LogWithLevels(1, NGLOG_INFO, false, false);
-  LogWithLevels(-1, NGLOG_INFO, false, false);
-  LogWithLevels(0, NGLOG_WARNING, false, false);
-  LogWithLevels(0, NGLOG_ERROR, false, false);
-  LogWithLevels(0, NGLOG_FATAL, false, false);
-  LogWithLevels(0, NGLOG_FATAL, true, false);
-  LogWithLevels(0, NGLOG_FATAL, false, true);
-  LogWithLevels(1, NGLOG_WARNING, false, false);
-  LogWithLevels(1, NGLOG_FATAL, false, true);
-}
-
-int TestVlogHelper() {
-  if (VLOG_IS_ON(1)) {
-    return 1;
-  }
-  return 0;
-}
-
-void TestVLogModule() {
-  int c = TestVlogHelper();
-  EXPECT_EQ(0, c);
-
-#if defined(__GNUC__)
-  EXPECT_EQ(0, SetVLOGLevel("logging_unittest", 1));
-  c = TestVlogHelper();
-  EXPECT_EQ(1, c);
-#endif
 }
 
 #ifdef GTEST_HAS_DEATH_TEST
@@ -2674,8 +2801,8 @@ class TestLogSinkWriter {
     std::unique_lock<std::mutex> lock{mutex_};
     while (true) {
       // A message is processed only once the logging thread waits for it.
-      // This orders the output of both threads deterministically for the
-      // golden file comparison regardless of how either thread is scheduled.
+      // This orders the output of both threads deterministically regardless
+      // of how either thread is scheduled.
       condition_.wait(lock, [this] {
         return should_exit_ || (waiting_ && !messages_.empty());
       });
@@ -2755,7 +2882,6 @@ class TestWaitingLogSink : public LogSink {
 };
 
 // Check that LogSink::WaitTillSent can be used in the advertised way.
-// We also do golden-stderr comparison.
 static void TestLogSinkWaitTillSent() {
   // Clear global_messages here to make sure that this test case can be
   // reentered
@@ -2860,20 +2986,37 @@ TEST(Logging, FatalIgnoresMinimumLogLevel) {
 
 TEST(Logging, DefaultPrefixFormatting) {
   nglog::ScopedFlags<> save;
-  nglog::SetFlag(FLAGS_logtostderr, true);
-  nglog::SetFlag(FLAGS_stderrthreshold, static_cast<std::int32_t>(NGLOG_INFO));
-  nglog::SetFlag(FLAGS_log_prefix, true);
-  nglog::SetFlag(FLAGS_minloglevel, static_cast<std::int32_t>(NGLOG_INFO));
+  RouteLogMessagesTo(StandardStream::kStderr);
   InstallPrefixFormatter(nullptr);
 
   ScopedStreamCapture capture{StandardStream::kStderr};
-  LOG(INFO) << "default prefix formatting";
+  const int line = __LINE__ + 1;
+  LOG(WARNING) << "default prefix formatting";
   const std::string output = capture.Stop();
 
   RestoreTestPrefixFormatter();
 
-  EXPECT_THAT(output, AllOf(HasSubstr("] default prefix formatting\n"),
-                            Not(HasSubstr("good data"))));
+  EXPECT_THAT(SplitLines(output),
+              ElementsAre(MatchesRegex(DefaultPrefixPattern('W', line) +
+                                       "default prefix formatting")));
+}
+
+TEST(RawLogging, PrefixFormatting) {
+  nglog::ScopedFlags<> save;
+  RouteLogMessagesTo(StandardStream::kStderr);
+
+  ScopedStreamCapture capture{StandardStream::kStderr};
+  const int line = __LINE__ + 1;
+  RAW_LOG(ERROR, "raw prefix formatting");
+  const std::string output = capture.Stop();
+
+  // RAW_LOG cannot convert the time without allocating memory and therefore
+  // writes zeros in place of the date and time.
+  EXPECT_THAT(SplitLines(output),
+              ElementsAre(MatchesRegex(
+                  "E00000000 00:00:00\\.000000 +" + CurrentThreadId() + ' ' +
+                  kSourceBasenamePattern + ':' + std::to_string(line) +
+                  "\\] RAW: raw prefix formatting")));
 }
 
 TEST(TestExitOnDFatal, ToBeOrNotToBe) {
@@ -3125,70 +3268,796 @@ TEST(Logging, FatalThrow) {
   EXPECT_THROW({ LOG(FATAL) << "must throw to fail"; }, std::logic_error);
 }
 
-// Own suite, not "Logging": gtest schedules suites by first-registered
-// case, so sharing "Logging" would run these wherever its first case is
-// declared instead of last, where they need to be to capture a clean
-// stderr/stdout diff.
-
-TEST(LoggingGoldenFile, Stderr) {
-  ScopedStreamCapture capture{StandardStream::kStderr};
-
-  // re-emit early_stderr
-  LogMessage("dummy", LogMessage::kNoLogPrefix, NGLOG_INFO).stream()
-      << early_stderr;
-
-  TestLogging(true);
-  TestRawLogging();
-  TestLoggingLevels();
-  TestVLogModule();
-  TestLogString();
-  TestLogSink();
-  TestLogToString();
-  TestLogSinkWaitTillSent();
-  TestCHECK();
-  TestDCHECK();
-  TestSTREQ();
-
-  // TODO: The golden test portion of this test is very flakey.
-  EXPECT_TRUE(MatchesGoldenFile(capture.Stop(),
-                                TestSrcDir() + "/src/logging_unittest.err"));
-
-  nglog::SetFlag(FLAGS_logtostderr, false);
+TEST(LoggingBeforeInitialization, WritesAllMessagesToStderr) {
+  const std::vector<LineMatcher> expected{
+      LogLine(
+          'I',
+          "RAW: Test: v=0 stderrthreshold=2 logtostderr=0 alsologtostderr=0"),
+      LogLine('I', "RAW: vlog -1"),
+      LogLine('I', "RAW: vlog 0"),
+      LogLine('I', "RAW: log info"),
+      LogLine('W', "RAW: log warning"),
+      LogLine('E', "RAW: log error"),
+      StrEq("WARNING: Logging before InitializeLogging() is written to STDERR"),
+      LogLine('I', "vlog -1"),
+      LogLine('I', "vlog 0"),
+      LogLine('I', "log info"),
+      LogLine('W', "log warning"),
+      LogLine('E', "log error"),
+      LogLine('I', "vlog_if -1"),
+      LogLine('I', "vlog_if 0"),
+      LogLine('I', "log_if info"),
+      LogLine('W', "log_if warning"),
+      LogLine('E', "log_if error"),
+      LogLine('I', "vlog_if 0 expr"),
+      LogLine('I', "log_if info expr"),
+      LogLine('E', "log_if error expr"),
+      LogLine('I', "log_if info every 1 expr"),
+      LogLine('E', "log_if error every 1 expr"),
+      LogLine('I', "vlog_if 0 every 1 expr"),
+      LogLine(
+          'I',
+          "RAW: Test: v=0 stderrthreshold=0 logtostderr=0 alsologtostderr=0"),
+      LogLine('I', "RAW: vlog -1"),
+      LogLine('I', "RAW: vlog 0"),
+      LogLine('I', "RAW: log info"),
+      LogLine('W', "RAW: log warning"),
+      LogLine('E', "RAW: log error"),
+      LogLine('I', "vlog -1"),
+      LogLine('I', "vlog 0"),
+      LogLine('I', "log info"),
+      LogLine('W', "log warning"),
+      LogLine('E', "log error"),
+      LogLine('I', "vlog_if -1"),
+      LogLine('I', "vlog_if 0"),
+      LogLine('I', "log_if info"),
+      LogLine('W', "log_if warning"),
+      LogLine('E', "log_if error"),
+      LogLine('I', "vlog_if 0 expr"),
+      LogLine('I', "log_if info expr"),
+      LogLine('E', "log_if error expr"),
+      LogLine('I', "log_if info every 1 expr"),
+      LogLine('E', "log_if error every 1 expr"),
+      LogLine('I', "vlog_if 0 every 1 expr"),
+  };
+  EXPECT_THAT(SplitLines(early_stderr), ElementsAreArray(expected));
 }
 
-TEST(LoggingGoldenFile, Stdout) {
-  nglog::SetFlag(FLAGS_logtostdout, true);
-  nglog::SetFlag(FLAGS_stderrthreshold, NUM_SEVERITIES);
-  ScopedStreamCapture capture{StandardStream::kStdout};
-  TestRawLogging();
-  TestLoggingLevels();
-  // Same relative position as LoggingGoldenFile.Stderr: VLOG_IS_ON's
-  // per-call-site module-level override (set here) only takes effect on
-  // GCC; MSVC's VLOG_IS_ON ignores it and always reads FLAGS_v directly.
-  // Calling this after TestLoggingLevels() keeps the golden file's expected
-  // output free of that override, and thus platform-independent.
-  TestVLogModule();
-  TestLogString();
-  TestLogSink();
-  TestLogToString();
-  TestLogSinkWaitTillSent();
-  TestCHECK();
-  TestDCHECK();
-  TestSTREQ();
-  EXPECT_TRUE(MatchesGoldenFile(capture.Stop(),
-                                TestSrcDir() + "/src/logging_unittest.out"));
-  nglog::SetFlag(FLAGS_logtostdout, false);
+TEST(LogMacros, WriteFormattedMessagesInOrder) {
+  nglog::ScopedFlags<> save;
+  RouteLogMessagesTo(StandardStream::kStderr);
+
+  // The expected messages of the EVERY_N macros assume that their counters
+  // start from zero, which holds because no other test calls TestLogging().
+  ScopedStreamCapture capture{StandardStream::kStderr};
+  TestLogging(true);
+  const std::vector<std::string> lines = SplitLines(capture.Stop());
+
+  // PLOG appends the description of errno, which differs between platforms,
+  // followed by the error number.
+  const std::vector<LineMatcher> expected{
+      LogLine('I', "foo bar 10 3.4"),
+      LogLine('E', "Plog every 2, iteration 1: " + StrError(0) + " [0]"),
+      LogLine('E', "Log every 3, iteration 1"),
+      LogLine('E', "Log every 4, iteration 1"),
+      LogLine('W', "Log if every 5, iteration 1"),
+      LogLine('I', "Log if every 1, iteration 1"),
+      LogLine('E', "Log if less than 3 every 2, iteration 1"),
+      LogLine('I', "Log if every 1, iteration 2"),
+      LogLine('E', "Plog every 2, iteration 3: " + StrError(2) + " [2]"),
+      LogLine('I', "Log if every 1, iteration 3"),
+      LogLine('E', "Log if less than 3 every 2, iteration 3"),
+      LogLine('E', "Log every 3, iteration 4"),
+      LogLine('I', "Log if every 1, iteration 4"),
+      LogLine('E', "Plog every 2, iteration 5: " + StrError(4) + " [4]"),
+      LogLine('E', "Log every 4, iteration 5"),
+      LogLine('I', "Log if every 1, iteration 5"),
+      LogLine('W', "Log if every 5, iteration 6"),
+      LogLine('I', "Log if every 1, iteration 6"),
+      LogLine('E', "Plog every 2, iteration 7: " + StrError(6) + " [6]"),
+      LogLine('E', "Log every 3, iteration 7"),
+      LogLine('I', "Log if every 1, iteration 7"),
+      LogLine('I', "Log if every 1, iteration 8"),
+      LogLine('E', "Plog every 2, iteration 9: " + StrError(8) + " [8]"),
+      LogLine('E', "Log every 4, iteration 9"),
+      LogLine('I', "Log if every 1, iteration 9"),
+      LogLine('E', "Log every 3, iteration 10"),
+      LogLine('I', "Log if every 1, iteration 10"),
+      LogLine('W', "log_if this"),
+      LogLine('I', "array"),
+      LogLine('I', "const array"),
+      LogLine('E', "foo 1000       1000 3e8"),
+      LogLine('I', "foo          1"),
+      LogLine('E', "inner"),
+      LogLine('E', "outer"),
+      StrEq("no prefix"),
+  };
+  EXPECT_THAT(lines, ElementsAreArray(expected));
+}
+
+//! Standard stream that log messages are routed to.
+struct StreamRoute {
+  const char* name;
+  StandardStream stream;
+};
+
+void PrintTo(const StreamRoute& route, std::ostream* os) { *os << route.name; }
+
+/**
+ * Lines written to the stream that log messages are routed to and to the
+ * other standard stream.
+ */
+struct RoutedOutput {
+  std::vector<std::string> routed;
+  std::vector<std::string> other;
+};
+
+class LoggingToStream : public testing::TestWithParam<StreamRoute> {
+ protected:
+  void SetUp() override { RouteLogMessagesTo(GetParam().stream); }
+
+  bool RoutedToStderr() const {
+    return GetParam().stream == StandardStream::kStderr;
+  }
+
+  //! Captures what `function` writes to both standard streams.
+  template <class Function>
+  RoutedOutput Capture(Function function) const {
+    const StandardStream other =
+        RoutedToStderr() ? StandardStream::kStdout : StandardStream::kStderr;
+    ScopedStreamCapture other_capture{other};
+    ScopedStreamCapture routed_capture{GetParam().stream};
+    function();
+    RoutedOutput output;
+    output.routed = SplitLines(routed_capture.Stop());
+    output.other = SplitLines(other_capture.Stop());
+    return output;
+  }
+
+ private:
+  nglog::ScopedFlags<> flags_;
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    Streams, LoggingToStream,
+    testing::Values(StreamRoute{"Stderr", StandardStream::kStderr},
+                    StreamRoute{"Stdout", StandardStream::kStdout}),
+    CaseName{});
+
+TEST_P(LoggingToStream, RawLoggingWritesOnlyToStderr) {
+  const RoutedOutput output = Capture(&TestRawLogging);
+
+  const std::vector<LineMatcher> expected{
+      LogLine('I', "RAW: foo bar 10 3.400000"),
+      LogLine('W', "RAW: array"),
+      LogLine('I', "RAW: const array"),
+      LogLine('I', "RAW: ptr " + FormatPointer(reinterpret_cast<void*>(
+                                     kRawLogPointerValue))),
+      LogLine('I', "RAW: ptr " + FormatPointer(nullptr)),
+      LogLine('E', "RAW: foo 1000 0000001000 3e8"),
+      LogLine('I', "RAW: foo 1000"),
+      LogLine('I', "RAW: foo 1000"),
+      LogLine('W', "RAW: RAW_LOG ERROR: The Message was too long!"),
+      LogLine('I', "RAW: RAW_LOG ERROR: The Message was too long!"),
+      LogLine('I', "RAW: log"),
+      LogLine('I', "RAW: vlog 0 on"),
+      LogLine('I', "RAW: log"),
+      LogLine('I', "RAW: vlog 1 on"),
+      LogLine('I', "RAW: vlog 2 on"),
+  };
+  if (RoutedToStderr()) {
+    EXPECT_THAT(output.routed, ElementsAreArray(expected));
+    EXPECT_THAT(output.other, IsEmpty());
+  } else {
+    EXPECT_THAT(output.routed, IsEmpty());
+    EXPECT_THAT(output.other, ElementsAreArray(expected));
+  }
+}
+
+TEST_P(LoggingToStream, LogStringCollectsOrWritesMessages) {
+  const RoutedOutput output = Capture(&TestLogString);
+
+  const std::vector<LineMatcher> expected{
+      LogLine('I', "LOG_STRING: reported info"),
+      LogLine('W', "LOG_STRING: reported warning"),
+      LogLine('E', "LOG_STRING: reported error"),
+      LogLine('I', "Captured by LOG_STRING:  LOG_STRING: collected info"),
+      LogLine('I', "Captured by LOG_STRING:  LOG_STRING: collected warning"),
+      LogLine('I', "Captured by LOG_STRING:  LOG_STRING: collected error"),
+  };
+  EXPECT_THAT(output.routed, ElementsAreArray(expected));
+  EXPECT_THAT(output.other, IsEmpty());
+}
+
+TEST_P(LoggingToStream, LogToSinkSendsAndWritesMessages) {
+  const RoutedOutput output = Capture(&TestLogSink);
+
+  // The lines following "Captured by LOG_TO_SINK:" are the messages the sink
+  // formatted, logged without a prefix of their own.
+  const std::vector<LineMatcher> expected{
+      LogLine('I', "LOG_TO_SINK: collected info"),
+      LogLine('W', "LOG_TO_SINK: collected warning"),
+      LogLine('E', "LOG_TO_SINK: collected error"),
+      LogLine('I', "LOG_TO_SINK: reported info"),
+      LogLine('W', "LOG_TO_SINK: reported warning"),
+      LogLine('E', "LOG_TO_SINK: reported error"),
+      LogLine('I', "Captured by LOG_TO_SINK:"),
+      LogLine('I', "LOG_TO_SINK: collected info"),
+      LogLine('W', "LOG_TO_SINK: collected warning"),
+      LogLine('E', "LOG_TO_SINK: collected error"),
+      LogLine('I', "LOG_TO_SINK_BUT_NOT_TO_LOGFILE: collected info"),
+      LogLine('W', "LOG_TO_SINK_BUT_NOT_TO_LOGFILE: collected warning"),
+      LogLine('E', "LOG_TO_SINK_BUT_NOT_TO_LOGFILE: collected error"),
+  };
+  EXPECT_THAT(output.routed, ElementsAreArray(expected));
+  EXPECT_THAT(output.other, IsEmpty());
+}
+
+TEST_P(LoggingToStream, LogToStringCollectsOrWritesMessages) {
+  const RoutedOutput output = Capture(&TestLogToString);
+
+  const std::vector<LineMatcher> expected{
+      LogLine('I', "LOG_TO_STRING: collected info"),
+      LogLine('I', "Captured by LOG_TO_STRING:  LOG_TO_STRING: collected info"),
+      LogLine('W', "LOG_TO_STRING: collected warning"),
+      LogLine('I',
+              "Captured by LOG_TO_STRING:  LOG_TO_STRING: collected warning"),
+      LogLine('E', "LOG_TO_STRING: collected error"),
+      LogLine('I',
+              "Captured by LOG_TO_STRING:  LOG_TO_STRING: collected error"),
+      LogLine('I', "LOG_TO_STRING: reported info"),
+      LogLine('W', "LOG_TO_STRING: reported warning"),
+      LogLine('E', "LOG_TO_STRING: reported error"),
+  };
+  EXPECT_THAT(output.routed, ElementsAreArray(expected));
+  EXPECT_THAT(output.other, IsEmpty());
+}
+
+TEST_P(LoggingToStream, SinkWaitsUntilMessagesAreSent) {
+  const RoutedOutput output = Capture(&TestLogSinkWaitTillSent);
+
+  if (RoutedToStderr()) {
+    const std::vector<LineMatcher> expected{
+        LogLine('I', "Message 1"),
+        LogLine('I', "RAW: Buffering"),
+        LogLine('I', "RAW: Buffered"),
+        LogLine('I', "RAW: Waiting"),
+        LogLine('I', "RAW: Sink got a messages"),
+        LogLine('I', StartsWithThen("Sink is sending out a message: ",
+                                    LogLine('I', "Message 1"))),
+        LogLine('I', "Have 0 left"),
+        LogLine('I', "RAW: Waited"),
+        LogLine('E', "Message 2"),
+        LogLine('I', "RAW: Buffering"),
+        LogLine('I', "RAW: Buffered"),
+        LogLine('I', "RAW: Waiting"),
+        LogLine('I', "RAW: Sink got a messages"),
+        LogLine('I', StartsWithThen("Sink is sending out a message: ",
+                                    LogLine('E', "Message 2"))),
+        LogLine('I', "Have 0 left"),
+        LogLine('I', "RAW: Waited"),
+        LogLine('W', "Message 3"),
+        LogLine('I', "RAW: Buffering"),
+        LogLine('I', "RAW: Buffered"),
+        LogLine('I', "RAW: Waiting"),
+        LogLine('I', "RAW: Sink got a messages"),
+        LogLine('I', StartsWithThen("Sink is sending out a message: ",
+                                    LogLine('W', "Message 3"))),
+        LogLine('I', "Have 0 left"),
+        LogLine('I', "RAW: Waited"),
+        LogLine('I',
+                StartsWithThen("Sink capture: ", LogLine('I', "Message 1"))),
+        LogLine('I',
+                StartsWithThen("Sink capture: ", LogLine('E', "Message 2"))),
+        LogLine('I',
+                StartsWithThen("Sink capture: ", LogLine('W', "Message 3"))),
+    };
+    EXPECT_THAT(output.routed, ElementsAreArray(expected));
+    EXPECT_THAT(output.other, IsEmpty());
+  } else {
+    // RAW_LOG writes to stderr regardless of the stream log messages are
+    // routed to.
+    const std::vector<LineMatcher> expected{
+        LogLine('I', "Message 1"),
+        LogLine('I', StartsWithThen("Sink is sending out a message: ",
+                                    LogLine('I', "Message 1"))),
+        LogLine('I', "Have 0 left"),
+        LogLine('E', "Message 2"),
+        LogLine('I', StartsWithThen("Sink is sending out a message: ",
+                                    LogLine('E', "Message 2"))),
+        LogLine('I', "Have 0 left"),
+        LogLine('W', "Message 3"),
+        LogLine('I', StartsWithThen("Sink is sending out a message: ",
+                                    LogLine('W', "Message 3"))),
+        LogLine('I', "Have 0 left"),
+        LogLine('I',
+                StartsWithThen("Sink capture: ", LogLine('I', "Message 1"))),
+        LogLine('I',
+                StartsWithThen("Sink capture: ", LogLine('E', "Message 2"))),
+        LogLine('I',
+                StartsWithThen("Sink capture: ", LogLine('W', "Message 3"))),
+    };
+    const std::vector<LineMatcher> expected_raw{
+        LogLine('I', "RAW: Buffering"),
+        LogLine('I', "RAW: Buffered"),
+        LogLine('I', "RAW: Waiting"),
+        LogLine('I', "RAW: Sink got a messages"),
+        LogLine('I', "RAW: Waited"),
+        LogLine('I', "RAW: Buffering"),
+        LogLine('I', "RAW: Buffered"),
+        LogLine('I', "RAW: Waiting"),
+        LogLine('I', "RAW: Sink got a messages"),
+        LogLine('I', "RAW: Waited"),
+        LogLine('I', "RAW: Buffering"),
+        LogLine('I', "RAW: Buffered"),
+        LogLine('I', "RAW: Waiting"),
+        LogLine('I', "RAW: Sink got a messages"),
+        LogLine('I', "RAW: Waited"),
+    };
+    EXPECT_THAT(output.routed, ElementsAreArray(expected));
+    EXPECT_THAT(output.other, ElementsAreArray(expected_raw));
+  }
+}
+
+TEST_P(LoggingToStream, ChecksThatHoldWriteNothing) {
+  const RoutedOutput output = Capture([] {
+    TestCHECK();
+    TestDCHECK();
+    TestSTREQ();
+  });
+
+  EXPECT_THAT(output.routed, IsEmpty());
+  EXPECT_THAT(output.other, IsEmpty());
+}
+
+//! Flags that LogWithLevels() logs with and the lines it is expected to write.
+struct LevelsCase {
+  const char* name;
+  StandardStream stream;
+  std::int32_t verbosity;
+  std::int32_t stderr_threshold;
+  bool log_to_stderr;
+  bool also_log_to_stderr;
+  std::vector<ExpectedLine> expected;
+};
+
+void PrintTo(const LevelsCase& levels, std::ostream* os) { *os << levels.name; }
+
+class LoggingLevels : public testing::TestWithParam<LevelsCase> {};
+
+/**
+ * Each case lists the lines that reach the stream log messages are routed to.
+ * LogWithLevels() logs its first line using the flags of the route, which
+ * write RAW_LOG messages to stderr. Unless logtostderr or logtostdout is set,
+ * the other messages reach stderr only if their severity is at least the
+ * stderr threshold or alsologtostderr is set. With logtostdout, messages
+ * below the stderr threshold reach stdout and the remaining ones stderr.
+ */
+const LevelsCase kLevelsCases[] = {
+    {"StderrVerbosity0ThresholdInfo",
+     StandardStream::kStderr,
+     0,
+     NGLOG_INFO,
+     false,
+     false,
+     {{'I', "RAW: Test: v=0 stderrthreshold=0 logtostderr=0 alsologtostderr=0"},
+      {'I', "RAW: vlog -1"},
+      {'I', "RAW: vlog 0"},
+      {'I', "RAW: log info"},
+      {'W', "RAW: log warning"},
+      {'E', "RAW: log error"},
+      {'I', "vlog -1"},
+      {'I', "vlog 0"},
+      {'I', "log info"},
+      {'W', "log warning"},
+      {'E', "log error"},
+      {'I', "vlog_if -1"},
+      {'I', "vlog_if 0"},
+      {'I', "log_if info"},
+      {'W', "log_if warning"},
+      {'E', "log_if error"},
+      {'I', "vlog_if 0 expr"},
+      {'I', "log_if info expr"},
+      {'E', "log_if error expr"},
+      {'I', "log_if info every 1 expr"},
+      {'E', "log_if error every 1 expr"},
+      {'I', "vlog_if 0 every 1 expr"}}},
+    {"StderrVerbosity1ThresholdInfo",
+     StandardStream::kStderr,
+     1,
+     NGLOG_INFO,
+     false,
+     false,
+     {{'I', "RAW: Test: v=1 stderrthreshold=0 logtostderr=0 alsologtostderr=0"},
+      {'I', "RAW: vlog -1"},
+      {'I', "RAW: vlog 0"},
+      {'I', "RAW: vlog 1"},
+      {'I', "RAW: log info"},
+      {'W', "RAW: log warning"},
+      {'E', "RAW: log error"},
+      {'I', "vlog -1"},
+      {'I', "vlog 0"},
+      {'I', "vlog 1"},
+      {'I', "log info"},
+      {'W', "log warning"},
+      {'E', "log error"},
+      {'I', "vlog_if -1"},
+      {'I', "vlog_if 0"},
+      {'I', "vlog_if 1"},
+      {'I', "log_if info"},
+      {'W', "log_if warning"},
+      {'E', "log_if error"},
+      {'I', "vlog_if 0 expr"},
+      {'I', "log_if info expr"},
+      {'E', "log_if error expr"},
+      {'I', "log_if info every 1 expr"},
+      {'E', "log_if error every 1 expr"},
+      {'I', "vlog_if 0 every 1 expr"}}},
+    {"StderrVerbosityMinus1ThresholdInfo",
+     StandardStream::kStderr,
+     -1,
+     NGLOG_INFO,
+     false,
+     false,
+     {{'I',
+       "RAW: Test: v=-1 stderrthreshold=0 logtostderr=0 alsologtostderr=0"},
+      {'I', "RAW: vlog -1"},
+      {'I', "RAW: log info"},
+      {'W', "RAW: log warning"},
+      {'E', "RAW: log error"},
+      {'I', "vlog -1"},
+      {'I', "log info"},
+      {'W', "log warning"},
+      {'E', "log error"},
+      {'I', "vlog_if -1"},
+      {'I', "log_if info"},
+      {'W', "log_if warning"},
+      {'E', "log_if error"},
+      {'I', "log_if info expr"},
+      {'E', "log_if error expr"},
+      {'I', "log_if info every 1 expr"},
+      {'E', "log_if error every 1 expr"}}},
+    {"StderrVerbosity0ThresholdWarning",
+     StandardStream::kStderr,
+     0,
+     NGLOG_WARNING,
+     false,
+     false,
+     {{'I', "RAW: Test: v=0 stderrthreshold=1 logtostderr=0 alsologtostderr=0"},
+      {'W', "RAW: log warning"},
+      {'E', "RAW: log error"},
+      {'W', "log warning"},
+      {'E', "log error"},
+      {'W', "log_if warning"},
+      {'E', "log_if error"},
+      {'E', "log_if error expr"},
+      {'E', "log_if error every 1 expr"}}},
+    {"StderrVerbosity0ThresholdError",
+     StandardStream::kStderr,
+     0,
+     NGLOG_ERROR,
+     false,
+     false,
+     {{'I', "RAW: Test: v=0 stderrthreshold=2 logtostderr=0 alsologtostderr=0"},
+      {'E', "RAW: log error"},
+      {'E', "log error"},
+      {'E', "log_if error"},
+      {'E', "log_if error expr"},
+      {'E', "log_if error every 1 expr"}}},
+    {"StderrVerbosity0ThresholdFatal",
+     StandardStream::kStderr,
+     0,
+     NGLOG_FATAL,
+     false,
+     false,
+     {{'I',
+       "RAW: Test: v=0 stderrthreshold=3 logtostderr=0 alsologtostderr=0"}}},
+    {"StderrVerbosity0ThresholdFatalLogToStderr",
+     StandardStream::kStderr,
+     0,
+     NGLOG_FATAL,
+     true,
+     false,
+     {{'I', "RAW: Test: v=0 stderrthreshold=3 logtostderr=1 alsologtostderr=0"},
+      {'I', "RAW: vlog -1"},
+      {'I', "RAW: vlog 0"},
+      {'I', "RAW: log info"},
+      {'W', "RAW: log warning"},
+      {'E', "RAW: log error"},
+      {'I', "vlog -1"},
+      {'I', "vlog 0"},
+      {'I', "log info"},
+      {'W', "log warning"},
+      {'E', "log error"},
+      {'I', "vlog_if -1"},
+      {'I', "vlog_if 0"},
+      {'I', "log_if info"},
+      {'W', "log_if warning"},
+      {'E', "log_if error"},
+      {'I', "vlog_if 0 expr"},
+      {'I', "log_if info expr"},
+      {'E', "log_if error expr"},
+      {'I', "log_if info every 1 expr"},
+      {'E', "log_if error every 1 expr"},
+      {'I', "vlog_if 0 every 1 expr"}}},
+    {"StderrVerbosity0ThresholdFatalAlsoLogToStderr",
+     StandardStream::kStderr,
+     0,
+     NGLOG_FATAL,
+     false,
+     true,
+     {{'I', "RAW: Test: v=0 stderrthreshold=3 logtostderr=0 alsologtostderr=1"},
+      {'I', "RAW: vlog -1"},
+      {'I', "RAW: vlog 0"},
+      {'I', "RAW: log info"},
+      {'W', "RAW: log warning"},
+      {'E', "RAW: log error"},
+      {'I', "vlog -1"},
+      {'I', "vlog 0"},
+      {'I', "log info"},
+      {'W', "log warning"},
+      {'E', "log error"},
+      {'I', "vlog_if -1"},
+      {'I', "vlog_if 0"},
+      {'I', "log_if info"},
+      {'W', "log_if warning"},
+      {'E', "log_if error"},
+      {'I', "vlog_if 0 expr"},
+      {'I', "log_if info expr"},
+      {'E', "log_if error expr"},
+      {'I', "log_if info every 1 expr"},
+      {'E', "log_if error every 1 expr"},
+      {'I', "vlog_if 0 every 1 expr"}}},
+    {"StderrVerbosity1ThresholdWarning",
+     StandardStream::kStderr,
+     1,
+     NGLOG_WARNING,
+     false,
+     false,
+     {{'I', "RAW: Test: v=1 stderrthreshold=1 logtostderr=0 alsologtostderr=0"},
+      {'W', "RAW: log warning"},
+      {'E', "RAW: log error"},
+      {'W', "log warning"},
+      {'E', "log error"},
+      {'W', "log_if warning"},
+      {'E', "log_if error"},
+      {'E', "log_if error expr"},
+      {'E', "log_if error every 1 expr"}}},
+    {"StderrVerbosity1ThresholdFatalAlsoLogToStderr",
+     StandardStream::kStderr,
+     1,
+     NGLOG_FATAL,
+     false,
+     true,
+     {{'I', "RAW: Test: v=1 stderrthreshold=3 logtostderr=0 alsologtostderr=1"},
+      {'I', "RAW: vlog -1"},
+      {'I', "RAW: vlog 0"},
+      {'I', "RAW: vlog 1"},
+      {'I', "RAW: log info"},
+      {'W', "RAW: log warning"},
+      {'E', "RAW: log error"},
+      {'I', "vlog -1"},
+      {'I', "vlog 0"},
+      {'I', "vlog 1"},
+      {'I', "log info"},
+      {'W', "log warning"},
+      {'E', "log error"},
+      {'I', "vlog_if -1"},
+      {'I', "vlog_if 0"},
+      {'I', "vlog_if 1"},
+      {'I', "log_if info"},
+      {'W', "log_if warning"},
+      {'E', "log_if error"},
+      {'I', "vlog_if 0 expr"},
+      {'I', "log_if info expr"},
+      {'E', "log_if error expr"},
+      {'I', "log_if info every 1 expr"},
+      {'E', "log_if error every 1 expr"},
+      {'I', "vlog_if 0 every 1 expr"}}},
+    {"StdoutVerbosity0ThresholdInfo",
+     StandardStream::kStdout,
+     0,
+     NGLOG_INFO,
+     false,
+     false,
+     {}},
+    {"StdoutVerbosity1ThresholdInfo",
+     StandardStream::kStdout,
+     1,
+     NGLOG_INFO,
+     false,
+     false,
+     {}},
+    {"StdoutVerbosityMinus1ThresholdInfo",
+     StandardStream::kStdout,
+     -1,
+     NGLOG_INFO,
+     false,
+     false,
+     {}},
+    {"StdoutVerbosity0ThresholdWarning",
+     StandardStream::kStdout,
+     0,
+     NGLOG_WARNING,
+     false,
+     false,
+     {{'I', "vlog -1"},
+      {'I', "vlog 0"},
+      {'I', "log info"},
+      {'I', "vlog_if -1"},
+      {'I', "vlog_if 0"},
+      {'I', "log_if info"},
+      {'I', "vlog_if 0 expr"},
+      {'I', "log_if info expr"},
+      {'I', "log_if info every 1 expr"},
+      {'I', "vlog_if 0 every 1 expr"}}},
+    {"StdoutVerbosity0ThresholdError",
+     StandardStream::kStdout,
+     0,
+     NGLOG_ERROR,
+     false,
+     false,
+     {{'I', "vlog -1"},
+      {'I', "vlog 0"},
+      {'I', "log info"},
+      {'W', "log warning"},
+      {'I', "vlog_if -1"},
+      {'I', "vlog_if 0"},
+      {'I', "log_if info"},
+      {'W', "log_if warning"},
+      {'I', "vlog_if 0 expr"},
+      {'I', "log_if info expr"},
+      {'I', "log_if info every 1 expr"},
+      {'I', "vlog_if 0 every 1 expr"}}},
+    {"StdoutVerbosity0ThresholdFatal",
+     StandardStream::kStdout,
+     0,
+     NGLOG_FATAL,
+     false,
+     false,
+     {{'I', "vlog -1"},
+      {'I', "vlog 0"},
+      {'I', "log info"},
+      {'W', "log warning"},
+      {'E', "log error"},
+      {'I', "vlog_if -1"},
+      {'I', "vlog_if 0"},
+      {'I', "log_if info"},
+      {'W', "log_if warning"},
+      {'E', "log_if error"},
+      {'I', "vlog_if 0 expr"},
+      {'I', "log_if info expr"},
+      {'E', "log_if error expr"},
+      {'I', "log_if info every 1 expr"},
+      {'E', "log_if error every 1 expr"},
+      {'I', "vlog_if 0 every 1 expr"}}},
+    {"StdoutVerbosity0ThresholdFatalLogToStderr",
+     StandardStream::kStdout,
+     0,
+     NGLOG_FATAL,
+     true,
+     false,
+     {{'I', "vlog -1"},
+      {'I', "vlog 0"},
+      {'I', "log info"},
+      {'W', "log warning"},
+      {'E', "log error"},
+      {'I', "vlog_if -1"},
+      {'I', "vlog_if 0"},
+      {'I', "log_if info"},
+      {'W', "log_if warning"},
+      {'E', "log_if error"},
+      {'I', "vlog_if 0 expr"},
+      {'I', "log_if info expr"},
+      {'E', "log_if error expr"},
+      {'I', "log_if info every 1 expr"},
+      {'E', "log_if error every 1 expr"},
+      {'I', "vlog_if 0 every 1 expr"}}},
+    {"StdoutVerbosity0ThresholdFatalAlsoLogToStderr",
+     StandardStream::kStdout,
+     0,
+     NGLOG_FATAL,
+     false,
+     true,
+     {{'I', "vlog -1"},
+      {'I', "vlog 0"},
+      {'I', "log info"},
+      {'W', "log warning"},
+      {'E', "log error"},
+      {'I', "vlog_if -1"},
+      {'I', "vlog_if 0"},
+      {'I', "log_if info"},
+      {'W', "log_if warning"},
+      {'E', "log_if error"},
+      {'I', "vlog_if 0 expr"},
+      {'I', "log_if info expr"},
+      {'E', "log_if error expr"},
+      {'I', "log_if info every 1 expr"},
+      {'E', "log_if error every 1 expr"},
+      {'I', "vlog_if 0 every 1 expr"}}},
+    {"StdoutVerbosity1ThresholdWarning",
+     StandardStream::kStdout,
+     1,
+     NGLOG_WARNING,
+     false,
+     false,
+     {{'I', "vlog -1"},
+      {'I', "vlog 0"},
+      {'I', "vlog 1"},
+      {'I', "log info"},
+      {'I', "vlog_if -1"},
+      {'I', "vlog_if 0"},
+      {'I', "vlog_if 1"},
+      {'I', "log_if info"},
+      {'I', "vlog_if 0 expr"},
+      {'I', "log_if info expr"},
+      {'I', "log_if info every 1 expr"},
+      {'I', "vlog_if 0 every 1 expr"}}},
+    {"StdoutVerbosity1ThresholdFatalAlsoLogToStderr",
+     StandardStream::kStdout,
+     1,
+     NGLOG_FATAL,
+     false,
+     true,
+     {{'I', "vlog -1"},
+      {'I', "vlog 0"},
+      {'I', "vlog 1"},
+      {'I', "log info"},
+      {'W', "log warning"},
+      {'E', "log error"},
+      {'I', "vlog_if -1"},
+      {'I', "vlog_if 0"},
+      {'I', "vlog_if 1"},
+      {'I', "log_if info"},
+      {'W', "log_if warning"},
+      {'E', "log_if error"},
+      {'I', "vlog_if 0 expr"},
+      {'I', "log_if info expr"},
+      {'E', "log_if error expr"},
+      {'I', "log_if info every 1 expr"},
+      {'E', "log_if error every 1 expr"},
+      {'I', "vlog_if 0 every 1 expr"}}},
+
+};
+
+INSTANTIATE_TEST_SUITE_P(Flags, LoggingLevels, testing::ValuesIn(kLevelsCases),
+                         CaseName{});
+
+TEST_P(LoggingLevels, WritesMessagesThatTheFlagsEnable) {
+  const LevelsCase& param = GetParam();
+  nglog::ScopedFlags<> save;
+  RouteLogMessagesTo(param.stream);
+
+  ScopedStreamCapture capture{param.stream};
+  LogWithLevels(param.verbosity, param.stderr_threshold, param.log_to_stderr,
+                param.also_log_to_stderr);
+  EXPECT_THAT(SplitLines(capture.Stop()),
+              ElementsAreArray(LogLines(param.expected)));
+}
+
+TEST(VLOG, ModuleLevelOverridesVerbosityFlag) {
+  constexpr int kVlogTestLevel = 1;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_v, 0);
+  EXPECT_FALSE(IsVerboseInTestModule(kVlogTestLevel));
+
+#if defined(__GNUC__)
+  const int previous_level = SetVLOGLevel(kVlogTestModule, kVlogTestLevel);
+  EXPECT_EQ(previous_level, 0);
+  EXPECT_TRUE(IsVerboseInTestModule(kVlogTestLevel));
+  SetVLOGLevel(kVlogTestModule, previous_level);
+#endif
 }
 
 #if defined(__GNUC__)
-TEST(VLOG, ConcurrentLevelUpdates) {
+static void UpdateVLogLevelWhileReading() {
   constexpr int kInitialLevel = 0;
   constexpr int kUpdateCount = 100000;
   constexpr int kVlogTestLevel = 1;
   constexpr int kVlogLevelPeriod = 2;
   constexpr int kYieldPeriod = 64;
-  SetVLOGLevel("logging_unittest", kInitialLevel);
-  static_cast<void>(VLOG_IS_ON(kVlogTestLevel));
+  SetVLOGLevel(kVlogTestModule, kInitialLevel);
+  static_cast<void>(IsVerboseInTestModule(kVlogTestLevel));
   std::atomic<bool> stop{false};
   std::condition_variable reader_started_condition;
   std::mutex reader_started_mutex;
@@ -3201,7 +4070,7 @@ TEST(VLOG, ConcurrentLevelUpdates) {
     }
     reader_started_condition.notify_one();
     while (!stop.load(std::memory_order_relaxed)) {
-      static_cast<void>(VLOG_IS_ON(kVlogTestLevel));
+      static_cast<void>(IsVerboseInTestModule(kVlogTestLevel));
     }
   });
 
@@ -3212,7 +4081,7 @@ TEST(VLOG, ConcurrentLevelUpdates) {
   }
 
   for (int i = 0; i < kUpdateCount; ++i) {
-    SetVLOGLevel("logging_unittest", i % kVlogLevelPeriod);
+    SetVLOGLevel(kVlogTestModule, i % kVlogLevelPeriod);
     if (i % kYieldPeriod == 0) {
       std::this_thread::yield();
     }
@@ -3220,6 +4089,8 @@ TEST(VLOG, ConcurrentLevelUpdates) {
 
   stop.store(true, std::memory_order_relaxed);
   reader.join();
-  SetVLOGLevel("logging_unittest", kInitialLevel);
+  SetVLOGLevel(kVlogTestModule, kInitialLevel);
 }
+
+TEST(VLOG, ConcurrentLevelUpdates) { UpdateVLogLevelWhileReading(); }
 #endif

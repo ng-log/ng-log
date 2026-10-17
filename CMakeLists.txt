@@ -451,17 +451,6 @@ check_cxx_symbol_exists (localtime_r "cstdlib;ctime" HAVE_LOCALTIME_R)
 
 set (SIZEOF_VOID_P ${CMAKE_SIZEOF_VOID_P})
 
-# fopen/open on Cygwin can not handle unix-type paths like /home/....
-# therefore we translate TEST_SRC_DIR to windows-path.
-if (CYGWIN)
-  execute_process (COMMAND cygpath.exe -m ${ng-log_SOURCE_DIR}
-                   OUTPUT_STRIP_TRAILING_WHITESPACE
-                   OUTPUT_VARIABLE TEST_SRC_DIR)
-  set (TEST_SRC_DIR \"${TEST_SRC_DIR}\")
-else (CYGWIN)
-  set (TEST_SRC_DIR \"${ng-log_SOURCE_DIR}\")
-endif (CYGWIN)
-
 configure_file (src/config.h.cmake.in config.h)
 
 # Probe each stacktrace implementation independently. Select the first
@@ -850,6 +839,7 @@ if (BUILD_TESTING AND GTest_FOUND)
 
   add_executable (logging_unittest
     src/logging_unittest.cc
+    src/vlog_module_test_helper.cc
   )
 
   target_link_libraries (logging_unittest PRIVATE ng-log_test)

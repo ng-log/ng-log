@@ -179,9 +179,6 @@
 /* The size of `void *', as computed by sizeof. */
 #cmakedefine SIZEOF_VOID_P ${SIZEOF_VOID_P}
 
-/* location of source code */
-#cmakedefine TEST_SRC_DIR ${TEST_SRC_DIR}
-
 /* define if abi::__cxa_demangle is available in cxxabi.h */
 #cmakedefine HAVE___CXA_DEMANGLE
 

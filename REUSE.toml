@@ -3,22 +3,6 @@ SPDX-PackageName = "ng-log"
 SPDX-PackageDownloadLocation = "https://github.com/ng-log/ng-log"
 
 [[annotations]]
-path = "src/logging_unittest.err"
-SPDX-FileCopyrightText = [
-  "2008-2021 Google Inc.",
-  "2026 The ng-log contributors",
-]
-SPDX-License-Identifier = "BSD-3-Clause"
-
-[[annotations]]
-path = "src/logging_unittest.out"
-SPDX-FileCopyrightText = [
-  "2022 Google Inc.",
-  "2026 The ng-log contributors",
-]
-SPDX-License-Identifier = "BSD-3-Clause"
-
-[[annotations]]
 path = "docs/failure-stacktrace.html"
 SPDX-FileCopyrightText = "2026 The ng-log contributors"
 SPDX-License-Identifier = "BSD-3-Clause"
