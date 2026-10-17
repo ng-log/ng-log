@@ -58,7 +58,6 @@ static _Unwind_Reason_Code GetOneFrame(struct _Unwind_Context* uc, void* opq) {
   return _URC_NO_REASON;
 }
 
-// If you change this function, also change GetStackFrames below.
 int GetStackTrace(void** result, int max_depth, int skip_count) {
   if (!ready_to_run) {
     return 0;

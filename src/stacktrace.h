@@ -28,14 +28,15 @@ constexpr char kStackDumpCutOffMarker[] = "    (More stack frames follow...)\n";
 
 #if defined(HAVE_STACKTRACE)
 
-// This is similar to the GetStackFrames routine, except that it returns
-// the stack trace only, and not the stack frame sizes as well.
+// Stores the return addresses of up to max_depth callers in result,
+// skipping the innermost skip_count frames besides this function, and
+// returns their number.
 // Example:
 //      main() { foo(); }
 //      foo() { bar(); }
 //      bar() {
 //        void* result[10];
-//        int depth = GetStackFrames(result, 10, 1);
+//        int depth = GetStackTrace(result, 10, 1);
 //      }
 //
 // This produces:

@@ -469,7 +469,8 @@ void FormatSymbolizedFrame(const char* symbol, std::size_t symbol_length,
                         &display_path_length, &line, &line_length)) {
     constexpr std::size_t kDisplayPathPrefixComponents = 2;
     constexpr std::size_t kDisplayPathSuffixComponents = 2;
-    char short_path[128];
+    constexpr std::size_t kMaxDisplayPathLength = 128;
+    char short_path[kMaxDisplayPathLength];
     FormatDisplayPath(
         display_path, display_path_length, cwd, kDisplayPathPrefixComponents,
         kDisplayPathSuffixComponents, short_path, sizeof(short_path));

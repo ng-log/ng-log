@@ -10,10 +10,10 @@
 #include "ng-log/platform.h"
 #include "utilities.h"
 
-// implementation uses posix_spawn() when available and retains the existing
-// fork()+exec() fallback. The signal-safe mode is defined separately in
-// subprocess_fork.cc so the normal implementation cannot accidentally
-// enter a fork child with the signal-handler constraints.
+// The normal mode uses posix_spawn() where available and falls back to
+// fork() and exec() otherwise. The signal-safe mode is defined separately in
+// subprocess_fork.cc, so that the normal implementation cannot enter a fork
+// child that is subject to the constraints of signal handlers.
 
 #ifdef HAVE_SUBPROCESS
 
@@ -103,8 +103,7 @@ bool HasPathEntry(char* const envp[], const std::locale& locale) {
     std::transform(p, p + kPathPrefixLen, upper,
                    [&locale](char c) { return std::toupper(c, locale); });
 
-    if (std::search(upper, upper + kPathPrefixLen, kPathPrefix,
-                    kPathPrefix + kPathPrefixLen) == upper) {
+    if (std::equal(upper, upper + kPathPrefixLen, kPathPrefix)) {
       return true;
     }
   }

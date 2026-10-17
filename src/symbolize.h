@@ -22,9 +22,8 @@
 //   If the symbol isn't found in the regular symbol table (binary is
 //   stripped), try the same thing with a dynamic symbol table.
 //
-// Note that Symbolize() is originally implemented to be used in
-// FailureSignalHandler() in base/google.cc.  Hence it doesn't use
-// malloc() and other unsafe operations.  It should be both
+// Note that Symbolize() is used by the failure signal handler.  Hence it
+// doesn't use malloc() and other unsafe operations.  It should be both
 // thread-safe and async-signal-safe.
 
 #ifndef NGLOG_INTERNAL_SYMBOLIZE_H

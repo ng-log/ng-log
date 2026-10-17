@@ -593,7 +593,7 @@ TEST(WindowsUtf8Path, ClassifiesInvalidUtf8Path) {
 
 TEST(Utf8Output, PreservesRedirectedBytes) {
   const std::string message = "caf\xC3\xA9 \xE2\x98\x83";
-  const std::unique_ptr<std::FILE> file_owner{std::tmpfile()};
+  const nglog::FilePtr file_owner{std::tmpfile()};
   std::FILE* const file = file_owner.get();
   ASSERT_NE(file, nullptr);
 
@@ -609,7 +609,7 @@ TEST(Utf8Output, PreservesRedirectedBytes) {
 
 TEST(Utf8Output, PreservesLengthDelimitedBytes) {
   const char message[] = {'a', '\0', '\xFF', 'b'};
-  const std::unique_ptr<std::FILE> file_owner{std::tmpfile()};
+  const nglog::FilePtr file_owner{std::tmpfile()};
   std::FILE* const file = file_owner.get();
   ASSERT_NE(file, nullptr);
 
@@ -793,7 +793,7 @@ TEST(WideToUtf8, RejectsNullInputWithLength) {
 
 #ifdef NGLOG_OS_WINDOWS
 TEST(Utf8Output, PreservesRedirectedTextModeBytes) {
-  const std::unique_ptr<std::FILE> file_owner{std::tmpfile()};
+  const nglog::FilePtr file_owner{std::tmpfile()};
   std::FILE* const file = file_owner.get();
   ASSERT_NE(file, nullptr);
   ASSERT_NE(_setmode(_fileno(file), _O_TEXT), -1);
@@ -809,7 +809,7 @@ TEST(Utf8Output, PreservesRedirectedTextModeBytes) {
 }
 
 TEST(Utf8Output, TranslatesNewlinesOfTextModeFile) {
-  const std::unique_ptr<std::FILE> stream_owner{std::tmpfile()};
+  const nglog::FilePtr stream_owner{std::tmpfile()};
   std::FILE* const stream = stream_owner.get();
   ASSERT_NE(stream, nullptr);
   ASSERT_NE(_setmode(_fileno(stream), _O_TEXT), -1);
@@ -867,7 +867,7 @@ TEST(Utf8Output, TranslatesNewlinesOfTextModeFileDescriptor) {
 }
 
 TEST(Utf8Output, WritesSignalSafeLengthDelimitedBytes) {
-  const std::unique_ptr<std::FILE> file_owner{std::tmpfile()};
+  const nglog::FilePtr file_owner{std::tmpfile()};
   std::FILE* const file = file_owner.get();
   ASSERT_NE(file, nullptr);
 
@@ -1125,7 +1125,7 @@ TEST_F(Utf8ConsoleOutput, WritesAsciiToFileDescriptor) {
 }
 
 TEST_F(Utf8ConsoleOutput, WritesAsciiToFile) {
-  const std::unique_ptr<std::FILE> stream{_fdopen(file_descriptor_, "wb")};
+  const nglog::FilePtr stream{_fdopen(file_descriptor_, "wb")};
   ASSERT_NE(stream, nullptr);
 
   constexpr std::array<char, 3> kMessage = {'l', 'o', 'g'};
@@ -1485,7 +1485,7 @@ TEST(Utf8StandardStream, RedirectionToReusedHandleWritesFile) {
 }
 
 TEST_F(Utf8ConsoleOutput, WritesUnicode) {
-  const std::unique_ptr<std::FILE> stream{_fdopen(file_descriptor_, "wb")};
+  const nglog::FilePtr stream{_fdopen(file_descriptor_, "wb")};
   ASSERT_NE(stream, nullptr);
 
   const std::string message = "caf\xC3\xA9 \xE2\x98\x83";

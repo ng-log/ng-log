@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <limits>
 #include <string>
 
 #include "config.h"
@@ -146,19 +147,17 @@ class MinimalFormatter {
   // Formats "number" in "radix" and updates the internal cursor.
   // Lowercase letters are used for 'a' - 'z'.
   void AppendUint64(std::uint64_t number, unsigned radix) {
-    unsigned i = 0;
-    while (cursor_ + i < end_) {
-      const std::uint64_t tmp = number % radix;
+    // The digits emerge least significant first, so they are written
+    // backwards into a scratch buffer that fits the digits of any radix and
+    // then appended in order.
+    char digits[std::numeric_limits<std::uint64_t>::digits];
+    char* const digits_end = digits + sizeof(digits);
+    char* first = digits_end;
+    do {
+      *--first = kHexDigits[number % radix];
       number /= radix;
-      cursor_[i] = kHexDigits[tmp];
-      ++i;
-      if (number == 0) {
-        break;
-      }
-    }
-    // Reverse the bytes written.
-    std::reverse(cursor_, cursor_ + i);
-    cursor_ += i;
+    } while (number != 0);
+    AppendString(first, static_cast<std::size_t>(digits_end - first));
   }
 
   // Formats "number" as hexadecimal number, and updates the internal
@@ -260,12 +259,12 @@ ColorMode g_stderr_color_mode = ColorMode::kNone;
 bool g_stderr_hyperlinks = false;
 
 // The local hostname, used as the authority component of "file://" URIs in
-// stack trace hyperlinks (see BuildFileUri() in color.h): terminal
-// implementations of OSC 8 file links (e.g. iTerm2, VS Code) compare it
-// against their own hostname before offering to open the link, which
-// matters for a log that might be viewed on a different machine than the
-// one that produced it. Resolved once by InstallFailureSignalHandler(),
-// since gethostname() is not async-signal-safe.
+// stack trace hyperlinks, as BuildFileUri() in internal/source_location.h
+// builds them. Terminals that implement OSC 8 file links, such as iTerm2 and
+// VS Code, compare it against their own hostname before offering to open the
+// link, which matters for a log viewed on a different machine than the one
+// that produced it. Resolved once by InstallFailureSignalHandler(), since
+// gethostname() is not async-signal-safe.
 char g_hostname[256] = "";
 
 // The value of --symbolize_file_base_path, used to resolve relative source
@@ -303,10 +302,10 @@ void ComputeHostname() {
 #endif  // NGLOG_OS_WINDOWS
 }
 
-// The current working directory, used to display a stack frame's file
-// path relative to it (see FormatDisplayPath() in color.h) instead of by
-// its full absolute path, when it is a descendant of it, as a project's
-// own source files usually are, unlike system/library headers. Resolved
+// The current working directory, which FormatDisplayPath() in
+// internal/source_location.h uses to display the file path of a stack frame
+// relative to it instead of in full, when the file lies below it. A project's
+// own source files usually do, unlike system and library headers. Resolved
 // once by InstallFailureSignalHandler(), since getcwd() is not
 // async-signal-safe.
 char g_cwd[512] = "";
@@ -569,7 +568,7 @@ void DumpStackFrameInfoImpl(const char* prefix, void* pc,
   // Get the symbol name.
   const char* symbol = "(unknown)";
   bool symbol_resolved = false;
-#if defined(HAVE_SYMBOLIZE)
+#  if defined(HAVE_SYMBOLIZE)
   SymbolizedFrame frame;
   char symbolized[1024];  // Big enough for a sane symbol.
   // A return address is symbolized by the address before it, which lies
@@ -582,10 +581,11 @@ void DumpStackFrameInfoImpl(const char* prefix, void* pc,
     symbol = symbolized;
     symbol_resolved = true;
   }
-#else
-#  pragma message( \
-      "Symbolize functionality is not available for target platform: stack dump will contain empty frames.")
-#endif  // defined(HAVE_SYMBOLIZE)
+#  else
+  static_cast<void>(kind);
+#    pragma message( \
+        "Symbolize functionality is not available for target platform: stack dump will contain empty frames.")
+#  endif  // defined(HAVE_SYMBOLIZE)
 
   // Only colorize/hyperlink if the writer is still the default one that
   // actually targets stderr. g_stderr_color_mode/g_stderr_hyperlinks were
@@ -593,7 +593,7 @@ void DumpStackFrameInfoImpl(const char* prefix, void* pc,
   const ColorMode mode = g_failure_writer == &WriteToStderr
                              ? g_stderr_color_mode
                              : ColorMode::kNone;
-#if defined(HAVE_SYMBOLIZE)
+#  if defined(HAVE_SYMBOLIZE)
   const bool hyperlink = mode == ColorMode::kAnsi &&
                          nglog::GetFlag(FLAGS_symbolize_hyperlinks) &&
                          g_stderr_hyperlinks && frame.file_line_length > 0;
@@ -604,7 +604,7 @@ void DumpStackFrameInfoImpl(const char* prefix, void* pc,
                    g_symbolize_file_base_path, g_hostname, uri, sizeof(uri))) {
     uri_pointer = uri;
   }
-#endif  // defined(HAVE_SYMBOLIZE)
+#  endif  // defined(HAVE_SYMBOLIZE)
 
   const Theme& theme = DefaultTheme();
 
@@ -626,7 +626,7 @@ void DumpStackFrameInfoImpl(const char* prefix, void* pc,
 
   g_failure_writer(" ", 1);
 
-#if defined(HAVE_SYMBOLIZE)
+#  if defined(HAVE_SYMBOLIZE)
   if (frame.file_line_length > 0) {
     std::size_t function_len = 0;
     if (frame.file_line_offset > 0) {
@@ -641,9 +641,9 @@ void DumpStackFrameInfoImpl(const char* prefix, void* pc,
 
     // The hyperlink built above (if any) always points at the original,
     // absolute "file:line" span. Only the displayed text is shortened
-    // here, relative to the current directory for a project source file,
-    // or compacted with an ellipsis for a system/library header (see
-    // FormatDisplayPath() in color.h).
+    // here by FormatDisplayPath() in internal/source_location.h, relative to
+    // the current directory for a project source file, or compacted with an
+    // ellipsis for a system or library header.
     const char* const file_line_span = symbol + frame.file_line_offset;
     char display_buf[160];
     MinimalFormatter display_formatter(display_buf, sizeof(display_buf));
@@ -694,7 +694,7 @@ void DumpStackFrameInfoImpl(const char* prefix, void* pc,
                        tail, tail_len);
     }
   } else
-#endif  // defined(HAVE_SYMBOLIZE)
+#  endif  // defined(HAVE_SYMBOLIZE)
   {
     // A resolved-but-lineless symbol still reads as a function name. Only
     // the "(unknown)" fallback (Symbolize() failed outright) gets the

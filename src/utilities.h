@@ -20,24 +20,6 @@
 #include <type_traits>
 #include <utility>
 
-// printf macros for std::size_t, in the style of inttypes.h
-#ifdef _LP64
-#  define __PRIS_PREFIX "z"
-#else
-#  define __PRIS_PREFIX
-#endif
-
-// Use these macros after a % in a printf format string
-// to get correct 32/64 bit behavior, like this:
-// std::size_t size = records.size();
-// printf("%"PRIuS"\n", size);
-
-#define PRIdS __PRIS_PREFIX "d"
-#define PRIxS __PRIS_PREFIX "x"
-#define PRIuS __PRIS_PREFIX "u"
-#define PRIXS __PRIS_PREFIX "X"
-#define PRIoS __PRIS_PREFIX "o"
-
 #include "config.h"
 #include "internal/utf8.h"
 #include "ng-log/platform.h"
@@ -97,8 +79,8 @@ struct CrashReason {
   int line_number{0};
   const char* message{nullptr};
 
-  // We'll also store a bit of stack trace context at the time of crash as
-  // it may not be available later on.
+  // Frames of the stack at the time of the crash, which may not be
+  // available later on.
   void* stack[kMaxStackDumpFrames];
   int depth{0};
 };
@@ -271,6 +253,14 @@ constexpr bool operator!=(std::nullptr_t, const FileDescriptor& rhs) noexcept {
   return static_cast<bool>(rhs);
 }
 
+// Closes a stream owned by a FilePtr. The standard library allows
+// specializing std::default_delete only for program-defined types.
+struct FileCloser {
+  void operator()(std::FILE* file) const noexcept { std::fclose(file); }
+};
+
+using FilePtr = std::unique_ptr<std::FILE, FileCloser>;
+
 }  // namespace tools
 
 void DumpStackFrameInfo(const char* prefix, void* pc);
@@ -278,10 +268,5 @@ void DumpStackFrameInfo(const char* prefix, void* pc);
 void DumpStackCutOffMarker();
 
 }  // namespace nglog
-
-template <>
-struct std::default_delete<std::FILE> {
-  void operator()(FILE* p) const noexcept { fclose(p); }
-};
 
 #endif  // NGLOG_INTERNAL_UTILITIES_H

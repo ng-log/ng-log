@@ -875,12 +875,15 @@ endif (WITH_PKGCONFIG)
 # Unit testing
 
 if (WITH_FUZZING AND NOT WITH_FUZZING STREQUAL none)
+  # The demangler is not exported from the shared library, so the target
+  # compiles the library sources itself. The fuzzer is guided by the coverage
+  # of the demangler, which the instrumentation of this target covers without
+  # affecting the library.
   add_executable (fuzz_demangle
     src/fuzz_demangle.cc
+    ${NGLOG_SRCS}
   )
 
-  # The demangler is not exported from the shared library. Link the objects
-  # directly instead.
   target_compile_definitions (fuzz_demangle PRIVATE NGLOG_STATIC_DEFINE
     $<TARGET_PROPERTY:ng-log,COMPILE_DEFINITIONS>)
   target_compile_features (fuzz_demangle PRIVATE
@@ -888,7 +891,6 @@ if (WITH_FUZZING AND NOT WITH_FUZZING STREQUAL none)
   target_include_directories (fuzz_demangle PRIVATE
     $<TARGET_PROPERTY:ng-log,INCLUDE_DIRECTORIES>)
   target_link_libraries (fuzz_demangle PRIVATE
-    $<TARGET_OBJECTS:ng-log_internal>
     $<TARGET_PROPERTY:ng-log,LINK_LIBRARIES>)
 
   if (WITH_FUZZING STREQUAL "ossfuzz")
