@@ -262,6 +262,7 @@ std::string ScopedStreamCapture::Peek() const {
 }
 
 void (*g_new_hook)() = nullptr;
+void (*g_new_size_hook)(std::size_t) = nullptr;
 
 int CountFramesBeforeCutOffMarker(const std::string& output) {
   // DumpStackFrameInfo() and DumpStackTrace() start each frame with it.
@@ -317,12 +318,18 @@ bool UnwinderWalksPastMaxStackDumpFrames() {
   if (nglog::g_new_hook) {
     nglog::g_new_hook();
   }
+  if (nglog::g_new_size_hook) {
+    nglog::g_new_size_hook(size);
+  }
   return malloc(size);
 }
 
 [[gnu::noinline]] void* operator new(size_t size) {
   if (nglog::g_new_hook) {
     nglog::g_new_hook();
+  }
+  if (nglog::g_new_size_hook) {
+    nglog::g_new_size_hook(size);
   }
   void* p = malloc(size);
   if (p == nullptr) {
@@ -334,6 +341,9 @@ bool UnwinderWalksPastMaxStackDumpFrames() {
 [[gnu::noinline]] void* operator new[](size_t size) {
   if (nglog::g_new_hook) {
     nglog::g_new_hook();
+  }
+  if (nglog::g_new_size_hook) {
+    nglog::g_new_size_hook(size);
   }
   void* p = malloc(size);
   if (p == nullptr) {

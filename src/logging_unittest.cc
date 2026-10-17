@@ -1089,6 +1089,21 @@ class BlockingLogger : public base::Logger {
   bool released_{false};
 };
 
+#if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && \
+    defined(GTEST_HAS_DEATH_TEST)
+namespace {
+
+// Ends a death test child that deadlocks before the CTest timeout ends the
+// test, yet leaves ample room for stalls on a loaded machine.
+void ArmDeadlockAlarm() {
+  using namespace std::chrono_literals;
+  constexpr std::chrono::seconds kDeadlockTimeout = 20s;
+  alarm(static_cast<unsigned>(kDeadlockTimeout.count()));
+}
+
+}  // namespace
+#endif
+
 class ReentrantLogSink : public LogSink {
  public:
   // Joining the thread deadlocks if a sink registry lock is held during the
@@ -1120,6 +1135,86 @@ class SelfRemovingLogSink : public LogSink {
     RemoveLogSink(this);
   }
 };
+
+namespace {
+
+// Lets a fixed number of threads meet inside a sink callback, so that each
+// of them is dispatching to the sink when the first one leaves.
+class SinkCallBarrier {
+ public:
+  explicit SinkCallBarrier(int parties) : remaining_(parties) {}
+
+  void ArriveAndWait() {
+    std::unique_lock<std::mutex> lock{mutex_};
+    if (--remaining_ == 0) {
+      cond_.notify_all();
+    }
+    cond_.wait(lock, [this] { return remaining_ == 0; });
+  }
+
+ private:
+  std::mutex mutex_;
+  std::condition_variable cond_;
+  int remaining_;
+};
+
+constexpr int kConcurrentSinkCallers = 2;
+
+class ConcurrentlySelfRemovingLogSink : public LogSink {
+ public:
+  void send(LogSeverity, const char*, const char*, int, const LogMessageTime&,
+            const char*, size_t) override {
+    barrier_.ArriveAndWait();
+    RemoveLogSink(this);
+  }
+
+ private:
+  SinkCallBarrier barrier_{kConcurrentSinkCallers};
+};
+
+class OtherSinkRemovingLogSink : public LogSink {
+ public:
+  explicit OtherSinkRemovingLogSink(LogSink* other) : other_(other) {}
+
+  void send(LogSeverity, const char*, const char*, int, const LogMessageTime&,
+            const char*, size_t) override {
+    barrier_.ArriveAndWait();
+    RemoveLogSink(other_);
+  }
+
+ private:
+  LogSink* other_;
+  SinkCallBarrier barrier_{kConcurrentSinkCallers};
+};
+
+class QuietLogSink : public LogSink {
+ public:
+  void send(LogSeverity, const char*, const char*, int, const LogMessageTime&,
+            const char*, size_t) override {}
+};
+
+class ThrowingLogSink : public LogSink {
+ public:
+  void send(LogSeverity, const char*, const char*, int, const LogMessageTime&,
+            const char*, size_t) override {
+    throw std::runtime_error("sink failure");
+  }
+};
+
+#if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && \
+    defined(GTEST_HAS_DEATH_TEST)
+void LogFromConcurrentThreads() {
+  std::vector<std::thread> threads;
+  for (int i = 0; i < kConcurrentSinkCallers; ++i) {
+    threads.emplace_back([] { LOG(INFO) << "Log to a concurrent sink."; });
+  }
+  for (auto& thread : threads) {
+    thread.join();
+  }
+}
+#endif
+
+}  // namespace
 
 class ReentrantLogger : public base::Logger {
  public:
@@ -1192,15 +1287,153 @@ TEST(Logging, RegisteredSinkCanLogDuringSend) {
   EXPECT_TRUE(sink.NestedCompleted());
 }
 
+namespace {
+
+// Removes itself from within the callback of two threads at different times.
+class TwiceRemovingSink : public LogSink {
+ public:
+  void send(LogSeverity /* severity */, const char* /* full_filename */,
+            const char* /* base_filename */, int /* line */,
+            const LogMessageTime& /* time */, const char* /* message */,
+            size_t /* message_len */) override {
+    // Gives the owner time to wait for the calls before the second removal
+    // and lets the first callback outlast the removal.
+    constexpr std::chrono::milliseconds kSecondRemovalDelay{100};
+    constexpr std::chrono::milliseconds kFirstCallbackTail{200};
+    inside.fetch_add(1);
+    const int index = arrivals.fetch_add(1);
+    while (arrivals.load() < kCallbacks) {
+      std::this_thread::yield();
+    }
+    if (index == 0) {
+      RemoveLogSink(this);
+      std::this_thread::sleep_for(kFirstCallbackTail);
+    } else {
+      std::this_thread::sleep_for(kSecondRemovalDelay);
+      RemoveLogSink(this);
+    }
+    inside.fetch_sub(1);
+  }
+
+  static constexpr int kCallbacks = 2;
+  std::atomic<int> arrivals{0};
+  std::atomic<int> inside{0};
+};
+
+}  // namespace
+
+// RemoveLogSink() called from outside the callbacks returns only after every
+// callback has left, even while callbacks remove the sink themselves. The
+// alarm turns a deadlock into a failure instead of a hang.
+TEST(Logging, RemoveLogSinkWaitsForCallbacksThatRemoveTheSink) {
+#if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && \
+    defined(GTEST_HAS_DEATH_TEST)
+  ASSERT_EXIT(
+      {
+        ArmDeadlockAlarm();
+        nglog::SetFlag(FLAGS_logtostderr, true);
+        TwiceRemovingSink sink;
+        AddLogSink(&sink);
+        std::thread first{[] { LOG(INFO) << "first"; }};
+        std::thread second{[] { LOG(INFO) << "second"; }};
+        while (sink.arrivals.load() < TwiceRemovingSink::kCallbacks) {
+          std::this_thread::yield();
+        }
+        RemoveLogSink(&sink);
+        const bool callbacks_left = sink.inside.load() == 0;
+        first.join();
+        second.join();
+        _exit(callbacks_left ? EXIT_SUCCESS : EXIT_FAILURE);
+      },
+      testing::ExitedWithCode(EXIT_SUCCESS), "");
+#else
+  GTEST_SKIP() << "requires death tests with alarm()";
+#endif
+}
+
+namespace {
+
+// Blocks the first call until released.
+class BlockingLogSink : public LogSink {
+ public:
+  void send(LogSeverity /* severity */, const char* /* full_filename */,
+            const char* /* base_filename */, int /* line */,
+            const LogMessageTime& /* time */, const char* /* message */,
+            size_t /* message_len */) override {
+    std::unique_lock<std::mutex> lock{mutex_};
+    entered_ = true;
+    condition_.notify_all();
+    condition_.wait(lock, [this] { return released_; });
+  }
+
+  void WaitUntilEntered() {
+    std::unique_lock<std::mutex> lock{mutex_};
+    condition_.wait(lock, [this] { return entered_; });
+  }
+
+  void Release() {
+    {
+      const std::lock_guard<std::mutex> lock{mutex_};
+      released_ = true;
+    }
+    condition_.notify_all();
+  }
+
+ private:
+  std::mutex mutex_;
+  std::condition_variable condition_;
+  bool entered_{false};
+  bool released_{false};
+};
+
+// Counts the calls made after its owner removed it.
+class RemovedCallCountingLogSink : public LogSink {
+ public:
+  void send(LogSeverity /* severity */, const char* /* full_filename */,
+            const char* /* base_filename */, int /* line */,
+            const LogMessageTime& /* time */, const char* /* message */,
+            size_t /* message_len */) override {
+    if (removed.load()) {
+      calls_after_removal.fetch_add(1);
+    }
+  }
+
+  std::atomic<bool> removed{false};
+  std::atomic<int> calls_after_removal{0};
+};
+
+}  // namespace
+
+// A thread that dispatches a message keeps the sinks registered when it
+// started. A sink removed meanwhile must not be called anymore, since its
+// owner may have destroyed it once RemoveLogSink() returned.
+TEST(Logging, RemovedSinkIsNotCalledByDispatchInProgress) {
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, true);
+  ScopedStreamCapture capture{StandardStream::kStderr};
+  BlockingLogSink blocking;
+  RemovedCallCountingLogSink removed;
+  // Sinks are called in the reverse order of their registration.
+  AddLogSink(&removed);
+  AddLogSink(&blocking);
+
+  std::thread logger{[] { LOG(INFO) << "dispatched during removal"; }};
+  blocking.WaitUntilEntered();
+  RemoveLogSink(&removed);
+  removed.removed.store(true);
+  blocking.Release();
+  logger.join();
+  RemoveLogSink(&blocking);
+
+  EXPECT_EQ(removed.calls_after_removal.load(), 0);
+}
+
 TEST(Logging, RegisteredSinkCanRemoveItself) {
 #if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && \
     defined(GTEST_HAS_DEATH_TEST)
-  // Reports a deadlock in the child before the CTest timeout ends the test,
-  // yet leaves ample room for stalls on a loaded machine.
-  constexpr unsigned kDeathTestTimeoutSeconds = 20;
   ASSERT_EXIT(
       {
-        alarm(kDeathTestTimeoutSeconds);
+        ArmDeadlockAlarm();
         SelfRemovingLogSink sink;
         AddLogSink(&sink);
         LOG(INFO) << "Remove sink from callback.";
@@ -1210,15 +1443,115 @@ TEST(Logging, RegisteredSinkCanRemoveItself) {
 #endif
 }
 
+TEST(Logging, RegisteredSinkCanRemoveItselfFromConcurrentCalls) {
+#if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && \
+    defined(GTEST_HAS_DEATH_TEST)
+  ASSERT_EXIT(
+      {
+        ArmDeadlockAlarm();
+        ConcurrentlySelfRemovingLogSink sink;
+        AddLogSink(&sink);
+        LogFromConcurrentThreads();
+        _exit(EXIT_SUCCESS);
+      },
+      testing::ExitedWithCode(EXIT_SUCCESS), "");
+#endif
+}
+
+TEST(Logging, RegisteredSinkCanRemoveAnotherSinkFromConcurrentCalls) {
+#if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && \
+    defined(GTEST_HAS_DEATH_TEST)
+  ASSERT_EXIT(
+      {
+        ArmDeadlockAlarm();
+        QuietLogSink other;
+        OtherSinkRemovingLogSink remover{&other};
+        // Sinks run in reverse order of registration, so the remover runs
+        // before the sink it removes.
+        AddLogSink(&other);
+        AddLogSink(&remover);
+        LogFromConcurrentThreads();
+        RemoveLogSink(&remover);
+        _exit(EXIT_SUCCESS);
+      },
+      testing::ExitedWithCode(EXIT_SUCCESS), "");
+#endif
+}
+
+TEST(Logging, ThrowingSinkDoesNotBlockRemovalOfLaterSinks) {
+#if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && \
+    defined(GTEST_HAS_DEATH_TEST)
+  ASSERT_EXIT(
+      {
+        ArmDeadlockAlarm();
+        QuietLogSink quiet;
+        ThrowingLogSink thrower;
+        AddLogSink(&quiet);
+        AddLogSink(&thrower);
+        try {
+          LOG(INFO) << "Log to a throwing sink.";
+        } catch (const std::runtime_error&) {
+        }
+        RemoveLogSink(&thrower);
+        std::thread{[&quiet] { RemoveLogSink(&quiet); }}.join();
+        _exit(EXIT_SUCCESS);
+      },
+      testing::ExitedWithCode(EXIT_SUCCESS), "");
+#endif
+}
+
+#if defined(GTEST_HAS_DEATH_TEST)
+namespace {
+
+std::atomic<bool> g_message_buffer_allocated{false};
+
+// Records an allocation that can hold a message buffer. Other allocations
+// depend on the standard library, such as the proxies that checked iterators
+// of MSVC allocate for every string.
+void RecordMessageBufferAllocation(std::size_t size) {
+  if (size >= LogMessage::kMaxLogMessageLen) {
+    g_message_buffer_allocated.store(true, std::memory_order_relaxed);
+  }
+}
+
+}  // namespace
+#endif
+
+TEST(Logging, ThrowingSinkReleasesThreadMessageBuffer) {
+#if defined(GTEST_HAS_DEATH_TEST)
+  ASSERT_EXIT(
+      {
+        nglog::SetFlag(FLAGS_logtostderr, true);
+        QuietLogSink quiet;
+        {
+          ThrowingLogSink thrower;
+          AddLogSink(&thrower);
+          try {
+            LOG(INFO) << "Log to a throwing sink.";
+          } catch (const std::runtime_error&) {
+          }
+          RemoveLogSink(&thrower);
+        }
+        // Messages use a preallocated buffer of the thread as long as no
+        // other message of the thread holds it.
+        g_new_size_hook = &RecordMessageBufferAllocation;
+        LOG_TO_SINK_BUT_NOT_TO_LOGFILE(&quiet, INFO)
+            << "Uses the thread buffer.";
+        g_new_size_hook = nullptr;
+        std::exit(g_message_buffer_allocated.load(std::memory_order_relaxed)
+                      ? EXIT_FAILURE
+                      : EXIT_SUCCESS);
+      },
+      testing::ExitedWithCode(EXIT_SUCCESS), "");
+#endif
+}
+
 TEST(Logging, CustomLoggerCanLogDuringWrite) {
 #if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && \
     defined(GTEST_HAS_DEATH_TEST)
-  // Reports a deadlock in the child before the CTest timeout ends the test,
-  // yet leaves ample room for stalls on a loaded machine.
-  constexpr unsigned kDeathTestTimeoutSeconds = 20;
   ASSERT_EXIT(
       {
-        alarm(kDeathTestTimeoutSeconds);
+        ArmDeadlockAlarm();
         nglog::SetFlag(FLAGS_logtostderr, false);
         nglog::SetFlag(FLAGS_logtostdout, false);
         auto logger = std::make_unique<ReentrantLogger>();
@@ -1227,6 +1560,65 @@ TEST(Logging, CustomLoggerCanLogDuringWrite) {
         _exit(EXIT_SUCCESS);
       },
       testing::ExitedWithCode(EXIT_SUCCESS), "");
+#endif
+}
+
+#if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && \
+    defined(GTEST_HAS_DEATH_TEST)
+namespace {
+
+// Forwards to the default file logger from another thread and waits for it,
+// as asynchronous loggers do.
+class ForwardingLogger : public base::Logger {
+ public:
+  explicit ForwardingLogger(base::Logger* wrapped) : wrapped_{wrapped} {}
+
+  void Write(bool force_flush,
+             const std::chrono::system_clock::time_point& timestamp,
+             const char* message, size_t message_len) override {
+    std::thread worker{[this, force_flush, &timestamp, message, message_len] {
+      wrapped_->Write(force_flush, timestamp, message, message_len);
+    }};
+    worker.join();
+  }
+
+  void Flush() override {
+    std::thread worker{[this] { wrapped_->Flush(); }};
+    worker.join();
+  }
+
+  uint32 LogSize() override { return wrapped_->LogSize(); }
+
+ private:
+  base::Logger* wrapped_;
+};
+
+}  // namespace
+#endif
+
+static void DeleteFiles(const string& pattern);
+
+TEST(Logging, LoggerCanForwardToTheDefaultLoggerFromAnotherThread) {
+#if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && \
+    defined(GTEST_HAS_DEATH_TEST)
+  const std::string dest = TestTmpDir() + "/logging_test_forwarding_logger.";
+  ASSERT_EXIT(
+      {
+        ArmDeadlockAlarm();
+        nglog::SetFlag(FLAGS_logtostderr, false);
+        nglog::SetFlag(FLAGS_logtostdout, false);
+        SetLogDestination(NGLOG_INFO, dest.c_str());
+        auto logger =
+            std::make_unique<ForwardingLogger>(base::GetLogger(NGLOG_INFO));
+        base::SetLogger(NGLOG_INFO, logger.release());
+        LOG(INFO) << "Log through a forwarding logger.";
+        FlushLogFiles(NGLOG_INFO);
+        _exit(EXIT_SUCCESS);
+      },
+      testing::ExitedWithCode(EXIT_SUCCESS), "");
+  DeleteFiles(dest + "*");
+#else
+  GTEST_SKIP() << "requires death tests with alarm()";
 #endif
 }
 
@@ -1390,6 +1782,28 @@ TEST(Logging, ConcurrentFatalMessages) {
   std::thread second{write_fatal};
   first.join();
   second.join();
+}
+
+TEST(Logging, LaterFatalMessagesStartWithEmptyBuffer) {
+  constexpr int kFatalMessageCount = 3;
+  const ScopedThrowOnFatal throw_on_fatal;
+  const ScopedExitOnDFatal exit_on_dfatal{true};
+  auto flags = nglog::MakeScopedFlags(
+      nglog::MakeScopedFlag(FLAGS_logtostderr, true),
+      nglog::MakeScopedFlag(FLAGS_logtostdout, false),
+      nglog::MakeScopedFlag(FLAGS_colorlogtostderr, false));
+  std::vector<std::string> lines;
+  for (int i = 0; i < kFatalMessageCount; ++i) {
+    ScopedStreamCapture capture{StandardStream::kStderr};
+    EXPECT_THROW({ LOG(FATAL) << "fatal number " << i; }, std::logic_error);
+    const std::vector<std::string> captured = SplitLines(capture.Stop());
+    ASSERT_THAT(captured, Not(IsEmpty()));
+    lines.push_back(captured.front());
+  }
+
+  EXPECT_THAT(lines, ElementsAre(LogLine('F', "fatal number 0"),
+                                 LogLine('F', "fatal number 1"),
+                                 LogLine('F', "fatal number 2")));
 }
 
 // For testing using CHECK*() on anonymous enums.
@@ -2693,6 +3107,37 @@ TEST(Logging, MessageCountDoesNotWaitForLogger) {
   base::SetLogger(NGLOG_INFO, old_logger);
 }
 
+// Data races here only fail the test under ThreadSanitizer.
+TEST(Logging, DefaultLoggerQueriesDoNotRaceWithLogging) {
+  auto save = nglog::MakeScopedFlags(
+      nglog::MakeScopedFlag(FLAGS_logtostderr, false),
+      nglog::MakeScopedFlag(FLAGS_logtostdout, false),
+      nglog::MakeScopedFlag(FLAGS_timestamp_in_logfile_name, false));
+
+  const std::string destination =
+      TestTmpDir() + "/logging_test_default_logger_queries";
+  DeleteFiles(destination + "*");
+  SetLogDestination(NGLOG_INFO, destination.c_str());
+
+  constexpr int kIterations = 1000;
+  std::atomic<bool> done{false};
+  std::thread querier{[&done] {
+    base::Logger* const logger = base::GetLogger(NGLOG_INFO);
+    while (!done.load(std::memory_order_acquire)) {
+      logger->Flush();
+      static_cast<void>(logger->LogSize());
+    }
+  }};
+  for (int i = 0; i < kIterations; ++i) {
+    LOG(INFO) << "message logged while the logger is queried";
+  }
+  done.store(true, std::memory_order_release);
+  querier.join();
+
+  LogToStderr();
+  DeleteFiles(destination + "*");
+}
+
 TEST(Logging, DefaultFileDispatchDoesNotRelockFile) {
   nglog::ScopedFlags<> save;
   nglog::SetFlag(FLAGS_logtostderr, false);
@@ -2712,7 +3157,7 @@ TEST(Logging, DefaultFileDispatchDoesNotRelockFile) {
 #ifdef NGLOG_ENABLE_LOCK_METRICS
   const internal::LockMetrics metrics =
       internal::GetLockMetrics(internal::LockKind::kFile);
-  EXPECT_EQ(metrics.acquisitions, 0U);
+  EXPECT_EQ(metrics.acquisitions, 1U);
 #endif
 
   LogToStderr();

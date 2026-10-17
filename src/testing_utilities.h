@@ -118,6 +118,8 @@ class ScopedStreamCapture final {
 
 // Add hook for operator new to ensure there are no memory allocation.
 extern void (*g_new_hook)();
+// Receives the size of every allocation through operator new.
+extern void (*g_new_size_hook)(std::size_t);
 
 /**
  * Recursion depth of tests of a cut-off stack dump. It exceeds
