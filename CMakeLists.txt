@@ -518,43 +518,22 @@ set (_ng-log_CMake_INCLUDE_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 set (_ng-log_CMake_LIBDIR ${CMAKE_INSTALL_LIBDIR})
 set (_ng-log_CMake_INSTALLDIR ${_ng-log_CMake_LIBDIR}/cmake/ng-log)
 
-set (_ng-log_CMake_DIR ng-log/cmake)
-set (_ng-log_CMake_DATADIR ${CMAKE_INSTALL_DATAROOTDIR}/${_ng-log_CMake_DIR})
-set (_ng-log_BINARY_CMake_DATADIR
-  ${ng-log_BINARY_DIR}/${_ng-log_CMake_DATADIR})
-
-# Add additional CMake find modules here.
-set (_ng-log_CMake_MODULES)
+# The package configuration locates the find modules relative to its own
+# location, both in the build tree and in the installation.
+set (_ng-log_FIND_MODULES)
 
 if (HAVE_UNWIND OR HAVE_LIBUNWIND)
-  # Copy the module only if libunwind is actually used.
-  list (APPEND _ng-log_CMake_MODULES ${ng-log_SOURCE_DIR}/cmake/FindUnwind.cmake)
+  list (APPEND _ng-log_FIND_MODULES FindUnwind.cmake)
 endif (HAVE_UNWIND OR HAVE_LIBUNWIND)
 
 if (HAVE_LIBBACKTRACE)
-  # Copy the module only if libbacktrace is actually used.
-  list (APPEND _ng-log_CMake_MODULES ${ng-log_SOURCE_DIR}/cmake/FindLibbacktrace.cmake)
+  list (APPEND _ng-log_FIND_MODULES FindLibbacktrace.cmake)
 endif (HAVE_LIBBACKTRACE)
 
-# Generate file name for each module in the binary directory
-foreach (_file ${_ng-log_CMake_MODULES})
-  get_filename_component (_module "${_file}" NAME)
-
-  list (APPEND _ng-log_BINARY_CMake_MODULES
-    ${_ng-log_BINARY_CMake_DATADIR}/${_module})
-endforeach (_file)
-
-if (_ng-log_CMake_MODULES)
-  # Copy modules to binary directory during the build
-  add_custom_command (OUTPUT ${_ng-log_BINARY_CMake_MODULES}
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-    ${_ng-log_BINARY_CMake_DATADIR}
-    COMMAND ${CMAKE_COMMAND} -E copy ${_ng-log_CMake_MODULES}
-    ${_ng-log_BINARY_CMake_DATADIR}
-    DEPENDS ${_ng-log_CMake_MODULES}
-    COMMENT "Copying find modules..."
-  )
-endif (_ng-log_CMake_MODULES)
+foreach (_ng-log_FIND_MODULE IN LISTS _ng-log_FIND_MODULES)
+  configure_file (cmake/${_ng-log_FIND_MODULE}
+    ${ng-log_BINARY_DIR}/modules/${_ng-log_FIND_MODULE} COPYONLY)
+endforeach (_ng-log_FIND_MODULE)
 
 set (NGLOG_PUBLIC_H
   ${ng-log_BINARY_DIR}/ng-log/export.h
@@ -642,7 +621,6 @@ if ((CYGWIN OR WIN32) AND NOT UNIX)
 endif ((CYGWIN OR WIN32) AND NOT UNIX)
 
 add_library (ng-log_internal OBJECT
-  ${_ng-log_BINARY_CMake_MODULES}
   ${NGLOG_SRCS}
 )
 target_compile_features (ng-log_internal PUBLIC $<TARGET_PROPERTY:ng-log,COMPILE_FEATURES>)
@@ -1744,53 +1722,16 @@ write_basic_package_version_file (
 export (TARGETS ng-log NAMESPACE ng-log:: FILE ng-log-targets.cmake)
 export (PACKAGE ng-log)
 
-get_filename_component (_PREFIX "${CMAKE_INSTALL_PREFIX}" ABSOLUTE)
-
-# Directory containing the find modules relative to the config install
-# directory.
-file (RELATIVE_PATH ng-log_REL_CMake_MODULES
-  ${_PREFIX}/${_ng-log_CMake_INSTALLDIR}
-  ${_PREFIX}/${_ng-log_CMake_DATADIR}/ng-log-modules.cmake)
-
-get_filename_component (ng-log_REL_CMake_DATADIR ${ng-log_REL_CMake_MODULES}
-  DIRECTORY)
-
-set (ng-log_FULL_CMake_DATADIR
-  ${ng-log_BINARY_DIR}/${_ng-log_CMake_DATADIR})
-
-configure_file (cmake/ng-log-modules.cmake.in
-  ${ng-log_BINARY_DIR}/ng-log-modules.cmake @ONLY)
-
-install (CODE
-"
-set (ng-log_FULL_CMake_DATADIR \"\\\${CMAKE_CURRENT_LIST_DIR}/${ng-log_REL_CMake_DATADIR}\")
-set (ng-log_DATADIR_DESTINATION ${_ng-log_CMake_INSTALLDIR})
-
-if (NOT IS_ABSOLUTE ${_ng-log_CMake_INSTALLDIR})
-  set (ng-log_DATADIR_DESTINATION \"\${CMAKE_INSTALL_PREFIX}/\${ng-log_DATADIR_DESTINATION}\")
-endif (NOT IS_ABSOLUTE ${_ng-log_CMake_INSTALLDIR})
-
-configure_file (\"${ng-log_SOURCE_DIR}/cmake/ng-log-modules.cmake.in\"
-  \"${ng-log_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/CMakeTmp/ng-log-modules.cmake\" @ONLY)
-file (INSTALL
-  \"${ng-log_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/CMakeTmp/ng-log-modules.cmake\"
-  DESTINATION
-  \"\${ng-log_DATADIR_DESTINATION}\")
-"
-  COMPONENT Development
-)
-
 install (FILES
   ${ng-log_BINARY_DIR}/ng-log-config.cmake
   ${ng-log_BINARY_DIR}/ng-log-config-version.cmake
   DESTINATION ${_ng-log_CMake_INSTALLDIR})
 
-# Find modules in share/ng-log/cmake
-install (DIRECTORY ${_ng-log_BINARY_CMake_DATADIR}
-  DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/ng-log
-  COMPONENT Development
-  FILES_MATCHING PATTERN "*.cmake"
-)
+list (TRANSFORM _ng-log_FIND_MODULES PREPEND cmake/)
+
+install (FILES ${_ng-log_FIND_MODULES}
+  DESTINATION ${_ng-log_CMake_INSTALLDIR}/modules
+  COMPONENT Development)
 
 install (EXPORT ng-log-targets NAMESPACE ng-log:: DESTINATION
   ${_ng-log_CMake_INSTALLDIR})
