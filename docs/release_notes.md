@@ -38,6 +38,7 @@ SPDX-License-Identifier: BSD-3-Clause
 - Support POSIX log paths longer than `PATH_MAX` through descriptor-relative
   filesystem operations
 - Breaking change: require Windows 8 or Windows Server 2012 or later
+- Breaking change: require CMake 3.28 or later to build and consume ng-log
 - Omit the default header format when a custom prefix formatter is installed
 - Improve suppressed logging performance by avoiding message construction and
   reduce overhead when formatting default prefixes
