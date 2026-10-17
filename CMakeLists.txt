@@ -1403,75 +1403,73 @@ if (BUILD_TESTING AND GTest_FOUND)
     DISCOVERY_TIMEOUT 30
   )
 
-  add_test (NAME flags_declaration COMMAND ${CMAKE_CTEST_COMMAND}
-    --build-config $<CONFIG>
-    --build-and-test
-    "${ng-log_SOURCE_DIR}/src/flags_declaration_unittest"
-    "${ng-log_BINARY_DIR}/Tests/flags_declaration"
-    --build-generator ${CMAKE_GENERATOR}
-    --build-makeprogram ${CMAKE_MAKE_PROGRAM}
-    --build-target ng-log_flags_declaration
-    --build-options
-    -DCMAKE_BUILD_TYPE=$<CONFIG>
-    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-    -DCMAKE_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}
-    -DCMAKE_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}
-    -Dng-log_DIR=${ng-log_BINARY_DIR}
+  # Configures and builds a target of a separate project against the ng-log
+  # build tree. The test optionally runs a command of that project afterwards.
+  function (nglog_add_build_test _NAME)
+    cmake_parse_arguments (PARSE_ARGV 1 _ARGS "" "SOURCE_DIR;TARGET;CONFIG"
+      "TEST_COMMAND")
+
+    if (DEFINED _ARGS_UNPARSED_ARGUMENTS OR NOT DEFINED _ARGS_SOURCE_DIR OR
+        NOT DEFINED _ARGS_TARGET)
+      message (FATAL_ERROR "nglog_add_build_test (${_NAME}) expects "
+        "SOURCE_DIR and TARGET but got: ${ARGN}")
+    endif (DEFINED _ARGS_UNPARSED_ARGUMENTS OR NOT DEFINED _ARGS_SOURCE_DIR OR
+        NOT DEFINED _ARGS_TARGET)
+
+    if (NOT DEFINED _ARGS_CONFIG)
+      set (_ARGS_CONFIG $<CONFIG>)
+    endif (NOT DEFINED _ARGS_CONFIG)
+
+    set (_TEST_COMMAND)
+
+    if (DEFINED _ARGS_TEST_COMMAND)
+      set (_TEST_COMMAND --test-command ${_ARGS_TEST_COMMAND})
+    endif (DEFINED _ARGS_TEST_COMMAND)
+
+    add_test (NAME ${_NAME} COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-config ${_ARGS_CONFIG}
+      --build-and-test
+      "${ng-log_SOURCE_DIR}/${_ARGS_SOURCE_DIR}"
+      "${ng-log_BINARY_DIR}/Tests/${_NAME}"
+      --build-generator ${CMAKE_GENERATOR}
+      --build-generator-platform "${CMAKE_GENERATOR_PLATFORM}"
+      --build-generator-toolset "${CMAKE_GENERATOR_TOOLSET}"
+      --build-makeprogram ${CMAKE_MAKE_PROGRAM}
+      --build-target ${_ARGS_TARGET}
+      --build-options
+      -DCMAKE_BUILD_TYPE=${_ARGS_CONFIG}
+      -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+      -DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=ON
+      -Dng-log_DIR=${ng-log_BINARY_DIR}
+      ${_TEST_COMMAND}
+    )
+  endfunction (nglog_add_build_test)
+
+  nglog_add_build_test (flags_declaration
+    SOURCE_DIR src/flags_declaration_unittest
+    TARGET ng-log_flags_declaration
   )
 
-  add_test (NAME flags_builtin_redeclaration COMMAND ${CMAKE_CTEST_COMMAND}
-    --build-config $<CONFIG>
-    --build-and-test
-    "${ng-log_SOURCE_DIR}/src/flags_declaration_unittest"
-    "${ng-log_BINARY_DIR}/Tests/flags_builtin_redeclaration"
-    --build-generator ${CMAKE_GENERATOR}
-    --build-makeprogram ${CMAKE_MAKE_PROGRAM}
-    --build-target ng-log_flags_builtin_redeclaration
-    --build-options
-    -DCMAKE_BUILD_TYPE=$<CONFIG>
-    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-    -DCMAKE_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}
-    -DCMAKE_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}
-    -Dng-log_DIR=${ng-log_BINARY_DIR}
+  nglog_add_build_test (flags_builtin_redeclaration
+    SOURCE_DIR src/flags_declaration_unittest
+    TARGET ng-log_flags_builtin_redeclaration
   )
   # The static assertion message is part of the diagnostic of every compiler.
   set_tests_properties (flags_builtin_redeclaration PROPERTIES
     PASS_REGULAR_EXPRESSION "is a built-in ng-log flag"
   )
 
-  add_test (NAME log_severity_constants COMMAND ${CMAKE_CTEST_COMMAND}
-    --build-config $<CONFIG>
-    --build-and-test
-    "${ng-log_SOURCE_DIR}/src/log_severity_unittest"
-    "${ng-log_BINARY_DIR}/Tests/log_severity_constants"
-    --build-generator ${CMAKE_GENERATOR}
-    --build-makeprogram ${CMAKE_MAKE_PROGRAM}
-    --build-target ng-log_log_severity_constants
-    --build-options
-    -DCMAKE_BUILD_TYPE=$<CONFIG>
-    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-    -DCMAKE_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}
-    -DCMAKE_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}
-    -Dng-log_DIR=${ng-log_BINARY_DIR}
+  nglog_add_build_test (log_severity_constants
+    SOURCE_DIR src/log_severity_unittest
+    TARGET ng-log_log_severity_constants
   )
   set_tests_properties (log_severity_constants PROPERTIES
     PASS_REGULAR_EXPRESSION "NGLOG_COMPACT_LOG_[1-3]"
   )
 
-  add_test (NAME log_severity_conversion COMMAND ${CMAKE_CTEST_COMMAND}
-    --build-config $<CONFIG>
-    --build-and-test
-    "${ng-log_SOURCE_DIR}/src/log_severity_unittest"
-    "${ng-log_BINARY_DIR}/Tests/log_severity_conversion"
-    --build-generator ${CMAKE_GENERATOR}
-    --build-makeprogram ${CMAKE_MAKE_PROGRAM}
-    --build-target ng-log_log_severity_conversion
-    --build-options
-    -DCMAKE_BUILD_TYPE=$<CONFIG>
-    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-    -DCMAKE_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}
-    -DCMAKE_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}
-    -Dng-log_DIR=${ng-log_BINARY_DIR}
+  nglog_add_build_test (log_severity_conversion
+    SOURCE_DIR src/log_severity_unittest
+    TARGET ng-log_log_severity_conversion
   )
 
   if (CMAKE_CXX_COMPILER_ID STREQUAL GNU)
@@ -1494,20 +1492,9 @@ if (BUILD_TESTING AND GTest_FOUND)
     set_tests_properties (log_severity_conversion PROPERTIES DISABLED ON)
   endif (CMAKE_CXX_COMPILER_ID STREQUAL GNU)
 
-  add_test (NAME log_severity_qualified COMMAND ${CMAKE_CTEST_COMMAND}
-    --build-config $<CONFIG>
-    --build-and-test
-    "${ng-log_SOURCE_DIR}/src/log_severity_unittest"
-    "${ng-log_BINARY_DIR}/Tests/log_severity_qualified"
-    --build-generator ${CMAKE_GENERATOR}
-    --build-makeprogram ${CMAKE_MAKE_PROGRAM}
-    --build-target ng-log_log_severity_qualified
-    --build-options
-    -DCMAKE_BUILD_TYPE=$<CONFIG>
-    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-    -DCMAKE_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}
-    -DCMAKE_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}
-    -Dng-log_DIR=${ng-log_BINARY_DIR}
+  nglog_add_build_test (log_severity_qualified
+    SOURCE_DIR src/log_severity_unittest
+    TARGET ng-log_log_severity_qualified
   )
   if (CMAKE_CXX_COMPILER_ID STREQUAL GNU)
     set_tests_properties (log_severity_qualified PROPERTIES
@@ -1529,85 +1516,31 @@ if (BUILD_TESTING AND GTest_FOUND)
     set_tests_properties (log_severity_qualified PROPERTIES DISABLED ON)
   endif (CMAKE_CXX_COMPILER_ID STREQUAL GNU)
 
-  add_test (NAME includes_logging COMMAND ${CMAKE_CTEST_COMMAND}
-    --build-config $<CONFIG>
-    --build-and-test
-    "${ng-log_SOURCE_DIR}/src/includes_unittest"
-    "${ng-log_BINARY_DIR}/Tests/includes_logging"
-    --build-generator ${CMAKE_GENERATOR}
-    --build-makeprogram ${CMAKE_MAKE_PROGRAM}
-    --build-target ng-log_includes_logging
-    --build-options
-    -DCMAKE_BUILD_TYPE=$<CONFIG>
-    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-    -DCMAKE_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}
-    -DCMAKE_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}
-    -Dng-log_DIR=${ng-log_BINARY_DIR}
+  nglog_add_build_test (includes_logging
+    SOURCE_DIR src/includes_unittest
+    TARGET ng-log_includes_logging
   )
 
-  add_test (NAME includes_vlog_is_on COMMAND ${CMAKE_CTEST_COMMAND}
-    --build-config $<CONFIG>
-    --build-and-test
-    "${ng-log_SOURCE_DIR}/src/includes_unittest"
-    "${ng-log_BINARY_DIR}/Tests/includes_vlog_is_on"
-    --build-generator ${CMAKE_GENERATOR}
-    --build-makeprogram ${CMAKE_MAKE_PROGRAM}
-    --build-target ng-log_includes_vlog_is_on
-    --build-options
-    -DCMAKE_BUILD_TYPE=$<CONFIG>
-    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-    -DCMAKE_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}
-    -DCMAKE_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}
-    -Dng-log_DIR=${ng-log_BINARY_DIR}
+  nglog_add_build_test (includes_vlog_is_on
+    SOURCE_DIR src/includes_unittest
+    TARGET ng-log_includes_vlog_is_on
   )
 
-  add_test (NAME includes_raw_logging COMMAND ${CMAKE_CTEST_COMMAND}
-    --build-config $<CONFIG>
-    --build-and-test
-    "${ng-log_SOURCE_DIR}/src/includes_unittest"
-    "${ng-log_BINARY_DIR}/Tests/includes_raw_logging"
-    --build-generator ${CMAKE_GENERATOR}
-    --build-makeprogram ${CMAKE_MAKE_PROGRAM}
-    --build-target ng-log_includes_raw_logging
-    --build-options
-    -DCMAKE_BUILD_TYPE=$<CONFIG>
-    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-    -DCMAKE_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}
-    -DCMAKE_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}
-    -Dng-log_DIR=${ng-log_BINARY_DIR}
+  nglog_add_build_test (includes_raw_logging
+    SOURCE_DIR src/includes_unittest
+    TARGET ng-log_includes_raw_logging
   )
 
-  add_test (NAME includes_stl_logging COMMAND ${CMAKE_CTEST_COMMAND}
-    --build-config $<CONFIG>
-    --build-and-test
-    "${ng-log_SOURCE_DIR}/src/includes_unittest"
-    "${ng-log_BINARY_DIR}/Tests/includes_stl_logging"
-    --build-generator ${CMAKE_GENERATOR}
-    --build-makeprogram ${CMAKE_MAKE_PROGRAM}
-    --build-target ng-log_includes_stl_logging
-    --build-options
-    -DCMAKE_BUILD_TYPE=$<CONFIG>
-    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-    -DCMAKE_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}
-    -DCMAKE_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}
-    -Dng-log_DIR=${ng-log_BINARY_DIR}
+  nglog_add_build_test (includes_stl_logging
+    SOURCE_DIR src/includes_unittest
+    TARGET ng-log_includes_stl_logging
   )
 
-  add_test (NAME dcheck_on COMMAND ${CMAKE_CTEST_COMMAND}
-    --build-config Debug
-    --build-and-test
-    "${ng-log_SOURCE_DIR}/src/dcheck_unittest"
-    "${ng-log_BINARY_DIR}/Tests/dcheck_on"
-    --build-generator ${CMAKE_GENERATOR}
-    --build-generator-platform "${CMAKE_GENERATOR_PLATFORM}"
-    --build-generator-toolset "${CMAKE_GENERATOR_TOOLSET}"
-    --build-makeprogram ${CMAKE_MAKE_PROGRAM}
-    --build-target ng-log_dcheck
-    --build-options
-    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-    -DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=ON
-    -Dng-log_DIR=${ng-log_BINARY_DIR}
-    --test-command ng-log_dcheck
+  nglog_add_build_test (dcheck_on
+    SOURCE_DIR src/dcheck_unittest
+    TARGET ng-log_dcheck
+    CONFIG Debug
+    TEST_COMMAND ng-log_dcheck
   )
   set_tests_properties (dcheck_on PROPERTIES
     DISABLED $<NOT:$<CONFIG:Debug,RelWithDebInfo>>
@@ -1615,21 +1548,11 @@ if (BUILD_TESTING AND GTest_FOUND)
     PASS_REGULAR_EXPRESSION "Assert failed: false"
   )
 
-  add_test (NAME dcheck_off COMMAND ${CMAKE_CTEST_COMMAND}
-    --build-config Release
-    --build-and-test
-    "${ng-log_SOURCE_DIR}/src/dcheck_unittest"
-    "${ng-log_BINARY_DIR}/Tests/dcheck_off"
-    --build-generator ${CMAKE_GENERATOR}
-    --build-generator-platform "${CMAKE_GENERATOR_PLATFORM}"
-    --build-generator-toolset "${CMAKE_GENERATOR_TOOLSET}"
-    --build-makeprogram ${CMAKE_MAKE_PROGRAM}
-    --build-target ng-log_dcheck
-    --build-options
-    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-    -DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=ON
-    -Dng-log_DIR=${ng-log_BINARY_DIR}
-    --test-command ng-log_dcheck
+  nglog_add_build_test (dcheck_off
+    SOURCE_DIR src/dcheck_unittest
+    TARGET ng-log_dcheck
+    CONFIG Release
+    TEST_COMMAND ng-log_dcheck
   )
   # None of the debug-only statements may produce output. The build output
   # is part of the test output, so match the messages themselves.
