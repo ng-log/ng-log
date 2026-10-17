@@ -1312,11 +1312,13 @@ static vector<string> GetFiles(const string& pattern) {
   }
   const string dirname = pattern.substr(0, index + 1);
   WIN32_FIND_DATAW data;
-  WindowsHandle handle{FindFirstFileW(wide_pattern.c_str(), &data)};
-  if (handle == nullptr || handle.get() == INVALID_HANDLE_VALUE) {
+  const HANDLE find_handle = FindFirstFileW(wide_pattern.c_str(), &data);
+  if (find_handle == INVALID_HANDLE_VALUE) {
     // Finding no files is OK.
     return files;
   }
+  const std::unique_ptr<std::remove_pointer_t<HANDLE>, decltype(&FindClose)>
+      handle{find_handle, &FindClose};
   do {
     std::string filename;
     const std::size_t filename_length = std::wcslen(data.cFileName);
