@@ -1420,9 +1420,24 @@ if (BUILD_TESTING AND GTest_FOUND)
       set (_ARGS_CONFIG $<CONFIG>)
     endif (NOT DEFINED _ARGS_CONFIG)
 
+    set (_OPTIONS)
+
+    # Cross compiling needs the same toolchain in the nested build.
+    if (DEFINED CMAKE_TOOLCHAIN_FILE)
+      list (APPEND _OPTIONS -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE})
+    endif (DEFINED CMAKE_TOOLCHAIN_FILE)
+
     set (_TEST_COMMAND)
 
     if (DEFINED _ARGS_TEST_COMMAND)
+      if (CMAKE_CROSSCOMPILING AND DEFINED CMAKE_CROSSCOMPILING_EMULATOR)
+        # The nested CTest neither knows the executable suffix of the target
+        # nor runs the program through the emulator.
+        list (POP_FRONT _ARGS_TEST_COMMAND _PROGRAM)
+        list (PREPEND _ARGS_TEST_COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR}
+          ${_PROGRAM}${CMAKE_EXECUTABLE_SUFFIX})
+      endif (CMAKE_CROSSCOMPILING AND DEFINED CMAKE_CROSSCOMPILING_EMULATOR)
+
       set (_TEST_COMMAND --test-command ${_ARGS_TEST_COMMAND})
     endif (DEFINED _ARGS_TEST_COMMAND)
 
@@ -1441,6 +1456,7 @@ if (BUILD_TESTING AND GTest_FOUND)
       -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
       -DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=ON
       -Dng-log_DIR=${ng-log_BINARY_DIR}
+      ${_OPTIONS}
       ${_TEST_COMMAND}
     )
   endfunction (nglog_add_build_test)
