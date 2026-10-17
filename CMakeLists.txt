@@ -1526,7 +1526,7 @@ if (BUILD_TESTING AND GTest_FOUND)
       "Unsupported C++ compiler ${CMAKE_CXX_COMPILER_ID}: "
       "log_severity_conversion test will be disabled"
     )
-    set_tests_properties (log_severity_conversion DISABLED ON)
+    set_tests_properties (log_severity_conversion PROPERTIES DISABLED ON)
   endif (CMAKE_CXX_COMPILER_ID STREQUAL GNU)
 
   add_test (NAME log_severity_qualified COMMAND ${CMAKE_CTEST_COMMAND}
@@ -1561,7 +1561,7 @@ if (BUILD_TESTING AND GTest_FOUND)
       "Unsupported C++ compiler ${CMAKE_CXX_COMPILER_ID}: "
       "log_severity_qualified test will be disabled"
     )
-    set_tests_properties (log_severity_qualified DISABLED ON)
+    set_tests_properties (log_severity_qualified PROPERTIES DISABLED ON)
   endif (CMAKE_CXX_COMPILER_ID STREQUAL GNU)
 
   add_test (NAME includes_logging COMMAND ${CMAKE_CTEST_COMMAND}
