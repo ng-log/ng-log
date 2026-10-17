@@ -155,7 +155,9 @@ TEST(Symbolize, ToleratesLongMappingLines) {
   std::string path = TestTmpDir();
   for (int i = 0; i < kComponents; ++i) {
     path += '/' + std::string(kComponentLength, 'd');
-    ASSERT_EQ(mkdir(path.c_str(), kDirectoryMode), 0) << strerror(errno);
+    // An earlier run in the same process may have created it already.
+    ASSERT_TRUE(mkdir(path.c_str(), kDirectoryMode) == 0 || errno == EEXIST)
+        << strerror(errno);
   }
   path += "/mapped";
   const long page_size = sysconf(_SC_PAGESIZE);
@@ -979,11 +981,25 @@ static const char* SymbolizeStackConsumption(void* pc, int* stack_consumed) {
 // Symbolize stack consumption should be within 4kB.
 constexpr int kStackConsumptionUpperLimit = 4096;
 
+// AddressSanitizer runs signal handlers with its own stack accounting, and
+// ThreadSanitizer defers them and runs them inside its own frames, so the
+// alternate signal stack does not reflect what Symbolize() consumes.
+#      if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+#        define NGLOG_TEST_SANITIZED_SIGNAL_HANDLERS 1
+#      elif defined(__has_feature)
+#        if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
+#          define NGLOG_TEST_SANITIZED_SIGNAL_HANDLERS 1
+#        endif
+#      endif
+
 testing::Matcher<int> IsWithinStackConsumptionLimit() {
   return AllOf(Gt(0), Lt(kStackConsumptionUpperLimit));
 }
 
 TEST(Symbolize, SymbolizeStackConsumption) {
+#      ifdef NGLOG_TEST_SANITIZED_SIGNAL_HANDLERS
+  GTEST_SKIP() << "the sanitizer distorts the measured stack consumption";
+#      endif
   int stack_consumed;
 
   EXPECT_STREQ("nonstatic_func",
@@ -998,6 +1014,9 @@ TEST(Symbolize, SymbolizeStackConsumption) {
 }
 
 TEST(Symbolize, SymbolizeWithDemanglingStackConsumption) {
+#      ifdef NGLOG_TEST_SANITIZED_SIGNAL_HANDLERS
+  GTEST_SKIP() << "the sanitizer distorts the measured stack consumption";
+#      endif
   Foo::func(100);
   int stack_consumed;
 

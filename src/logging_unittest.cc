@@ -747,10 +747,11 @@ int main(int argc, char** argv) {
   // Test some basics before InitializeLogging:
   {
     ScopedStreamCapture capture{StandardStream::kStderr};
-    LogWithLevels(nglog::GetFlag(FLAGS_v),
-                  nglog::GetFlag(FLAGS_stderrthreshold),
-                  nglog::GetFlag(FLAGS_logtostderr),
-                  nglog::GetFlag(FLAGS_alsologtostderr));
+    // The default flag values, independent of NGLOG_ environment variables
+    // that may override them for the test run.
+    constexpr int kDefaultVerbosity = 0;
+    LogWithLevels(kDefaultVerbosity, NGLOG_ERROR, /*err=*/false,
+                  /*alsoerr=*/false);
     LogWithLevels(0, 0, false, false);  // simulate "before global c-tors"
     early_stderr = capture.Stop();
   }
@@ -826,12 +827,9 @@ void TestLogging(bool check_counts) {
     // they're independent of the per-call-site counters' starting phase.
     EXPECT_EQ(LogMessage::num_messages(NGLOG_INFO), base_num_infos + 15);
     EXPECT_EQ(LogMessage::num_messages(NGLOG_WARNING), base_num_warning + 3);
-    // ERROR is a range, not an exact count: its EVERY_N periods (3, 4, 2)
-    // don't evenly divide their iteration counts, so how many fire depends
-    // on the counters' phase, which carries over from any earlier call to
-    // this function elsewhere in the process.
-    EXPECT_THAT(LogMessage::num_messages(NGLOG_ERROR),
-                AllOf(Ge(base_num_errors + 14), Le(base_num_errors + 17)));
+    // The count holds for the first call in the process only, since the
+    // EVERY_N counters keep their phase across calls.
+    EXPECT_EQ(LogMessage::num_messages(NGLOG_ERROR), base_num_errors + 17);
   }
 }
 
@@ -845,9 +843,14 @@ struct NewHook {
 #ifdef GTEST_HAS_DEATH_TEST
 namespace {
 // Keep the allocation in a separate function so the death test exercises the
-// replaceable global operator new on every supported compiler.
+// replaceable global operator new on every supported compiler. Storing the
+// result keeps optimizers from eliding the allocation.
+int* volatile g_allocated_int = nullptr;
 NGLOG_ATTRIBUTE_NOINLINE
-int* allocInt() { return new int; }
+int* allocInt() {
+  g_allocated_int = new int;
+  return g_allocated_int;
+}
 }  // namespace
 
 TEST(DeathNoAllocNewHook, logging) {
@@ -1517,6 +1520,8 @@ TEST(Logging, RegisteredSinkCanRemoveItself) {
         _exit(EXIT_SUCCESS);
       },
       testing::ExitedWithCode(EXIT_SUCCESS), "");
+#else
+  GTEST_SKIP() << "requires death tests with alarm()";
 #endif
 }
 
@@ -1532,6 +1537,8 @@ TEST(Logging, RegisteredSinkCanRemoveItselfFromConcurrentCalls) {
         _exit(EXIT_SUCCESS);
       },
       testing::ExitedWithCode(EXIT_SUCCESS), "");
+#else
+  GTEST_SKIP() << "requires death tests with alarm()";
 #endif
 }
 
@@ -1552,6 +1559,8 @@ TEST(Logging, RegisteredSinkCanRemoveAnotherSinkFromConcurrentCalls) {
         _exit(EXIT_SUCCESS);
       },
       testing::ExitedWithCode(EXIT_SUCCESS), "");
+#else
+  GTEST_SKIP() << "requires death tests with alarm()";
 #endif
 }
 
@@ -1574,6 +1583,8 @@ TEST(Logging, ThrowingSinkDoesNotBlockRemovalOfLaterSinks) {
         _exit(EXIT_SUCCESS);
       },
       testing::ExitedWithCode(EXIT_SUCCESS), "");
+#else
+  GTEST_SKIP() << "requires death tests with alarm()";
 #endif
 }
 
@@ -1620,6 +1631,8 @@ TEST(Logging, ThrowingSinkReleasesThreadMessageBuffer) {
                       : EXIT_SUCCESS);
       },
       testing::ExitedWithCode(EXIT_SUCCESS), "");
+#else
+  GTEST_SKIP() << "requires death tests";
 #endif
 }
 
@@ -1637,6 +1650,8 @@ TEST(Logging, CustomLoggerCanLogDuringWrite) {
         _exit(EXIT_SUCCESS);
       },
       testing::ExitedWithCode(EXIT_SUCCESS), "");
+#else
+  GTEST_SKIP() << "requires death tests with alarm()";
 #endif
 }
 
@@ -1791,6 +1806,8 @@ constexpr int kCountingIterations = 20'000;
  */
 template <class Log>
 int CountConcurrentMessages(Log log) {
+  // LogToStderr() at the end also changes --stderrthreshold.
+  const nglog::ScopedFlags<> save_all;
   auto save = nglog::MakeScopedFlags(
       nglog::MakeScopedFlag(FLAGS_logtostderr, false),
       nglog::MakeScopedFlag(FLAGS_logtostdout, false),
@@ -1895,6 +1912,10 @@ void LogAtCallSites(std::index_sequence<Sites...> /*sites*/) {
 }
 
 TEST(LogMacros, FirstNLogsExactlyNConcurrentOccurrences) {
+  static bool already_ran = false;
+  if (std::exchange(already_ran, true)) {
+    GTEST_SKIP() << "each call site logs its first occurrence once only";
+  }
   EXPECT_EQ(CountConcurrentMessages([] {
               LogAtCallSites<FirstOccurrence>(
                   std::make_index_sequence<kCallSites>{});
@@ -1904,6 +1925,10 @@ TEST(LogMacros, FirstNLogsExactlyNConcurrentOccurrences) {
 
 // Occurrences arriving together within a period log once.
 TEST(LogMacros, EveryTLogsConcurrentOccurrencesOncePerPeriod) {
+  static bool already_ran = false;
+  if (std::exchange(already_ran, true)) {
+    GTEST_SKIP() << "each call site logs once within the period only";
+  }
   EXPECT_EQ(CountConcurrentMessages([] {
               LogAtCallSites<HourlyOccurrence>(
                   std::make_index_sequence<kCallSites>{});
@@ -2323,21 +2348,29 @@ void TestSTREQ() {
 }
 
 #ifdef GTEST_HAS_DEATH_TEST
+// Each death symbolizes a stack trace, which takes long with some backends,
+// so the deaths are spread over several tests.
 TEST(DeathSTREQ, logging) {
   ASSERT_DEATH(CHECK_STREQ(nullptr, "this"),
                "CHECK_STREQ failed: .* \\( vs\\. this\\)");
   ASSERT_DEATH(CHECK_STREQ("this", "siht"),
                "CHECK_STREQ failed: .* \\(this vs\\. siht\\)");
+  ASSERT_DEATH(CHECK_STREQ((string("a") + "b").c_str(), "abc"),
+               "CHECK_STREQ failed: .* \\(ab vs\\. abc\\)");
+}
+
+TEST(DeathSTRCASEEQ, logging) {
   ASSERT_DEATH(CHECK_STRCASEEQ(nullptr, "siht"),
                "CHECK_STRCASEEQ failed: .* \\( vs\\. siht\\)");
   ASSERT_DEATH(CHECK_STRCASEEQ("this", "siht"),
                "CHECK_STRCASEEQ failed: .* \\(this vs\\. siht\\)");
+}
+
+TEST(DeathSTRNE, logging) {
   ASSERT_DEATH(CHECK_STRNE(nullptr, nullptr),
                "CHECK_STRNE failed: .* \\( vs\\. \\)");
   ASSERT_DEATH(CHECK_STRNE("this", "this"),
                "CHECK_STRNE failed: .* \\(this vs\\. this\\)");
-  ASSERT_DEATH(CHECK_STREQ((string("a") + "b").c_str(), "abc"),
-               "CHECK_STREQ failed: .* \\(ab vs\\. abc\\)");
 }
 
 TEST(DeathCheckOp, ReportsBothValues) {
@@ -2547,7 +2580,8 @@ static std::size_t LogSizeAfterWritingMessages(const string& dest) {
   // process can report a stale (pre-flush) size, even after fflush().
   LogToStderr();
 
-  struct stat statbuf;
+  // Zero-initialized, so that a failed stat() reports a size of zero.
+  struct stat statbuf = {};
   EXPECT_EQ(stat(dest.c_str(), &statbuf), 0)
       << "failed to determine size of log file " << dest << ": "
       << strerror(errno);
@@ -2894,6 +2928,8 @@ MATCHER_P(ExitsWithStatus, expected,
 TEST(Logging, ForkedChildReopensEveryLogFile) {
 #if defined(HAVE_UNISTD_H) && defined(HAVE_SYS_WAIT_H) && \
     !defined(NGLOG_OS_WINDOWS) && !defined(NGLOG_OS_EMSCRIPTEN)
+  // LogToStderr() at the end also changes --stderrthreshold.
+  const nglog::ScopedFlags<> save_all;
   auto save = nglog::MakeScopedFlags(
       nglog::MakeScopedFlag(FLAGS_logtostderr, false),
       nglog::MakeScopedFlag(FLAGS_logtostdout, false),
@@ -3163,6 +3199,8 @@ TEST(Logging, FileLockIsHeldAcrossProcesses) {
   file_handle.reset();
   LogToStderr();
   DeleteFiles(dest + "*");
+#else
+  GTEST_SKIP() << "Windows file locks only";
 #endif
 }
 
@@ -3171,6 +3209,8 @@ TEST(Logging, LockedOversizedFileIsNotTruncated) {
 #if defined(NGLOG_OS_WINDOWS) ||                      \
     (defined(HAVE_FCNTL) && defined(HAVE_UNISTD_H) && \
      defined(HAVE_SYS_WAIT_H) && !defined(NGLOG_OS_EMSCRIPTEN))
+  // LogToStderr() at the end also changes --stderrthreshold.
+  const nglog::ScopedFlags<> save_all;
   auto save = nglog::MakeScopedFlags(
       nglog::MakeScopedFlag(FLAGS_logtostderr, false),
       nglog::MakeScopedFlag(FLAGS_timestamp_in_logfile_name, false),
@@ -3235,10 +3275,14 @@ TEST(Logging, LockedOversizedFileIsNotTruncated) {
 
   LogToStderr();
   DeleteFiles(dest + "*");
+#else
+  GTEST_SKIP() << "requires file locks and child processes";
 #endif
 }
 
 TEST(Logging, TruncatedOversizedFileStartsWithOneHeader) {
+  // LogToStderr() at the end also changes --stderrthreshold.
+  const nglog::ScopedFlags<> save_all;
   auto save = nglog::MakeScopedFlags(
       nglog::MakeScopedFlag(FLAGS_logtostderr, false),
       nglog::MakeScopedFlag(FLAGS_timestamp_in_logfile_name, false),
@@ -3276,6 +3320,8 @@ TEST(Logging, TruncatedOversizedFileStartsWithOneHeader) {
 TEST(Logging, LogFileIsNotOpenedThroughSymlink) {
 #if defined(HAVE_UNISTD_H) && !defined(NGLOG_OS_WINDOWS) && \
     !defined(NGLOG_OS_EMSCRIPTEN)
+  // LogToStderr() at the end also changes --stderrthreshold.
+  const nglog::ScopedFlags<> save_all;
   auto save = nglog::MakeScopedFlags(
       nglog::MakeScopedFlag(FLAGS_logtostderr, false),
       nglog::MakeScopedFlag(FLAGS_timestamp_in_logfile_name, false));
@@ -3369,11 +3415,15 @@ TEST(Logging, LogFileIsNotInheritedByChildProcesses) {
 
   LogToStderr();
   DeleteFiles(dest + "*");
+#else
+  GTEST_SKIP() << "Windows handle inheritance only";
 #endif
 }
 
 TEST(Logging, FileLockFailureReportsWindowsError) {
 #ifdef NGLOG_OS_WINDOWS
+  // LogToStderr() at the end also changes --stderrthreshold.
+  const nglog::ScopedFlags<> save_all;
   auto save = nglog::MakeScopedFlags(
       nglog::MakeScopedFlag(FLAGS_logtostderr, false),
       nglog::MakeScopedFlag(FLAGS_timestamp_in_logfile_name, false));
@@ -3409,6 +3459,8 @@ TEST(Logging, FileLockFailureReportsWindowsError) {
 
   LogToStderr();
   DeleteFiles(dest + "*");
+#else
+  GTEST_SKIP() << "Windows file locks only";
 #endif
 }
 
@@ -3556,6 +3608,8 @@ TEST(Logging, TruncatesLongPath) {
 
 TEST(Logging, DisablingAnInactiveCleanerKeepsOverdueLogs) {
 #if defined(HAVE_UNISTD_H) && !defined(NGLOG_OS_WINDOWS)
+  // LogToStderr() at the end also changes --stderrthreshold.
+  const nglog::ScopedFlags<> save_all;
   auto save = nglog::MakeScopedFlags(
       nglog::MakeScopedFlag(FLAGS_logtostderr, false),
       nglog::MakeScopedFlag(FLAGS_timestamp_in_logfile_name, true));
@@ -3910,6 +3964,8 @@ TEST(Logging, Truncate) {
   TestOneTruncate(fdpath.c_str(), 10, 10, 10, 10, 10);
 #  endif
 
+#else
+  GTEST_SKIP() << "requires file truncation support";
 #endif
 }
 
@@ -4000,6 +4056,8 @@ TEST(Logging, DropLogMemoryConcurrentWriters) {
   // Windows.
   LogToStderr();
   DeleteFiles(dest + "*");
+#else
+  GTEST_SKIP() << "requires posix_fadvise() on Linux";
 #endif
 }
 
@@ -4026,6 +4084,8 @@ TEST(Logging, MessageCountDoesNotWaitForLogger) {
 
 // Data races here only fail the test under ThreadSanitizer.
 TEST(Logging, DefaultLoggerQueriesDoNotRaceWithLogging) {
+  // LogToStderr() at the end also changes --stderrthreshold.
+  const nglog::ScopedFlags<> save_all;
   auto save = nglog::MakeScopedFlags(
       nglog::MakeScopedFlag(FLAGS_logtostderr, false),
       nglog::MakeScopedFlag(FLAGS_logtostdout, false),
@@ -4055,7 +4115,12 @@ TEST(Logging, DefaultLoggerQueriesDoNotRaceWithLogging) {
   DeleteFiles(destination + "*");
 }
 
-TEST(Logging, DefaultFileDispatchDoesNotRelockFile) {
+// The default dispatch shares the mutex of the file with direct calls through
+// the logger interface and takes it once per message.
+TEST(Logging, DefaultFileDispatchLocksTheFileOnce) {
+#ifndef NGLOG_ENABLE_LOCK_METRICS
+  GTEST_SKIP() << "requires lock metrics";
+#endif
   nglog::ScopedFlags<> save;
   nglog::SetFlag(FLAGS_logtostderr, false);
   nglog::SetFlag(FLAGS_logtostdout, false);
@@ -4139,6 +4204,8 @@ TEST(Logging, ShutdownDoesNotRaceWithLogCleaner) {
         std::exit(EXIT_SUCCESS);
       },
       testing::ExitedWithCode(EXIT_SUCCESS), "");
+#else
+  GTEST_SKIP() << "requires death tests";
 #endif
 }
 
@@ -4391,6 +4458,7 @@ TEST(DVLog, Basic) {
   EXPECT_CALL(log, Log(NGLOG_INFO, StrEq(__FILE__), StrEq("debug log")));
 #endif
 
+  nglog::ScopedFlags<> save;
   nglog::SetFlag(FLAGS_v, 1);
   DVLOG(1) << "debug log";
 }
@@ -4585,6 +4653,7 @@ static int kBacktraceAtLine = __LINE__ - 3;  // The line of the LOG(INFO) above
 #  endif                                     // HAVE_SYMBOLIZE
 
 TEST(LogBacktraceAt, DoesNotBacktraceWhenDisabled) {
+  nglog::ScopedFlags<> save;
   StrictMock<ScopedMockLog> log;
 
   nglog::SetFlag(FLAGS_log_backtrace_at, std::string());
@@ -4601,6 +4670,7 @@ TEST(LogBacktraceAt, DoesNotBacktraceWhenDisabled) {
 // Windows dbghelp API can't read).
 #  ifdef HAVE_SYMBOLIZE
 TEST(LogBacktraceAt, DoesBacktraceAtRightLineWhenEnabled) {
+  nglog::ScopedFlags<> save;
   StrictMock<ScopedMockLog> log;
 
   char where[100];
@@ -4972,7 +5042,8 @@ TEST(EmailLogging, SlowMailerDoesNotBlockOtherLoggingThreads) {
 
   const std::string marker_path = TestTmpDir() + "/sleeping-mailer.started";
   const std::string log_path = TestTmpDir() + "/slow-mailer-log";
-  DeleteFiles(marker_path);
+  // Includes the release and exit markers of the fake mailer.
+  DeleteFiles(marker_path + "*");
   DeleteFiles(log_path + "*");
 
   std::vector<char> program(g_argv0, g_argv0 + std::strlen(g_argv0) + 1);
@@ -5005,7 +5076,8 @@ TEST(EmailLogging, SlowMailerDoesNotBlockOtherLoggingThreads) {
 
   EXPECT_EQ(TrimTrailingCRLF(std::string(output, output_size)),
             TrimTrailingCRLF(kExpectedOutput));
-  DeleteFiles(marker_path);
+  // Includes the release and exit markers of the fake mailer.
+  DeleteFiles(marker_path + "*");
   DeleteFiles(log_path + "*");
 }
 #endif  // HAVE_SUBPROCESS
@@ -5075,7 +5147,12 @@ TEST(LogMacros, WriteFormattedMessagesInOrder) {
   RouteLogMessagesTo(StandardStream::kStderr);
 
   // The expected messages of the EVERY_N macros assume that their counters
-  // start from zero, which holds because no other test calls TestLogging().
+  // start from zero, which holds for the first run of this test only, the
+  // single caller of TestLogging().
+  static bool already_ran = false;
+  if (std::exchange(already_ran, true)) {
+    GTEST_SKIP() << "the EVERY_N counters keep their phase across runs";
+  }
   ScopedStreamCapture capture{StandardStream::kStderr};
   TestLogging(true);
   const std::vector<std::string> lines = SplitLines(capture.Stop());
