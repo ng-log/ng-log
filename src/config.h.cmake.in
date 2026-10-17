@@ -71,6 +71,9 @@
 /* Define if you have the 'pipe2' function in <unistd.h> */
 #cmakedefine HAVE_PIPE2
 
+/* Define if you have the 'mallinfo2' function in <malloc.h> */
+#cmakedefine HAVE_MALLINFO2
+
 /* Define if you have the 'poll' function in <poll.h> */
 #cmakedefine HAVE_POLL
 
