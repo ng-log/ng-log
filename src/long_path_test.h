@@ -4,6 +4,7 @@
 #ifndef NGLOG_LONG_PATH_TEST_H_
 #define NGLOG_LONG_PATH_TEST_H_
 
+#include <process.h>
 #include <windows.h>
 
 #include <cstddef>
@@ -19,6 +20,12 @@ inline bool IsWine() {
   const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
   return ntdll != nullptr &&
          GetProcAddress(ntdll, "wine_get_version") != nullptr;
+}
+
+//! Returns a name for a temporary file system entry no other test run uses.
+inline std::string UniqueTemporaryName(const std::string& prefix) {
+  return prefix + std::to_string(_getpid()) + "_" +
+         std::to_string(GetTickCount64());
 }
 
 /**

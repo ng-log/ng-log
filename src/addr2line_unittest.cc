@@ -8,6 +8,7 @@
 
 #include "addr2line.h"
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include "ng-log/platform.h"
@@ -21,6 +22,7 @@
 #endif  // NGLOG_OS_WINDOWS
 
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -38,6 +40,7 @@
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "symbolize.h"
+#include "testing_utilities.h"
 #include "utilities.h"
 
 using namespace nglog;
@@ -48,81 +51,26 @@ namespace {
 bool g_long_path_child = false;
 #endif
 
-void SetPathEnvironmentVariable(const char* value) {
-#ifdef NGLOG_OS_WINDOWS
-  _putenv_s("PATH", value != nullptr ? value : "");
-#else
-  if (value != nullptr) {
-    setenv("PATH", value, 1);
-  } else {
-    unsetenv("PATH");
-  }
-#endif  // NGLOG_OS_WINDOWS
-}
-
-// Saves and restores the PATH environment variable so that tests which
-// point it at a scratch directory don't leak that into other tests.
-class ScopedPathOverride {
- public:
-  explicit ScopedPathOverride(const char* value) {
-    const char* current = std::getenv("PATH");
-    had_previous_value_ = current != nullptr;
-    if (had_previous_value_) {
-      previous_value_ = current;
-    }
-    SetPathEnvironmentVariable(value);
-  }
-
-  ScopedPathOverride(const ScopedPathOverride&) = delete;
-  ScopedPathOverride& operator=(const ScopedPathOverride&) = delete;
-
-  ~ScopedPathOverride() {
-    SetPathEnvironmentVariable(had_previous_value_ ? previous_value_.c_str()
-                                                   : nullptr);
-  }
-
- private:
-  bool had_previous_value_;
-  std::string previous_value_;
-};
-
 using UniqueFile = std::unique_ptr<std::FILE, int (*)(std::FILE*)>;
 
 constexpr std::size_t kCopyBufferSize = 4096;
 
-// Creates a fresh, empty scratch directory and returns its path.
-// CHECK-fails on error.
+// Creates a fresh, empty scratch directory in the private temporary
+// directory of the test process and returns its path. CHECK-fails on error.
 std::string MakeScratchDirectory() {
+  static unsigned int counter = 0;
+  const std::string directory =
+      TestTmpDir() + "/addr2line_" + std::to_string(++counter);
 #ifdef NGLOG_OS_WINDOWS
-  wchar_t temp_path[MAX_PATH];
-  CHECK_NE(0U, GetTempPathW(ARRAYSIZE(temp_path), temp_path));
-  wchar_t dir[MAX_PATH];
-  // GetTempFileNameW() is used only to obtain a name that is guaranteed
-  // unique within |temp_path|. The file it creates is immediately
-  // replaced with a directory of the same name, which is the standard
-  // way to reserve a unique temporary directory name on Windows.
-  CHECK_NE(0U, GetTempFileNameW(temp_path, L"a2l", 0, dir));
-  CHECK(DeleteFileW(dir));
-  CHECK(CreateDirectoryW(dir, nullptr));
-  std::string result;
-  CHECK(internal::WideToUtf8(dir, std::wcslen(dir), &result));
-  return result;
+  std::wstring wide_directory;
+  CHECK(internal::Utf8ToWide(directory.data(), directory.size(),
+                             &wide_directory));
+  CHECK(CreateDirectoryW(wide_directory.c_str(), nullptr));
 #else
-  char dir_template[] = "/tmp/addr2line_unittest.XXXXXX";
-  const char* dir = mkdtemp(dir_template);
-  CHECK(dir != nullptr);
-  return dir;
+  constexpr mode_t kDirectoryMode = 0700;
+  CHECK_EQ(0, mkdir(directory.c_str(), kDirectoryMode));
 #endif  // NGLOG_OS_WINDOWS
-}
-
-void RemoveScratchDirectory(const std::string& dir) {
-#ifdef NGLOG_OS_WINDOWS
-  std::wstring wide_dir;
-  CHECK(internal::Utf8ToWide(dir.data(), dir.size(), &wide_dir));
-  RemoveDirectoryW(wide_dir.c_str());
-#else
-  rmdir(dir.c_str());
-#endif  // NGLOG_OS_WINDOWS
+  return directory;
 }
 
 // Materializes a fake "addr2line" executable in |dir| and returns its path.
@@ -155,161 +103,146 @@ std::string MakeFakeAddr2Line(const std::string& dir, const char* helper_path) {
   }
   CHECK_EQ(0, std::ferror(source.get()));
   destination.reset();
-  CHECK_EQ(0, chmod(path.c_str(), 0755));
+  constexpr mode_t kExecutableMode = 0755;
+  CHECK_EQ(0, chmod(path.c_str(), kExecutableMode));
   return path;
 #endif  // NGLOG_OS_WINDOWS
 }
 
-void RemoveFakeAddr2Line(const std::string& path) {
-#ifdef NGLOG_OS_WINDOWS
-  std::wstring wide_path;
-  CHECK(internal::Utf8ToWide(path.data(), path.size(), &wide_path));
-  DeleteFileW(wide_path.c_str());
-#else
-  unlink(path.c_str());
-#endif  // NGLOG_OS_WINDOWS
-}
+// Places a copy of |helper_path| named addr2line into a fresh scratch
+// directory and points PATH at that directory while in scope. The private
+// temporary directory of the test process removes the copy on exit.
+class ScopedFakeAddr2Line {
+ public:
+  explicit ScopedFakeAddr2Line(const char* helper_path)
+      : directory_(MakeScratchDirectory()),
+        path_override_("PATH", directory_.c_str()) {
+    MakeFakeAddr2Line(directory_, helper_path);
+  }
+
+ private:
+  std::string directory_;
+  ScopedEnvironmentVariable path_override_;
+};
 
 }  // namespace
 
 // Tests for FormatAddr2LineOutput.
 
-TEST(FormatAddr2LineOutput, ResolvedLocation) {
-  constexpr char kInput[] = "src/addr2line.cc:42\n";
-  char out[64];
-  const std::size_t written =
-      FormatAddr2LineOutput(kInput, std::strlen(kInput), out, sizeof(out));
-  EXPECT_EQ(std::strlen("src/addr2line.cc:42 "), written);
-  EXPECT_STREQ("src/addr2line.cc:42 ", out);
+namespace {
+
+constexpr std::size_t kFormatBufferSize = 64;
+constexpr char kLocationInput[] = "src/addr2line.cc:42\n";
+constexpr char kFormattedLocation[] = "src/addr2line.cc:42 ";
+
+// addr2line output that carries a usable location and its expected
+// formatting.
+struct FormatCase {
+  const char* name;
+  const char* input;
+  const char* expected;
+};
+
+// addr2line output that a parser rejects.
+struct RejectedInput {
+  const char* name;
+  const char* input;
+};
+
+class FormatAddr2LineOutputAccepts
+    : public ::testing::TestWithParam<FormatCase> {};
+
+TEST_P(FormatAddr2LineOutputAccepts, WritesFileAndLine) {
+  const FormatCase& param = GetParam();
+  char out[kFormatBufferSize];
+  const std::size_t written = FormatAddr2LineOutput(
+      param.input, std::strlen(param.input), out, sizeof(out));
+  EXPECT_EQ(std::strlen(param.expected), written);
+  EXPECT_STREQ(param.expected, out);
 }
 
-TEST(FormatAddr2LineOutput, IgnoresTrailingDiscriminatorAnnotation) {
-  // GNU addr2line appends " (discriminator N)" when an address maps to one
-  // of several DWARF line-table discriminators for the same source line, as
-  // commonly happens right at a CHECK/LOG(FATAL) call site.
-  constexpr char kInput[] = "src/addr2line.cc:42 (discriminator 3)\n";
-  char out[64];
-  const std::size_t written =
-      FormatAddr2LineOutput(kInput, std::strlen(kInput), out, sizeof(out));
-  EXPECT_EQ(std::strlen("src/addr2line.cc:42 "), written);
-  EXPECT_STREQ("src/addr2line.cc:42 ", out);
+INSTANTIATE_TEST_SUITE_P(
+    FormatAddr2LineOutput, FormatAddr2LineOutputAccepts,
+    ::testing::Values(
+        FormatCase{"ResolvedLocation", kLocationInput, kFormattedLocation},
+        // GNU addr2line appends " (discriminator N)" when an address maps
+        // to one of several DWARF line-table discriminators for the same
+        // source line, as commonly happens right at a CHECK/LOG(FATAL) call
+        // site.
+        FormatCase{"IgnoresTrailingDiscriminatorAnnotation",
+                   "src/addr2line.cc:42 (discriminator 3)\n",
+                   kFormattedLocation},
+        FormatCase{"IgnoresLinesAfterTheFirst",
+                   "src/addr2line.cc:42\nsrc/other.cc:1\n", kFormattedLocation},
+        FormatCase{"HandlesInputWithoutTrailingNewline", "src/addr2line.cc:42",
+                   kFormattedLocation},
+        FormatCase{"HandlesColonWithinTheFilePath", "weird:name.cc:42\n",
+                   "weird:name.cc:42 "}),
+    CaseName{});
+
+class FormatAddr2LineOutputRejects
+    : public ::testing::TestWithParam<RejectedInput> {};
+
+TEST_P(FormatAddr2LineOutputRejects, ReturnsZero) {
+  const RejectedInput& param = GetParam();
+  char out[kFormatBufferSize];
+  EXPECT_EQ(0U, FormatAddr2LineOutput(param.input, std::strlen(param.input),
+                                      out, sizeof(out)));
 }
 
-TEST(FormatAddr2LineOutput, IgnoresLinesAfterTheFirst) {
-  constexpr char kInput[] = "src/addr2line.cc:42\nsrc/other.cc:1\n";
-  char out[64];
-  const std::size_t written =
-      FormatAddr2LineOutput(kInput, std::strlen(kInput), out, sizeof(out));
-  EXPECT_STREQ("src/addr2line.cc:42 ", out);
-  EXPECT_EQ(std::strlen("src/addr2line.cc:42 "), written);
+INSTANTIATE_TEST_SUITE_P(
+    FormatAddr2LineOutput, FormatAddr2LineOutputRejects,
+    ::testing::Values(RejectedInput{"UnresolvedLocation", "??:0\n"},
+                      RejectedInput{"MissingColon", "not-a-location\n"},
+                      RejectedInput{"NonNumericLine", "src/addr2line.cc:abc\n"},
+                      RejectedInput{"EmptyInput", ""},
+                      RejectedInput{"EmptyFileField", ":42\n"},
+                      RejectedInput{"EmptyLineField", "src/addr2line.cc:\n"},
+                      // A byte with the high bit set is never a valid
+                      // line-number digit. This also exercises that classifying
+                      // it does not read out of bounds.
+                      RejectedInput{"HighBitSetByteInLineField",
+                                    "src/addr2line.cc:\xff\n"}),
+    CaseName{});
+
+// An output buffer size too small for the formatted location and its NUL.
+struct ShortBufferCase {
+  const char* name;
+  std::size_t size;
+};
+
+class FormatAddr2LineOutputRejectsShortBuffer
+    : public ::testing::TestWithParam<ShortBufferCase> {};
+
+TEST_P(FormatAddr2LineOutputRejectsShortBuffer, ReturnsZero) {
+  const ShortBufferCase& param = GetParam();
+  // Sized exactly so that sanitizers flag any write past the given size.
+  const std::unique_ptr<char[]> out{new char[param.size]};
+  EXPECT_EQ(0U,
+            FormatAddr2LineOutput(kLocationInput, std::strlen(kLocationInput),
+                                  out.get(), param.size));
 }
 
-TEST(FormatAddr2LineOutput, RejectsUnresolvedLocation) {
-  constexpr char kInput[] = "??:0\n";
-  char out[64];
-  EXPECT_EQ(
-      0U, FormatAddr2LineOutput(kInput, std::strlen(kInput), out, sizeof(out)));
-}
+INSTANTIATE_TEST_SUITE_P(
+    FormatAddr2LineOutput, FormatAddr2LineOutputRejectsShortBuffer,
+    ::testing::Values(
+        ShortBufferCase{"ZeroSized", 0},
+        // Room for a NUL and a byte of content, but not even the fixed ':'
+        // and ' ' that always separate the file and line fields.
+        ShortBufferCase{"TooSmallForTheLiteralBytes", 2},
+        ShortBufferCase{"FarTooSmall", 8},
+        ShortBufferCase{"OneByteTooSmall", sizeof(kFormattedLocation) - 1}),
+    CaseName{});
 
-TEST(FormatAddr2LineOutput, RejectsMissingColon) {
-  constexpr char kInput[] = "not-a-location\n";
-  char out[64];
-  EXPECT_EQ(
-      0U, FormatAddr2LineOutput(kInput, std::strlen(kInput), out, sizeof(out)));
-}
-
-TEST(FormatAddr2LineOutput, RejectsNonNumericLine) {
-  constexpr char kInput[] = "src/addr2line.cc:abc\n";
-  char out[64];
-  EXPECT_EQ(
-      0U, FormatAddr2LineOutput(kInput, std::strlen(kInput), out, sizeof(out)));
-}
-
-TEST(FormatAddr2LineOutput, RejectsEmptyInput) {
-  char out[64];
-  EXPECT_EQ(0U, FormatAddr2LineOutput("", 0, out, sizeof(out)));
-}
-
-TEST(FormatAddr2LineOutput, RejectsWhenOutputDoesNotFit) {
-  constexpr char kInput[] = "src/addr2line.cc:42\n";
-  char out[8];  // Too small for "src/addr2line.cc:42 " + '\0'.
-  EXPECT_EQ(
-      0U, FormatAddr2LineOutput(kInput, std::strlen(kInput), out, sizeof(out)));
-}
-
-TEST(FormatAddr2LineOutput, RejectsEmptyFileField) {
-  constexpr char kInput[] = ":42\n";
-  char out[64];
-  EXPECT_EQ(
-      0U, FormatAddr2LineOutput(kInput, std::strlen(kInput), out, sizeof(out)));
-}
-
-TEST(FormatAddr2LineOutput, RejectsEmptyLineField) {
-  constexpr char kInput[] = "src/addr2line.cc:\n";
-  char out[64];
-  EXPECT_EQ(
-      0U, FormatAddr2LineOutput(kInput, std::strlen(kInput), out, sizeof(out)));
-}
-
-TEST(FormatAddr2LineOutput, HandlesInputWithoutTrailingNewline) {
-  constexpr char kInput[] = "src/addr2line.cc:42";  // No trailing '\n'.
-  char out[64];
-  const std::size_t written =
-      FormatAddr2LineOutput(kInput, std::strlen(kInput), out, sizeof(out));
-  EXPECT_EQ(std::strlen("src/addr2line.cc:42 "), written);
-  EXPECT_STREQ("src/addr2line.cc:42 ", out);
-}
-
-TEST(FormatAddr2LineOutput, HandlesColonWithinTheFilePath) {
-  constexpr char kInput[] = "weird:name.cc:42\n";
-  char out[64];
-  const std::size_t written =
-      FormatAddr2LineOutput(kInput, std::strlen(kInput), out, sizeof(out));
-  EXPECT_EQ(std::strlen("weird:name.cc:42 "), written);
-  EXPECT_STREQ("weird:name.cc:42 ", out);
-}
-
-TEST(FormatAddr2LineOutput, RejectsHighBitSetByteInLineField) {
-  // A byte with the high bit set is never a valid line-number digit.
-  // This also exercises that classifying it does not read out of bounds.
-  constexpr char kInput[] = "src/addr2line.cc:\xff\n";
-  char out[64];
-  EXPECT_EQ(
-      0U, FormatAddr2LineOutput(kInput, std::strlen(kInput), out, sizeof(out)));
-}
+}  // namespace
 
 TEST(FormatAddr2LineOutput, SucceedsWhenOutputExactlyFits) {
-  constexpr char kInput[] = "src/addr2line.cc:42\n";
-  constexpr char kExpected[] = "src/addr2line.cc:42 ";
-  char out[64];
-  const std::size_t exact_size = std::strlen(kExpected) + 1;  // +1 for NUL.
+  const std::unique_ptr<char[]> out{new char[sizeof(kFormattedLocation)]};
   const std::size_t written =
-      FormatAddr2LineOutput(kInput, std::strlen(kInput), out, exact_size);
-  EXPECT_EQ(std::strlen(kExpected), written);
-  EXPECT_STREQ(kExpected, out);
-}
-
-TEST(FormatAddr2LineOutput, RejectsWhenOutputIsOneByteTooSmall) {
-  constexpr char kInput[] = "src/addr2line.cc:42\n";
-  constexpr char kExpected[] = "src/addr2line.cc:42 ";
-  char out[64];
-  const std::size_t one_byte_too_few = std::strlen(kExpected);  // No NUL.
-  EXPECT_EQ(0U, FormatAddr2LineOutput(kInput, std::strlen(kInput), out,
-                                      one_byte_too_few));
-}
-
-TEST(FormatAddr2LineOutput, RejectsZeroSizedOutputBuffer) {
-  constexpr char kInput[] = "src/addr2line.cc:42\n";
-  char out[64];
-  EXPECT_EQ(0U, FormatAddr2LineOutput(kInput, std::strlen(kInput), out, 0));
-}
-
-TEST(FormatAddr2LineOutput, RejectsOutputTooSmallForTheLiteralBytes) {
-  constexpr char kInput[] = "src/addr2line.cc:42\n";
-  char out[64];
-  // Room for a NUL and a byte or two of content, but not even the fixed
-  // ':', ' ' that always separate the file and line fields.
-  EXPECT_EQ(0U, FormatAddr2LineOutput(kInput, std::strlen(kInput), out, 2));
+      FormatAddr2LineOutput(kLocationInput, std::strlen(kLocationInput),
+                            out.get(), sizeof(kFormattedLocation));
+  EXPECT_EQ(std::strlen(kFormattedLocation), written);
+  EXPECT_STREQ(kFormattedLocation, out.get());
 }
 
 // Tests for SplitAddr2LineFunctionsOutput.
@@ -324,23 +257,6 @@ TEST(SplitAddr2LineFunctionsOutput, ResolvesNameAndLocation) {
             "src/addr2line.cc:42");
 }
 
-TEST(SplitAddr2LineFunctionsOutput, RejectsUnresolvedName) {
-  constexpr char kInput[] = "??\n??:0\n";
-  Addr2LineFunctionsResult result;
-  EXPECT_FALSE(
-      SplitAddr2LineFunctionsOutput(kInput, std::strlen(kInput), &result));
-}
-
-TEST(SplitAddr2LineFunctionsOutput, RejectsUnresolvedNameWithCrlfLineEndings) {
-  // addr2line's stdout is opened in text mode on Windows, so its CRT
-  // writes CRLF line endings. The "??" placeholder must still be
-  // recognized with the trailing '\r' included in the line.
-  constexpr char kInput[] = "??\r\n??:0\r\n";
-  Addr2LineFunctionsResult result;
-  EXPECT_FALSE(
-      SplitAddr2LineFunctionsOutput(kInput, std::strlen(kInput), &result));
-}
-
 TEST(SplitAddr2LineFunctionsOutput, ResolvesNameWithCrlfLineEndings) {
   constexpr char kInput[] = "main\r\nsrc/addr2line.cc:42\r\n";
   Addr2LineFunctionsResult result;
@@ -349,19 +265,31 @@ TEST(SplitAddr2LineFunctionsOutput, ResolvesNameWithCrlfLineEndings) {
   EXPECT_EQ(std::string(result.name, result.name_len), "main");
 }
 
-TEST(SplitAddr2LineFunctionsOutput, RejectsMissingSecondLine) {
-  constexpr char kInput[] = "main";  // No '\n' anywhere.
+namespace {
+
+class SplitAddr2LineFunctionsOutputRejects
+    : public ::testing::TestWithParam<RejectedInput> {};
+
+TEST_P(SplitAddr2LineFunctionsOutputRejects, ReturnsFalse) {
+  const RejectedInput& param = GetParam();
   Addr2LineFunctionsResult result;
-  EXPECT_FALSE(
-      SplitAddr2LineFunctionsOutput(kInput, std::strlen(kInput), &result));
+  EXPECT_FALSE(SplitAddr2LineFunctionsOutput(
+      param.input, std::strlen(param.input), &result));
 }
 
-TEST(SplitAddr2LineFunctionsOutput, RejectsEmptyNameField) {
-  constexpr char kInput[] = "\nsrc/addr2line.cc:42\n";
-  Addr2LineFunctionsResult result;
-  EXPECT_FALSE(
-      SplitAddr2LineFunctionsOutput(kInput, std::strlen(kInput), &result));
-}
+INSTANTIATE_TEST_SUITE_P(
+    SplitAddr2LineFunctionsOutput, SplitAddr2LineFunctionsOutputRejects,
+    ::testing::Values(
+        RejectedInput{"UnresolvedName", "??\n??:0\n"},
+        // addr2line's stdout is opened in text mode on Windows, so its CRT
+        // writes CRLF line endings. The "??" placeholder must still be
+        // recognized with the trailing '\r' included in the line.
+        RejectedInput{"UnresolvedNameWithCrlfLineEndings", "??\r\n??:0\r\n"},
+        RejectedInput{"MissingSecondLine", "main"},
+        RejectedInput{"EmptyNameField", "\nsrc/addr2line.cc:42\n"}),
+    CaseName{});
+
+}  // namespace
 
 // Tests for Addr2LineSymbolizeCallback, exercised through Symbolize().
 // This whole file only builds when HAVE_ADDR2LINE is defined, which
@@ -371,6 +299,12 @@ TEST(SplitAddr2LineFunctionsOutput, RejectsEmptyNameField) {
 
 namespace {
 
+constexpr std::size_t kSymbolBufferSize = 4096;
+constexpr char kSourceLocation[] = "addr2line_unittest.cc:";
+constexpr char kFunctionName[] = "FunctionSymbolizedForAddr2LineTest";
+constexpr char kResolverUnavailable[] =
+    "no name resolver available without addr2line";
+
 NGLOG_ATTRIBUTE_NOINLINE
 void FunctionSymbolizedForAddr2LineTest() {
   volatile int a = 0;
@@ -378,44 +312,54 @@ void FunctionSymbolizedForAddr2LineTest() {
 }
 
 const char* TrySymbolize(void* pc) {
-  static char symbol[4096];
+  static char symbol[kSymbolBufferSize];
   if (Symbolize(pc, symbol, sizeof(symbol))) {
     return symbol;
   }
   return nullptr;
 }
 
+const char* TrySymbolizeTestFunction() {
+  return TrySymbolize(
+      reinterpret_cast<void*>(&FunctionSymbolizedForAddr2LineTest));
+}
+
+// Resolves an address within a module that does not exist, so that only the
+// addr2line executable found on PATH determines the outcome.
+bool ResolveInMissingModule(char (&symbol)[kSymbolBufferSize]) {
+  constexpr std::uintptr_t kAddress = 1;
+  constexpr std::uint64_t kRelocation = 0;
+  return ResolveFunctionAndLine(
+      "missing.exe", reinterpret_cast<void*>(kAddress), kRelocation, symbol,
+      sizeof(symbol), SymbolizeOptions::kNone, nullptr);
+}
+
+// Matches a symbol that names the test function without a source location.
+::testing::Matcher<const char*> NamesFunctionWithoutLocation() {
+  return ::testing::AllOf(
+      ::testing::HasSubstr(kFunctionName),
+      ::testing::Not(::testing::HasSubstr(kSourceLocation)));
+}
+
 #ifdef NGLOG_OS_WINDOWS
 bool RunLongPathSymbolizeChild(DWORD* create_error) {
   *create_error = ERROR_SUCCESS;
   nglog::testing_internal::LongPathTestDirectory directory;
-  const std::string directory_name = "nglog_symbolize_long_path_" +
-                                     std::to_string(_getpid()) + "_" +
-                                     std::to_string(GetTickCount64());
+  const std::string directory_name =
+      nglog::testing_internal::UniqueTemporaryName(
+          "nglog_symbolize_long_path_");
   if (!directory.CreateInTemporaryDirectory(directory_name)) {
     return false;
   }
 
-  constexpr DWORD kInitialExecutablePathLength = 256;
-  constexpr std::size_t kBufferGrowthFactor = 2;
-  std::vector<wchar_t> executable_path(kInitialExecutablePathLength);
-  while (true) {
-    const DWORD length =
-        GetModuleFileNameW(nullptr, executable_path.data(),
-                           static_cast<DWORD>(executable_path.size()));
-    if (length == 0) {
-      return false;
-    }
-    if (length < executable_path.size()) {
-      executable_path.resize(length);
-      break;
-    }
-    executable_path.resize(executable_path.size() * kBufferGrowthFactor);
+  std::wstring executable_path;
+  if (!nglog::testing_internal::GetExecutablePath(&executable_path)) {
+    return false;
   }
 
   constexpr wchar_t kChildName[] = L"long_path_symbolize.exe";
   const std::wstring child_path = directory.ExtendedChildPath(kChildName);
-  if (!CopyFileW(executable_path.data(), child_path.c_str(), FALSE)) {
+  if (!CopyFileW(executable_path.c_str(), child_path.c_str(), FALSE)) {
     return false;
   }
 
@@ -447,6 +391,28 @@ bool RunLongPathSymbolizeChild(DWORD* create_error) {
 }
 #endif
 
+// Restores the symbolization callback and the flags that tests modify.
+class Addr2LineSymbolizeCallback : public ::testing::Test {
+ protected:
+  // Lets addr2line finish however long a loaded machine stalls it, in tests
+  // where a timeout would take a different path than the one under test.
+  static void DisableAddr2LineTimeout() {
+    nglog::SetFlag(FLAGS_addr2line_timeout_ms,
+                   std::numeric_limits<nglog::int32>::max());
+  }
+
+  void TearDown() override {
+    InstallSymbolizeCallback(nullptr);
+    nglog::SetFlag(FLAGS_symbolize_line_info, symbolize_line_info_);
+    nglog::SetFlag(FLAGS_addr2line_timeout_ms, addr2line_timeout_ms_);
+  }
+
+ private:
+  const bool symbolize_line_info_ = nglog::GetFlag(FLAGS_symbolize_line_info);
+  const nglog::int32 addr2line_timeout_ms_ =
+      nglog::GetFlag(FLAGS_addr2line_timeout_ms);
+};
+
 }  // namespace
 
 // On platforms where addr2line supplements a name resolver that always
@@ -457,124 +423,98 @@ bool RunLongPathSymbolizeChild(DWORD* create_error) {
 // outright. The tests below treat a null symbol as a reason to skip
 // rather than a hard failure.
 
-TEST(Addr2LineSymbolizeCallback, ResolvesFileAndLine) {
+TEST_F(Addr2LineSymbolizeCallback, ResolvesFileAndLine) {
   nglog::SetFlag(FLAGS_symbolize_line_info, true);
   EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
 
-  const char* symbol = TrySymbolize(
-      reinterpret_cast<void*>(&FunctionSymbolizedForAddr2LineTest));
-  InstallSymbolizeCallback(nullptr);
+  const char* symbol = TrySymbolizeTestFunction();
 
-  if (symbol == nullptr ||
-      std::strstr(symbol, "addr2line_unittest.cc:") == nullptr) {
+  if (symbol == nullptr || std::strstr(symbol, kSourceLocation) == nullptr) {
     GTEST_SKIP() << "addr2line not available or not resolving";
   }
-  EXPECT_NE(nullptr, std::strstr(symbol, "FunctionSymbolizedForAddr2LineTest"));
+  EXPECT_THAT(symbol, ::testing::HasSubstr(kFunctionName));
 }
 
 #ifdef NGLOG_OS_WINDOWS
-TEST(Addr2LineSymbolizeCallback, ResolvesFromLongModulePath) {
-  if (!g_long_path_child) {
-    nglog::SetFlag(FLAGS_symbolize_line_info, true);
-    ASSERT_TRUE(InstallAddr2LineSymbolizeCallback());
-    const char* const short_path_symbol = TrySymbolize(
-        reinterpret_cast<void*>(&InstallAddr2LineSymbolizeCallback));
-    InstallSymbolizeCallback(nullptr);
-    if (short_path_symbol == nullptr) {
-      GTEST_SKIP() << "addr2line not available or not resolving";
-    }
-
-    DWORD create_error = ERROR_SUCCESS;
-    const bool resolved = RunLongPathSymbolizeChild(&create_error);
-    if (!resolved && create_error == ERROR_INVALID_NAME &&
-        nglog::testing_internal::IsWine()) {
-      GTEST_SKIP() << "Wine does not launch executables through extended paths";
-    }
-    EXPECT_TRUE(resolved);
-    return;
-  }
-
+TEST_F(Addr2LineSymbolizeCallback, ResolvesFromLongModulePath) {
   nglog::SetFlag(FLAGS_symbolize_line_info, true);
   ASSERT_TRUE(InstallAddr2LineSymbolizeCallback());
-  const char* symbol =
+  const char* const symbol =
       TrySymbolize(reinterpret_cast<void*>(&InstallAddr2LineSymbolizeCallback));
   InstallSymbolizeCallback(nullptr);
 
-  ASSERT_NE(symbol, nullptr);
-  EXPECT_NE(std::strstr(symbol, "InstallAddr2LineSymbolizeCallback"), nullptr);
+  if (g_long_path_child) {
+    ASSERT_NE(symbol, nullptr);
+    EXPECT_THAT(symbol,
+                ::testing::HasSubstr("InstallAddr2LineSymbolizeCallback"));
+    return;
+  }
+
+  if (symbol == nullptr) {
+    GTEST_SKIP() << "addr2line not available or not resolving";
+  }
+
+  DWORD create_error = ERROR_SUCCESS;
+  const bool resolved = RunLongPathSymbolizeChild(&create_error);
+  if (!resolved && create_error == ERROR_INVALID_NAME &&
+      nglog::testing_internal::IsWine()) {
+    GTEST_SKIP() << "Wine does not launch executables through extended paths";
+  }
+  EXPECT_TRUE(resolved);
 }
 #endif
 
-TEST(Addr2LineSymbolizeCallback, DisabledByFlag) {
+TEST_F(Addr2LineSymbolizeCallback, DisabledByFlag) {
   nglog::SetFlag(FLAGS_symbolize_line_info, false);
   EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
 
-  const char* symbol = TrySymbolize(
-      reinterpret_cast<void*>(&FunctionSymbolizedForAddr2LineTest));
-  nglog::SetFlag(FLAGS_symbolize_line_info, true);
-  InstallSymbolizeCallback(nullptr);
+  const char* symbol = TrySymbolizeTestFunction();
 
-  if (symbol == nullptr ||
-      std::strstr(symbol, "FunctionSymbolizedForAddr2LineTest") == nullptr) {
+  if (symbol == nullptr || std::strstr(symbol, kFunctionName) == nullptr) {
     GTEST_SKIP() << "addr2line not available or not resolving";
   }
-  EXPECT_EQ(nullptr, std::strstr(symbol, "addr2line_unittest.cc:"));
+  EXPECT_THAT(symbol, ::testing::Not(::testing::HasSubstr(kSourceLocation)));
 }
 
-TEST(Addr2LineSymbolizeCallback, SkipsGracefullyWhenUnavailable) {
-  ScopedPathOverride scoped_path("/nonexistent/directory/for/testing");
+TEST_F(Addr2LineSymbolizeCallback, SkipsGracefullyWhenUnavailable) {
+  const ScopedEnvironmentVariable scoped_path{
+      "PATH", "/nonexistent/directory/for/testing"};
 
   nglog::SetFlag(FLAGS_symbolize_line_info, true);
   EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
 
-  const char* symbol = TrySymbolize(
-      reinterpret_cast<void*>(&FunctionSymbolizedForAddr2LineTest));
-  InstallSymbolizeCallback(nullptr);
+  const char* symbol = TrySymbolizeTestFunction();
 
   if (symbol == nullptr) {
-    GTEST_SKIP() << "no name resolver available without addr2line";
+    GTEST_SKIP() << kResolverUnavailable;
   }
-  EXPECT_EQ(nullptr, std::strstr(symbol, "addr2line_unittest.cc:"));
-  EXPECT_NE(nullptr, std::strstr(symbol, "FunctionSymbolizedForAddr2LineTest"));
+  EXPECT_THAT(symbol, NamesFunctionWithoutLocation());
 }
 
-TEST(Addr2LineSymbolizeCallback, DoesNotHangOnAnUnresponsiveAddr2Line) {
-  const std::string dir = MakeScratchDirectory();
-  // This helper never writes anything, exercising the timeout /
-  // forced-termination path in RunAddr2Line().
-  const std::string fake_executable =
-      MakeFakeAddr2Line(dir, ADDR2LINE_FAKE_HANG_PATH);
+TEST_F(Addr2LineSymbolizeCallback, DoesNotHangOnAnUnresponsiveAddr2Line) {
+  // Short enough to keep this test fast, while still giving the helper
+  // plenty of time to be seen as unresponsive.
+  constexpr nglog::int32 kTimeoutMs = 50;
 
   const char* symbol = nullptr;
   {
-    ScopedPathOverride scoped_path(dir.c_str());
-
-    // Short enough to keep this test fast, while still giving the helper
-    // plenty of time to be seen as unresponsive.
-    const nglog::int32 previous_timeout_ms =
-        nglog::GetFlag(FLAGS_addr2line_timeout_ms);
-    nglog::SetFlag(FLAGS_addr2line_timeout_ms, 50);
+    // This helper never writes anything, exercising the timeout /
+    // forced-termination path in RunAddr2Line().
+    const ScopedFakeAddr2Line fake{ADDR2LINE_FAKE_HANG_PATH};
+    nglog::SetFlag(FLAGS_addr2line_timeout_ms, kTimeoutMs);
     nglog::SetFlag(FLAGS_symbolize_line_info, true);
     EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
 
-    symbol = TrySymbolize(
-        reinterpret_cast<void*>(&FunctionSymbolizedForAddr2LineTest));
-
-    InstallSymbolizeCallback(nullptr);
-    nglog::SetFlag(FLAGS_addr2line_timeout_ms, previous_timeout_ms);
+    symbol = TrySymbolizeTestFunction();
   }
-
-  RemoveFakeAddr2Line(fake_executable);
-  RemoveScratchDirectory(dir);
 
   if (symbol == nullptr) {
-    GTEST_SKIP() << "no name resolver available without addr2line";
+    GTEST_SKIP() << kResolverUnavailable;
   }
-  EXPECT_EQ(nullptr, std::strstr(symbol, "addr2line_unittest.cc:"));
-  EXPECT_NE(nullptr, std::strstr(symbol, "FunctionSymbolizedForAddr2LineTest"));
+  EXPECT_THAT(symbol, NamesFunctionWithoutLocation());
 }
 
-TEST(Addr2LineSymbolizeCallback, UsesOneTimeoutForSlowOutput) {
+TEST_F(Addr2LineSymbolizeCallback, UsesOneTimeoutForSlowOutput) {
   constexpr std::chrono::milliseconds kTimeout{40};
   // The helper never exits and emits a chunk well within kTimeout. A timeout
   // restarted by every read would therefore keep reading until the output
@@ -582,122 +522,64 @@ TEST(Addr2LineSymbolizeCallback, UsesOneTimeoutForSlowOutput) {
   // while tolerating long scheduling stalls of a loaded machine.
   constexpr std::chrono::seconds kMaxElapsed{10};
 
-  const std::string dir = MakeScratchDirectory();
-  const std::string fake_executable =
-      MakeFakeAddr2Line(dir, ADDR2LINE_FAKE_STREAM_PATH);
+  const ScopedFakeAddr2Line fake{ADDR2LINE_FAKE_STREAM_PATH};
+  nglog::SetFlag(FLAGS_addr2line_timeout_ms,
+                 static_cast<nglog::int32>(kTimeout.count()));
+  EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
 
-  {
-    ScopedPathOverride scoped_path(dir.c_str());
-    const nglog::int32 previous_timeout_ms =
-        nglog::GetFlag(FLAGS_addr2line_timeout_ms);
-    nglog::SetFlag(FLAGS_addr2line_timeout_ms,
-                   static_cast<nglog::int32>(kTimeout.count()));
-    EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
+  char symbol[kSymbolBufferSize];
+  const auto start = std::chrono::steady_clock::now();
+  const bool resolved = ResolveInMissingModule(symbol);
+  const auto elapsed = std::chrono::steady_clock::now() - start;
 
-    char symbol[4096];
-    const auto start = std::chrono::steady_clock::now();
-    const bool resolved = ResolveFunctionAndLine(
-        "missing.exe", reinterpret_cast<void*>(1), 0, symbol, sizeof(symbol),
-        SymbolizeOptions::kNone, nullptr);
-    const auto elapsed = std::chrono::steady_clock::now() - start;
-
-    nglog::SetFlag(FLAGS_addr2line_timeout_ms, previous_timeout_ms);
-    EXPECT_FALSE(resolved);
-    // Timer granularity and truncation to whole milliseconds can end the
-    // wait slightly before the deadline.
-    EXPECT_GE(elapsed, kTimeout / 2);
-    EXPECT_LT(elapsed, kMaxElapsed);
-    InstallSymbolizeCallback(nullptr);
-  }
-
-  RemoveFakeAddr2Line(fake_executable);
-  RemoveScratchDirectory(dir);
+  EXPECT_FALSE(resolved);
+  // Timer granularity and truncation to whole milliseconds can end the
+  // wait slightly before the deadline.
+  EXPECT_GE(elapsed, kTimeout / 2);
+  EXPECT_LT(elapsed, kMaxElapsed);
 }
 
-TEST(Addr2LineSymbolizeCallback, RejectsUnsuccessfulAddr2LineExit) {
-  const std::string dir = MakeScratchDirectory();
-  const std::string fake_executable =
-      MakeFakeAddr2Line(dir, ADDR2LINE_FAKE_FAIL_PATH);
+TEST_F(Addr2LineSymbolizeCallback, RejectsUnsuccessfulAddr2LineExit) {
+  const ScopedFakeAddr2Line fake{ADDR2LINE_FAKE_FAIL_PATH};
+  EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
 
-  {
-    ScopedPathOverride scoped_path(dir.c_str());
-    EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
-
-    char symbol[4096] = {};
-    EXPECT_FALSE(ResolveFunctionAndLine(
-        "missing.exe", reinterpret_cast<void*>(1), 0, symbol, sizeof(symbol),
-        SymbolizeOptions::kNone, nullptr));
-
-    InstallSymbolizeCallback(nullptr);
-  }
-
-  RemoveFakeAddr2Line(fake_executable);
-  RemoveScratchDirectory(dir);
+  char symbol[kSymbolBufferSize] = {};
+  EXPECT_FALSE(ResolveInMissingModule(symbol));
 }
 
 #ifndef NGLOG_OS_WINDOWS
-TEST(Addr2LineSymbolizeCallback, KeepsExecutableAfterPathChanges) {
-  const std::string dir = MakeScratchDirectory();
-  const std::string fake_executable =
-      MakeFakeAddr2Line(dir, ADDR2LINE_FAKE_SLOW_PATH);
+TEST_F(Addr2LineSymbolizeCallback, KeepsExecutableAfterPathChanges) {
+  const ScopedFakeAddr2Line fake{ADDR2LINE_FAKE_SLOW_PATH};
+  DisableAddr2LineTimeout();
+  EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
 
-  {
-    ScopedPathOverride scoped_path(dir.c_str());
-    // The helper must be able to finish however long it is stalled.
-    const nglog::int32 previous_timeout_ms =
-        nglog::GetFlag(FLAGS_addr2line_timeout_ms);
-    nglog::SetFlag(FLAGS_addr2line_timeout_ms,
-                   std::numeric_limits<nglog::int32>::max());
-    EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
+  EXPECT_TRUE(
+      SetEnvironmentValue("PATH", "/nonexistent/directory/for/testing"));
 
-    SetPathEnvironmentVariable("/nonexistent/directory/for/testing");
-
-    char symbol[4096] = {};
-    const bool resolved = ResolveFunctionAndLine(
-        "missing.exe", reinterpret_cast<void*>(1), 0, symbol, sizeof(symbol),
-        SymbolizeOptions::kNone, nullptr);
-
-    nglog::SetFlag(FLAGS_addr2line_timeout_ms, previous_timeout_ms);
-    EXPECT_TRUE(resolved);
-    EXPECT_STREQ("slow", symbol);
-
-    InstallSymbolizeCallback(nullptr);
-  }
-
-  RemoveFakeAddr2Line(fake_executable);
-  RemoveScratchDirectory(dir);
+  char symbol[kSymbolBufferSize] = {};
+  EXPECT_TRUE(ResolveInMissingModule(symbol));
+  EXPECT_STREQ("slow", symbol);
 }
 #endif  // NGLOG_OS_WINDOWS
 
-TEST(Addr2LineSymbolizeCallback, SkipsGracefullyWhenAddr2LineProducesNoOutput) {
-  const std::string dir = MakeScratchDirectory();
-  // Exits immediately without printing anything: distinct from addr2line
-  // being entirely absent from PATH (no process is ever spawned) and from
-  // it hanging (RunAddr2Line() reaches EOF here well within the timeout).
-  const std::string fake_executable =
-      MakeFakeAddr2Line(dir, ADDR2LINE_FAKE_EMPTY_PATH);
-
+TEST_F(Addr2LineSymbolizeCallback,
+       SkipsGracefullyWhenAddr2LineProducesNoOutput) {
   const char* symbol = nullptr;
   {
-    ScopedPathOverride scoped_path(dir.c_str());
-
+    // Exits immediately without printing anything: distinct from addr2line
+    // being entirely absent from PATH (no process is ever spawned) and from
+    // it hanging (RunAddr2Line() reaches EOF here well within the timeout).
+    const ScopedFakeAddr2Line fake{ADDR2LINE_FAKE_EMPTY_PATH};
     nglog::SetFlag(FLAGS_symbolize_line_info, true);
     EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
 
-    symbol = TrySymbolize(
-        reinterpret_cast<void*>(&FunctionSymbolizedForAddr2LineTest));
-
-    InstallSymbolizeCallback(nullptr);
+    symbol = TrySymbolizeTestFunction();
   }
-
-  RemoveFakeAddr2Line(fake_executable);
-  RemoveScratchDirectory(dir);
 
   if (symbol == nullptr) {
-    GTEST_SKIP() << "no name resolver available without addr2line";
+    GTEST_SKIP() << kResolverUnavailable;
   }
-  EXPECT_EQ(nullptr, std::strstr(symbol, "addr2line_unittest.cc:"));
-  EXPECT_NE(nullptr, std::strstr(symbol, "FunctionSymbolizedForAddr2LineTest"));
+  EXPECT_THAT(symbol, NamesFunctionWithoutLocation());
 }
 
 int main(int argc, char** argv) {
