@@ -329,6 +329,47 @@ TEST(SignalHandler, FailureDumpOrder) {
 }
 #  endif  // defined(HAVE_SIGACTION) && !defined(NGLOG_OS_WINDOWS)
 
+#  if defined(HAVE_SIGACTION) && defined(NGLOG_OS_LINUX) && defined(__x86_64__)
+// Faults on its first instruction, so that the address before the faulting
+// instruction belongs to another function.
+extern "C" void nglog_test_trap_on_entry();
+asm(".text\n"
+    ".globl nglog_test_trap_on_entry\n"
+    ".type nglog_test_trap_on_entry, @function\n"
+    "nglog_test_trap_on_entry:\n"
+    "  ud2\n"
+    ".size nglog_test_trap_on_entry, .-nglog_test_trap_on_entry\n");
+
+// Unlike the return addresses of the frames below it, the program counter
+// of the fault points at the faulting instruction itself.
+TEST(SignalHandler, FaultingInstructionNamesItsFunction) {
+  ASSERT_DEATH(nglog_test_trap_on_entry(),
+               "PC: @ +0x[0-9a-f]+ +([^ ]+:[0-9]+ )?nglog_test_trap_on_entry");
+}
+
+// The stack trace lists the interrupted frame by the faulting address as
+// well.
+TEST(SignalHandler, FaultingFrameNamesItsFunction) {
+  ASSERT_DEATH(nglog_test_trap_on_entry(),
+               "\n +@ +0x[0-9a-f]+ +([^ ]+:[0-9]+ )?nglog_test_trap_on_entry");
+}
+
+// A fault has an address but no sending process, whose field shares storage
+// with the address.
+TEST(SignalHandler, FaultReportsAddressWithoutSender) {
+  ASSERT_DEATH(nglog_test_trap_on_entry(),
+               "\\*\\*\\* SIGILL \\(@0x[0-9a-f]+\\) received by PID [0-9]+ "
+               "\\(TID [^)]*\\) stack trace: \\*\\*\\*");
+}
+
+// A signal sent by a process has a sender but no fault address.
+TEST(SignalHandler, SentSignalReportsSenderWithoutAddress) {
+  ASSERT_DEATH(CrashInThread(),
+               "\\*\\*\\* SIGSEGV received by PID [0-9]+ \\(TID [^)]*\\) "
+               "from PID [0-9]+; stack trace: \\*\\*\\*");
+}
+#  endif
+
 #  if defined(NGLOG_OS_WINDOWS) && !defined(HAVE_ADDR2LINE)
 TEST(SignalHandler, SourceLocationPrecedesFunctionName) {
   ASSERT_DEATH(abort(), "signalhandler_unittest\\.cc:.*TestBody");

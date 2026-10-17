@@ -15,9 +15,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
-#include <sstream>
 #include <string>
-#include <thread>
 
 #include "config.h"
 #include "internal/source_location.h"
@@ -38,7 +36,7 @@
 #ifdef HAVE_SYS_UCONTEXT_H
 #  include <sys/ucontext.h>
 #endif
-#ifdef HAVE_PTHREAD_GETNAME_NP
+#if defined(HAVE_PTHREAD_GETNAME_NP) || defined(HAVE_SIGACTION)
 #  include <pthread.h>
 #endif
 #ifdef HAVE_UNISTD_H
@@ -104,6 +102,8 @@ void* GetPC(void* ucontext_in_void) {
 // guaranteed to be (e.g. EBCDIC), so that arithmetic would not necessarily
 // produce the intended letters.
 constexpr char kHexDigits[] = "0123456789abcdef";
+constexpr unsigned kDecimalRadix = 10;
+constexpr unsigned kHexadecimalRadix = 16;
 
 // The class is used for formatting error messages.  We don't use printf()
 // as it's not async signal safe.
@@ -167,19 +167,21 @@ class MinimalFormatter {
   void AppendHexWithPadding(uint64 number, int width) {
     char* const start = cursor_;
     AppendString("0x");
-    AppendUint64(number, 16);
+    AppendUint64(number, kHexadecimalRadix);
     const int64 content_len = cursor_ - start;
     if (content_len < width) {
       // The padded field, [start, start + target_len), must include both
       // the shifted-right content and the padding spaces in front of it.
       // target_len is clamped to the buffer's remaining capacity (from
       // "start", not "cursor_") so that a "width" wider than the buffer
-      // can never make the std::copy()/std::fill() below write past it.
+      // can never make the std::copy_backward()/std::fill() below write past
+      // it. The content moves right within the buffer, so it is copied from
+      // its end.
       const int64 target_len =
           std::min(static_cast<int64>(width), static_cast<int64>(end_ - start));
       const int64 delta = target_len - content_len;  // Padding spaces.
       if (delta > 0) {
-        std::copy(start, cursor_, start + delta);
+        std::copy_backward(start, cursor_, start + target_len);
         std::fill(start, start + delta, ' ');
         cursor_ = start + target_len;
       }
@@ -340,7 +342,8 @@ void DumpTimeInfo() {
     // this is the same value, just in a different format.
     char time_buf[24];  // Big enough for a 64-bit decimal unix time.
     MinimalFormatter time_formatter(time_buf, sizeof(time_buf));
-    time_formatter.AppendUint64(static_cast<uint64>(time_in_sec), 10);
+    time_formatter.AppendUint64(static_cast<uint64>(time_in_sec),
+                                kDecimalRadix);
     WriteStyledField(theme.Get(Role::kShellCommand), mode, g_failure_writer,
                      time_buf, time_formatter.num_bytes_written());
   }
@@ -356,7 +359,7 @@ void DumpTimeInfo() {
     char command_buf[64];
     MinimalFormatter command(command_buf, sizeof(command_buf));
     command.AppendString("date -d @");
-    command.AppendUint64(static_cast<uint64>(time_in_sec), 10);
+    command.AppendUint64(static_cast<uint64>(time_in_sec), kDecimalRadix);
     WriteStyledField(theme.Get(Role::kShellCommand), mode, g_failure_writer,
                      command_buf, command.num_bytes_written());
   }
@@ -370,6 +373,21 @@ void DumpTimeInfo() {
 
 // sigaction is required here because signal() cannot provide siginfo_t or the
 // interrupted execution context used by the failure report.
+
+// Returns whether the kernel raises the signal for a faulting instruction,
+// in which case si_addr holds the faulting address. Only the handled failure
+// signals in kFailureSignals reach it.
+bool IsFaultSignal(int signal_number) {
+  switch (signal_number) {
+    case SIGSEGV:
+    case SIGBUS:
+    case SIGILL:
+    case SIGFPE:
+      return true;
+    default:
+      return false;
+  }
+}
 
 // Dumps information about the signal to STDERR. The crash address and the
 // PID/TID/LWP identifiers are colorized separately from the surrounding
@@ -409,35 +427,45 @@ void DumpSignalInfo(int signal_number, siginfo_t* siginfo) {
     char buf[24];  // Big enough for "Signal " + a 64-bit decimal number.
     MinimalFormatter formatter(buf, sizeof(buf));
     formatter.AppendString("Signal ");
-    formatter.AppendUint64(static_cast<uint64>(signal_number), 10);
+    formatter.AppendUint64(static_cast<uint64>(signal_number), kDecimalRadix);
     WriteStyledField(theme.Get(Role::kSignalName), mode, g_failure_writer, buf,
                      formatter.num_bytes_written());
   }
 
-  plain.Reset();
-  plain.AppendString(" (@");
-  g_failure_writer(plain_buf, plain.num_bytes_written());
+  // si_addr and si_pid share storage, so only one of them is meaningful: the
+  // address for a fault the kernel raised, the sender for a signal that a
+  // process sent.
+  const bool sent_by_process = siginfo->si_code <= 0;
+  const bool is_fault = !sent_by_process && IsFaultSignal(signal_number);
+  if (is_fault) {
+    plain.Reset();
+    plain.AppendString(" (@");
+    g_failure_writer(plain_buf, plain.num_bytes_written());
 
-  {
     // "0x" is part of the colored field, not the surrounding plain text,
     // to match how DumpStackFrameInfo() colors the "0x"-prefixed address
     // of each frame as a single unit.
     char buf[24];  // Big enough for a padded, prefixed 64-bit address.
     MinimalFormatter formatter(buf, sizeof(buf));
     formatter.AppendString("0x");
-    formatter.AppendUint64(reinterpret_cast<uintptr_t>(siginfo->si_addr), 16);
+    formatter.AppendUint64(reinterpret_cast<uintptr_t>(siginfo->si_addr),
+                           kHexadecimalRadix);
     WriteStyledField(theme.Get(Role::kStackAddress), mode, g_failure_writer,
                      buf, formatter.num_bytes_written());
+
+    plain.Reset();
+    plain.AppendString(")");
+    g_failure_writer(plain_buf, plain.num_bytes_written());
   }
 
   plain.Reset();
-  plain.AppendString(") received by PID ");
+  plain.AppendString(" received by PID ");
   g_failure_writer(plain_buf, plain.num_bytes_written());
 
   {
     char buf[24];  // Big enough for a 64-bit decimal PID.
     MinimalFormatter formatter(buf, sizeof(buf));
-    formatter.AppendUint64(static_cast<uint64>(getpid()), 10);
+    formatter.AppendUint64(static_cast<uint64>(getpid()), kDecimalRadix);
     WriteStyledField(theme.Get(Role::kMetaIdentifier), mode, g_failure_writer,
                      buf, formatter.num_bytes_written());
   }
@@ -447,11 +475,21 @@ void DumpSignalInfo(int signal_number, siginfo_t* siginfo) {
   g_failure_writer(plain_buf, plain.num_bytes_written());
 
   {
-    std::ostringstream oss;
-    oss << std::showbase << std::hex << std::this_thread::get_id();
-    const std::string tid_str = oss.str();
+    // Streams use locales and may allocate, which a signal handler must not.
+    // The value matches what std::thread::id prints for POSIX threads.
+    const pthread_t thread = pthread_self();
+    std::uintptr_t thread_value = 0;
+    std::memcpy(&thread_value, &thread,
+                std::min(sizeof(thread_value), sizeof(thread)));
+    // Big enough for a prefixed 64-bit hexadecimal value.
+    constexpr std::size_t kThreadIdBufferSize = 24;
+    char buf[kThreadIdBufferSize];
+    MinimalFormatter formatter(buf, sizeof(buf));
+    formatter.AppendString("0x");
+    formatter.AppendUint64(static_cast<uint64>(thread_value),
+                           kHexadecimalRadix);
     WriteStyledField(theme.Get(Role::kMetaIdentifier), mode, g_failure_writer,
-                     tid_str.c_str(), tid_str.size());
+                     buf, formatter.num_bytes_written());
   }
 
 #  if defined(NGLOG_OS_LINUX) && defined(HAVE_SYS_SYSCALL_H) && \
@@ -464,7 +502,7 @@ void DumpSignalInfo(int signal_number, siginfo_t* siginfo) {
 
     char buf[24];  // Big enough for a 64-bit decimal LWP id.
     MinimalFormatter formatter(buf, sizeof(buf));
-    formatter.AppendUint64(static_cast<uint64>(tid), 10);
+    formatter.AppendUint64(static_cast<uint64>(tid), kDecimalRadix);
     WriteStyledField(theme.Get(Role::kMetaIdentifier), mode, g_failure_writer,
                      buf, formatter.num_bytes_written());
   }
@@ -484,23 +522,25 @@ void DumpSignalInfo(int signal_number, siginfo_t* siginfo) {
 
   plain.Reset();
   plain.AppendString(") ");
-  // Only linux has the PID of the signal sender in si_pid.
-#  ifdef NGLOG_OS_LINUX
-  plain.AppendString("from PID ");
-#  endif  // NGLOG_OS_LINUX
   g_failure_writer(plain_buf, plain.num_bytes_written());
 
+  // Only linux has the PID of the signal sender in si_pid.
 #  ifdef NGLOG_OS_LINUX
-  {
+  if (sent_by_process) {
+    plain.Reset();
+    plain.AppendString("from PID ");
+    g_failure_writer(plain_buf, plain.num_bytes_written());
+
     char buf[24];  // Big enough for a 64-bit decimal PID.
     MinimalFormatter formatter(buf, sizeof(buf));
-    formatter.AppendUint64(static_cast<uint64>(siginfo->si_pid), 10);
+    formatter.AppendUint64(static_cast<uint64>(siginfo->si_pid), kDecimalRadix);
     WriteStyledField(theme.Get(Role::kMetaIdentifier), mode, g_failure_writer,
                      buf, formatter.num_bytes_written());
+
+    plain.Reset();
+    plain.AppendString("; ");
+    g_failure_writer(plain_buf, plain.num_bytes_written());
   }
-  plain.Reset();
-  plain.AppendString("; ");
-  g_failure_writer(plain_buf, plain.num_bytes_written());
 #  endif  // NGLOG_OS_LINUX
 
   plain.Reset();
@@ -512,16 +552,29 @@ void DumpSignalInfo(int signal_number, siginfo_t* siginfo) {
 
 // Dumps information about the stack frame to STDERR.
 #if !defined(NGLOG_OS_WINDOWS) || defined(HAVE_STACKTRACE)
-void DumpStackFrameInfoImpl(const char* prefix, void* pc) {
+// What a stack frame address points at.
+enum class FrameAddress {
+  // The instruction after a call, which may belong to the next function if
+  // the call was the last instruction of its function.
+  kReturnAddress,
+  // The instruction that was executing, such as the one that faulted.
+  kInstruction,
+};
+
+void DumpStackFrameInfoImpl(const char* prefix, void* pc,
+                            FrameAddress kind = FrameAddress::kReturnAddress) {
   // Get the symbol name.
   const char* symbol = "(unknown)";
   bool symbol_resolved = false;
 #if defined(HAVE_SYMBOLIZE)
   SymbolizedFrame frame;
   char symbolized[1024];  // Big enough for a sane symbol.
-  // Symbolizes the previous address of pc because pc may be in the
-  // next function.
-  if (Symbolize(reinterpret_cast<char*>(pc) - 1, symbolized, sizeof(symbolized),
+  // A return address is symbolized by the address before it, which lies
+  // within the call.
+  char* const address = kind == FrameAddress::kReturnAddress && pc != nullptr
+                            ? reinterpret_cast<char*>(pc) - 1
+                            : reinterpret_cast<char*>(pc);
+  if (Symbolize(address, symbolized, sizeof(symbolized),
                 SymbolizeOptions::kNone, &frame)) {
     symbol = symbolized;
     symbol_resolved = true;
@@ -735,7 +788,7 @@ static void HandleSignal(int signal_number
 #if !defined(NGLOG_OS_WINDOWS)
   // Get the program counter from ucontext.
   void* pc = GetPC(ucontext);
-  DumpStackFrameInfoImpl("PC: ", pc);
+  DumpStackFrameInfoImpl("PC: ", pc, FrameAddress::kInstruction);
 #endif
 
 #ifdef HAVE_STACKTRACE
@@ -745,7 +798,15 @@ static void HandleSignal(int signal_number
   const int depth = GetStackTrace(stack, ARRAYSIZE(stack), 1);
   // Dump the stack traces.
   for (int i = 0; i < depth; ++i) {
+#  if !defined(NGLOG_OS_WINDOWS)
+    // The unwinder lists the interrupted frame by the faulting address itself
+    // rather than by a return address.
+    DumpStackFrameInfoImpl("    ", stack[i],
+                           stack[i] == pc ? FrameAddress::kInstruction
+                                          : FrameAddress::kReturnAddress);
+#  else
     DumpStackFrameInfoImpl("    ", stack[i]);
+#  endif
   }
 #endif
 
