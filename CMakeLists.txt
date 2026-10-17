@@ -810,7 +810,7 @@ if (WITH_FUZZING AND NOT WITH_FUZZING STREQUAL none)
     # The fuzzing engine provides main() and must therefore also be linked.
     target_compile_options (fuzz_demangle PRIVATE -fsanitize=fuzzer)
     target_link_options (fuzz_demangle PRIVATE -fsanitize=fuzzer)
-  else (WITH_FUZZING STREQUAL "libfuzzer")
+  else (WITH_FUZZING STREQUAL "ossfuzz")
     message (FATAL_ERROR "Unsupported fuzzing engine ${WITH_FUZZING}")
   endif (WITH_FUZZING STREQUAL "ossfuzz")
 endif (WITH_FUZZING AND NOT WITH_FUZZING STREQUAL none)
