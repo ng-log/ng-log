@@ -36,11 +36,11 @@ constexpr char kErrorMessage[] = "strip error";
 }  // namespace
 
 TEST(StripLog, LogsExpectedSeverities) {
-  CaptureTestStderr();
+  ScopedStreamCapture capture{StandardStream::kStderr};
   LOG(INFO) << kInfoMessage;
   LOG(WARNING) << kWarningMessage;
   LOG(ERROR) << kErrorMessage;
-  const std::string output = GetCapturedTestStderr();
+  const std::string output = capture.Stop();
 
 #if NGLOG_STRIP_LOG == 0
   EXPECT_THAT(output, HasSubstr(kInfoMessage));

@@ -14,7 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <map>
+#include <fstream>
 #include <memory>
 #include <new>
 #include <sstream>
@@ -219,53 +219,19 @@ const std::string& TestSrcDir() {
   return dir;
 }
 
-CapturedStream::CapturedStream(int fd, std::string filename)
-    : fd_(fd), filename_(std::move(filename)) {
-  Capture();
-}
-
-void CapturedStream::Capture() {
-  // Keep original stream for later
-  CHECK(!uncaptured_fd_) << ", Stream " << fd_ << " already captured!";
-  uncaptured_fd_.reset(dup(fd_));
-  CHECK(uncaptured_fd_);
-
-  // Open file to save stream to
-  FileDescriptor cap_fd{
-      open(filename_.c_str(), O_CREAT | O_TRUNC | O_WRONLY, S_IRUSR | S_IWUSR)};
-  CHECK(cap_fd);
-
-  // Send stdout/stderr to this file
-  fflush(nullptr);
-  CHECK(dup2(cap_fd.get(), fd_) != -1);
-  CHECK(cap_fd.close() != -1);
-}
-
-void CapturedStream::StopCapture() {
-  // Restore original stream
-  if (uncaptured_fd_) {
-    fflush(nullptr);
-    CHECK(dup2(uncaptured_fd_.get(), fd_) != -1);
-  }
-}
-
 namespace {
 
-std::map<int, std::unique_ptr<CapturedStream>> s_captured_streams;
-
-// Redirect a file descriptor to a file.
-//   fd       - Should be stdout or stderr
-//   filename - File where output should be stored
-void CaptureTestOutput(int fd, const std::string& filename) {
-  CHECK((fd == fileno(stdout)) || (fd == fileno(stderr)));
-  CHECK(s_captured_streams.find(fd) == s_captured_streams.end());
-  s_captured_streams[fd] = std::make_unique<CapturedStream>(fd, filename);
-}
-
-// Return the size (in bytes) of a file
-size_t GetFileSize(FILE* file) {
-  fseek(file, 0, SEEK_END);
-  return static_cast<size_t>(ftell(file));
+// Reads a text file. Line endings are translated as for a text stream, so
+// that captured output and golden files compare equally on every platform.
+bool ReadTextFile(const std::string& path, std::string* contents) {
+  std::ifstream file{path};
+  if (!file) {
+    return false;
+  }
+  std::ostringstream buffer;
+  buffer << file.rdbuf();
+  *contents = buffer.str();
+  return true;
 }
 
 std::vector<std::string> SplitLines(const std::string& s) {
@@ -283,68 +249,64 @@ std::vector<std::string> SplitLines(const std::string& s) {
   return lines;
 }
 
-// Print a minimal unified-style diff of two line sequences directly to
-// stderr. Deliberately done in-process rather than via temp files and an
-// external diff/fc tool: those depend on platform-specific quirks (working
-// directory, path separators, sandboxing) that have made the diff itself
-// fail to show on some CI platforms, hiding the actual mismatch.
+// Writes a diff of two line sequences that shows each change together with
+// the unchanged lines around it.
 void PrintDiff(const std::vector<std::string>& golden,
-               const std::vector<std::string>& actual) {
-  const size_t rows = golden.size();
-  const size_t cols = actual.size();
+               const std::vector<std::string>& actual, std::ostream& output) {
+  const std::size_t rows = golden.size();
+  const std::size_t cols = actual.size();
 
   // lcs[i][j] holds the length of the longest common subsequence of
   // golden[i:] and actual[j:].
-  std::vector<std::vector<int>> lcs(rows + 1, std::vector<int>(cols + 1, 0));
-  for (size_t i = rows; i-- > 0;) {
-    for (size_t j = cols; j-- > 0;) {
+  std::vector<std::vector<std::size_t>> lcs(
+      rows + 1, std::vector<std::size_t>(cols + 1, 0));
+  for (std::size_t i = rows; i-- > 0;) {
+    for (std::size_t j = cols; j-- > 0;) {
       lcs[i][j] = golden[i] == actual[j]
                       ? lcs[i + 1][j + 1] + 1
                       : std::max(lcs[i + 1][j], lcs[i][j + 1]);
     }
   }
 
-  size_t i = 0;
-  size_t j = 0;
-  while (i < rows && j < cols) {
-    if (golden[i] == actual[j]) {
-      fprintf(stderr, "  %s\n", golden[i].c_str());
+  // Each line is prefixed with "  " if unchanged, "- " if only in the golden
+  // file and "+ " if only in the actual output.
+  std::vector<std::string> lines;
+  std::size_t i = 0;
+  std::size_t j = 0;
+  while (i < rows || j < cols) {
+    if (i < rows && j < cols && golden[i] == actual[j]) {
+      lines.push_back("  " + golden[i]);
       ++i;
       ++j;
-    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
-      fprintf(stderr, "- %s\n", golden[i].c_str());
+    } else if (j == cols || (i < rows && lcs[i + 1][j] >= lcs[i][j + 1])) {
+      lines.push_back("- " + golden[i]);
       ++i;
     } else {
-      fprintf(stderr, "+ %s\n", actual[j].c_str());
+      lines.push_back("+ " + actual[j]);
       ++j;
     }
   }
-  for (; i < rows; ++i) {
-    fprintf(stderr, "- %s\n", golden[i].c_str());
+
+  constexpr std::size_t kContextLines = 3;
+  std::vector<bool> shown(lines.size(), false);
+  for (std::size_t k = 0; k < lines.size(); ++k) {
+    if (lines[k][0] != ' ') {
+      const std::size_t first = k > kContextLines ? k - kContextLines : 0;
+      const std::size_t last = std::min(lines.size(), k + kContextLines + 1);
+      std::fill(shown.begin() + static_cast<std::ptrdiff_t>(first),
+                shown.begin() + static_cast<std::ptrdiff_t>(last), true);
+    }
   }
-  for (; j < cols; ++j) {
-    fprintf(stderr, "+ %s\n", actual[j].c_str());
+  bool skipping = false;
+  for (std::size_t k = 0; k < lines.size(); ++k) {
+    if (shown[k]) {
+      output << lines[k] << '\n';
+      skipping = false;
+    } else if (!skipping) {
+      output << "...\n";
+      skipping = true;
+    }
   }
-}
-
-// Get the captured stdout or stderr as a string
-std::string GetCapturedTestOutput(int fd) {
-  CHECK((fd == fileno(stdout)) || (fd == fileno(stderr)));
-  auto pos = s_captured_streams.find(fd);
-  CHECK(pos != s_captured_streams.end())
-      << ": did you forget CaptureTestStdout() or CaptureTestStderr()?";
-  std::unique_ptr<CapturedStream> cap = std::move(pos->second);
-  s_captured_streams.erase(pos);
-
-  // Make sure everything is flushed.
-  cap->StopCapture();
-
-  // Read the captured file.
-  std::unique_ptr<FILE> file{fopen(cap->filename().c_str(), "r")};
-  const std::string content = ReadEntireFile(file.get());
-  file.reset();
-
-  return content;
 }
 
 constexpr char kDatePlaceholder[] = "YEARDATE";
@@ -424,9 +386,7 @@ void StringReplace(std::string* str, const std::string& oldsub,
   }
 }
 
-std::string Munge(const std::string& filename) {
-  std::unique_ptr<FILE> fp{fopen(filename.c_str(), "rb")};
-  CHECK(fp != nullptr) << filename << ": couldn't open";
+std::string Munge(const std::string& text) {
   constexpr std::size_t kPointerBufferSize = 256;
   char null_str[kPointerBufferSize];
   char ptr_str[kPointerBufferSize];
@@ -434,10 +394,10 @@ std::string Munge(const std::string& filename) {
   std::snprintf(ptr_str, sizeof(ptr_str), "%p",
                 reinterpret_cast<void*>(kPtrTestValue));
 
-  constexpr std::size_t kLineBufferSize = 4096;
-  char buf[kLineBufferSize];
+  std::istringstream input{text};
+  std::string buf;
   std::string result;
-  while (fgets(buf, sizeof(buf) - 1, fp.get())) {
+  while (std::getline(input, buf)) {
     std::string line = MungeLine(buf);
     StringReplace(&line, "__NULLP__", null_str);
     StringReplace(&line, "__PTRTEST__", ptr_str);
@@ -459,73 +419,64 @@ std::string Munge(const std::string& filename) {
   return result;
 }
 
-bool MungeAndDiffTest(const std::string& golden_filename, CapturedStream* cap) {
-  cap->StopCapture();
-
-  // Run munge
-  const std::string captured = Munge(cap->filename());
-  const std::string golden = Munge(golden_filename);
-  if (captured != golden) {
-    fprintf(stderr,
-            "Test with golden file failed. Diff (- golden, + actual):\n");
-    PrintDiff(SplitLines(golden), SplitLines(captured));
-    return false;
-  }
-  LOG(INFO) << "Diff was successful";
-  return true;
-}
-
 }  // namespace
 
-// Read the entire content of a file as a string
-std::string ReadEntireFile(FILE* file) {
-  const size_t file_size = GetFileSize(file);
-  std::vector<char> content(file_size);
-
-  size_t bytes_last_read = 0;  // # of bytes read in the last fread()
-  size_t bytes_read = 0;       // # of bytes read so far
-
-  fseek(file, 0, SEEK_SET);
-
-  // Keep reading the file until we cannot read further or the
-  // pre-determined file size is reached.
-  do {
-    bytes_last_read =
-        fread(content.data() + bytes_read, 1, file_size - bytes_read, file);
-    bytes_read += bytes_last_read;
-  } while (bytes_last_read > 0 && bytes_read < file_size);
-
-  return std::string(content.data(), bytes_read);
+ScopedStreamCapture::ScopedStreamCapture(StandardStream stream)
+    : stream_{stream == StandardStream::kStdout ? stdout : stderr} {
+  static unsigned int captures = 0;
+  filename_ = TestTmpDir() + "/captured-" + std::to_string(++captures) +
+              (stream == StandardStream::kStdout ? ".out" : ".err");
+  const int fd = fileno(stream_);
+  std::fflush(nullptr);
+  original_.reset(dup(fd));
+  CHECK(original_) << ": cannot duplicate descriptor " << fd;
+  const FileDescriptor capture{
+      open(filename_.c_str(), O_CREAT | O_TRUNC | O_WRONLY, S_IRUSR | S_IWUSR)};
+  CHECK(capture) << ": cannot create " << filename_;
+  CHECK_NE(dup2(capture.get(), fd), -1)
+      << ": cannot redirect descriptor " << fd << " to " << filename_;
 }
 
-void CaptureTestStdout() {
-  CaptureTestOutput(fileno(stdout), TestTmpDir() + "/captured.out");
+ScopedStreamCapture::~ScopedStreamCapture() { Restore(); }
+
+void ScopedStreamCapture::Restore() {
+  if (original_) {
+    std::fflush(nullptr);
+    CHECK_NE(dup2(original_.get(), fileno(stream_)), -1)
+        << ": cannot restore descriptor " << fileno(stream_);
+    original_.reset();
+  }
 }
 
-void CaptureTestStderr() {
-  CaptureTestOutput(fileno(stderr), TestTmpDir() + "/captured.err");
+std::string ScopedStreamCapture::Stop() {
+  Restore();
+  return Peek();
 }
 
-std::string GetCapturedTestStdout() {
-  return GetCapturedTestOutput(fileno(stdout));
+std::string ScopedStreamCapture::Peek() const {
+  std::string output;
+  CHECK(ReadTextFile(filename_, &output)) << ": cannot read " << filename_;
+  return output;
 }
 
-std::string GetCapturedTestStderr() {
-  return GetCapturedTestOutput(fileno(stderr));
-}
-
-bool MungeAndDiffTestStdout(const std::string& golden_filename) {
-  auto pos = s_captured_streams.find(fileno(stdout));
-  CHECK(pos != s_captured_streams.end())
-      << ": did you forget CaptureTestStdout()?";
-  return MungeAndDiffTest(golden_filename, pos->second.get());
-}
-
-bool MungeAndDiffTestStderr(const std::string& golden_filename) {
-  auto pos = s_captured_streams.find(fileno(stderr));
-  CHECK(pos != s_captured_streams.end())
-      << ": did you forget CaptureTestStderr()?";
-  return MungeAndDiffTest(golden_filename, pos->second.get());
+testing::AssertionResult MatchesGoldenFile(const std::string& output,
+                                           const std::string& golden_filename) {
+  std::string golden;
+  if (!ReadTextFile(golden_filename, &golden)) {
+    return testing::AssertionFailure()
+           << "cannot read the golden file " << golden_filename;
+  }
+  const std::string normalized_golden = Munge(golden);
+  const std::string normalized_output = Munge(output);
+  if (normalized_output == normalized_golden) {
+    return testing::AssertionSuccess();
+  }
+  std::ostringstream diff;
+  PrintDiff(SplitLines(normalized_golden), SplitLines(normalized_output), diff);
+  return testing::AssertionFailure()
+         << "the output differs from the golden file " << golden_filename
+         << " (- golden, + actual):\n"
+         << diff.str();
 }
 
 void (*g_new_hook)() = nullptr;

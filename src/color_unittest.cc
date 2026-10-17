@@ -567,10 +567,10 @@ TEST(StyledOutput, ResetsAttributesBeforeLineEndings) {
     fwrite(value, length, 1, stderr);
   };
 
-  CaptureTestStderr();
+  ScopedStreamCapture capture{StandardStream::kStderr};
   WriteStyledField(ColorSpec{Color::kCyan, TextStyle::kBold, Color::kDefault},
                    ColorMode::kAnsi, write_content, text.data(), text.size());
-  const std::string output = GetCapturedTestStderr();
+  const std::string output = capture.Stop();
 
   EXPECT_EQ(output, "\033[1;36mfirst\033[0m\n\033[1;36msecond\033[0m");
 }

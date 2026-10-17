@@ -255,9 +255,9 @@ TEST_F(ColoredStderr, DefaultPrefixRetainsPerFieldColors) {
   nglog::SetFlag(FLAGS_minloglevel, static_cast<std::int32_t>(NGLOG_INFO));
   nglog::SetFlag(FLAGS_symbolize_hyperlinks, false);
 
-  CaptureTestStderr();
+  ScopedStreamCapture capture{StandardStream::kStderr};
   LOG(INFO) << "colored default prefix";
-  const std::string output = GetCapturedTestStderr();
+  const std::string output = capture.Stop();
 
   EXPECT_THAT(output, AllOf(HasSubstr("\033[34m"), HasSubstr("\033[35m"),
                             HasSubstr("\033[36m"), HasSubstr("\033[90m]")));
@@ -268,7 +268,7 @@ TEST_F(ColoredStderr, RendersStyledSpansAndHyperlinksOnAnsiOutput) {
                                                       "iTerm.app"};
   nglog::SetFlag(FLAGS_symbolize_hyperlinks, true);
 
-  CaptureTestStderr();
+  ScopedStreamCapture capture{StandardStream::kStderr};
   {
     LogMessage log(kSourceFile, kSourceLine, NGLOG_INFO);
     log.stream() << "before"
@@ -281,7 +281,7 @@ TEST_F(ColoredStderr, RendersStyledSpansAndHyperlinksOnAnsiOutput) {
   }
   errno = ENOENT;
   PLOG(INFO) << "plog";
-  const std::string output = GetCapturedTestStderr();
+  const std::string output = capture.Stop();
 
   EXPECT_THAT(
       output,
@@ -291,19 +291,19 @@ TEST_F(ColoredStderr, RendersStyledSpansAndHyperlinksOnAnsiOutput) {
 }
 
 TEST_F(ColoredStderr, ResetsAttributesBeforeTheLineEnding) {
-  CaptureTestStderr();
+  ScopedStreamCapture capture{StandardStream::kStderr};
   LOG(INFO) << "colored line";
-  const std::string output = GetCapturedTestStderr();
+  const std::string output = capture.Stop();
 
   EXPECT_THAT(output, HasSubstr("colored line\033[0m\n"));
 }
 
 TEST_F(ColoredStderr, ResetsAndReappliesAttributesForEachLine) {
-  CaptureTestStderr();
+  ScopedStreamCapture capture{StandardStream::kStderr};
   LOG(INFO) << Styled(
       ColorSpec{Color::kCyan, TextStyle::kBold, Color::kDefault},
       "first\nsecond");
-  const std::string output = GetCapturedTestStderr();
+  const std::string output = capture.Stop();
 
   EXPECT_THAT(output, HasSubstr("first\033[0m\n\033[1;36msecond\033[0m\n"));
 }

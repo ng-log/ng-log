@@ -563,12 +563,15 @@ int main(int argc, char** argv) {
   setbuf(stderr, nullptr);
 
   // Test some basics before InitializeLogging:
-  CaptureTestStderr();
-  LogWithLevels(nglog::GetFlag(FLAGS_v), nglog::GetFlag(FLAGS_stderrthreshold),
-                nglog::GetFlag(FLAGS_logtostderr),
-                nglog::GetFlag(FLAGS_alsologtostderr));
-  LogWithLevels(0, 0, false, false);  // simulate "before global c-tors"
-  early_stderr = GetCapturedTestStderr();
+  {
+    ScopedStreamCapture capture{StandardStream::kStderr};
+    LogWithLevels(nglog::GetFlag(FLAGS_v),
+                  nglog::GetFlag(FLAGS_stderrthreshold),
+                  nglog::GetFlag(FLAGS_logtostderr),
+                  nglog::GetFlag(FLAGS_alsologtostderr));
+    LogWithLevels(0, 0, false, false);  // simulate "before global c-tors"
+    early_stderr = capture.Stop();
+  }
 
   EXPECT_FALSE(IsLoggingInitialized());
 
@@ -1197,14 +1200,14 @@ TEST(Logging, ReprintFatalMessageDoesNotColorStderr) {
   const ScopedExitOnDFatal exit_on_dfatal{true};
   const ScopedThrowOnFatal throw_on_fatal;
 
-  CaptureTestStderr();
-  EXPECT_THROW({ LOG(FATAL) << "fatal message for replay"; }, std::logic_error);
   constexpr char kColorEscape[] = "\033[";
-  ASSERT_THAT(GetCapturedTestStderr(), HasSubstr(kColorEscape));
+  ScopedStreamCapture fatal_capture{StandardStream::kStderr};
+  EXPECT_THROW({ LOG(FATAL) << "fatal message for replay"; }, std::logic_error);
+  ASSERT_THAT(fatal_capture.Stop(), HasSubstr(kColorEscape));
 
-  CaptureTestStderr();
+  ScopedStreamCapture reprint_capture{StandardStream::kStderr};
   ReprintFatalMessage();
-  EXPECT_THAT(GetCapturedTestStderr(), Not(HasSubstr(kColorEscape)));
+  EXPECT_THAT(reprint_capture.Stop(), Not(HasSubstr(kColorEscape)));
 }
 #endif
 
@@ -1767,7 +1770,7 @@ TEST(Logging, TwoProcessesWrite) {
   EXPECT_TRUE(GetExitCodeProcess(process_handle.get(), &exit_code));
   EXPECT_EQ(exit_code, 0U);
 #  else
-  CaptureTestStderr();
+  ScopedStreamCapture capture{StandardStream::kStderr};
   const pid_t pid = fork();
   ASSERT_NE(pid, -1) << strerror(errno);
   if (pid == 0) {
@@ -1776,7 +1779,7 @@ TEST(Logging, TwoProcessesWrite) {
     exit(EXIT_SUCCESS);
   }
   wait(nullptr);
-  EXPECT_THAT(GetCapturedTestStderr(),
+  EXPECT_THAT(capture.Stop(),
               MatchesRegex("Could not create log file '[^']+': [^\n]*\n"));
 #  endif
 
@@ -1858,10 +1861,9 @@ TEST(Logging, LockedOversizedFileIsNotTruncated) {
   ASSERT_TRUE(WaitForFile(ready));
 
   SetLogDestination(NGLOG_INFO, dest.c_str());
-  CaptureTestStderr();
+  ScopedStreamCapture capture{StandardStream::kStderr};
   LOG(INFO) << "message that cannot be written while the file is locked";
-  EXPECT_THAT(GetCapturedTestStderr(),
-              HasSubstr("Could not create log file '"));
+  EXPECT_THAT(capture.Stop(), HasSubstr("Could not create log file '"));
 
   EXPECT_TRUE(TerminateProcess(process_handle.get(), 0));
   EXPECT_EQ(WaitForSingleObject(process_handle.get(),
@@ -1939,9 +1941,9 @@ TEST(Logging, FileLockFailureReportsWindowsError) {
   ASSERT_TRUE(WaitForFile(ready));
 
   SetLogDestination(NGLOG_WARNING, dest.c_str());
-  CaptureTestStderr();
+  ScopedStreamCapture capture{StandardStream::kStderr};
   LOG(WARNING) << "message that cannot be written while the file is locked";
-  const std::string stderr_output = GetCapturedTestStderr();
+  const std::string stderr_output = capture.Stop();
   const std::string expected_error = nglog::tools::TrimTrailingCRLF(
       nglog::tools::FormatWindowsMessage(ERROR_LOCK_VIOLATION));
   ASSERT_FALSE(expected_error.empty());
@@ -2390,7 +2392,7 @@ TEST(Logging, TruncateStdoutStderr) {
   constexpr char kPending[] = "pending";
   constexpr char kTail[] = "tail";
 
-  CaptureTestStdout();
+  ScopedStreamCapture capture{StandardStream::kStdout};
   const string message(2U << 20U, 'x');
   ASSERT_EQ(fwrite(message.data(), message.size(), 1, stdout), 1U);
   ASSERT_EQ(fflush(stdout), 0);
@@ -2401,7 +2403,7 @@ TEST(Logging, TruncateStdoutStderr) {
   // Output after the truncation must continue at the new end of the file.
   ASSERT_GE(fputs(kTail, stdout), 0);
   ASSERT_EQ(fflush(stdout), 0);
-  const string output = GetCapturedTestStdout();
+  const string output = capture.Stop();
 
   const string written = message + kPending;
   const string expected = written.substr(written.size() - kKeptSize) + kTail;
@@ -2862,9 +2864,9 @@ TEST(Logging, DefaultPrefixFormatting) {
   nglog::SetFlag(FLAGS_minloglevel, static_cast<std::int32_t>(NGLOG_INFO));
   InstallPrefixFormatter(nullptr);
 
-  CaptureTestStderr();
+  ScopedStreamCapture capture{StandardStream::kStderr};
   LOG(INFO) << "default prefix formatting";
-  const std::string output = GetCapturedTestStderr();
+  const std::string output = capture.Stop();
 
   RestoreTestPrefixFormatter();
 
@@ -3127,7 +3129,7 @@ TEST(Logging, FatalThrow) {
 // stderr/stdout diff.
 
 TEST(LoggingGoldenFile, Stderr) {
-  CaptureTestStderr();
+  ScopedStreamCapture capture{StandardStream::kStderr};
 
   // re-emit early_stderr
   LogMessage("dummy", LogMessage::kNoLogPrefix, NGLOG_INFO).stream()
@@ -3146,8 +3148,8 @@ TEST(LoggingGoldenFile, Stderr) {
   TestSTREQ();
 
   // TODO: The golden test portion of this test is very flakey.
-  EXPECT_TRUE(
-      MungeAndDiffTestStderr(TestSrcDir() + "/src/logging_unittest.err"));
+  EXPECT_TRUE(MatchesGoldenFile(capture.Stop(),
+                                TestSrcDir() + "/src/logging_unittest.err"));
 
   nglog::SetFlag(FLAGS_logtostderr, false);
 }
@@ -3155,7 +3157,7 @@ TEST(LoggingGoldenFile, Stderr) {
 TEST(LoggingGoldenFile, Stdout) {
   nglog::SetFlag(FLAGS_logtostdout, true);
   nglog::SetFlag(FLAGS_stderrthreshold, NUM_SEVERITIES);
-  CaptureTestStdout();
+  ScopedStreamCapture capture{StandardStream::kStdout};
   TestRawLogging();
   TestLoggingLevels();
   // Same relative position as LoggingGoldenFile.Stderr: VLOG_IS_ON's
@@ -3171,8 +3173,8 @@ TEST(LoggingGoldenFile, Stdout) {
   TestCHECK();
   TestDCHECK();
   TestSTREQ();
-  EXPECT_TRUE(
-      MungeAndDiffTestStdout(TestSrcDir() + "/src/logging_unittest.out"));
+  EXPECT_TRUE(MatchesGoldenFile(capture.Stop(),
+                                TestSrcDir() + "/src/logging_unittest.out"));
   nglog::SetFlag(FLAGS_logtostdout, false);
 }
 

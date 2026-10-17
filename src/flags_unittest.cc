@@ -366,9 +366,9 @@ MATCHER(CurrentValueIsTheDefault, "has its default value as current value") {
 }
 
 std::string PrintedHelp() {
-  nglog::CaptureTestStderr();
+  nglog::ScopedStreamCapture capture{nglog::StandardStream::kStderr};
   nglog::PrintCommandLineFlags();
-  return nglog::GetCapturedTestStderr();
+  return capture.Stop();
 }
 
 std::string StripTerminalStyles(const std::string& text) {

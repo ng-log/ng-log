@@ -3,8 +3,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 //
-// Test helpers that are not provided by GoogleTest itself: golden-file
-// stdout/stderr capture and diffing, environment overrides and names of
+// Test helpers that are not provided by GoogleTest itself: standard stream
+// capture, golden file comparison, environment overrides and names of
 // parameterized test instances.
 
 #ifndef NGLOG_SRC_TESTING_UTILITIES_H_
@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstdio>
 #include <string>
 
 #include "config.h"
@@ -77,41 +78,47 @@ struct CaseName {
 // value produced at runtime.
 constexpr std::uint32_t kPtrTestValue = 0x12345678;
 
-// Read the entire content of a file as a string.
-std::string ReadEntireFile(FILE* file);
+//! Standard stream that a capture redirects.
+enum class StandardStream { kStdout, kStderr };
 
-class CapturedStream {
+/**
+ * Redirects a standard stream into a private file while in scope.
+ *
+ * Captures nest, and the destructor restores the stream however the scope is
+ * left, so a failing assertion cannot leave the stream redirected.
+ */
+class ScopedStreamCapture final {
  public:
-  CapturedStream(int fd, std::string filename);
+  explicit ScopedStreamCapture(StandardStream stream);
+  ScopedStreamCapture(const ScopedStreamCapture& other) = delete;
+  ScopedStreamCapture& operator=(const ScopedStreamCapture& other) = delete;
+  ~ScopedStreamCapture();
 
-  // Start redirecting output to a file
-  void Capture();
+  //! Restores the stream and returns everything written to it while captured.
+  std::string Stop();
 
-  // Remove output redirection
-  void StopCapture();
-
-  const std::string& filename() const { return filename_; }
+  /**
+   * Returns what reached the stream so far without flushing its buffer or
+   * stopping the capture.
+   */
+  std::string Peek() const;
 
  private:
-  int fd_;                        // file descriptor being captured
-  FileDescriptor uncaptured_fd_;  // where the stream was originally sent to
-  std::string filename_;          // file where stream is being saved
+  void Restore();
+
+  std::FILE* stream_;
+  std::string filename_;
+  FileDescriptor original_;
 };
 
-// Redirect stdout/stderr to a file so it can later be compared against a
-// golden file.
-void CaptureTestStdout();
-void CaptureTestStderr();
-
-// Return the captured stdout/stderr of a test as a string. Stops the
-// capture in the process.
-std::string GetCapturedTestStdout();
-std::string GetCapturedTestStderr();
-
-// Compare the captured stdout/stderr, after normalization, against the
-// given golden file.
-bool MungeAndDiffTestStdout(const std::string& golden_filename);
-bool MungeAndDiffTestStderr(const std::string& golden_filename);
+/**
+ * Checks that output equals the contents of a golden file once dates, times,
+ * line numbers, thread identifiers, pointers and error descriptions are
+ * normalized. A mismatch is explained by a diff of the lines around each
+ * change.
+ */
+testing::AssertionResult MatchesGoldenFile(const std::string& output,
+                                           const std::string& golden_filename);
 
 // Add hook for operator new to ensure there are no memory allocation.
 extern void (*g_new_hook)();

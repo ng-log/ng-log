@@ -1149,6 +1149,19 @@ if (BUILD_TESTING AND GTest_FOUND)
     target_link_libraries (stacktrace_unittest PRIVATE ng-log_test)
   endif (HAVE_STACKTRACE)
 
+  add_executable (testing_utilities_unittest
+    src/testing_utilities_unittest.cc
+  )
+
+  target_link_libraries (testing_utilities_unittest PRIVATE ng-log_test
+    GTest::gtest_main)
+
+  gtest_discover_tests (testing_utilities_unittest
+    TEST_PREFIX testing_utilities.
+    DISCOVERY_TIMEOUT 30
+    DISCOVERY_MODE PRE_TEST
+  )
+
   add_executable (utilities_unittest
     src/utilities_unittest.cc
   )

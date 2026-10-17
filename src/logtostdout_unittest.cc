@@ -8,8 +8,6 @@
 #include <gtest/gtest.h>
 
 #include <cstdio>
-#include <fstream>
-#include <sstream>
 #include <string>
 
 #include "ng-log/flags.h"
@@ -22,17 +20,6 @@ namespace {
 
 constexpr char kInfoMessage[] = "buffered info message";
 constexpr char kWarningMessage[] = "unbuffered warning message";
-
-// Reads what has actually reached the capture file so far. Unlike
-// GetCapturedTestStdout(), this does not stop the capture and therefore does
-// not fflush(3) the stream itself, which is what makes it possible to observe
-// whether ng-log flushed stdout on its own.
-std::string PeekCapturedStdout(const CapturedStream& capture) {
-  std::ifstream file{capture.filename(), std::ios::binary};
-  std::ostringstream contents;
-  contents << file.rdbuf();
-  return contents.str();
-}
 
 }  // namespace
 
@@ -53,7 +40,7 @@ TEST(LogToStdout, HonorsLogbuflevel) {
   std::string after_warning;
 
   {
-    CapturedStream capture{fileno(stdout), TestTmpDir() + "/logtostdout.out"};
+    ScopedStreamCapture capture{StandardStream::kStdout};
 
     // stdout now refers to a regular file; make sure it is fully buffered so
     // that messages which are not explicitly flushed stay in the stdio buffer.
@@ -64,13 +51,13 @@ TEST(LogToStdout, HonorsLogbuflevel) {
     nglog::SetFlag(FLAGS_logbuflevel, static_cast<std::int32_t>(NGLOG_INFO));
     // Buffer INFO, flush WARNING and above.
 
+    // Peeking neither flushes nor stops the capture, so it shows whether
+    // ng-log flushed stdout on its own.
     LOG(INFO) << kInfoMessage;
-    after_info = PeekCapturedStdout(capture);
+    after_info = capture.Peek();
 
     LOG(WARNING) << kWarningMessage;
-    after_warning = PeekCapturedStdout(capture);
-
-    capture.StopCapture();
+    after_warning = capture.Peek();
   }
 
   // INFO does not exceed --logbuflevel, so it stays in the stdio buffer.
