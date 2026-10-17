@@ -9,78 +9,63 @@
 
 #include <functional>
 #include <map>
-#include <ostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
 #include "config.h"
 #include "ng-log/logging.h"
 
-using namespace std;
+namespace {
 
-struct user_hash {
-  size_t operator()(int x) const { return static_cast<size_t>(x); }
-};
+//! Number of elements printed before the output is truncated.
+constexpr int kMaxPrintedElements = 100;
 
-TEST(STLLogging, Basic) {
-  {
-    // Test a sequence.
-    vector<int> v;
-    v.push_back(10);
-    v.push_back(20);
-    v.push_back(30);
-    ostringstream ss;
-    ss << v;
-    EXPECT_EQ(ss.str(), "10 20 30");
-    vector<int> copied_v(v);
-    CHECK_EQ(v, copied_v);  // This must compile.
-  }
+template <class T>
+std::string ToString(const T& value) {
+  std::ostringstream stream;
+  stream << value;
+  return stream.str();
+}
 
-  {
-    // Test a sorted pair associative container.
-    map<int, string> m;
-    m[20] = "twenty";
-    m[10] = "ten";
-    m[30] = "thirty";
-    ostringstream ss;
-    ss << m;
-    EXPECT_EQ(ss.str(), "(10, ten) (20, twenty) (30, thirty)");
-    map<int, string> copied_m(m);
-    CHECK_EQ(m, copied_m);  // This must compile.
-  }
+}  // namespace
 
-  {
-    // Test a long sequence.
-    vector<int> v;
-    string expected;
-    for (int i = 0; i < 100; i++) {
-      v.push_back(i);
-      if (i > 0) expected += ' ';
-      const size_t buf_size = 256;
-      char buf[buf_size];
-      std::snprintf(buf, buf_size, "%d", i);
-      expected += buf;
+TEST(STLLogging, Sequence) {
+  const std::vector<int> v{10, 20, 30};
+  EXPECT_EQ(ToString(v), "10 20 30");
+  const std::vector<int> copied_v(v);
+  CHECK_EQ(v, copied_v);  // This must compile.
+}
+
+TEST(STLLogging, SortedPairAssociativeContainer) {
+  const std::map<int, std::string> m{
+      {20, "twenty"}, {10, "ten"}, {30, "thirty"}};
+  EXPECT_EQ(ToString(m), "(10, ten) (20, twenty) (30, thirty)");
+  const std::map<int, std::string> copied_m(m);
+  CHECK_EQ(m, copied_m);  // This must compile.
+}
+
+TEST(STLLogging, LongSequenceIsTruncated) {
+  std::vector<int> v;
+  std::string expected;
+  for (int i = 0; i < kMaxPrintedElements; ++i) {
+    v.push_back(i);
+    if (i > 0) {
+      expected += ' ';
     }
-    v.push_back(100);
-    expected += " ...";
-    ostringstream ss;
-    ss << v;
-    CHECK_EQ(ss.str(), expected.c_str());
+    expected += std::to_string(i);
   }
+  v.push_back(kMaxPrintedElements);
+  expected += " ...";
+  EXPECT_EQ(ToString(v), expected);
+}
 
-  {
-    // Test a sorted pair associative container.
-    // Use a non-default comparison functor.
-    map<int, string, greater<>> m;
-    m[20] = "twenty";
-    m[10] = "ten";
-    m[30] = "thirty";
-    ostringstream ss;
-    ss << m;
-    EXPECT_EQ(ss.str(), "(30, thirty) (20, twenty) (10, ten)");
-    map<int, string, greater<>> copied_m(m);
-    CHECK_EQ(m, copied_m);  // This must compile.
-  }
+TEST(STLLogging, SortedPairAssociativeContainerWithCustomComparison) {
+  const std::map<int, std::string, std::greater<>> m{
+      {20, "twenty"}, {10, "ten"}, {30, "thirty"}};
+  EXPECT_EQ(ToString(m), "(30, thirty) (20, twenty) (10, ten)");
+  const std::map<int, std::string, std::greater<>> copied_m(m);
+  CHECK_EQ(m, copied_m);  // This must compile.
 }
 
 int main(int argc, char** argv) {

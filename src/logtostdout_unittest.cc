@@ -36,7 +36,7 @@ std::string PeekCapturedStdout(const CapturedStream& capture) {
 
 }  // namespace
 
-// Regression test: with stdout fully buffered, a message whose severity
+// With stdout fully buffered, a message whose severity
 // exceeds --logbuflevel must be flushed by ng-log itself instead of lingering
 // in the stdio buffer.
 //
@@ -90,7 +90,6 @@ int main(int argc, char** argv) {
   setvbuf(stderr, nullptr, _IONBF, 0);
 
   testing::InitGoogleTest(&argc, argv);
-  testing::InitGoogleMock(&argc, argv);
 
   nglog::ParseCommandLineFlags(&argc, &argv,
                                nglog::FlagParsingMode::kRemoveFlags);

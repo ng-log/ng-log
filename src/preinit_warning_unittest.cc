@@ -4,23 +4,33 @@
 //
 // Author: Sergiu Deitsch
 
-#include <cstdlib>
-
 #include <gtest/gtest.h>
+
+#include <cstdlib>
 
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
+#include "testing_utilities.h"
 
 using namespace nglog;
 
 #if !defined(NGLOG_OS_WINDOWS) && defined(GTEST_HAS_DEATH_TEST)
-TEST(Logging, PreInitializationWarningUsesFieldColors) {
-  ASSERT_EQ(setenv("CLICOLOR_FORCE", "1", 1), 0);
-  ASSERT_EQ(setenv("TERM", "xterm", 1), 0);
-  unsetenv("NO_COLOR");
+namespace {
 
+// Forces a color capable terminal so that only the color flag decides
+// whether the warning is colored.
+class PreInitializationWarning : public testing::Test {
+ private:
+  ScopedEnvironmentVariable clicolor_force_{"CLICOLOR_FORCE", "1"};
+  ScopedEnvironmentVariable term_{"TERM", "xterm"};
+  ScopedEnvironmentVariable no_color_{"NO_COLOR", nullptr};
+};
+
+}  // namespace
+
+TEST_F(PreInitializationWarning, UsesFieldColors) {
   nglog::SetFlag(FLAGS_colorlogtostderr, true);
-  ASSERT_EXIT(
+  EXPECT_EXIT(
       {
         LOG(INFO) << "before initialization";
         std::exit(0);
@@ -31,12 +41,8 @@ TEST(Logging, PreInitializationWarningUsesFieldColors) {
       "\033\\[35mSTDERR\033\\[0m");
 }
 
-TEST(Logging, PreInitializationWarningHonorsColorFlag) {
-  ASSERT_EQ(setenv("CLICOLOR_FORCE", "1", 1), 0);
-  ASSERT_EQ(setenv("TERM", "xterm", 1), 0);
-  unsetenv("NO_COLOR");
-
-  ASSERT_EXIT(
+TEST_F(PreInitializationWarning, HonorsColorFlag) {
+  EXPECT_EXIT(
       {
         nglog::SetFlag(FLAGS_colorlogtostderr, false);
         LOG(INFO) << "before initialization";

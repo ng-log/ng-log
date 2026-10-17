@@ -11,9 +11,7 @@
 #include <gtest/gtest.h>
 
 #include <csignal>
-#include <cstdio>
 #include <cstdlib>
-#include <iosfwd>
 #include <string>
 
 #include "config.h"
@@ -64,9 +62,9 @@ TEST(StripLog, LogsExpectedSeverities) {
 #ifdef GTEST_HAS_DEATH_TEST
 TEST(StripLog, FatalIsNotStripped) {
 #  if NGLOG_STRIP_LOG <= 3
-  ASSERT_DEATH(LOG(FATAL) << "fatal log", "fatal log");
+  EXPECT_DEATH(LOG(FATAL) << "fatal log", "fatal log");
 #  else
-  ASSERT_DEATH(LOG(FATAL) << "fatal log", "");
+  EXPECT_DEATH(LOG(FATAL) << "fatal log", "");
 #  endif
 }
 #endif
@@ -82,7 +80,6 @@ int main(int argc, char* argv[]) {
   nglog::SetFlag(FLAGS_logtostderr, true);
   InitializeLogging(argv[0]);
   testing::InitGoogleTest(&argc, argv);
-  testing::InitGoogleMock(&argc, argv);
 #if !DCHECK_IS_ON()
   DLOG(INFO) << "no debug output";
   DLOG_IF(WARNING, true) << "no conditional debug output";
