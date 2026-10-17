@@ -370,7 +370,7 @@ class NGLOG_EXPORT FlagBase {
   // The callback form explicitly marks semantic text such as options and
   // environment variables with HelpWriter styles.
   constexpr FlagBase(const char* name, const char* filename,
-                     HelpCallback help) noexcept;
+                     HelpCallback write_help) noexcept;
   // Defaulted here because only a destructor defaulted on its first
   // declaration is trivial.
   ~FlagBase() = default;
@@ -606,7 +606,7 @@ class Flag : public FlagBase {
                  const char* filename, const char* help,
                  DefaultValueFunction default_value) noexcept;
   constexpr Flag(internal::StaticFlagTag, const char* name,
-                 const char* filename, HelpCallback help,
+                 const char* filename, HelpCallback write_help,
                  DefaultValueFunction default_value) noexcept;
   Flag(const Flag&) = delete;
   Flag& operator=(const Flag&) = delete;
@@ -627,7 +627,7 @@ class Flag : public FlagBase {
  protected:
   Flag(const char* name, const char* filename, const char* help,
        const T& value);
-  Flag(const char* name, const char* filename, HelpCallback help,
+  Flag(const char* name, const char* filename, HelpCallback write_help,
        const T& value);
 
   void DestroyValues() noexcept;
@@ -672,7 +672,7 @@ class DynamicFlag final : public Flag<T> {
  public:
   DynamicFlag(const char* name, const char* filename, const char* help,
               const T& value);
-  DynamicFlag(const char* name, const char* filename, HelpCallback help,
+  DynamicFlag(const char* name, const char* filename, HelpCallback write_help,
               const T& value);
   ~DynamicFlag();
 };
@@ -1165,8 +1165,8 @@ constexpr FlagBase::FlagBase(const char* name, const char* filename,
     : name_(name), filename_(filename), help_(help), help_callback_() {}
 
 constexpr FlagBase::FlagBase(const char* name, const char* filename,
-                             HelpCallback help) noexcept
-    : name_(name), filename_(filename), help_(""), help_callback_(help) {}
+                             HelpCallback write_help) noexcept
+    : name_(name), filename_(filename), help_(""), help_callback_(write_help) {}
 
 template <typename T>
 constexpr Flag<T>::Flag(internal::StaticFlagTag, const char* name,
@@ -1176,9 +1176,9 @@ constexpr Flag<T>::Flag(internal::StaticFlagTag, const char* name,
 
 template <typename T>
 constexpr Flag<T>::Flag(internal::StaticFlagTag, const char* name,
-                        const char* filename, HelpCallback help,
+                        const char* filename, HelpCallback write_help,
                         DefaultValueFunction default_value) noexcept
-    : FlagBase(name, filename, help), values_(default_value) {}
+    : FlagBase(name, filename, write_help), values_(default_value) {}
 
 template <typename T>
 Flag<T>::Flag(const char* name, const char* filename, const char* help,
@@ -1186,9 +1186,9 @@ Flag<T>::Flag(const char* name, const char* filename, const char* help,
     : FlagBase(name, filename, help), values_(value) {}
 
 template <typename T>
-Flag<T>::Flag(const char* name, const char* filename, HelpCallback help,
+Flag<T>::Flag(const char* name, const char* filename, HelpCallback write_help,
               const T& value)
-    : FlagBase(name, filename, help), values_(value) {}
+    : FlagBase(name, filename, write_help), values_(value) {}
 
 template <typename T>
 const char* Flag<T>::type_name() const noexcept {
@@ -1306,8 +1306,8 @@ DynamicFlag<T>::DynamicFlag(const char* name, const char* filename,
 
 template <typename T>
 DynamicFlag<T>::DynamicFlag(const char* name, const char* filename,
-                            HelpCallback help, const T& value)
-    : Flag<T>(name, filename, help, value) {
+                            HelpCallback write_help, const T& value)
+    : Flag<T>(name, filename, write_help, value) {
   RegisterFlag(*this);
 }
 

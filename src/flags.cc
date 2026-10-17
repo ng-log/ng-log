@@ -82,10 +82,10 @@ void WriteLogToStdoutHelp(nglog::HelpWriter& help) {
 void WriteStderrThresholdHelp(nglog::HelpWriter& help) {
   help.Write("Copy log messages at or above this severity level to ");
   help.Write(nglog::HelpTextStyle::kStream, "stderr");
-  help.Write(" in addition to the log files. This flag supersedes ");
+  help.Write(" in addition to the log files. ");
   help.Write(nglog::HelpTextStyle::kOptionPrefix, "--");
   help.Write(nglog::HelpTextStyle::kOption, "alsologtostderr");
-  help.Write(".");
+  help.Write(" copies all messages regardless of this threshold.");
 }
 
 void WriteLogBacktraceAtHelp(nglog::HelpWriter& help) {

@@ -212,7 +212,7 @@ void RawLog(LogSeverity severity, const char* file, int line,
   char* buf = buffer;
   size_t size = sizeof(buffer);
 
-  // NOTE: this format should match the specification in base/logging.h
+  // NOTE: this format should match the prefix documented in ng-log/logging.h
   DoRawLog(&buf, &size, "%c00000000 00:00:00.000000 %5s %s:%d] RAW: ",
            GetLogSeverityName(severity)[0], thread_id,
            const_basename(const_cast<char*>(file)), line);

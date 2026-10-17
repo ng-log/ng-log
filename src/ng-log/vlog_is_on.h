@@ -39,28 +39,11 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 
 #include "ng-log/export.h"
 #include "ng-log/flags.h"
 #include "ng-log/types.h"
-
-#if defined(__GNUC__)
-// We emit an anonymous static cache at every VLOG_IS_ON(n) site.
-// (Normally) the first time every VLOG_IS_ON(n) site is hit,
-// we determine what variable will dynamically control logging at this site:
-// it's either FLAGS_v or an appropriate internal variable
-// matching the current source file that represents results of
-// parsing of --vmodule flag and/or SetVLOGLevel calls.
-#  define VLOG_IS_ON(verboselevel)                                   \
-    __extension__({                                                  \
-      static nglog::SiteFlag vlocal__;                               \
-      nglog::internal::IsVLogOn(vlocal__, (verboselevel), __FILE__); \
-    })
-#else
-// GNU extensions not available, so we do not support --vmodule.
-// Dynamic value of FLAGS_v always controls the logging level.
-#  define VLOG_IS_ON(verboselevel) (nglog::GetFlag(FLAGS_v) >= (verboselevel))
-#endif
 
 namespace nglog {
 
@@ -73,7 +56,7 @@ namespace nglog {
 // level if module_pattern matches their module.
 extern NGLOG_EXPORT int SetVLOGLevel(const char* module_pattern, int log_level);
 
-// Various declarations needed for VLOG_IS_ON above: =========================
+// Declarations needed by VLOG_IS_ON below.
 
 struct SiteFlag {
   // The pointer selects either the default or the module-specific level.
@@ -118,5 +101,23 @@ inline bool IsVLogOn(SiteFlag& site_flag, int32 verbose_level,
 
 }  // namespace internal
 }  // namespace nglog
+
+#if defined(__GNUC__)
+// We emit an anonymous static cache at every VLOG_IS_ON(n) site.
+// (Normally) the first time every VLOG_IS_ON(n) site is hit,
+// we determine what variable will dynamically control logging at this site:
+// it's either FLAGS_v or an appropriate internal variable
+// matching the current source file that represents results of
+// parsing of --vmodule flag and/or SetVLOGLevel calls.
+#  define VLOG_IS_ON(verboselevel)                                           \
+    __extension__({                                                          \
+      static nglog::SiteFlag nglog_vlog_site_;                               \
+      nglog::internal::IsVLogOn(nglog_vlog_site_, (verboselevel), __FILE__); \
+    })
+#else
+// GNU extensions not available, so we do not support --vmodule.
+// Dynamic value of FLAGS_v always controls the logging level.
+#  define VLOG_IS_ON(verboselevel) (nglog::GetFlag(FLAGS_v) >= (verboselevel))
+#endif
 
 #endif  // NGLOG_VLOG_IS_ON_H

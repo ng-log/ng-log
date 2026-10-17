@@ -179,6 +179,10 @@ static Role SeverityToRole(LogSeverity severity) {
   NGLOG_UNREACHABLE;
 }
 
+// Log sizes are configured in mebibytes.
+constexpr unsigned kMebibyteShift = 20U;
+constexpr std::size_t kMebibyte = std::size_t{1} << kMebibyteShift;
+
 // Safely get max_log_size. A value of 0 is overridden to the 1 MiB minimum.
 // Values large enough to overflow the "MaxLogSize() << 20" byte computation
 // are capped to the 4095 MiB maximum instead of being silently reduced to the
@@ -733,9 +737,11 @@ class LogDestination {
   LogDestination& operator=(const LogDestination&) = delete;
 };
 
-// Errors do not get logged to email by default.
+// Errors do not get logged to email by default: the threshold exceeds every
+// severity.
+constexpr std::underlying_type_t<LogSeverity> kEmailLoggingDisabled = 99999;
 std::underlying_type_t<LogSeverity> LogDestination::email_logging_severity_ =
-    99999;
+    kEmailLoggingDisabled;
 
 string LogDestination::addresses_;
 string LogDestination::hostname_;
@@ -1232,12 +1238,14 @@ static void ColoredWriteToStderrOrStdoutWithFields(
   formatter.Write(message + pos, 1);
   pos += 1;
 
-  char uri[1024];
+  constexpr std::size_t kMaxUriLength = 1024;
+  constexpr std::size_t kMaxFileLineLength = 600;
+  char uri[kMaxUriLength];
   const char* uri_pointer = nullptr;
 
   if (mode == ColorMode::kAnsi && nglog::GetFlag(FLAGS_symbolize_hyperlinks) &&
       StreamSupportsHyperlinks(output)) {
-    char span[600];
+    char span[kMaxFileLineLength];
     const int span_len =
         std::snprintf(span, sizeof(span), "%s:%d", data.fullname_, data.line_);
     if (span_len > 0 && static_cast<size_t>(span_len) < sizeof(span)) {
@@ -1601,13 +1609,14 @@ bool IsRegularFile(const struct stat& statbuf) {
 }
 
 string PrettyDuration(const std::chrono::duration<int>& secs) {
+  const auto hours = std::chrono::duration_cast<std::chrono::hours>(secs);
+  const auto mins =
+      std::chrono::duration_cast<std::chrono::minutes>(secs - hours);
+  const auto s = secs - hours - mins;
   std::stringstream result;
-  int mins = secs.count() / 60;
-  int hours = mins / 60;
-  mins = mins % 60;
-  int s = secs.count() % 60;
   result.fill('0');
-  result << hours << ':' << setw(2) << mins << ':' << setw(2) << s;
+  result << hours.count() << ':' << setw(2) << mins.count() << ':' << setw(2)
+         << s.count();
   return result.str();
 }
 
@@ -1721,7 +1730,8 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
     struct stat statbuf;
     if (internal::StatPath(filename, &statbuf) == 0) {
       // truncate the file if it exceeds the max size
-      if ((static_cast<std::size_t>(statbuf.st_size) >> 20U) >= MaxLogSize()) {
+      if ((static_cast<std::size_t>(statbuf.st_size) >> kMebibyteShift) >=
+          MaxLogSize()) {
         truncate_file = true;
       }
 
@@ -1931,11 +1941,8 @@ void LogFileObject::WriteUnlocked(
     return;
   }
 
-  const int32 pid = static_cast<int32>(getpid());
-  if (file_ != nullptr && file_pid_ != pid) {
-    DiscardInheritedFile();
-  }
-  if (file_length_ >> 20U >= MaxLogSize()) {
+  DiscardFileIfInherited();
+  if (file_length_ >> kMebibyteShift >= MaxLogSize()) {
     file_ = nullptr;
     file_length_ = bytes_since_flush_ = dropped_mem_length_ = 0;
     rollover_attempt_ = kRolloverAttemptFrequency - 1;
@@ -2116,18 +2123,22 @@ void LogFileObject::WriteUnlocked(
 
   // See important msgs *now*.  Also, flush logs at least every 10^6 chars,
   // or every "FLAGS_logbufsecs" seconds.
-  if (force_flush || (bytes_since_flush_ >= 1000000) ||
+  constexpr std::size_t kFlushBytes = 1000000;
+  if (force_flush || (bytes_since_flush_ >= kFlushBytes) ||
       (timestamp >= next_flush_time_)) {
     FlushUnlocked(timestamp);
 #ifdef NGLOG_OS_LINUX
     // Only consider files >= 3MiB
-    if (nglog::GetFlag(FLAGS_drop_log_memory) && file_length_ >= (3U << 20U)) {
+    constexpr std::size_t kMinimumDropFileLength = 3 * kMebibyte;
+    constexpr std::size_t kMinimumDropLength = 2 * kMebibyte;
+    if (nglog::GetFlag(FLAGS_drop_log_memory) &&
+        file_length_ >= kMinimumDropFileLength) {
       // Don't evict the most recent 1-2MiB so as not to impact a tailer
       // of the log file and to avoid page rounding issue on linux < 4.7
       std::size_t total_drop_length =
-          (file_length_ & ~((1U << 20U) - 1U)) - (1U << 20U);
+          (file_length_ & ~(kMebibyte - 1U)) - kMebibyte;
       std::size_t this_drop_length = total_drop_length - dropped_mem_length_;
-      if (this_drop_length >= (2U << 20U)) {
+      if (this_drop_length >= kMinimumDropLength) {
         // Only advise when >= 2MiB to drop
 #  if defined(HAVE_POSIX_FADVISE)
         const off_t offset = static_cast<off_t>(dropped_mem_length_);
@@ -2326,7 +2337,8 @@ void LogMessage::Init(const char* file, int line, LogSeverity severity,
   // Checking emptiness first avoids locking the flag for every message.
   if (!internal::FlagValueAccess::Empty(FLAGS_log_backtrace_at)) {
     const std::string log_backtrace_at = nglog::GetFlag(FLAGS_log_backtrace_at);
-    char fileline[128];
+    constexpr std::size_t kMaxFileLineLength = 128;
+    char fileline[kMaxFileLineLength];
     const int fileline_len = std::snprintf(fileline, sizeof(fileline), "%s:%d",
                                            data_->basename_, line);
     if (fileline_len >= 0 &&
@@ -3328,8 +3340,8 @@ void TruncateLogFile(const char* path, uint64 limit, uint64 keep) {
 }
 
 void TruncateStdoutStderr() {
-  uint64 limit = MaxLogSize() << 20U;
-  uint64 keep = 1U << 20U;
+  uint64 limit = static_cast<uint64>(MaxLogSize()) << kMebibyteShift;
+  uint64 keep = kMebibyte;
 #ifdef NGLOG_OS_WINDOWS
 #  if defined(HAVE_UNISTD_H) || defined(HAVE__CHSIZE_S)
   const std::array<FILE*, 2> outputs = {stdout, stderr};
