@@ -5,6 +5,7 @@
 
 #include "stacktrace.h"
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <csignal>
@@ -22,6 +23,10 @@
 #endif
 
 #ifdef HAVE_STACKTRACE
+
+using testing::AllOf;
+using testing::Ge;
+using testing::Le;
 
 // Obtain a backtrace, verify that the expected callers are present in the
 // backtrace, and maybe print the backtrace to stdout.
@@ -86,16 +91,6 @@ AddressRange expected_range[BACKTRACE_STEPS];
       } while (0)
 #  endif  // __GNUC__
 
-//-----------------------------------------------------------------------//
-
-static void CheckRetAddrIsInFunction(void* ret_addr,
-                                     const AddressRange& range) {
-  ASSERT_GE(ret_addr, range.start);
-  ASSERT_LE(ret_addr, range.end);
-}
-
-//-----------------------------------------------------------------------//
-
 #  if defined(__clang__)
 #    pragma clang diagnostic push
 #    pragma clang diagnostic ignored "-Wgnu-label-as-value"
@@ -133,39 +128,32 @@ static void CheckStackTraceLeaf() {
   expected_range[0].end = GetReturnAddress();
 #  endif
   printf("Obtained %d stack frames.\n", size);
-  ASSERT_GE(size, 1);
+  ASSERT_GE(size, BACKTRACE_STEPS);
   ASSERT_LE(size, STACK_LEN);
 
-  if (true) {
 #  ifdef HAVE_EXECINFO_BACKTRACE_SYMBOLS
-    std::unique_ptr<char*, decltype(&std::free)> strings{
-        backtrace_symbols(stack, size), &std::free};
-    printf("Obtained %d stack frames.\n", size);
-    for (int i = 0; i < size; i++) {
-      printf("%s %p\n", strings.get()[i], stack[i]);
-    }
-
-    union {
-      void (*p1)(int);
-      void* p2;
-    } p = {&CheckStackTrace};
-
-    printf("CheckStackTrace() addr: %p\n", p.p2);
-#  endif
+  std::unique_ptr<char*, decltype(&std::free)> strings{
+      backtrace_symbols(stack, size), &std::free};
+  for (int i = 0; i < size; ++i) {
+    printf("%s %p\n", strings.get()[i], stack[i]);
   }
-  for (int i = 0; i < BACKTRACE_STEPS; i++) {
-    printf("Backtrace %d: expected: %p..%p  actual: %p ... ", i,
-           expected_range[i].start, expected_range[i].end, stack[i]);
-    fflush(stdout);
-    CheckRetAddrIsInFunction(stack[i], expected_range[i]);
-    printf("OK\n");
+
+  union {
+    void (*p1)(int);
+    void* p2;
+  } p = {&CheckStackTrace};
+
+  printf("CheckStackTrace() addr: %p\n", p.p2);
+#  endif
+  for (int i = 0; i < BACKTRACE_STEPS; ++i) {
+    SCOPED_TRACE(i);
+    EXPECT_THAT(stack[i],
+                AllOf(Ge(expected_range[i].start), Le(expected_range[i].end)));
   }
 #  ifndef __GNUC__
   NGLOG_DECLARE_ADDRESS_LABEL(end);
 #  endif
 }
-
-//-----------------------------------------------------------------------//
 
 /* Dummy functions to make the backtrace more interesting. */
 NGLOG_ATTRIBUTE_NOINLINE
@@ -232,15 +220,13 @@ static
 
 #  if defined(__clang__)
 #    pragma clang diagnostic pop
-#  elif defined(__MINGW32__)
+#  elif defined(__GNUC__)
 #    pragma GCC diagnostic pop
 #  endif
 
 namespace {
 void handle_abort(int /*code*/) { std::exit(EXIT_FAILURE); }
 }  // namespace
-
-//-----------------------------------------------------------------------//
 
 TEST(Stacktrace, StackTrace) { CheckStackTrace(0); }
 
@@ -267,4 +253,4 @@ int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
-#endif    // HAVE_STACKTRACE
+#endif  // HAVE_STACKTRACE
