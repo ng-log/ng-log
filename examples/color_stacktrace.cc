@@ -39,16 +39,15 @@ void DisableCoreDumps() {
 
 // Recurses a few times before crashing so the stack trace below has more
 // than one frame to show off file:line/function coloring on.
-void CrashThroughFewFrames(int depth);
+[[noreturn]] void CrashThroughFewFrames(int depth);
 
-void CrashThroughFewFramesIndirectly(int depth) {
+[[noreturn]] void CrashThroughFewFramesIndirectly(int depth) {
   CrashThroughFewFrames(depth);
 }
 
-void CrashThroughFewFrames(int depth) {
+[[noreturn]] void CrashThroughFewFrames(int depth) {
   if (depth > 0) {
     CrashThroughFewFramesIndirectly(depth - 1);
-    return;
   }
   // LOG(FATAL) shows the FATAL severity's own coloring on its log line,
   // then aborts, which InstallFailureSignalHandler() (installed by the
@@ -73,11 +72,17 @@ void WriteUsage(nglog::HelpWriter& help) {
   help.Write(" to disable coloring.\n\n");
 }
 
+// Raises SIGABRT for the failure signal handler. Taking the address of
+// std::abort itself is not portable.
+[[noreturn]] void Abort() { std::abort(); }
+
 }  // namespace
 
 int main(int argc, char** argv) {
   // Set the example defaults before parsing so command-line values override
-  // them while retaining the example's useful output by default.
+  // them while retaining the example's useful output by default. Logging to
+  // stderr shows every severity on the terminal this example colorizes,
+  // since FLAGS_stderrthreshold copies only ERROR and above there.
   nglog::SetFlag(FLAGS_logtostderr, true);
   nglog::SetFlag(FLAGS_v, 1);
   nglog::SetUsageMessage(WriteUsage);
@@ -92,9 +97,6 @@ int main(int argc, char** argv) {
   // nglog::SetFlag(FLAGS_colorlogtostderr, false);
   // nglog::SetFlag(FLAGS_symbolize_hyperlinks, false);
 
-  // FLAGS_stderrthreshold defaults to ERROR, so INFO/WARNING messages
-  // would otherwise go only to a log file, never to the terminal this
-  // example colorizes.
   // Regular log lines are colorized by severity when writing to a
   // terminal: INFO is left uncolored, WARNING is yellow, ERROR is red,
   // and FATAL is bold red. This coloring is applied uniformly across
@@ -122,8 +124,7 @@ int main(int argc, char** argv) {
   // exit path, bypassing the crash handler installed above, routing it
   // through plain abort() instead raises a real, catchable signal, so it
   // goes through the same colorized crash banner as any other crash.
-  nglog::InstallFailureFunction(
-      reinterpret_cast<nglog::logging_fail_func_t>(&std::abort));
+  nglog::InstallFailureFunction(&Abort);
 
   LOG(INFO) << "crashing on purpose to show a colorized stack trace";
   CrashThroughFewFrames(3);
