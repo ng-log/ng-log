@@ -45,7 +45,14 @@ include (GenerateExportHeader)
 include (GetCacheVariables)
 include (GNUInstallDirs)
 
-option (BUILD_SHARED_LIBS "Build shared libraries" ON)
+# An embedding project owns the global library type. Default to a shared
+# library within this directory only.
+if (PROJECT_IS_TOP_LEVEL)
+  option (BUILD_SHARED_LIBS "Build shared libraries" ON)
+elseif (NOT DEFINED BUILD_SHARED_LIBS)
+  set (BUILD_SHARED_LIBS ON)
+endif (PROJECT_IS_TOP_LEVEL)
+
 option (BUILD_EXAMPLES "Build examples" ON)
 option (WITH_LOCK_METRICS
   "Enable internal lock contention metrics" OFF)
