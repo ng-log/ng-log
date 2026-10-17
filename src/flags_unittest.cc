@@ -8,13 +8,14 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
+#include <initializer_list>
 #include <new>
+#include <ostream>
 #include <regex>
 #include <stdexcept>
 #include <string>
@@ -76,43 +77,38 @@ struct ConstructibleOnlyFlagValue {
 
 namespace nglog {
 
+// Parses and formats the single digit values accepted by the test types.
+template <typename T>
+struct DigitFlagTraits {
+  static bool Parse(const std::string& value, T* output, std::string* error) {
+    if (value == "7" || value == "9") {
+      output->value = value[0] - '0';
+      return true;
+    }
+    *error = "expected 7 or 9";
+    return false;
+  }
+
+  static std::string ToString(const T& value) {
+    return std::to_string(value.value);
+  }
+};
+
 template <>
-struct FlagTraits<CustomFlagValue> {
+struct FlagTraits<CustomFlagValue> : DigitFlagTraits<CustomFlagValue> {
   static const char* TypeName() noexcept { return "custom"; }
-
-  static bool Parse(const std::string& value, CustomFlagValue* output,
-                    std::string* error) {
-    if (value == "7" || value == "9") {
-      output->value = value[0] - '0';
-      return true;
-    }
-    *error = "expected 7 or 9";
-    return false;
-  }
-
-  static std::string ToString(const CustomFlagValue& value) {
-    return std::to_string(value.value);
-  }
 };
 
 template <>
-struct FlagTraits<ConstructibleOnlyFlagValue> {
+struct FlagTraits<ConstructibleOnlyFlagValue>
+    : DigitFlagTraits<ConstructibleOnlyFlagValue> {
   static const char* TypeName() noexcept { return "constructible-only"; }
-
-  static bool Parse(const std::string& value,
-                    ConstructibleOnlyFlagValue* output, std::string* error) {
-    if (value == "7" || value == "9") {
-      output->value = value[0] - '0';
-      return true;
-    }
-    *error = "expected 7 or 9";
-    return false;
-  }
-
-  static std::string ToString(const ConstructibleOnlyFlagValue& value) {
-    return std::to_string(value.value);
-  }
 };
+
+// Names the flag in assertion failures instead of dumping its bytes.
+void PrintTo(const FlagInfo& info, std::ostream* os) {
+  *os << "flag " << info.name;
+}
 
 }  // namespace nglog
 
@@ -294,21 +290,120 @@ static_assert(
 
 namespace {
 
-int SetTestEnvironment(const char* name, const char* value) {
-#ifdef NGLOG_OS_WINDOWS
-  return _putenv_s(name, value);
-#else
-  return setenv(name, value, 1);
-#endif
+using nglog::ScopedEnvironmentVariable;
+
+constexpr char kProgramName[] = "flags_unittest";
+
+constexpr int kReadIterations = 1000;
+constexpr std::int32_t kFirstWrittenValue = 17;
+constexpr std::int32_t kSecondWrittenValue = 23;
+constexpr std::int32_t kOriginalValue = 1;
+constexpr std::int32_t kTemporaryValue = 2;
+constexpr std::int32_t kReplacementValue = 3;
+
+// Owns mutable copies of the arguments of a command line that starts with the
+// program name, as the parser expects them.
+class CommandLine {
+ public:
+  CommandLine(std::initializer_list<const char*> arguments) {
+    arguments_.emplace_back(kProgramName);
+    arguments_.insert(arguments_.end(), arguments.begin(), arguments.end());
+    for (std::string& argument : arguments_) {
+      pointers_.push_back(&argument[0]);
+    }
+    pointers_.push_back(nullptr);
+    argc_ = static_cast<int>(arguments_.size());
+    argv_ = pointers_.data();
+  }
+
+  CommandLine(const CommandLine&) = delete;
+  CommandLine& operator=(const CommandLine&) = delete;
+
+  std::uint32_t Parse(
+      nglog::FlagParsingMode mode = nglog::FlagParsingMode::kRemoveFlags,
+      nglog::UnknownFlagMode unknown_mode = nglog::UnknownFlagMode::kError) {
+    return nglog::ParseCommandLineFlags(&argc_, &argv_, mode, unknown_mode);
+  }
+
+  //! Returns the arguments that follow the program name after parsing.
+  std::vector<std::string> Arguments() const {
+    return {argv_ + 1, argv_ + argc_};
+  }
+
+  //! Returns the argument vector terminator position after parsing.
+  const char* Terminator() const { return argv_[argc_]; }
+
+ private:
+  std::vector<std::string> arguments_;
+  std::vector<char*> pointers_;
+  int argc_ = 0;
+  char** argv_ = nullptr;
+};
+
+std::vector<nglog::FlagInfo> AllFlags() {
+  std::vector<nglog::FlagInfo> flags;
+  nglog::GetAllFlags(&flags);
+  return flags;
 }
 
-int UnsetTestEnvironment(const char* name) {
-#ifdef NGLOG_OS_WINDOWS
-  return _putenv_s(name, "");
-#else
-  return unsetenv(name);
-#endif
+testing::Matcher<const nglog::FlagInfo&> FlagNamed(const std::string& name) {
+  return testing::Field("name", &nglog::FlagInfo::name, name);
 }
+
+testing::Matcher<const nglog::FlagInfo&> FlagWithHelp(const std::string& name,
+                                                      const std::string& help) {
+  return testing::AllOf(FlagNamed(name),
+                        testing::Field("help", &nglog::FlagInfo::help, help));
+}
+
+MATCHER(StartsWithAnUppercaseLetter, "starts with an uppercase letter") {
+  return !arg.empty() && arg.front() >= 'A' && arg.front() <= 'Z';
+}
+
+MATCHER(CurrentValueIsTheDefault, "has its default value as current value") {
+  return arg.current_value == arg.default_value;
+}
+
+std::string PrintedHelp() {
+  nglog::CaptureTestStderr();
+  nglog::PrintCommandLineFlags();
+  return nglog::GetCapturedTestStderr();
+}
+
+std::string StripTerminalStyles(const std::string& text) {
+  static const std::regex escape("\033\\[[0-9;]*m");
+  return std::regex_replace(text, escape, "");
+}
+
+// Constructs a flag in place so that a replacement can occupy the address of
+// the destroyed original.
+class ReplaceableFlag {
+ public:
+  // Named differently from the base class, whose trivial destructor a call
+  // through the name Flag would select.
+  using Int32Flag = nglog::DynamicFlag<std::int32_t>;
+
+  ReplaceableFlag(const char* name, std::int32_t value) : name_(name) {
+    flag_ = new (storage_) Int32Flag(name_, __FILE__, "Dynamic flag.", value);
+  }
+
+  ReplaceableFlag(const ReplaceableFlag&) = delete;
+  ReplaceableFlag& operator=(const ReplaceableFlag&) = delete;
+
+  ~ReplaceableFlag() { flag_->~Int32Flag(); }
+
+  Int32Flag& get() noexcept { return *flag_; }
+
+  void Replace(std::int32_t value) {
+    flag_->~Int32Flag();
+    flag_ = new (storage_) Int32Flag(name_, __FILE__, "Dynamic flag.", value);
+  }
+
+ private:
+  const char* name_;
+  alignas(Int32Flag) unsigned char storage_[sizeof(Int32Flag)];
+  Int32Flag* flag_ = nullptr;
+};
 
 void WriteGeneratedUsage(nglog::HelpWriter& help) {
   help.Write(nglog::HelpTextStyle::kHeading, "Usage:");
@@ -396,41 +491,23 @@ TEST(Flags, ScopedFlagsIgnoreDestroyedFlags) {
 #endif
 
 TEST(Flags, ScopedFlagsIgnoreReplacementAtTheSameAddress) {
-  // Named differently from the base class, whose trivial destructor a call
-  // through the name Flag would select.
-  using Int32Flag = nglog::DynamicFlag<std::int32_t>;
-  alignas(Int32Flag) unsigned char storage[sizeof(Int32Flag)];
-  auto* flag = new (storage)
-      Int32Flag("scoped_all_dynamic_flag", __FILE__, "Dynamic flag.", 1);
-  Int32Flag* replacement = nullptr;
+  ReplaceableFlag flag("scoped_all_dynamic_flag", kOriginalValue);
   {
     nglog::ScopedFlags<> save;
-    flag->~Int32Flag();
-    replacement = new (storage)
-        Int32Flag("scoped_all_dynamic_flag", __FILE__, "Dynamic flag.", 3);
-    EXPECT_EQ(3, nglog::GetFlag(*replacement));
+    flag.Replace(kReplacementValue);
+    EXPECT_EQ(kReplacementValue, nglog::GetFlag(flag.get()));
   }
-  EXPECT_EQ(3, nglog::GetFlag(*replacement));
-  replacement->~Int32Flag();
+  EXPECT_EQ(kReplacementValue, nglog::GetFlag(flag.get()));
 }
 
 TEST(Flags, ScopedFlagIgnoresDestroyedFlags) {
-  // Named differently from the base class, whose trivial destructor a call
-  // through the name Flag would select.
-  using Int32Flag = nglog::DynamicFlag<std::int32_t>;
-  alignas(Int32Flag) unsigned char storage[sizeof(Int32Flag)];
-  auto* flag = new (storage)
-      Int32Flag("scoped_selected_dynamic_flag", __FILE__, "Dynamic flag.", 1);
-  Int32Flag* replacement = nullptr;
+  ReplaceableFlag flag("scoped_selected_dynamic_flag", kOriginalValue);
   {
-    auto save = nglog::MakeScopedFlag(*flag, 2);
-    flag->~Int32Flag();
-    replacement = new (storage)
-        Int32Flag("scoped_selected_dynamic_flag", __FILE__, "Dynamic flag.", 3);
-    EXPECT_EQ(3, nglog::GetFlag(*replacement));
+    auto save = nglog::MakeScopedFlag(flag.get(), kTemporaryValue);
+    flag.Replace(kReplacementValue);
+    EXPECT_EQ(kReplacementValue, nglog::GetFlag(flag.get()));
   }
-  EXPECT_EQ(3, nglog::GetFlag(*replacement));
-  replacement->~Int32Flag();
+  EXPECT_EQ(kReplacementValue, nglog::GetFlag(flag.get()));
 }
 
 TEST(Flags, ScopedFlagsRestoresSelectedFlags) {
@@ -465,18 +542,19 @@ TEST(Flags, ScopedFlagsRestoreFailureUsesErrorStyling) {
 
 TEST(Flags, TypedFlagObjectsProvideSynchronizedAccess) {
   nglog::ScopedFlags<> save;
-  nglog::SetFlag(FLAGS_test_int32_flag, 17);
+  nglog::SetFlag(FLAGS_test_int32_flag, kFirstWrittenValue);
   std::atomic<bool> stop{false};
   std::thread writer([&stop] {
     while (!stop.load(std::memory_order_relaxed)) {
-      nglog::SetFlag(FLAGS_test_int32_flag, 17);
-      nglog::SetFlag(FLAGS_test_int32_flag, 23);
+      nglog::SetFlag(FLAGS_test_int32_flag, kFirstWrittenValue);
+      nglog::SetFlag(FLAGS_test_int32_flag, kSecondWrittenValue);
     }
   });
 
-  for (int iteration_count = 0; iteration_count < 1000; ++iteration_count) {
-    const std::int32_t value = nglog::GetFlag(FLAGS_test_int32_flag);
-    EXPECT_TRUE(value == 17 || value == 23);
+  for (int iteration_count = 0; iteration_count < kReadIterations;
+       ++iteration_count) {
+    EXPECT_THAT(nglog::GetFlag(FLAGS_test_int32_flag),
+                testing::AnyOf(kFirstWrittenValue, kSecondWrittenValue));
   }
 
   stop.store(true, std::memory_order_relaxed);
@@ -494,9 +572,10 @@ TEST(Flags, NonTrivialFlagObjectsProvideSynchronizedAccess) {
     }
   });
 
-  for (int iteration_count = 0; iteration_count < 1000; ++iteration_count) {
-    const std::string value = nglog::GetFlag(FLAGS_test_string_flag);
-    EXPECT_TRUE(value == "first" || value == "second");
+  for (int iteration_count = 0; iteration_count < kReadIterations;
+       ++iteration_count) {
+    EXPECT_THAT(nglog::GetFlag(FLAGS_test_string_flag),
+                testing::AnyOf("first", "second"));
   }
 
   stop.store(true, std::memory_order_relaxed);
@@ -507,7 +586,6 @@ TEST(Flags, DefaultValuesCanBeAccessedConcurrently) {
   nglog::DynamicFlag<std::string> flag("concurrent_default_flag", __FILE__,
                                        "Concurrent default flag.", "first");
   std::atomic<bool> stop{false};
-  std::atomic<int> invalid_values{0};
   std::thread writer([&flag, &stop] {
     while (!stop.load(std::memory_order_relaxed)) {
       std::string error;
@@ -518,36 +596,27 @@ TEST(Flags, DefaultValuesCanBeAccessedConcurrently) {
     }
   });
 
-  for (int iteration_count = 0; iteration_count < 1000; ++iteration_count) {
-    const std::string value = flag.DefaultValue();
-    if (value != "first" && value != "second") {
-      invalid_values.fetch_add(1, std::memory_order_relaxed);
-    }
+  for (int iteration_count = 0; iteration_count < kReadIterations;
+       ++iteration_count) {
+    EXPECT_THAT(flag.DefaultValue(), testing::AnyOf("first", "second"));
   }
 
   stop.store(true, std::memory_order_relaxed);
   writer.join();
-  EXPECT_EQ(0, invalid_values.load(std::memory_order_relaxed));
 }
 
 TEST(Flags, ParsesTypedValues) {
   nglog::ScopedFlags<> save;
-  char program[] = "flags_unittest";
-  char bool_arg[] = "--test_bool_flag";
-  char int_arg[] = "--test_int32_flag=-13";
-  char uint_arg[] = "--test_uint32_flag=19";
-  char string_arg[] = "--test_string_flag=changed";
-  char* argv_storage[] = {program, bool_arg, int_arg, uint_arg, string_arg};
-  char** argv = argv_storage;
-  int argc = 5;
+  CommandLine command_line({"--test_bool_flag", "--test_int32_flag=-13",
+                            "--test_uint32_flag=19",
+                            "--test_string_flag=changed"});
 
-  ASSERT_EQ(4U, nglog::ParseCommandLineFlags(
-                    &argc, &argv, nglog::FlagParsingMode::kRemoveFlags));
+  ASSERT_EQ(4U, command_line.Parse());
   EXPECT_TRUE(nglog::GetFlag(FLAGS_test_bool_flag));
   EXPECT_EQ(-13, nglog::GetFlag(FLAGS_test_int32_flag));
-  EXPECT_EQ(19, nglog::GetFlag(FLAGS_test_uint32_flag));
+  EXPECT_EQ(19U, nglog::GetFlag(FLAGS_test_uint32_flag));
   EXPECT_EQ("changed", nglog::GetFlag(FLAGS_test_string_flag));
-  EXPECT_EQ(1, argc);
+  EXPECT_THAT(command_line.Arguments(), testing::IsEmpty());
 }
 
 TEST(Flags, FlagCallbacksMayReadTheRegistry) {
@@ -559,60 +628,35 @@ TEST(Flags, FlagCallbacksMayReadTheRegistry) {
 
 TEST(Flags, ParsesAnEmptyStringValue) {
   nglog::ScopedFlags<> save;
-  char program[] = "flags_unittest";
-  char string_arg[] = "--test_string_flag=";
-  char* argv_storage[] = {program, string_arg};
-  char** argv = argv_storage;
-  int argc = 2;
+  CommandLine command_line({"--test_string_flag="});
 
-  ASSERT_EQ(1U, nglog::ParseCommandLineFlags(
-                    &argc, &argv, nglog::FlagParsingMode::kRemoveFlags));
+  ASSERT_EQ(1U, command_line.Parse());
   EXPECT_THAT(nglog::GetFlag(FLAGS_test_string_flag), testing::IsEmpty());
 }
 
 TEST(Flags, KeepsConsumedValuesWhenRequested) {
   nglog::ScopedFlags<> save;
-  char program[] = "flags_unittest";
-  char int_arg[] = "--test_int32_flag";
-  char int_value[] = "-13";
-  char positional_arg[] = "positional";
-  char* argv_storage[] = {program, int_arg, int_value, positional_arg};
-  char** argv = argv_storage;
-  int argc = 4;
+  CommandLine command_line({"--test_int32_flag", "-13", "positional"});
 
-  ASSERT_EQ(1U, nglog::ParseCommandLineFlags(
-                    &argc, &argv, nglog::FlagParsingMode::kKeepFlags));
-  ASSERT_EQ(4, argc);
-  EXPECT_THAT(argv[1], testing::StrEq("--test_int32_flag"));
-  EXPECT_THAT(argv[2], testing::StrEq("-13"));
-  EXPECT_THAT(argv[3], testing::StrEq("positional"));
+  ASSERT_EQ(1U, command_line.Parse(nglog::FlagParsingMode::kKeepFlags));
+  EXPECT_THAT(command_line.Arguments(),
+              testing::ElementsAre("--test_int32_flag", "-13", "positional"));
 }
 
 TEST(Flags, ParsesDecimalNumbersWithLeadingZeroes) {
   nglog::ScopedFlags<> save;
-  char program[] = "flags_unittest";
-  char int_arg[] = "--test_int32_flag=010";
-  char uint_arg[] = "--test_uint32_flag=08";
-  char* argv_storage[] = {program, int_arg, uint_arg};
-  char** argv = argv_storage;
-  int argc = 3;
+  CommandLine command_line({"--test_int32_flag=010", "--test_uint32_flag=08"});
 
-  ASSERT_EQ(2U, nglog::ParseCommandLineFlags(
-                    &argc, &argv, nglog::FlagParsingMode::kRemoveFlags));
+  ASSERT_EQ(2U, command_line.Parse());
   EXPECT_EQ(10, nglog::GetFlag(FLAGS_test_int32_flag));
   EXPECT_EQ(8U, nglog::GetFlag(FLAGS_test_uint32_flag));
 }
 
 TEST(Flags, ParsesMixedCaseBooleanValues) {
   nglog::ScopedFlags<> save;
-  char program[] = "flags_unittest";
-  char true_arg[] = "--test_bool_flag=TrUe";
-  char* argv_storage[] = {program, true_arg};
-  char** argv = argv_storage;
-  int argc = 2;
+  CommandLine command_line({"--test_bool_flag=TrUe"});
 
-  ASSERT_EQ(1U, nglog::ParseCommandLineFlags(
-                    &argc, &argv, nglog::FlagParsingMode::kRemoveFlags));
+  ASSERT_EQ(1U, command_line.Parse());
   EXPECT_TRUE(nglog::GetFlag(FLAGS_test_bool_flag));
 }
 
@@ -621,64 +665,50 @@ TEST(Flags, ExposesTypedReflection) {
   EXPECT_THAT(FLAGS_test_int32_flag.type_name(), testing::StrEq("int32"));
   EXPECT_THAT(FLAGS_test_uint32_flag.type_name(), testing::StrEq("uint32"));
   EXPECT_THAT(FLAGS_test_string_flag.type_name(), testing::StrEq("string"));
-  EXPECT_EQ(false, nglog::GetFlag(FLAGS_test_bool_flag));
+  EXPECT_FALSE(nglog::GetFlag(FLAGS_test_bool_flag));
 }
 
 TEST(Flags, ExplicitFlagHelpRetainsPlainReflectionText) {
-  std::vector<nglog::FlagInfo> flags;
-  nglog::GetAllFlags(&flags);
-  const auto flag = std::find_if(
-      flags.begin(), flags.end(),
-      [](const nglog::FlagInfo& info) { return info.name == "logtostderr"; });
-  ASSERT_NE(flag, flags.end());
-  ASSERT_TRUE(flag->help_function);
   EXPECT_THAT(
-      flag->help,
-      testing::StrEq("Send log messages to stderr instead of log files."));
+      AllFlags(),
+      testing::Contains(testing::AllOf(
+          FlagWithHelp("logtostderr",
+                       "Send log messages to stderr instead of log "
+                       "files."),
+          testing::Field("help_function", &nglog::FlagInfo::help_function,
+                         testing::NotNull()))));
 }
 
 TEST(Flags, BuiltInHelpUsesUserFriendlyWording) {
-  std::vector<nglog::FlagInfo> flags;
-  nglog::GetAllFlags(&flags);
-  const auto find_help = [&flags](const char* name) {
-    const auto flag = std::find_if(
-        flags.begin(), flags.end(),
-        [name](const nglog::FlagInfo& info) { return info.name == name; });
-    EXPECT_NE(flag, flags.end());
-    return flag == flags.end() ? std::string() : flag->help;
-  };
-
-  EXPECT_THAT(find_help("alsologtoemail"),
-              testing::StrEq("Send log messages to each address in this "
-                             "comma-separated list in addition to log files."));
-  EXPECT_THAT(find_help("log_file_header"),
-              testing::StrEq("Write a header at the beginning of each log "
-                             "file."));
   EXPECT_THAT(
-      find_help("logbufsecs"),
-      testing::StrEq("Keep buffered log messages for no more than this many "
-                     "seconds."));
-  EXPECT_THAT(find_help("logfile_mode"),
-              testing::StrEq("Set the permissions for newly created log "
-                             "files."));
-  EXPECT_THAT(
-      find_help("max_log_size"),
-      testing::StrEq("Limit each log file to approximately this size in MiB. "
-                     "A value of 0 is treated as 1 and values above 4095 are "
-                     "capped at 4095."));
-  EXPECT_THAT(
-      find_help("symbolize_line_info"),
-      testing::StrEq("Resolve source file names and line numbers in stack "
-                     "frames with addr2line or libbacktrace, when available."));
-  EXPECT_THAT(
-      find_help("symbolize_file_base_path"),
-      testing::StrEq("Use this base path to resolve relative source paths when "
-                     "creating terminal hyperlinks."));
-  EXPECT_THAT(find_help("symbolize_hyperlinks"),
-              testing::StrEq(
-                  "Add hyperlinks to file:line references in colorized stack "
-                  "traces when supported by the terminal. Set false to "
-                  "disable them."));
+      AllFlags(),
+      testing::IsSupersetOf({
+          FlagWithHelp("alsologtoemail",
+                       "Send log messages to each address in this "
+                       "comma-separated list in addition to log files."),
+          FlagWithHelp("log_file_header",
+                       "Write a header at the beginning of each log file."),
+          FlagWithHelp("logbufsecs",
+                       "Keep buffered log messages for no more than this many "
+                       "seconds."),
+          FlagWithHelp("logfile_mode",
+                       "Set the permissions for newly created log files."),
+          FlagWithHelp("max_log_size",
+                       "Limit each log file to approximately this size in MiB. "
+                       "A value of 0 is treated as 1 and values above 4095 are "
+                       "capped at 4095."),
+          FlagWithHelp("symbolize_line_info",
+                       "Resolve source file names and line numbers in stack "
+                       "frames with addr2line or libbacktrace, when "
+                       "available."),
+          FlagWithHelp("symbolize_file_base_path",
+                       "Use this base path to resolve relative source paths "
+                       "when creating terminal hyperlinks."),
+          FlagWithHelp("symbolize_hyperlinks",
+                       "Add hyperlinks to file:line references in colorized "
+                       "stack traces when supported by the terminal. Set false "
+                       "to disable them."),
+      }));
 }
 
 TEST(Flags, FlagInfoPreservesExistingAggregateFieldOrder) {
@@ -694,9 +724,7 @@ TEST(Flags, FlagInfoPreservesExistingAggregateFieldOrder) {
 }
 
 TEST(Flags, HelpUsesTerminalStyling) {
-  nglog::CaptureTestStderr();
-  nglog::PrintCommandLineFlags();
-  const std::string output = nglog::GetCapturedTestStderr();
+  const std::string output = PrintedHelp();
   EXPECT_THAT(output, testing::HasSubstr("\033["));
   EXPECT_THAT(output, testing::HasSubstr("Environment variables:"));
   EXPECT_THAT(output, testing::HasSubstr("NGLOG_"));
@@ -748,9 +776,7 @@ TEST(Flags, HelpUsesTerminalStyling) {
 }
 
 TEST(Flags, PlainHelpTextIsNotInterpreted) {
-  nglog::CaptureTestStderr();
-  nglog::PrintCommandLineFlags();
-  const std::string output = nglog::GetCapturedTestStderr();
+  const std::string output = PrintedHelp();
   EXPECT_THAT(
       output,
       testing::HasSubstr(
@@ -760,9 +786,7 @@ TEST(Flags, PlainHelpTextIsNotInterpreted) {
 }
 
 TEST(Flags, StyledHelpWrapsAcrossStyleBoundaries) {
-  nglog::CaptureTestStderr();
-  nglog::PrintCommandLineFlags();
-  const std::string output = nglog::GetCapturedTestStderr();
+  const std::string output = PrintedHelp();
   EXPECT_THAT(
       output,
       testing::HasSubstr(
@@ -783,28 +807,18 @@ TEST(Flags, StyledHelpWrapsAcrossStyleBoundaries) {
 
 #ifdef GTEST_HAS_DEATH_TEST
 TEST(Flags, MisspelledFlagsSuggestTheClosestRegisteredFlag) {
-  char program[] = "flags_unittest";
-  char argument[] = "--test_bool_flga";
-  char* argv_storage[] = {program, argument, nullptr};
-  char** argv = argv_storage;
-  int argc = 2;
-  ASSERT_EXIT(nglog::ParseCommandLineFlags(
-                  &argc, &argv, nglog::FlagParsingMode::kRemoveFlags),
-              testing::ExitedWithCode(EXIT_FAILURE),
+  CommandLine command_line({"--test_bool_flga"});
+  ASSERT_EXIT(command_line.Parse(), testing::ExitedWithCode(EXIT_FAILURE),
               "\033\\[1;31merror:\033\\[0m"
               ".*unknown command-line option");
 
-  ASSERT_EXIT(nglog::ParseCommandLineFlags(
-                  &argc, &argv, nglog::FlagParsingMode::kRemoveFlags),
-              testing::ExitedWithCode(EXIT_FAILURE),
+  ASSERT_EXIT(command_line.Parse(), testing::ExitedWithCode(EXIT_FAILURE),
               "\033\\[2;39m    Did you mean \033\\[0m"
               "\033\\[39m--\033\\[0m\033\\[1;36mtest_bool_fl\033\\[0m"
               "\033\\[1;3;4;36mag\033\\[0m"
               "\033\\[2;39m\\?\033\\[0m");
 
-  ASSERT_EXIT(nglog::ParseCommandLineFlags(
-                  &argc, &argv, nglog::FlagParsingMode::kRemoveFlags),
-              testing::ExitedWithCode(EXIT_FAILURE),
+  ASSERT_EXIT(command_line.Parse(), testing::ExitedWithCode(EXIT_FAILURE),
               "\033\\[39mUse \033\\[0m"
               "\033\\[39m--\033\\[0m\033\\[1;36mhelp\033\\[0m"
               "\033\\[39m to list all available options.\033\\[0m");
@@ -822,16 +836,8 @@ TEST(Flags, FuzzyMatchingUsesLevenshteinDistance) {
 
 #ifdef GTEST_HAS_DEATH_TEST
 TEST(Flags, MisspelledHelpSuggestsHelp) {
-  ASSERT_EXIT(([] {
-                char program[] = "flags_unittest";
-                char argument[] = "--halp";
-                char* argv_storage[] = {program, argument};
-                char** argv = argv_storage;
-                int argc = 2;
-                nglog::ParseCommandLineFlags(
-                    &argc, &argv, nglog::FlagParsingMode::kRemoveFlags);
-              }()),
-              testing::ExitedWithCode(EXIT_FAILURE),
+  CommandLine command_line({"--halp"});
+  ASSERT_EXIT(command_line.Parse(), testing::ExitedWithCode(EXIT_FAILURE),
               "\033\\[2;39m    Did you mean \033\\[0m"
               "\033\\[39m--\033\\[0m\033\\[1;36mh\033\\[0m"
               "\033\\[1;3;4;36me\033\\[0m\033\\[1;36mlp\033\\[0m"
@@ -840,70 +846,40 @@ TEST(Flags, MisspelledHelpSuggestsHelp) {
 #endif
 
 TEST(Flags, UnknownFlagsCanBeIgnoredExplicitly) {
-  char program[] = "flags_unittest";
-  char argument[] = "--flag_from_another_library";
-  char* argv_storage[] = {program, argument, nullptr};
-  char** argv = argv_storage;
-  int argc = 2;
-  EXPECT_EQ(0U, nglog::ParseCommandLineFlags(
-                    &argc, &argv, nglog::FlagParsingMode::kRemoveFlags,
-                    nglog::UnknownFlagMode::kIgnore));
-  ASSERT_EQ(2, argc);
-  EXPECT_THAT(argv[1], testing::StrEq("--flag_from_another_library"));
+  CommandLine command_line({"--flag_from_another_library"});
+  EXPECT_EQ(0U, command_line.Parse(nglog::FlagParsingMode::kRemoveFlags,
+                                   nglog::UnknownFlagMode::kIgnore));
+  EXPECT_THAT(command_line.Arguments(),
+              testing::ElementsAre("--flag_from_another_library"));
 }
 
 TEST(Flags, SeparatorIsRemovedWithTheFlags) {
   nglog::ScopedFlags<> save;
-  char program[] = "flags_unittest";
-  char flag[] = "--test_bool_flag";
-  char separator[] = "--";
-  char option_like[] = "--test_int32_flag=9";
-  char repeated_separator[] = "--";
-  char* argv_storage[] = {
-      program, flag, separator, option_like, repeated_separator, nullptr};
-  char** argv = argv_storage;
-  int argc = 5;
-  EXPECT_EQ(1U, nglog::ParseCommandLineFlags(
-                    &argc, &argv, nglog::FlagParsingMode::kRemoveFlags));
-  ASSERT_EQ(3, argc);
-  EXPECT_THAT(argv[1], testing::StrEq("--test_int32_flag=9"));
-  EXPECT_THAT(argv[2], testing::StrEq("--"));
-  EXPECT_EQ(nullptr, argv[3]);
+  CommandLine command_line(
+      {"--test_bool_flag", "--", "--test_int32_flag=9", "--"});
+  EXPECT_EQ(1U, command_line.Parse());
+  EXPECT_THAT(command_line.Arguments(),
+              testing::ElementsAre("--test_int32_flag=9", "--"));
+  EXPECT_EQ(nullptr, command_line.Terminator());
   EXPECT_EQ(7, nglog::GetFlag(FLAGS_test_int32_flag));
 }
 
 TEST(Flags, SeparatorIsKeptForAnotherParser) {
   nglog::ScopedFlags<> save;
-  char program[] = "flags_unittest";
-  char flag[] = "--test_bool_flag";
-  char foreign[] = "--flag_from_another_library";
-  char separator[] = "--";
-  char option_like[] = "--not_an_option";
-  char* argv_storage[] = {program,   flag,        foreign,
-                          separator, option_like, nullptr};
-  char** argv = argv_storage;
-  int argc = 5;
-  EXPECT_EQ(1U, nglog::ParseCommandLineFlags(
-                    &argc, &argv, nglog::FlagParsingMode::kRemoveFlags,
-                    nglog::UnknownFlagMode::kIgnore));
-  ASSERT_EQ(4, argc);
-  EXPECT_THAT(argv[1], testing::StrEq("--flag_from_another_library"));
-  EXPECT_THAT(argv[2], testing::StrEq("--"));
-  EXPECT_THAT(argv[3], testing::StrEq("--not_an_option"));
+  CommandLine command_line({"--test_bool_flag", "--flag_from_another_library",
+                            "--", "--not_an_option"});
+  EXPECT_EQ(1U, command_line.Parse(nglog::FlagParsingMode::kRemoveFlags,
+                                   nglog::UnknownFlagMode::kIgnore));
+  EXPECT_THAT(command_line.Arguments(),
+              testing::ElementsAre("--flag_from_another_library", "--",
+                                   "--not_an_option"));
 }
 
 TEST(Flags, SeparatorIsKeptWhenFlagsAreKept) {
   nglog::ScopedFlags<> save;
-  char program[] = "flags_unittest";
-  char separator[] = "--";
-  char positional[] = "file";
-  char* argv_storage[] = {program, separator, positional, nullptr};
-  char** argv = argv_storage;
-  int argc = 3;
-  EXPECT_EQ(0U, nglog::ParseCommandLineFlags(
-                    &argc, &argv, nglog::FlagParsingMode::kKeepFlags));
-  ASSERT_EQ(3, argc);
-  EXPECT_THAT(argv[1], testing::StrEq("--"));
+  CommandLine command_line({"--", "file"});
+  EXPECT_EQ(0U, command_line.Parse(nglog::FlagParsingMode::kKeepFlags));
+  EXPECT_THAT(command_line.Arguments(), testing::ElementsAre("--", "file"));
 }
 
 TEST(Flags, OptionsCanBeGrouped) {
@@ -911,18 +887,12 @@ TEST(Flags, OptionsCanBeGrouped) {
   const auto group = module.AddGroup("Test options");
   ASSERT_TRUE(group.AddFlag(FLAGS_test_wrapped_help_flag));
 
-  std::vector<nglog::FlagInfo> flags;
-  nglog::GetAllFlags(&flags);
-  const auto flag =
-      std::find_if(flags.begin(), flags.end(), [](const nglog::FlagInfo& info) {
-        return info.name == "test_wrapped_help_flag";
-      });
-  ASSERT_NE(flag, flags.end());
-  EXPECT_THAT(flag->group, testing::StrEq("Test options"));
+  EXPECT_THAT(AllFlags(),
+              testing::Contains(testing::AllOf(
+                  FlagNamed("test_wrapped_help_flag"),
+                  testing::Field(&nglog::FlagInfo::group, "Test options"))));
 
-  nglog::CaptureTestStderr();
-  nglog::PrintCommandLineFlags();
-  const std::string output = nglog::GetCapturedTestStderr();
+  const std::string output = PrintedHelp();
   EXPECT_THAT(output, testing::HasSubstr("\033[1;32mTest options:\033[0m"));
   EXPECT_THAT(output, testing::Not(testing::HasSubstr("Options:")));
   EXPECT_THAT(output, testing::HasSubstr("test_wrapped_help_flag\033[0m"
@@ -937,15 +907,12 @@ TEST(Flags, ModulesOwnMandatoryFlagGroups) {
   const auto group = module.AddGroup("Grouped options");
   ASSERT_TRUE(group.AddFlag(FLAGS_test_custom_flag));
 
-  std::vector<nglog::FlagInfo> flags;
-  nglog::GetAllFlags(&flags);
-  const auto flag =
-      std::find_if(flags.begin(), flags.end(), [](const nglog::FlagInfo& info) {
-        return info.name == "test_custom_flag";
-      });
-  ASSERT_NE(flag, flags.end());
-  EXPECT_THAT(flag->module, testing::StrEq("mandatory-group-module"));
-  EXPECT_THAT(flag->group, testing::StrEq("Grouped options"));
+  EXPECT_THAT(
+      AllFlags(),
+      testing::Contains(testing::AllOf(
+          FlagNamed("test_custom_flag"),
+          testing::Field(&nglog::FlagInfo::module, "mandatory-group-module"),
+          testing::Field(&nglog::FlagInfo::group, "Grouped options"))));
 }
 
 TEST(Flags, OptionsCanBeGroupedByModule) {
@@ -962,18 +929,13 @@ TEST(Flags, OptionsCanBeGroupedByModule) {
   const auto second_group = second_module.AddGroup("Integer options");
   ASSERT_TRUE(second_group.AddFlag(FLAGS_test_int32_flag));
 
-  std::vector<nglog::FlagInfo> flags;
-  nglog::GetAllFlags(&flags);
-  const auto flag =
-      std::find_if(flags.begin(), flags.end(), [](const nglog::FlagInfo& info) {
-        return info.name == "test_bool_flag";
-      });
-  ASSERT_NE(flag, flags.end());
-  EXPECT_THAT(flag->module, testing::StrEq("test-application"));
+  EXPECT_THAT(
+      AllFlags(),
+      testing::Contains(testing::AllOf(
+          FlagNamed("test_bool_flag"),
+          testing::Field(&nglog::FlagInfo::module, "test-application"))));
 
-  nglog::CaptureTestStderr();
-  nglog::PrintCommandLineFlags();
-  const std::string output = nglog::GetCapturedTestStderr();
+  const std::string output = PrintedHelp();
   EXPECT_THAT(output, testing::HasSubstr("\033[37mOptions provided by \033[0m"
                                          "\033[1;37mtest-application\033[0m"
                                          "\033[37m:\033[0m\n\n"));
@@ -1012,9 +974,7 @@ TEST(Flags, CustomModuleHeadersArePrinted) {
   const auto group = module.AddGroup("Custom options");
   ASSERT_TRUE(group.AddFlag(FLAGS_test_literal_help_flag));
 
-  nglog::CaptureTestStderr();
-  nglog::PrintCommandLineFlags();
-  const std::string output = nglog::GetCapturedTestStderr();
+  const std::string output = PrintedHelp();
   EXPECT_THAT(output,
               testing::HasSubstr("\033[37mApplication options \033[0m"
                                  "\033[1;37mcustom-header-module\033[0m"));
@@ -1036,7 +996,7 @@ TEST(Flags, ModuleAssociationFollowsFlagLifetime) {
 }
 
 TEST(Flags, ModuleEnvironmentPrefixSetsTheFlagDefault) {
-  ASSERT_EQ(0, SetTestEnvironment("DYNAMIC_default_flag", "23"));
+  const ScopedEnvironmentVariable variable("DYNAMIC_default_flag", "23");
   const nglog::FlagModule module("environment-module", "Options provided by",
                                  "DYNAMIC_");
   const auto group = module.AddGroup("Environment options");
@@ -1045,17 +1005,11 @@ TEST(Flags, ModuleEnvironmentPrefixSetsTheFlagDefault) {
                                           "Environment default flag.", 7);
     ASSERT_TRUE(group.AddFlag(flag));
     EXPECT_EQ(23, nglog::GetFlag(flag));
-
-    std::vector<nglog::FlagInfo> flags;
-    nglog::GetAllFlags(&flags);
-    const auto found = std::find_if(flags.begin(), flags.end(),
-                                    [](const nglog::FlagInfo& info) {
-                                      return info.name == "default_flag";
-                                    });
-    ASSERT_NE(found, flags.end());
-    EXPECT_THAT(found->default_value, testing::StrEq("23"));
+    EXPECT_THAT(AllFlags(),
+                testing::Contains(testing::AllOf(
+                    FlagNamed("default_flag"),
+                    testing::Field(&nglog::FlagInfo::default_value, "23"))));
   }
-  ASSERT_EQ(0, UnsetTestEnvironment("DYNAMIC_default_flag"));
 }
 
 #ifdef GTEST_HAS_DEATH_TEST
@@ -1071,18 +1025,12 @@ TEST(Flags, HelpNameIsReserved) {
 #endif
 
 TEST(Flags, HelpUsesConsistentTextAndThemeStyles) {
-  std::vector<nglog::FlagInfo> flags;
-  nglog::GetAllFlags(&flags);
-  for (const nglog::FlagInfo& flag : flags) {
-    ASSERT_FALSE(flag.help.empty()) << flag.name;
-    EXPECT_THAT("ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-                testing::HasSubstr(flag.help.substr(0, 1)));
-    EXPECT_THAT(flag.help, testing::EndsWith("."));
-  }
+  EXPECT_THAT(AllFlags(), testing::Each(testing::Field(
+                              "help", &nglog::FlagInfo::help,
+                              testing::AllOf(StartsWithAnUppercaseLetter(),
+                                             testing::EndsWith(".")))));
 
-  nglog::CaptureTestStderr();
-  nglog::PrintCommandLineFlags();
-  const std::string output = nglog::GetCapturedTestStderr();
+  const std::string output = PrintedHelp();
   EXPECT_THAT(output,
               testing::HasSubstr("\033[1;32mEnvironment variables:\033[0m"));
   EXPECT_THAT(output, testing::HasSubstr("\033[1;36mtest_bool_flag\033[0m"
@@ -1131,9 +1079,7 @@ TEST(Flags, HelpUsesConsistentTextAndThemeStyles) {
 TEST(Flags, CustomFlagHelpFormatterOverridesRepresentation) {
   nglog::SetFlagHelpFormatter("test_string_flag", WriteCustomFlagHelp);
 
-  nglog::CaptureTestStderr();
-  nglog::PrintCommandLineFlags();
-  const std::string output = nglog::GetCapturedTestStderr();
+  const std::string output = PrintedHelp();
   EXPECT_THAT(output, testing::HasSubstr("\033[39m--\033[0m"
                                          "\033[1;36mtest_string_flag\033[0m"
                                          "\033[2;39m=\033[0m"
@@ -1153,9 +1099,7 @@ TEST(Flags, GeneratedUsageCanUseTextStyles) {
       "Use stderr and true or false.\n",
       nglog::ProgramUsage());
 
-  nglog::CaptureTestStderr();
-  nglog::PrintCommandLineFlags();
-  const std::string output = nglog::GetCapturedTestStderr();
+  const std::string output = PrintedHelp();
   EXPECT_THAT(output, testing::HasSubstr("\033[1;32mUsage:\033[0m"
                                          "\033[2;39m \033[0m"
                                          "\033[34mflags_unittest\033[0m"
@@ -1173,10 +1117,7 @@ TEST(Flags, GeneratedUsageCanUseTextStyles) {
                                          "\033[2;39m.\033[0m\n"));
 
   nglog::SetUsageMessage("Plain usage.");
-  nglog::CaptureTestStderr();
-  nglog::PrintCommandLineFlags();
-  const std::string plain_output = nglog::GetCapturedTestStderr();
-  EXPECT_THAT(plain_output,
+  EXPECT_THAT(PrintedHelp(),
               testing::HasSubstr("\033[2;39mPlain usage.\033[0m\n"));
 
   nglog::SetUsageMessage(std::string());
@@ -1224,14 +1165,8 @@ TEST(Flags, InvalidTypedValuePreservesCurrentValue) {
 
 #ifdef GTEST_HAS_DEATH_TEST
 TEST(Flags, InvalidCommandLineValueExitsWithFailureAndUsesTerminalStyling) {
-  char program[] = "flags_unittest";
-  char argument[] = "--test_uint32_flag=-1";
-  char* argv_storage[] = {program, argument};
-  char** argv = argv_storage;
-  int argc = 2;
-  ASSERT_EXIT(nglog::ParseCommandLineFlags(
-                  &argc, &argv, nglog::FlagParsingMode::kRemoveFlags),
-              testing::ExitedWithCode(EXIT_FAILURE),
+  CommandLine command_line({"--test_uint32_flag=-1"});
+  ASSERT_EXIT(command_line.Parse(), testing::ExitedWithCode(EXIT_FAILURE),
               "\033\\[1;31merror:\033\\[0m"
               ".*\033\\[39m--\033\\[0m"
               "\033\\[1;36mtest_uint32_flag\033\\[0m.*"
@@ -1336,93 +1271,45 @@ TEST(Flags, DestroyedFlagsAreUnregistered) {
 
 #ifdef GTEST_HAS_DEATH_TEST
 TEST(Flags, RejectsNegationOfNonBooleanFlags) {
-  ASSERT_EXIT(([] {
-                char program[] = "flags_unittest";
-                char argument[] = "--notest_int32_flag";
-                char* argv_storage[] = {program, argument};
-                char** argv = argv_storage;
-                int argc = 2;
-                nglog::ParseCommandLineFlags(
-                    &argc, &argv, nglog::FlagParsingMode::kRemoveFlags);
-              }()),
-              testing::ExitedWithCode(EXIT_FAILURE),
+  CommandLine command_line({"--notest_int32_flag"});
+  ASSERT_EXIT(command_line.Parse(), testing::ExitedWithCode(EXIT_FAILURE),
               "cannot be negated because it is not boolean");
 }
 #endif
 
 #ifdef GTEST_HAS_DEATH_TEST
 TEST(Flags, RejectsValuesForNegatedBooleanFlags) {
-  ASSERT_EXIT(([] {
-                char program[] = "flags_unittest";
-                char argument[] = "--notest_bool_flag=true";
-                char* argv_storage[] = {program, argument};
-                char** argv = argv_storage;
-                int argc = 2;
-                nglog::ParseCommandLineFlags(
-                    &argc, &argv, nglog::FlagParsingMode::kRemoveFlags);
-              }()),
-              testing::ExitedWithCode(EXIT_FAILURE),
+  CommandLine command_line({"--notest_bool_flag=true"});
+  ASSERT_EXIT(command_line.Parse(), testing::ExitedWithCode(EXIT_FAILURE),
               "does not accept a value when negated");
 }
 #endif
 
 #ifdef GTEST_HAS_DEATH_TEST
 TEST(Flags, RejectsValuesForHelpOption) {
-  ASSERT_EXIT(([] {
-                char program[] = "flags_unittest";
-                char argument[] = "--help=unexpected";
-                char* argv_storage[] = {program, argument};
-                char** argv = argv_storage;
-                int argc = 2;
-                nglog::ParseCommandLineFlags(
-                    &argc, &argv, nglog::FlagParsingMode::kRemoveFlags);
-              }()),
-              testing::ExitedWithCode(EXIT_FAILURE),
+  CommandLine command_line({"--help=unexpected"});
+  ASSERT_EXIT(command_line.Parse(), testing::ExitedWithCode(EXIT_FAILURE),
               "command-line option --help does not accept a value");
 }
 #endif
 
 #ifdef GTEST_HAS_DEATH_TEST
 TEST(Flags, HelpOptionPrintsAndExits) {
-  ASSERT_EXIT(([] {
-                char program[] = "flags_unittest";
-                char help_arg[] = "--help";
-                char* argv_storage[] = {program, help_arg};
-                char** argv = argv_storage;
-                int argc = 2;
-                nglog::ParseCommandLineFlags(
-                    &argc, &argv, nglog::FlagParsingMode::kRemoveFlags);
-              }()),
-              (testing::ExitedWithCode(0)),
+  CommandLine command_line({"--help"});
+  ASSERT_EXIT(command_line.Parse(), testing::ExitedWithCode(EXIT_SUCCESS),
               "\033\\[39m  --\033\\[0m\033\\[1;36mhelp\033\\[0m\n"
               "\033\\[2;39m      Show available command-line options "
               "and exit.\033\\[0m");
 }
 #endif
 
-std::size_t CountOccurrences(const std::string& text,
-                             const std::string& pattern) {
-  std::size_t count = 0;
-  for (std::size_t position = text.find(pattern); position != std::string::npos;
-       position = text.find(pattern, position + pattern.size())) {
-    ++count;
-  }
-  return count;
-}
-
-std::string StripTerminalStyles(const std::string& text) {
-  static const std::regex escape("\033\\[[0-9;]*m");
-  return std::regex_replace(text, escape, "");
-}
-
 TEST(Flags, UnbrokenHelpWordIsPrintedOnce) {
-  nglog::CaptureTestStderr();
-  nglog::PrintCommandLineFlags();
-  const std::string output =
-      StripTerminalStyles(nglog::GetCapturedTestStderr());
-  EXPECT_EQ(1U, CountOccurrences(output, "Unbroken_help_second_paragraph."));
+  const std::string output = StripTerminalStyles(PrintedHelp());
+  constexpr char kParagraph[] = "Unbroken_help_second_paragraph.";
   EXPECT_THAT(output,
               testing::HasSubstr("\n      Unbroken_help_second_paragraph.\n"));
+  // The first and the last occurrence coincide only for a single one.
+  EXPECT_EQ(output.find(kParagraph), output.rfind(kParagraph));
 }
 
 #ifdef GTEST_HAS_DEATH_TEST
@@ -1484,13 +1371,13 @@ TEST(Flags, RegisteringAFlagMultipleTimesIsFatal) {
 TEST(Flags, InvalidNamesAreFatal) {
   for (const char* const name :
        {"", "with space", "key=value", "1st", "dash-ed"}) {
+    SCOPED_TRACE(name);
     EXPECT_DEATH(
         {
           const nglog::DynamicFlag<bool> flag(name, "app/options.cc", "",
                                               false);
         },
-        "is not a valid command-line option name")
-        << name;
+        "is not a valid command-line option name");
   }
 }
 
@@ -1535,7 +1422,7 @@ TEST(Flags, DeclarationsWithTheDefinitionTypeAreAccepted) {
 }
 
 TEST(Flags, EnvironmentDefaultsKeepExplicitlySetValues) {
-  ASSERT_EQ(0, SetTestEnvironment("EXPLICIT_explicit_flag", "23"));
+  const ScopedEnvironmentVariable variable("EXPLICIT_explicit_flag", "23");
   const nglog::FlagModule module("explicit-module", "Options provided by",
                                  "EXPLICIT_");
   {
@@ -1546,14 +1433,12 @@ TEST(Flags, EnvironmentDefaultsKeepExplicitlySetValues) {
     EXPECT_EQ(11, nglog::GetFlag(flag));
     EXPECT_THAT(flag.DefaultValue(), testing::StrEq("23"));
   }
-  ASSERT_EQ(0, UnsetTestEnvironment("EXPLICIT_explicit_flag"));
 }
 
 TEST(Flags, DefaultsAreDeterminedWhenTheFlagIsRegistered) {
-  ASSERT_EQ(0, SetTestEnvironment(kDefaultSourceVariable, "changed"));
-  const std::string value = nglog::GetFlag(FLAGS_test_environment_default_flag);
-  ASSERT_EQ(0, UnsetTestEnvironment(kDefaultSourceVariable));
-  EXPECT_THAT(value, testing::StrEq("unset"));
+  const ScopedEnvironmentVariable variable(kDefaultSourceVariable, "changed");
+  EXPECT_THAT(nglog::GetFlag(FLAGS_test_environment_default_flag),
+              testing::StrEq("unset"));
 }
 
 TEST(Flags, FailedFirstUseLeavesTheFlagUsable) {
@@ -1571,8 +1456,10 @@ TEST(Flags, FailedFirstUseLeavesTheFlagUsable) {
 }
 
 TEST(Flags, RestoringAValueKeepsItUntouched) {
-  ASSERT_EQ(0, SetTestEnvironment("RESTORE_restored_single_flag", "23"));
-  ASSERT_EQ(0, SetTestEnvironment("RESTORE_restored_all_flag", "29"));
+  const ScopedEnvironmentVariable single_variable(
+      "RESTORE_restored_single_flag", "23");
+  const ScopedEnvironmentVariable all_variable("RESTORE_restored_all_flag",
+                                               "29");
   const nglog::FlagModule module("restore-module", "Options provided by",
                                  "RESTORE_");
   const auto group = module.AddGroup("Restored options");
@@ -1591,25 +1478,24 @@ TEST(Flags, RestoringAValueKeepsItUntouched) {
   ASSERT_TRUE(group.AddFlag(all));
   EXPECT_EQ(23, nglog::GetFlag(single));
   EXPECT_EQ(29, nglog::GetFlag(all));
-  ASSERT_EQ(0, UnsetTestEnvironment("RESTORE_restored_single_flag"));
-  ASSERT_EQ(0, UnsetTestEnvironment("RESTORE_restored_all_flag"));
 }
 
 TEST(Flags, IntegersRejectSurroundingWhitespace) {
+  constexpr std::int32_t kSignedSentinel = 7;
+  constexpr std::uint32_t kUnsignedSentinel = 11;
   for (const char* const value : {" 5", "\t5", "5 ", " 0x5"}) {
-    std::int32_t signed_value = 7;
-    std::uint32_t unsigned_value = 11;
+    SCOPED_TRACE(value);
+    std::int32_t signed_value = kSignedSentinel;
+    std::uint32_t unsigned_value = kUnsignedSentinel;
     std::string error;
     EXPECT_FALSE(
-        nglog::FlagTraits<std::int32_t>::Parse(value, &signed_value, &error))
-        << value;
-    EXPECT_EQ(7, signed_value) << value;
-    EXPECT_FALSE(
-        nglog::FlagTraits<std::uint32_t>::Parse(value, &unsigned_value, &error))
-        << value;
-    EXPECT_EQ(11U, unsigned_value) << value;
+        nglog::FlagTraits<std::int32_t>::Parse(value, &signed_value, &error));
+    EXPECT_EQ(kSignedSentinel, signed_value);
+    EXPECT_FALSE(nglog::FlagTraits<std::uint32_t>::Parse(value, &unsigned_value,
+                                                         &error));
+    EXPECT_EQ(kUnsignedSentinel, unsigned_value);
   }
-  std::uint32_t unsigned_value = 11;
+  std::uint32_t unsigned_value = kUnsignedSentinel;
   std::string error;
   EXPECT_FALSE(
       nglog::FlagTraits<std::uint32_t>::Parse(" -1", &unsigned_value, &error));
@@ -1638,13 +1524,13 @@ TEST(Flags, FileModesUseOctalNotation) {
 TEST(Flags, FileModesRejectInvalidValues) {
   for (const char* const value :
        {"", "8", "0x1A", "-600", "+600", " 600", "600 ", "010000", "06a4"}) {
+    SCOPED_TRACE(value);
     nglog::FileMode mode{0664};
     std::string error;
     nglog::internal::FlagParseError details;
     EXPECT_FALSE(nglog::FlagTraits<nglog::FileMode>::ParseWithDetails(
-        value, &mode, &error, &details))
-        << value;
-    EXPECT_EQ(0664U, mode.value()) << value;
+        value, &mode, &error, &details));
+    EXPECT_EQ(0664U, mode.value());
     EXPECT_THAT(details.minimum, testing::StrEq("0000"));
     EXPECT_THAT(details.maximum, testing::StrEq("07777"));
   }
@@ -1689,28 +1575,16 @@ TEST(Flags, ScopedFlagsRestoreTheOriginalValueOfARepeatedFlag) {
 
 TEST(Flags, DisplayedLogFileModeDefaultRestoresTheDefault) {
   nglog::ScopedFlags<> save;
-  nglog::CaptureTestStderr();
-  nglog::PrintCommandLineFlags();
-  const std::string output =
-      StripTerminalStyles(nglog::GetCapturedTestStderr());
+  const std::string output = StripTerminalStyles(PrintedHelp());
   std::smatch match;
   const std::regex entry("--logfile_mode=\\S+ \\(default=([^)]*)\\)");
   ASSERT_TRUE(std::regex_search(output, match, entry)) << output;
   const std::string displayed = match[1].str();
 
-  std::string default_value;
-  std::vector<nglog::FlagInfo> flags;
-  nglog::GetAllFlags(&flags);
-  for (const nglog::FlagInfo& flag : flags) {
-    if (flag.name == "logfile_mode") {
-      default_value = flag.default_value;
-    }
-  }
-
   ASSERT_TRUE(nglog::SetCommandLineOption("logfile_mode", displayed.c_str()));
-  std::string current_value;
-  ASSERT_TRUE(nglog::GetCommandLineOption("logfile_mode", &current_value));
-  EXPECT_THAT(current_value, testing::StrEq(default_value))
+  EXPECT_THAT(AllFlags(),
+              testing::Contains(testing::AllOf(FlagNamed("logfile_mode"),
+                                               CurrentValueIsTheDefault())))
       << "displayed default: " << displayed;
 }
 
@@ -1739,15 +1613,12 @@ TEST(Flags, DestroyedModuleReleasesItsFlags) {
     ASSERT_TRUE(module.AddGroup("Transient options").AddFlag(flag));
   }
 
-  std::vector<nglog::FlagInfo> flags;
-  nglog::GetAllFlags(&flags);
-  const auto found =
-      std::find_if(flags.begin(), flags.end(), [](const nglog::FlagInfo& info) {
-        return info.name == "module_lifetime_flag";
-      });
-  ASSERT_NE(found, flags.end());
-  EXPECT_THAT(found->module, testing::IsEmpty());
-  EXPECT_THAT(found->group, testing::IsEmpty());
+  EXPECT_THAT(
+      AllFlags(),
+      testing::Contains(testing::AllOf(
+          FlagNamed("module_lifetime_flag"),
+          testing::Field(&nglog::FlagInfo::module, testing::IsEmpty()),
+          testing::Field(&nglog::FlagInfo::group, testing::IsEmpty()))));
 
   const nglog::FlagModule replacement("replacement-module",
                                       "Options provided by", "");
@@ -1774,34 +1645,6 @@ TEST(Flags, FlagIsUnregisteredBeforeItsValueIsDestroyed) {
 }
 
 #if !defined(NGLOG_OS_WINDOWS)
-class TemporaryDirectoryOverride {
- public:
-  explicit TemporaryDirectoryOverride(const std::string& path) {
-    const char* const previous = std::getenv("TMPDIR");
-    had_previous_ = previous != nullptr;
-    if (had_previous_) {
-      previous_ = previous;
-    }
-    SetTestEnvironment("TMPDIR", path.c_str());
-  }
-
-  TemporaryDirectoryOverride(const TemporaryDirectoryOverride&) = delete;
-  TemporaryDirectoryOverride& operator=(const TemporaryDirectoryOverride&) =
-      delete;
-
-  ~TemporaryDirectoryOverride() {
-    if (had_previous_) {
-      SetTestEnvironment("TMPDIR", previous_.c_str());
-    } else {
-      UnsetTestEnvironment("TMPDIR");
-    }
-  }
-
- private:
-  bool had_previous_ = false;
-  std::string previous_;
-};
-
 TEST(Flags, ProcessFlagRegistryDoesNotUseTheEnvironment) {
   nglog::internal::ProcessFlagRegistry registry;
   nglog::internal::ProcessFlagInfo previous;
@@ -1813,8 +1656,8 @@ TEST(Flags, ProcessFlagRegistryDoesNotUseTheEnvironment) {
 }
 
 TEST(Flags, ProcessFlagRegistryDoesNotRequireAWritableTemporaryDirectory) {
-  const TemporaryDirectoryOverride override_tmpdir(
-      "/nonexistent-nglog-temporary-directory");
+  const ScopedEnvironmentVariable override_tmpdir(
+      "TMPDIR", "/nonexistent-nglog-temporary-directory");
   nglog::internal::ProcessFlagRegistry registry;
   nglog::internal::ProcessFlagInfo previous;
   EXPECT_EQ(nglog::internal::ProcessFlagRegistration::kRegistered,
@@ -1828,7 +1671,7 @@ TEST(Flags, ProcessFlagRegistryLeavesNoFilesBehind) {
   const char* const directory = mkdtemp(directory_template);
   ASSERT_NE(directory, nullptr);
   {
-    const TemporaryDirectoryOverride override_tmpdir(directory);
+    const ScopedEnvironmentVariable override_tmpdir("TMPDIR", directory);
     nglog::internal::ProcessFlagRegistry registry;
     nglog::internal::ProcessFlagInfo previous;
     ASSERT_EQ(
@@ -1970,15 +1813,9 @@ TEST(Flags, ForkWhileAnotherThreadHoldsAFlagValueLockDoesNotDeadlock) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  UnsetTestEnvironment("NO_COLOR");
-  if (SetTestEnvironment("TERM", "xterm") != 0) {
-    return 1;
-  }
-  if (SetTestEnvironment("CLICOLOR_FORCE", "1") != 0) {
-    return 1;
-  }
+  const ScopedEnvironmentVariable no_color{"NO_COLOR", nullptr};
+  const ScopedEnvironmentVariable term{"TERM", "xterm"};
+  const ScopedEnvironmentVariable clicolor_force{"CLICOLOR_FORCE", "1"};
   testing::InitGoogleTest(&argc, argv);
-  const int result = RUN_ALL_TESTS();
-  UnsetTestEnvironment("CLICOLOR_FORCE");
-  return result;
+  return RUN_ALL_TESTS();
 }

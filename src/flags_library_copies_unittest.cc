@@ -163,6 +163,24 @@ int RunChild(const char* library) {
 #endif
 }
 
+// Loads a copy inside a death test child and ends the child with the load
+// failure status if that fails.
+Library LoadOrExit(const char* path) {
+  const Library library = Load(path);
+  if (library == nullptr) {
+    std::exit(kLoadFailure);
+  }
+  return library;
+}
+
+// Ends a death test child successfully if the first copy loads and reports
+// its own value.
+[[noreturn]] void ExitWithFirstCopyStatus() {
+  const Library first = Load(NGLOG_LIBRARY_COPY_FIRST);
+  std::exit(first != nullptr && Value(first) == kFirstCopyValue ? EXIT_SUCCESS
+                                                                : kLoadFailure);
+}
+
 int LoadCopyInChild(const char* path) {
   const Library library = Load(path);
   if (library == nullptr) {
@@ -174,9 +192,7 @@ int LoadCopyInChild(const char* path) {
 TEST(FlagLibraryCopies, DuplicateDefinitionsAcrossCopiesAreFatal) {
   EXPECT_DEATH(
       {
-        if (Load(NGLOG_LIBRARY_COPY_FIRST) == nullptr) {
-          std::exit(kLoadFailure);
-        }
+        LoadOrExit(NGLOG_LIBRARY_COPY_FIRST);
         Load(NGLOG_LIBRARY_COPY_SECOND);
       },
       "defined more than once"
@@ -192,9 +208,7 @@ TEST(FlagLibraryCopies, DuplicateDefinitionsAcrossCopiesAreFatal) {
 TEST(FlagLibraryCopies, DetectionDoesNotDependOnTheEnvironment) {
   EXPECT_DEATH(
       {
-        if (Load(NGLOG_LIBRARY_COPY_FIRST) == nullptr) {
-          std::exit(kLoadFailure);
-        }
+        LoadOrExit(NGLOG_LIBRARY_COPY_FIRST);
         ClearEnvironment();
         Load(NGLOG_LIBRARY_COPY_SECOND);
       },
@@ -243,9 +257,7 @@ void CloseRegistryDescriptors() {
 TEST(FlagLibraryCopies, DetectionSurvivesClosedDescriptors) {
   EXPECT_DEATH(
       {
-        if (Load(NGLOG_LIBRARY_COPY_FIRST) == nullptr) {
-          std::exit(kLoadFailure);
-        }
+        LoadOrExit(NGLOG_LIBRARY_COPY_FIRST);
         CloseRegistryDescriptors();
         Load(NGLOG_LIBRARY_COPY_SECOND);
       },
@@ -284,10 +296,7 @@ TEST(FlagLibraryCopies, MappedFilesThatResembleTheAnchorAreIgnored) {
   EXPECT_EXIT(
       {
         MapLookalikeFile();
-        const Library first = Load(NGLOG_LIBRARY_COPY_FIRST);
-        std::exit(first != nullptr && Value(first) == kFirstCopyValue
-                      ? EXIT_SUCCESS
-                      : kLoadFailure);
+        ExitWithFirstCopyStatus();
       },
       testing::ExitedWithCode(EXIT_SUCCESS), "");
 }
@@ -296,10 +305,7 @@ TEST(FlagLibraryCopies, CorruptedAnchorFallsBackToAPrivateRegistry) {
   EXPECT_EXIT(
       {
         PublishCorruptedAnchor();
-        const Library first = Load(NGLOG_LIBRARY_COPY_FIRST);
-        std::exit(first != nullptr && Value(first) == kFirstCopyValue
-                      ? EXIT_SUCCESS
-                      : kLoadFailure);
+        ExitWithFirstCopyStatus();
       },
       testing::ExitedWithCode(EXIT_SUCCESS), "");
 }
@@ -341,10 +347,7 @@ TEST(FlagLibraryCopies, ForeignAnchorFallsBackToAPrivateRegistry) {
   EXPECT_EXIT(
       {
         PlantForeignAnchor();
-        const Library first = Load(NGLOG_LIBRARY_COPY_FIRST);
-        std::exit(first != nullptr && Value(first) == kFirstCopyValue
-                      ? EXIT_SUCCESS
-                      : kLoadFailure);
+        ExitWithFirstCopyStatus();
       },
       testing::ExitedWithCode(EXIT_SUCCESS), "");
 }
@@ -354,9 +357,7 @@ TEST(FlagLibraryCopies, LoadingACopyLeavesTheEnvironmentUnchanged) {
   EXPECT_EXIT(
       {
         const std::vector<std::string> before = EnvironmentSnapshot();
-        if (Load(NGLOG_LIBRARY_COPY_FIRST) == nullptr) {
-          std::exit(kLoadFailure);
-        }
+        LoadOrExit(NGLOG_LIBRARY_COPY_FIRST);
         std::exit(EnvironmentSnapshot() == before ? EXIT_SUCCESS
                                                   : EXIT_FAILURE);
       },
@@ -366,10 +367,7 @@ TEST(FlagLibraryCopies, LoadingACopyLeavesTheEnvironmentUnchanged) {
 TEST(FlagLibraryCopies, UnloadedCopyReleasesItsFlags) {
   EXPECT_EXIT(
       {
-        const Library first = Load(NGLOG_LIBRARY_COPY_FIRST);
-        if (first == nullptr) {
-          std::exit(kLoadFailure);
-        }
+        const Library first = LoadOrExit(NGLOG_LIBRARY_COPY_FIRST);
         if (Value(first) != kFirstCopyValue) {
           std::exit(kUnexpectedValue);
         }
@@ -377,10 +375,7 @@ TEST(FlagLibraryCopies, UnloadedCopyReleasesItsFlags) {
         if (IsLoaded(NGLOG_LIBRARY_COPY_FIRST)) {
           std::exit(kStillLoaded);
         }
-        const Library second = Load(NGLOG_LIBRARY_COPY_SECOND);
-        if (second == nullptr) {
-          std::exit(kLoadFailure);
-        }
+        const Library second = LoadOrExit(NGLOG_LIBRARY_COPY_SECOND);
         std::exit(Value(second) == kSecondCopyValue ? EXIT_SUCCESS
                                                     : kUnexpectedValue);
       },
