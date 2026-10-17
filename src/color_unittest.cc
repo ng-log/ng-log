@@ -710,8 +710,10 @@ TEST(SourceLocation, UsesUtf8ComputerName) {
 #endif
 
 TEST(StyledOutput, WritesRawText) {
+  ScopedStreamCapture capture{StandardStream::kStderr};
   WriteRawToStderr("");
-  SUCCEED();
+  WriteRawToStderr("raw \033[1mtext");
+  EXPECT_EQ(capture.Stop(), "raw \033[1mtext");
 }
 
 TEST(StyledOutput, ResetsAttributesBeforeLineEndings) {

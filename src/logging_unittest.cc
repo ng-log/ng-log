@@ -1901,6 +1901,39 @@ TEST(Logging, EmptyMessageWithoutPrefixIsSentAsEmptyMessage) {
   EXPECT_THAT(sink.messages, ElementsAre(""));
 }
 
+TEST(LogMacros, ErrnoAndPeriodicVariantsLog) {
+  nglog::ScopedFlags<> save;
+  RouteLogMessagesTo(StandardStream::kStderr);
+  nglog::SetFlag(FLAGS_v, 1);
+  constexpr int kPeriod = 2;
+  constexpr int kOccurrences = 4;
+  MessageCollectingSink sink;
+  AddLogSink(&sink);
+  {
+    ScopedStreamCapture capture{StandardStream::kStderr};
+    errno = ENOENT;
+    PLOG_IF(INFO, true) << "plog_if";
+    PLOG_IF(INFO, false) << "not logged";
+    LOG_ASSERT(true);
+    for (int i = 0; i < kOccurrences; ++i) {
+      VLOG_EVERY_N(1, kPeriod) << "vlog every 2";
+      DLOG_EVERY_N(INFO, kPeriod) << "dlog every 2";
+    }
+  }
+  RemoveLogSink(&sink);
+
+  const auto plog_message = AllOf(
+      StartsWith("plog_if: "), EndsWith(" [" + std::to_string(ENOENT) + "]"));
+#if DCHECK_IS_ON()
+  EXPECT_THAT(sink.messages,
+              ElementsAre(plog_message, "vlog every 2", "dlog every 2",
+                          "vlog every 2", "dlog every 2"));
+#else
+  EXPECT_THAT(sink.messages,
+              ElementsAre(plog_message, "vlog every 2", "vlog every 2"));
+#endif
+}
+
 TEST(LogMacros, OccasionalVariantsCanBeJumpedAcross) {
   // LOG_FIRST_N() logs during the first run of the test only.
   static bool first_run = true;
@@ -1999,7 +2032,98 @@ TEST(LogMacros, OccasionalVariantsLeaveTrailingElseToEnclosingIf) {
   EXPECT_THAT(sink.messages, ElementsAreArray(expected));
 }
 
+#ifdef GTEST_HAS_DEATH_TEST
+// Each death symbolizes a stack trace, which takes long with some backends,
+// so the deaths are spread over several tests. The parentheses keep the
+// commas of the expanded checks inside one macro argument.
+TEST(DeathCheckVariants, ReportNumericFailures) {
+  constexpr double kTolerance = 0.5;
+  constexpr double kWithinTolerance = 1.25;
+  constexpr double kBeyondTolerance = 2.0;
+  constexpr double kUnequal = 1.5;
+  constexpr int kIndexCount = 3;
+  const double one = 1.0;
+  const int indices[kIndexCount] = {};
+  static_cast<void>(indices);
+  CHECK_DOUBLE_EQ(one, 1.0);
+  CHECK_NEAR(one, kWithinTolerance, kTolerance);
+  CHECK_INDEX(kIndexCount - 1, indices);
+
+  ASSERT_DEATH(([one] { CHECK_DOUBLE_EQ(one, kUnequal); }()), "Check failed");
+  ASSERT_DEATH(([one] { CHECK_NEAR(one, kBeyondTolerance, kTolerance); }()),
+               "Check failed");
+  ASSERT_DEATH(([] { CHECK_INDEX(kIndexCount, indices); }()), "Check failed");
+}
+
+TEST(DeathCheckVariants, ReportAssertionFailures) {
+  const double one = 1.0;
+  PCHECK(one == 1.0);
+
+  ASSERT_DEATH(([one] { LOG_ASSERT(one == 2.0); }()),
+               "Assert failed: one == 2.0");
+  ASSERT_DEATH(
+      ([one] {
+        errno = ENOENT;
+        PCHECK(one == 2.0);
+      }()),
+      "Check failed: one == 2.0 : .* \\[" + std::to_string(ENOENT) + "\\]");
+#  if DCHECK_IS_ON()
+  ASSERT_DEATH(([] { DCHECK_STREQ("a", "b"); }()), "CHECK_STREQ failed");
+#  endif
+}
+#endif
+
+TEST(Logging, SetStderrLoggingSelectsTheMinimumSeverity) {
+  nglog::ScopedFlags<> save;
+  RouteLogMessagesTo(StandardStream::kStderr);
+  nglog::SetFlag(FLAGS_logtostderr, false);
+  for (int severity = 0; severity < NUM_SEVERITIES; ++severity) {
+    SetLogDestination(static_cast<LogSeverity>(severity), "");
+  }
+  SetStderrLogging(NGLOG_WARNING);
+
+  ScopedStreamCapture capture{StandardStream::kStderr};
+  LOG(INFO) << "below the threshold";
+  LOG(WARNING) << "at the threshold";
+  EXPECT_THAT(SplitLines(capture.Stop()),
+              ElementsAre(LogLine('W', "at the threshold")));
+}
+
+TEST(Logging, LoggingDirectoriesEndWithSeparator) {
+  const std::vector<std::string>& directories = GetLoggingDirectories();
+  ASSERT_THAT(directories, Not(IsEmpty()));
+  for (const std::string& directory : directories) {
+    EXPECT_THAT(directory, AnyOf(EndsWith("/"), EndsWith("\\")));
+  }
+}
+
+#ifndef NGLOG_OS_WINDOWS
+namespace nglog {
+void GetExistingTempDirectories(std::vector<std::string>& list);
+}  // namespace nglog
+
+// An empty variable names no directory, rather than the root directory.
+TEST(Logging, EmptyTemporaryDirectoryVariablesAreSkipped) {
+  const ScopedEnvironmentVariable test_tmpdir{"TEST_TMPDIR", ""};
+  const ScopedEnvironmentVariable tmpdir{"TMPDIR", ""};
+  const ScopedEnvironmentVariable tmp{"TMP", ""};
+  std::vector<std::string> directories;
+  nglog::GetExistingTempDirectories(directories);
+  EXPECT_THAT(directories, Not(Contains("/")));
+}
+#endif
+
+TEST(Logging, MessageReportsTheFullSourcePath) {
+  nglog::ScopedFlags<> save;
+  RouteLogMessagesTo(StandardStream::kStderr);
+  ScopedStreamCapture capture{StandardStream::kStderr};
+  LogMessage message(__FILE__, __LINE__);
+  EXPECT_STREQ(message.fullname(), __FILE__);
+  EXPECT_STREQ(message.basename(), const_basename(__FILE__));
+}
+
 #if defined(NGLOG_OS_LINUX)
+// Data races between the writers only fail the test under ThreadSanitizer.
 TEST(Logging, ConcurrentFullDiskWrites) {
   constexpr int kFullDiskWriteCount = 100;
   nglog::ScopedFlags<> save;
@@ -2181,13 +2305,36 @@ void TestSTREQ() {
 
 #ifdef GTEST_HAS_DEATH_TEST
 TEST(DeathSTREQ, logging) {
-  ASSERT_DEATH(CHECK_STREQ(nullptr, "this"), "");
-  ASSERT_DEATH(CHECK_STREQ("this", "siht"), "");
-  ASSERT_DEATH(CHECK_STRCASEEQ(nullptr, "siht"), "");
-  ASSERT_DEATH(CHECK_STRCASEEQ("this", "siht"), "");
-  ASSERT_DEATH(CHECK_STRNE(nullptr, nullptr), "");
-  ASSERT_DEATH(CHECK_STRNE("this", "this"), "");
-  ASSERT_DEATH(CHECK_STREQ((string("a") + "b").c_str(), "abc"), "");
+  ASSERT_DEATH(CHECK_STREQ(nullptr, "this"),
+               "CHECK_STREQ failed: .* \\( vs\\. this\\)");
+  ASSERT_DEATH(CHECK_STREQ("this", "siht"),
+               "CHECK_STREQ failed: .* \\(this vs\\. siht\\)");
+  ASSERT_DEATH(CHECK_STRCASEEQ(nullptr, "siht"),
+               "CHECK_STRCASEEQ failed: .* \\( vs\\. siht\\)");
+  ASSERT_DEATH(CHECK_STRCASEEQ("this", "siht"),
+               "CHECK_STRCASEEQ failed: .* \\(this vs\\. siht\\)");
+  ASSERT_DEATH(CHECK_STRNE(nullptr, nullptr),
+               "CHECK_STRNE failed: .* \\( vs\\. \\)");
+  ASSERT_DEATH(CHECK_STRNE("this", "this"),
+               "CHECK_STRNE failed: .* \\(this vs\\. this\\)");
+  ASSERT_DEATH(CHECK_STREQ((string("a") + "b").c_str(), "abc"),
+               "CHECK_STREQ failed: .* \\(ab vs\\. abc\\)");
+}
+
+TEST(DeathCheckOp, ReportsBothValues) {
+  // Clang deems captures of constants unnecessary, so the values are mutable.
+  int one = 1;
+  int two = 2;
+  // The parentheses keep the commas of the expanded checks inside one macro
+  // argument.
+  ASSERT_DEATH(([one, two] { CHECK_EQ(one, two); }()),
+               "Check failed: one == two \\(1 vs\\. 2\\)");
+  ASSERT_DEATH(([one] { CHECK_NE(one, one); }()),
+               "Check failed: one != one \\(1 vs\\. 1\\)");
+  ASSERT_DEATH(([one, two] { CHECK_LT(two, one); }()),
+               "Check failed: two < one \\(2 vs\\. 1\\)");
+  ASSERT_DEATH(([one, two] { CHECK(one == two); }()),
+               "Check failed: one == two");
 }
 #endif
 
@@ -2204,7 +2351,8 @@ TEST(CheckNOTNULL, Simple) {
 
 #ifdef GTEST_HAS_DEATH_TEST
 TEST(DeathCheckNN, Simple) {
-  ASSERT_DEATH(CHECK_NOTNULL(static_cast<void*>(nullptr)), "");
+  ASSERT_DEATH(CHECK_NOTNULL(static_cast<void*>(nullptr)),
+               "'static_cast<void\\*>\\(nullptr\\)' Must be non nullptr");
 }
 #endif
 
@@ -2385,6 +2533,26 @@ static std::size_t LogSizeAfterWritingMessages(const string& dest) {
       << "failed to determine size of log file " << dest << ": "
       << strerror(errno);
   return static_cast<std::size_t>(statbuf.st_size);
+}
+
+TEST(Logging, ApplicationFingerprintAppearsInLogFileHeader) {
+  const nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+  nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
+  nglog::SetFlag(FLAGS_log_file_header, true);
+  const std::string dest = TestTmpDir() + "/logging_test_fingerprint";
+  DeleteFiles(dest + "*");
+  SetApplicationFingerprint("fingerprint-1234");
+  SetLogDestination(NGLOG_INFO, dest.c_str());
+  LOG(INFO) << "message after the header";
+  FlushLogFiles(NGLOG_INFO);
+  LogToStderr();
+  SetApplicationFingerprint("");
+
+  EXPECT_THAT(
+      SplitLines(ReadFileContents(dest)),
+      Contains(StartsWith("Application fingerprint: fingerprint-1234")));
+  DeleteFiles(dest + "*");
 }
 
 TEST(Logging, MaxLogSizeWhenNoTimestamp) {
@@ -3602,9 +3770,21 @@ TEST(Logging, Errno) {
   // to TestLogging(true)'s expected counts elsewhere.
   fprintf(stderr, "==== Test errno preservation\n");
 
+  // A sink that changes errno stands in for any failing system call on the
+  // logging path.
+  class ErrnoChangingSink : public LogSink {
+   public:
+    void send(LogSeverity, const char*, const char*, int, const LogMessageTime&,
+              const char*, size_t) override {
+      errno = EBADF;
+    }
+  } sink;
+  AddLogSink(&sink);
   errno = ENOENT;
   LOG(INFO) << "foo";
-  EXPECT_EQ(errno, ENOENT);
+  const int logged_errno = errno;
+  RemoveLogSink(&sink);
+  EXPECT_EQ(logged_errno, ENOENT);
 }
 
 // Repeats `pattern` until the result is `length` characters long.
@@ -5637,6 +5817,8 @@ static void UpdateVLogLevelWhileReading() {
   SetVLOGLevel(kVlogTestModule, kInitialLevel);
 }
 
+// Data races between the readers and the writer only fail the test under
+// ThreadSanitizer.
 TEST(VLOG, ConcurrentLevelUpdates) { UpdateVLogLevelWhileReading(); }
 
 // Threads that reach a VLOG site together initialize it once. Threads that
