@@ -67,10 +67,6 @@
 #ifdef HAVE_PTHREAD_SETNAME_NP
 #  include <pthread.h>
 #endif
-#ifdef NGLOG_OS_WINDOWS
-#  include <windows.h>
-#endif
-
 #if defined(HAVE___PROGNAME)
 extern char* __progname;
 #endif
@@ -271,7 +267,8 @@ static void DumpPCAndSymbol(DebugWriter* writerfn, void* arg, void* pc,
     return;
   }
 
-  char tmp[1024];
+  constexpr std::size_t kMaxSymbolLength = 1024;
+  char tmp[kMaxSymbolLength];
   const char* symbol = "(unknown)";
   SymbolizedFrame frame;
   // Symbolizes the previous address of pc because pc may be in the
@@ -289,7 +286,8 @@ static void DumpPCAndSymbol(DebugWriter* writerfn, void* arg, void* pc,
         sizeof(formatted_symbol));
     symbol = formatted_symbol;
   }
-  char buf[1024];
+  constexpr std::size_t kMaxFrameLineLength = 1024;
+  char buf[kMaxFrameLineLength];
   std::snprintf(buf, sizeof(buf), "%s@ %*p  %s\n", prefix,
                 kPrintfPointerFieldWidth, pc, symbol);
   writerfn(buf, arg);
@@ -298,7 +296,8 @@ static void DumpPCAndSymbol(DebugWriter* writerfn, void* arg, void* pc,
 
 static void DumpPC(DebugWriter* writerfn, void* arg, void* pc,
                    const char* const prefix) {
-  char buf[100];
+  constexpr std::size_t kMaxAddressLineLength = 100;
+  char buf[kMaxAddressLineLength];
   std::snprintf(buf, sizeof(buf), "%s@ %*p\n", prefix, kPrintfPointerFieldWidth,
                 pc);
   writerfn(buf, arg);
@@ -529,8 +528,8 @@ bool TrustsEnvironment() {
 static void MyUserNameInitializer() { g_my_user_name = GetMyUserName(); }
 REGISTER_MODULE_INITIALIZER(utilities, MyUserNameInitializer())
 
-// We use an atomic operation to prevent problems with calling CrashReason
-// from inside the Mutex implementation (potentially through RAW_CHECK).
+// Keeps the reason of the first crash for inspection in a debugger or core
+// dump. The atomic exchange lets concurrent crashes race safely for it.
 static std::atomic<const internal::CrashReason*> g_reason{nullptr};
 
 void SetCrashReason(const internal::CrashReason* r) {

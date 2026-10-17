@@ -48,7 +48,6 @@ int CallerFrameIndex(void* const* stack, int size, const void* return_address) {
 
 }  // namespace
 
-// If you change this function, also change GetStackFrames below.
 NGLOG_ATTRIBUTE_NOINLINE
 int GetStackTrace(void** result, int max_depth, int skip_count) {
   static const int kStackLength = 64;

@@ -160,7 +160,7 @@ using namespace internal;
 NGLOG_NO_EXPORT
 std::string StrError(int err);
 
-// Maps a log severity to the Role used to colorize it (see color.h).
+// Maps a log severity to the Role used to colorize it (see internal/theme.h).
 // DefaultTheme() leaves Role::kLogInfo at Color::kDefault, i.e. uncolored.
 static Role SeverityToRole(LogSeverity severity) {
   switch (severity) {
@@ -555,7 +555,7 @@ class LogFileObject : public base::Logger {
   string base_filename_;
   string symlink_basename_;
   string filename_extension_;  // option users can specify (eg to add port#)
-  std::unique_ptr<FILE> file_;
+  FilePtr file_;
   // Process that opened file_. A child process created by fork() must write
   // to its own file.
   std::int32_t file_pid_{0};
@@ -947,7 +947,8 @@ std::string* ColoredLineBuffer(ColorMode mode, std::string& buffer) {
 
 // Writes a single field of "len" bytes starting at "text", bracketed with
 // the color for "spec" according to "mode" (see WriteColoredField() in
-// color.h for the analogous, but stderr-only and pluggable-writer-safe,
+// internal/styled_output.h for the analogous, but stderr-only and
+// pluggable-writer-safe,
 // helper the crash path uses). Unlike that one, this may target either
 // stdout or stderr, and writes straight to "output": logging.cc's regular
 // output path has no pluggable, content-only sink to keep clean of escape

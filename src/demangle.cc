@@ -379,34 +379,7 @@ bool IsAlpha(char c) {
 
 bool IsDigit(char c) { return c >= '0' && c <= '9'; }
 
-// Returns true if "str" is a function clone suffix.  These suffixes are used
-// by GCC 4.5.x and later versions to indicate functions which have been
-// cloned during optimization.  We treat any sequence (.<alpha>+.<digit>+)+ as
-// a function clone suffix.
-bool IsFunctionCloneSuffix(const char* str) {
-  std::size_t i = 0;
-  while (str[i] != '\0') {
-    // Consume a single .<alpha>+.<digit>+ sequence.
-    if (str[i] != '.' || !IsAlpha(str[i + 1])) {
-      return false;
-    }
-    i += 2;
-    while (IsAlpha(str[i])) {
-      ++i;
-    }
-    if (str[i] != '.' || !IsDigit(str[i + 1])) {
-      return false;
-    }
-    i += 2;
-    while (IsDigit(str[i])) {
-      ++i;
-    }
-  }
-  return true;  // Consumed everything in "str".
-}
-
 // Append "str" with some tweaks, iff "append" state is true.
-// Returns true so that it can be placed in "if" conditions.
 void MaybeAppendWithLength(State* state, const char* const str,
                            ssize_t length) {
   if (state->append && length > 0) {
@@ -2209,16 +2182,13 @@ bool ParseSubstitution(State* state) {
 bool ParseTopLevelMangledName(State* state) {
   if (ParseMangledName(state)) {
     if (state->mangled_cur[0] != '\0') {
-      // Drop trailing function clone suffix, if any.
-      if (IsFunctionCloneSuffix(state->mangled_cur)) {
-        return true;
-      }
       // Append trailing version suffix if any.
       // ex. _Z3foo@@GLIBCXX_3.4
       if (state->mangled_cur[0] == '@') {
         MaybeAppend(state, state->mangled_cur);
         return true;
       }
+      // Drop trailing function clone suffix, if any.
       if (state->mangled_cur[0] == '.' && state->mangled_cur[1] != '\0') {
         return true;
       }
@@ -2231,10 +2201,14 @@ bool ParseTopLevelMangledName(State* state) {
 }  // namespace
 #endif
 
+namespace {
+
 bool ValidDemangleArguments(const char* mangled, const char* out,
                             std::size_t out_size) {
   return mangled != nullptr && out != nullptr && out_size != 0;
 }
+
+}  // namespace
 
 // The system demangler is kept separate because it may allocate memory.
 bool DemangleWithSystem(const char* mangled, char* out, std::size_t out_size) {

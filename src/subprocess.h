@@ -132,13 +132,16 @@ class NGLOG_NO_EXPORT Subprocess final {
   Subprocess(Subprocess&& other) noexcept;
   Subprocess& operator=(Subprocess&& other) noexcept;
 
-  // The normal mode searches PATH for argv[0] and spawns it with the given
-  // argv/envp (null-terminated, as for execve()/CreateProcessW()). The
-  // signal-safe mode requires argv[0] to be an explicit path, ignores envp,
-  // and inherits the current environment through execv(). Both modes
-  // redirect stdin/stdout through pipes owned by this Subprocess and discard
-  // stderr. Returns false if the process could not be spawned at all. Never
-  // blocks waiting for the child.
+  // The normal mode searches for argv[0] and spawns it with the given argv
+  // and envp, both null-terminated as for execve() and CreateProcessW(). On
+  // POSIX systems it searches PATH, and so does its fork fallback for systems
+  // without posix_spawn(), which passes envp as well. On Windows it
+  // searches the directory of this executable, the system directory and the
+  // absolute PATH entries. The signal-safe mode requires argv[0] to be an
+  // explicit path and passes envp through execve() where it exists. Both
+  // modes redirect stdin and stdout through pipes owned by this Subprocess and
+  // discard stderr. Returns false if the process could not be spawned at all.
+  // Never blocks waiting for the child.
 #  if defined(NGLOG_OS_WINDOWS)
   bool Spawn(char* const argv[], char* const envp[]);
 #  else
@@ -148,10 +151,12 @@ class NGLOG_NO_EXPORT Subprocess final {
   // True once Spawn() has succeeded and Wait() has not yet been called.
   explicit operator bool() const noexcept;
 
-  // Writes up to |size| bytes of |data| to the process' stdin without
-  // blocking beyond |timeout|. Returns the number of bytes actually
-  // written, which may be less than |size| even on success, as for a raw
-  // write() call.
+  // Waits up to |timeout| for the process' stdin to accept data, then writes
+  // up to |size| bytes of |data| to it. Returns the number of bytes actually
+  // written. On POSIX systems, the write blocks once the pipe accepts data
+  // until it has taken all of it, so keep |size| within the free pipe
+  // capacity, and writing to a process that closed its stdin raises SIGPIPE,
+  // which the caller must ignore or block.
   //
   // Writing more than a pipe buffer's worth of input without also
   // reading stdout in between can deadlock against a child that fills

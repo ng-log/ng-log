@@ -1440,14 +1440,12 @@ static FileDescriptor OpenObjectFileContainingPcAndGetStartAddress(
 // an integer to ASCII. We'll have to define our own version.
 // itoa_r() converts an (unsigned) integer to ASCII. It returns "buf", if the
 // conversion was successful or nullptr otherwise. It never writes more than
-// "sz" bytes. Output will be truncated as needed, and a NUL character is always
-// appended.
+// "sz" bytes and fails if the digits and the terminating NUL character do not
+// fit.
 // NOTE: code from sandbox/linux/seccomp-bpf/demo.cc.
-static char* itoa_r(std::uintptr_t i, char* buf, std::size_t sz, unsigned base,
-                    std::size_t padding) {
+static char* itoa_r(std::uintptr_t i, char* buf, std::size_t sz, unsigned base) {
   // Make sure we can write at least one NUL byte.
-  std::size_t n = 1;
-  if (n > sz) {
+  if (sz < 1) {
     return nullptr;
   }
 
@@ -1456,39 +1454,24 @@ static char* itoa_r(std::uintptr_t i, char* buf, std::size_t sz, unsigned base,
     return nullptr;
   }
 
-  char* start = buf;
-
-  // Loop until we have converted the entire number. Output at least one
-  // character (i.e. '0').
-  char* ptr = start;
+  // The digits emerge least significant first, so they are written backwards
+  // into a scratch buffer that fits the digits of any base and then copied in
+  // order. A value of zero yields the single digit 0.
+  char digits[std::numeric_limits<std::uintptr_t>::digits];
+  char* const digits_end = digits + sizeof(digits);
+  char* first = digits_end;
   do {
-    // Make sure there is still enough space left in our output buffer.
-    if (++n > sz) {
-      buf[0] = '\000';
-      return nullptr;
-    }
-
-    // Output the next digit.
-    *ptr++ = "0123456789abcdef"[i % base];
+    *--first = "0123456789abcdef"[i % base];
     i /= base;
+  } while (i > 0);
 
-    if (padding > 0) {
-      padding--;
-    }
-  } while (i > 0 || padding > 0);
-
-  // Terminate the output with a NUL character.
-  *ptr = '\000';
-
-  // Conversion to ASCII actually resulted in the digits being in reverse
-  // order. We can't easily generate them in forward order, as we can't tell
-  // the number of characters needed until we are done converting.
-  // So, now, we reverse the string (except for the possible "-" sign).
-  while (--ptr > start) {
-    char ch = *ptr;
-    *ptr = *start;
-    *start++ = ch;
+  const auto length = static_cast<std::size_t>(digits_end - first);
+  if (length >= sz) {
+    buf[0] = '\000';
+    return nullptr;
   }
+  std::memcpy(buf, first, length);
+  buf[length] = '\000';
   return buf;
 }
 
@@ -1512,7 +1495,7 @@ static void SafeAppendHexNumber(std::uint64_t value, char* dest,
                                 std::size_t dest_size) {
   // 64-bit numbers in hex can have up to 16 digits.
   char buf[17] = {'\0'};
-  SafeAppendString(itoa_r(value, buf, sizeof(buf), 16, 0), dest, dest_size);
+  SafeAppendString(itoa_r(value, buf, sizeof(buf), 16), dest, dest_size);
 }
 
 // The implementation of our symbolization routine.  If it

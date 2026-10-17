@@ -28,7 +28,6 @@ inline namespace tools {
 // Windows.
 static __thread bool g_tl_entered;  // Initialized to false.
 
-// If you change this function, also change GetStackFrames below.
 int GetStackTrace(void** result, int max_depth, int skip_count) {
   void* ip;
   int n = 0;
