@@ -771,6 +771,8 @@ set_property (TARGET ng-log PROPERTY SPDX_LICENSE ${_ng-log_SPDX_LICENSE})
 
 if (CYGWIN OR WIN32)
   target_compile_definitions (ng-log PUBLIC NGLOG_NO_ABBREVIATED_SEVERITIES)
+  # Consumers that use pkg-config need the definition as well.
+  set (ng-log_pkgconfig_compile_options -DNGLOG_NO_ABBREVIATED_SEVERITIES)
 endif (CYGWIN OR WIN32)
 
 # The header set installs the headers with their directory layout and adds
@@ -821,15 +823,41 @@ string (STRIP "${ng-log_libraries_options_for_static_linking}" ng-log_libraries_
 
 if (WITH_PKGCONFIG)
   set (VERSION ${ng-log_VERSION})
-  set (prefix ${CMAKE_INSTALL_PREFIX})
-  set (exec_prefix ${CMAKE_INSTALL_FULL_BINDIR})
-  set (libdir ${CMAKE_INSTALL_FULL_LIBDIR})
-  set (includedir ${CMAKE_INSTALL_FULL_INCLUDEDIR})
+  # Paths relative to the location of the installed file keep the package
+  # usable after the installation moves, like the CMake package
+  # configuration.
+  file (RELATIVE_PATH _ng-log_pkgconfig_prefix
+    "${CMAKE_INSTALL_FULL_LIBDIR}/pkgconfig" "${CMAKE_INSTALL_PREFIX}")
+  string (REGEX REPLACE "/$" "" _ng-log_pkgconfig_prefix
+    "\${pcfiledir}/${_ng-log_pkgconfig_prefix}")
+  set (prefix "${_ng-log_pkgconfig_prefix}")
+  set (exec_prefix "\${prefix}")
+
+  if (IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}")
+    set (libdir "${CMAKE_INSTALL_LIBDIR}")
+  else (IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}")
+    set (libdir "\${exec_prefix}/${CMAKE_INSTALL_LIBDIR}")
+  endif (IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}")
+
+  if (IS_ABSOLUTE "${CMAKE_INSTALL_INCLUDEDIR}")
+    set (includedir "${CMAKE_INSTALL_INCLUDEDIR}")
+  else (IS_ABSOLUTE "${CMAKE_INSTALL_INCLUDEDIR}")
+    set (includedir "\${prefix}/${CMAKE_INSTALL_INCLUDEDIR}")
+  endif (IS_ABSOLUTE "${CMAKE_INSTALL_INCLUDEDIR}")
+
+  unset (_ng-log_pkgconfig_prefix)
+  # The library name depends on the configuration, such as the debug postfix,
+  # so the file is generated for each configuration.
+  set (ng-log_pkgconfig_library "$<TARGET_FILE_BASE_NAME:ng-log>")
 
   configure_file (
     "${ng-log_SOURCE_DIR}/cmake/libng-log.pc.in"
-    "${ng-log_BINARY_DIR}/libng-log.pc"
+    "${ng-log_BINARY_DIR}/libng-log.pc.in"
     @ONLY
+  )
+  file (GENERATE
+    OUTPUT "${ng-log_BINARY_DIR}/$<CONFIG>/libng-log.pc"
+    INPUT "${ng-log_BINARY_DIR}/libng-log.pc.in"
   )
 
   unset (VERSION)
@@ -837,6 +865,7 @@ if (WITH_PKGCONFIG)
   unset (exec_prefix)
   unset (libdir)
   unset (includedir)
+  unset (ng-log_pkgconfig_library)
 endif (WITH_PKGCONFIG)
 
 # Unit testing
@@ -1695,6 +1724,24 @@ logging libraries\"\n#endif\n")
 
   set (CLEANUP_LOG_DIR ${ng-log_BINARY_DIR}/cleanup_tests)
 
+  if (WITH_PKGCONFIG AND NOT IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}" AND
+      NOT IS_ABSOLUTE "${CMAKE_INSTALL_INCLUDEDIR}")
+    find_program (PKG_CONFIG_EXECUTABLE NAMES pkgconf pkg-config)
+
+    if (PKG_CONFIG_EXECUTABLE)
+      add_test (NAME pkgconfig_relocatable COMMAND
+        ${CMAKE_COMMAND}
+        -DBINARY_DIR=${ng-log_BINARY_DIR}
+        -DCONFIG=$<CONFIG>
+        -DPKG_CONFIG=${PKG_CONFIG_EXECUTABLE}
+        -DLIBDIR=${CMAKE_INSTALL_LIBDIR}
+        -DINCLUDEDIR=${CMAKE_INSTALL_INCLUDEDIR}
+        -DTEST_DIR=${ng-log_BINARY_DIR}/pkgconfig_relocatable
+        -P ${ng-log_SOURCE_DIR}/cmake/RunPkgConfigTest.cmake)
+    endif (PKG_CONFIG_EXECUTABLE)
+  endif (WITH_PKGCONFIG AND NOT IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}" AND
+    NOT IS_ABSOLUTE "${CMAKE_INSTALL_INCLUDEDIR}")
+
   add_test (NAME cleanup_init COMMAND
     ${CMAKE_COMMAND} -E make_directory ${CLEANUP_LOG_DIR})
   add_test (NAME cleanup_logdir COMMAND
@@ -2048,7 +2095,7 @@ install (TARGETS ng-log
 
 if (WITH_PKGCONFIG)
   install (
-    FILES "${ng-log_BINARY_DIR}/libng-log.pc"
+    FILES "${ng-log_BINARY_DIR}/$<CONFIG>/libng-log.pc"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig"
   )
 endif (WITH_PKGCONFIG)

@@ -104,6 +104,9 @@ SPDX-License-Identifier: BSD-3-Clause
 - Skip sanitizer frames in `backtrace` stack traces
 - Keep `BUILD_SHARED_LIBS` from changing the library type of embedding
   projects
+- Name the debug library and define `NGLOG_NO_ABBREVIATED_SEVERITIES` on
+  Windows in the pkg-config file
+- Keep the pkg-config file valid after moving the installation
 
 [@devtejasx]: https://github.com/devtejasx
 

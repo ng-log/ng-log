@@ -43,7 +43,8 @@ jobs:
             libgmock-dev \
             libgtest-dev \
             libunwind-dev \
-            ninja-build
+            ninja-build \
+            pkgconf
 
       - uses: actions/setup-python@v7
         if: matrix.build_type == 'Debug'
@@ -70,6 +71,7 @@ jobs:
             -DCMAKE_CXX_STANDARD=${{matrix.std}} \
             -DCMAKE_CXX_STANDARD_REQUIRED=ON \
             -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/install \
+            -DWITH_PKGCONFIG=ON \
             -G Ninja \
             -Werror=author
 
