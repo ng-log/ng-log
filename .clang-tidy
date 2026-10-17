@@ -3,23 +3,11 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 ---
-Checks:          'clang-diagnostic-*,clang-analyzer-*,google-*,modernize-*,-modernize-use-trailing-return-type,readability-*,portability-*,performance-*,bugprone-*,android-*,darwin-*,clang-analyzer-*'
+Checks:          'clang-diagnostic-*,clang-analyzer-*,google-*,modernize-*,-modernize-use-trailing-return-type,readability-*,portability-*,performance-*,bugprone-*,android-*,darwin-*'
 WarningsAsErrors: ''
 HeaderFilterRegex: ''
 FormatStyle:     file
 CheckOptions:
-  - key:             cert-dcl16-c.NewSuffixes
-    value:           'L;LL;LU;LLU'
-  - key:             cert-oop54-cpp.WarnOnlyIfThisHasSuspiciousField
-    value:           '0'
-  - key:             cppcoreguidelines-explicit-virtual-functions.IgnoreDestructors
-    value:           '1'
-  - key:             cppcoreguidelines-non-private-member-variables-in-classes.IgnoreClassesWithAllMemberVariablesBeingPublic
-    value:           '1'
-  - key:             google-build-namespaces.HeaderFileExtensions
-    value:           ',h,hh,hpp,hxx'
-  - key:             google-global-names-in-headers.HeaderFileExtensions
-    value:           ',h,hh,hpp,hxx'
   - key:             google-readability-braces-around-statements.ShortStatementLines
     value:           '1'
   - key:             google-readability-function-size.BranchThreshold
@@ -44,8 +32,6 @@ CheckOptions:
     value:           ''
   - key:             google-runtime-int.UnsignedTypePrefix
     value:           uint
-  - key:             google-runtime-references.WhiteListTypes
-    value:           ''
   - key:             modernize-loop-convert.MaxCopySize
     value:           '16'
   - key:             modernize-loop-convert.MinConfidence
