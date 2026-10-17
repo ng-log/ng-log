@@ -3,11 +3,28 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+# Report every failure through the not found message so that find_package
+# handles it according to the REQUIRED and QUIET options of the consumer.
 if (CMAKE_VERSION VERSION_LESS @ng-log_CMake_VERSION@)
-  message (FATAL_ERROR "CMake >= @ng-log_CMake_VERSION@ required")
+  set (ng-log_FOUND FALSE)
+  set (ng-log_NOT_FOUND_MESSAGE "ng-log requires CMake \
+@ng-log_CMake_VERSION@ or later but CMake ${CMAKE_VERSION} is used.")
+  return ()
 endif (CMAKE_VERSION VERSION_LESS @ng-log_CMake_VERSION@)
 
 @PACKAGE_INIT@
+
+foreach (_ng-log_COMPONENT IN LISTS ng-log_FIND_COMPONENTS)
+  if (ng-log_FIND_REQUIRED_${_ng-log_COMPONENT})
+    set (ng-log_FOUND FALSE)
+    set (ng-log_NOT_FOUND_MESSAGE "ng-log provides no components but the \
+required component ${_ng-log_COMPONENT} was requested.")
+    unset (_ng-log_COMPONENT)
+    return ()
+  endif (ng-log_FIND_REQUIRED_${_ng-log_COMPONENT})
+endforeach (_ng-log_COMPONENT)
+
+unset (_ng-log_COMPONENT)
 
 include (CMakeFindDependencyMacro)
 
