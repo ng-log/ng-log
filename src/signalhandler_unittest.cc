@@ -12,6 +12,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -103,9 +104,7 @@ static void WriteAndReenter(const char* data, size_t size) {
   }
 }
 
-static void CrashInThread() {
-  raise(SIGSEGV);
-}
+static void CrashInThread() { raise(SIGSEGV); }
 
 #if defined(NGLOG_OS_LINUX)
 static void DiscardFailureDump(const char*, size_t) {}
@@ -118,49 +117,71 @@ static void ReturnFromFailureHandler() {
 #endif  // defined(NGLOG_OS_LINUX)
 
 #if !defined(NGLOG_OS_WINDOWS)
-// Runs self_path with child_command as its only argument and checks
-// that the child terminates by one of acceptable_signals within
-// timeout_seconds. Used to verify the reentrancy guard in
-// signalhandler.cc actually lets the process die instead of hanging.
-// More than one acceptable signal matters whenever a second signal can
-// legitimately fire while the first is still being dumped, whether
-// deliberately (the reentrant scenario) or as a side effect of dumping
-// itself (some platforms hit an internal abort() while symbolizing a
-// std::thread-invoked frame). Once both handler invocations have
-// returned, two pending unblocked signals race, and which one the
-// kernel ends up delivering first is platform-dependent, not a
-// correctness property of the guard. The child's own stdout and stderr
-// are left connected to this process's, so a crash dump shows up
-// directly in the test log alongside the diagnostics below.
-static bool ExpectChildDiesBySignal(
-    const char* self_path, const char* child_command,
-    std::initializer_list<int> acceptable_signals, int timeout_seconds) {
-  pid_t pid = fork();
+// Bounds how long a child scenario may take before it counts as hung.
+constexpr std::chrono::seconds kChildTimeout{10};
+
+// Runs self_path with child_command as its only argument and waits for it
+// to terminate within kChildTimeout. Returns false after killing the child
+// if it does not. The child's own stdout and stderr are left connected to
+// this process's, so a crash dump shows up directly in the test log
+// alongside the diagnostics below.
+static bool RunChild(const char* self_path, const char* child_command,
+                     int* status) {
+  constexpr int kExecFailure = 127;
+  constexpr useconds_t kPollIntervalUs = 20000;
+
+  const pid_t pid = fork();
   if (pid == 0) {
     execl(self_path, self_path, child_command, static_cast<char*>(nullptr));
-    _exit(127);
+    _exit(kExecFailure);
   }
   if (pid < 0) {
     fprintf(stderr, "%s: fork failed\n", child_command);
     return false;
   }
 
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::seconds(timeout_seconds);
-  int status = 0;
-  bool reaped = false;
+  const auto deadline = std::chrono::steady_clock::now() + kChildTimeout;
   while (std::chrono::steady_clock::now() < deadline) {
-    if (waitpid(pid, &status, WNOHANG) == pid) {
-      reaped = true;
-      break;
+    if (waitpid(pid, status, WNOHANG) == pid) {
+      return true;
     }
-    usleep(20000);
+    usleep(kPollIntervalUs);
   }
-  if (!reaped) {
-    fprintf(stderr, "%s: timed out after %d seconds\n", child_command,
-            timeout_seconds);
-    kill(pid, SIGKILL);
-    waitpid(pid, &status, 0);
+
+  fprintf(stderr, "%s: timed out after %lld seconds\n", child_command,
+          static_cast<long long>(kChildTimeout.count()));
+  kill(pid, SIGKILL);
+  waitpid(pid, status, 0);
+  return false;
+}
+
+static void ReportUnexpectedStatus(const char* child_command, int status) {
+  if (WIFSIGNALED(status)) {
+    fprintf(stderr, "%s: died by unexpected signal %d\n", child_command,
+            WTERMSIG(status));
+  } else if (WIFEXITED(status)) {
+    fprintf(stderr, "%s: exited with unexpected code %d\n", child_command,
+            WEXITSTATUS(status));
+  } else {
+    fprintf(stderr, "%s: unexpected status 0x%x\n", child_command, status);
+  }
+}
+
+// Checks that the child scenario terminates by one of acceptable_signals.
+// Used to verify the reentrancy guard in signalhandler.cc actually lets the
+// process die instead of hanging. More than one acceptable signal matters
+// whenever a second signal can legitimately fire while the first is still
+// being dumped, whether deliberately (the reentrant scenario) or as a side
+// effect of dumping itself (some platforms hit an internal abort() while
+// symbolizing a std::thread-invoked frame). Once both handler invocations
+// have returned, two pending unblocked signals race, and which one the
+// kernel ends up delivering first is platform-dependent, not a
+// correctness property of the guard.
+static bool ExpectChildDiesBySignal(
+    const char* self_path, const char* child_command,
+    std::initializer_list<int> acceptable_signals) {
+  int status = 0;
+  if (!RunChild(self_path, child_command, &status)) {
     return false;
   }
   if (WIFSIGNALED(status)) {
@@ -169,53 +190,22 @@ static bool ExpectChildDiesBySignal(
         return true;
       }
     }
-    fprintf(stderr, "%s: died by unexpected signal %d\n", child_command,
-            WTERMSIG(status));
-  } else if (WIFEXITED(status)) {
-    fprintf(stderr, "%s: exited with code %d instead of dying by a signal\n",
-            child_command, WEXITSTATUS(status));
-  } else {
-    fprintf(stderr, "%s: unexpected status 0x%x\n", child_command, status);
   }
+  ReportUnexpectedStatus(child_command, status);
   return false;
 }
 
 #  if defined(NGLOG_OS_LINUX)
 static bool ExpectChildExitsSuccessfully(const char* self_path,
-                                         const char* child_command,
-                                         int timeout_seconds) {
-  pid_t pid = fork();
-  if (pid == 0) {
-    execl(self_path, self_path, child_command, static_cast<char*>(nullptr));
-    _exit(127);
-  }
-  if (pid < 0) {
-    fprintf(stderr, "%s: fork failed\n", child_command);
+                                         const char* child_command) {
+  int status = 0;
+  if (!RunChild(self_path, child_command, &status)) {
     return false;
   }
-
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::seconds(timeout_seconds);
-  int status = 0;
-  while (std::chrono::steady_clock::now() < deadline) {
-    if (waitpid(pid, &status, WNOHANG) == pid) {
-      if (WIFEXITED(status) && WEXITSTATUS(status) == 0) return true;
-      if (WIFSIGNALED(status)) {
-        fprintf(stderr, "%s: died by signal %d\n", child_command,
-                WTERMSIG(status));
-      } else if (WIFEXITED(status)) {
-        fprintf(stderr, "%s: exited with code %d\n", child_command,
-                WEXITSTATUS(status));
-      }
-      return false;
-    }
-    usleep(20000);
+  if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+    return true;
   }
-
-  fprintf(stderr, "%s: timed out after %d seconds\n", child_command,
-          timeout_seconds);
-  kill(pid, SIGKILL);
-  waitpid(pid, &status, 0);
+  ReportUnexpectedStatus(child_command, status);
   return false;
 }
 #  endif  // defined(NGLOG_OS_LINUX)
@@ -295,7 +285,7 @@ static ColorlogtostderrResult RunColorlogtostderrChild(const char* self_path) {
   return result;
 }
 #  endif  // defined(NGLOG_OS_LINUX)
-#endif  // !defined(NGLOG_OS_WINDOWS)
+#endif    // !defined(NGLOG_OS_WINDOWS)
 
 #if defined(HAVE_STACKTRACE) && defined(HAVE_SYMBOLIZE)
 TEST(SignalHandler, Installed) {
@@ -338,7 +328,7 @@ TEST(SignalHandler, SourceLocationPrecedesFunctionName) {
   ASSERT_DEATH(abort(), "signalhandler_unittest\\.cc:.*TestBody");
 }
 #  endif  // defined(NGLOG_OS_WINDOWS) && !defined(HAVE_ADDR2LINE)
-#endif  // defined(HAVE_STACKTRACE) && defined(HAVE_SYMBOLIZE)
+#endif    // defined(HAVE_STACKTRACE) && defined(HAVE_SYMBOLIZE)
 
 #if defined(NGLOG_OS_LINUX)
 static const char* g_self_path = nullptr;
@@ -347,8 +337,7 @@ TEST(SignalHandler, ColorlogtostderrDisablesAnsi) {
   ASSERT_NE(g_self_path, nullptr);
   const ColorlogtostderrResult result = RunColorlogtostderrChild(g_self_path);
   ASSERT_TRUE(result.completed) << result.error;
-  ASSERT_TRUE(WIFSIGNALED(result.status)) << "child status: " << result.status;
-  EXPECT_EQ(WTERMSIG(result.status), SIGABRT);
+  EXPECT_PRED1(testing::KilledBySignal(SIGABRT), result.status);
   EXPECT_THAT(result.output, testing::Not(testing::HasSubstr("\033[")));
 }
 
@@ -385,6 +374,8 @@ int main(int argc, char** argv) {
   g_self_path = argv[0];
 #  endif  // defined(NGLOG_OS_LINUX)
   InitializeLogging(argv[0]);
+  // A shared GoogleMock library carries its own copy of GoogleTest, which
+  // InitGoogleMock initializes instead of the one the tests run in.
   testing::InitGoogleTest(&argc, argv);
   testing::InitGoogleMock(&argc, argv);
   nglog::ParseCommandLineFlags(&argc, &argv,
@@ -420,14 +411,14 @@ int main(int argc, char** argv) {
     InstallFailureWriter(&WriteAndReenter);
     abort();
   } else if (command == "multithread") {
-    std::thread t1{&CrashInThread};
-    std::thread t2{&CrashInThread};
-    std::thread t3{&CrashInThread};
-    std::thread t4{&CrashInThread};
-    t1.join();
-    t2.join();
-    t3.join();
-    t4.join();
+    constexpr std::size_t kCrashingThreads = 4;
+    std::array<std::thread, kCrashingThreads> threads;
+    for (std::thread& thread : threads) {
+      thread = std::thread{&CrashInThread};
+    }
+    for (std::thread& thread : threads) {
+      thread.join();
+    }
 #  if defined(NGLOG_OS_LINUX)
   } else if (command == "handler_returns") {
     InstallFailureWriter(&DiscardFailureDump);
@@ -442,11 +433,11 @@ int main(int argc, char** argv) {
 #  if !defined(NGLOG_OS_WINDOWS)
   } else if (command == "self_test") {
     const bool ok =
-        ExpectChildDiesBySignal(argv[0], "segv", {SIGSEGV}, 10) &&
-        ExpectChildDiesBySignal(argv[0], "reentrant", {SIGTERM, SIGABRT}, 10) &&
-        ExpectChildDiesBySignal(argv[0], "multithread", {SIGSEGV, SIGABRT}, 10)
+        ExpectChildDiesBySignal(argv[0], "segv", {SIGSEGV}) &&
+        ExpectChildDiesBySignal(argv[0], "reentrant", {SIGTERM, SIGABRT}) &&
+        ExpectChildDiesBySignal(argv[0], "multithread", {SIGSEGV, SIGABRT})
 #    if defined(NGLOG_OS_LINUX)
-        && ExpectChildExitsSuccessfully(argv[0], "handler_returns", 10)
+        && ExpectChildExitsSuccessfully(argv[0], "handler_returns")
 #    endif  // defined(NGLOG_OS_LINUX)
         ;
     puts(ok ? "OK" : "FAIL");
