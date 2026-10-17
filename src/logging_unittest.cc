@@ -24,7 +24,6 @@
 #include <iomanip>
 #include <iterator>
 #include <limits>
-#include <locale>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -4274,28 +4273,6 @@ TEST(RawLogging, MessageFillingBufferEndsLine) {
     }
   }
 }
-
-//! Groups the digits of numbers in threes like many locales do.
-class GroupingPunctuation : public std::numpunct<char> {
- protected:
-  char do_thousands_sep() const override { return ','; }
-  std::string do_grouping() const override { return "\3"; }
-};
-
-//! Installs a global locale that groups digits and restores the previous one.
-class ScopedGroupingLocale {
- public:
-  ScopedGroupingLocale()
-      : previous_{std::locale::global(
-            std::locale{std::locale::classic(), new GroupingPunctuation})} {}
-  ~ScopedGroupingLocale() { std::locale::global(previous_); }
-
-  ScopedGroupingLocale(const ScopedGroupingLocale&) = delete;
-  ScopedGroupingLocale& operator=(const ScopedGroupingLocale&) = delete;
-
- private:
-  std::locale previous_;
-};
 
 // RAW_LOG writes the thread identifier like the classic locale writes it,
 // whatever the global locale. A stream would use the global locale, whose

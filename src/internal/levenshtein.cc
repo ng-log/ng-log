@@ -42,7 +42,11 @@ std::string FindClosestMatch(const std::string& value,
   std::size_t closest_distance = std::numeric_limits<std::size_t>::max();
   for (const std::string& candidate : candidates) {
     const std::size_t distance = LevenshteinDistance(value, candidate);
-    if (distance < closest_distance) {
+    // A distance of the length of the longer string allows replacing every
+    // character, so such a candidate does not count as related to the input.
+    const std::size_t replacement_distance =
+        std::max(value.size(), candidate.size());
+    if (distance < replacement_distance && distance < closest_distance) {
       closest_distance = distance;
       closest = candidate;
     }
