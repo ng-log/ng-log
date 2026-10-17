@@ -160,16 +160,31 @@ TEST(Demangle, RejectsExcessivelyNestedTypes) {
   EXPECT_THAT(mangled, FailsToDemangle());
 }
 
-TEST(Demangle, RejectsExcessivelyNestedLocalEncodings) {
-  constexpr std::size_t kNestedLocalNames = 24;
+std::string NestedLocalName(std::size_t levels) {
   std::string mangled = "_Z";
-  for (std::size_t index = 0; index < kNestedLocalNames; ++index) {
+  for (std::size_t index = 0; index < levels; ++index) {
     mangled += "Z1fvE";
   }
-  mangled += "1x";
+  return mangled + "1x";
+}
 
-  char tmp[64];
-  EXPECT_FALSE(Demangle(mangled.c_str(), tmp, sizeof(tmp)));
+// The output buffer holds the demangled name of any nesting depth used
+// below, so that only the nesting limits can reject a name.
+constexpr std::size_t kNestedNameBufferSize = 4096;
+
+TEST(Demangle, AcceptsModeratelyNestedLocalEncodings) {
+  constexpr std::size_t kModerateNesting = 8;
+  char tmp[kNestedNameBufferSize];
+  EXPECT_TRUE(
+      Demangle(NestedLocalName(kModerateNesting).c_str(), tmp, sizeof(tmp)));
+}
+
+TEST(Demangle, RejectsExcessivelyNestedLocalEncodings) {
+  // Exceeds every nesting limit of the parser.
+  constexpr std::size_t kExcessiveNesting = 65;
+  char tmp[kNestedNameBufferSize];
+  EXPECT_FALSE(
+      Demangle(NestedLocalName(kExcessiveNesting).c_str(), tmp, sizeof(tmp)));
 }
 
 struct DemangleCase {
