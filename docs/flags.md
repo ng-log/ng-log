@@ -129,11 +129,11 @@ The default is determined when the flag is first used or registered, whichever
 comes first. Afterward, only the environment variable of a flag module replaces
 it, when the flag is added to a group of that module. The default value
 expression may be evaluated more than once when threads use the flag
-concurrently for the first time, so it should not have side effects. The environment and the command line
-apply once the flag is registered and the arguments are parsed. An environment
-default does not replace a value that was set explicitly before. Restoring a
-saved value with `ScopedFlag` or `ScopedFlags` also restores whether the value
-counts as set explicitly.
+concurrently for the first time, so it should not have side effects. The
+environment and the command line apply once the flag is registered and the
+arguments are parsed. An environment default does not replace a value that was
+set explicitly before. Restoring a saved value with `ScopedFlag` or
+`ScopedFlags` also restores whether the value counts as set explicitly.
 
 A flag whose lifetime is bounded by a scope, for example one created by a test,
 is an `nglog::DynamicFlag`. It is registered on construction and unregistered on
@@ -367,9 +367,12 @@ The following flags are most commonly used:
     `INFO`, `WARNING`, `ERROR`, and `FATAL` are 0, 1, 2, and 3,
     respectively.
 
-`log_dir` (`string`, default="")
+`log_dir` (`string`, default=`NGLOG_DIR`, then `TEST_TMPDIR`, else "")
 
 :   Write log files to this directory instead of the default logging directory.
+    The default comes from the first nonempty one of the environment variables
+    `NGLOG_DIR` and `TEST_TMPDIR`. `NGLOG_log_dir`, if set, takes precedence
+    over both.
 
 `logfile_mode` (`mode`, default=`0664`)
 
@@ -399,23 +402,128 @@ The following flags are most commonly used:
     overrides any value given by `--v`. See also [verbose
     logging](logging/index.md#verbose-logging) for more details.
 
-Additional flags are defined in
-[flags.cc](https://github.com/ng-log/ng-log/blob/master/src/flags.cc). Please see
-the source for their complete list.
+The remaining built-in flags control the destinations, the format of log
+files and lines, email, and crash reports:
+
+`alsologtostderr` (`bool`, default=`false`)
+
+:   Copy all log messages to `stderr` in addition to log files, regardless of
+    `stderrthreshold`.
+
+`logtostdout` (`bool`, default=`false`)
+
+:   Use `stdout` as the primary destination instead of log files. Messages at
+    or above `stderrthreshold` go to `stderr` instead.
+
+`timestamp_in_logfile_name` (`bool`, default=`true`)
+
+:   Add a timestamp and the process ID to each log file name. Without them,
+    processes with the same log file name share one file name. The first
+    process locks the file, so the others cannot write to it, and the file
+    is truncated once it exceeds `max_log_size`.
+
+`log_file_header` (`bool`, default=`true`)
+
+:   Write a header with the creation time, the host and the line format at
+    the beginning of each log file.
+
+`log_prefix` (`bool`, default=`true`)
+
+:   Add the [log line prefix](logging/index.md#log-line-prefix-format) to each
+    log line.
+
+`log_year_in_prefix` (`bool`, default=`true`)
+
+:   Include the year in the log line prefix.
+
+`log_utc_time` (`bool`, default=`false`)
+
+:   Use UTC instead of local time in log line prefixes and log file names.
+
+`log_link` (`string`, default="")
+
+:   Create additional links to the latest log files in this directory.
+
+`logbuflevel` (`int32`, default=0, which is `INFO`)
+
+:   Buffer messages at this severity level or below instead of flushing them
+    to the log file right away. A value of -1 disables buffering.
+
+`logbufsecs` (`int32`, default=30)
+
+:   Keep buffered log messages for no more than this many seconds.
+
+`logcleansecs` (`int32`, default=300)
+
+:   Check for overdue log files this often in seconds, once the [log
+    cleaner](log_cleaner.md) is enabled.
+
+`stop_logging_if_full_disk` (`bool`, default=`false`)
+
+:   Pause writing log files once writing fails because the disk is full.
+    Messages are dropped until the next periodic flush would be due, at most
+    `logbufsecs` seconds after the last flush. The first message after that
+    is dropped as well and resumes writing for the messages that follow.
+
+`drop_log_memory` (`bool`, default=`true`, Linux only)
+
+:   Advise the kernel to drop flushed log file contents from the page cache,
+    since logs are rarely read soon after they are written.
+
+`alsologtoemail` (`string`, default="")
+
+:   Send log messages at or above `logemaillevel` to each address in this
+    comma-separated list. No email is sent while `logtostderr` or
+    `logtostdout` is set.
+
+`logemaillevel` (`int32`, default=999)
+
+:   Email messages at this severity level or above. The default disables
+    email for every severity. No email is sent while `logtostderr` or
+    `logtostdout` is set.
+
+`logmailer` (`string`, default="")
+
+:   Send email with this program. It receives the subject attached to `-s`,
+    the comma-separated recipients as one argument and the message on its
+    standard input. An empty
+    value uses `/bin/mail`. Delivery counts as failed unless the program exits
+    with status 0.
+
+`log_backtrace_at` (`string`, default="")
+
+:   Insert a stack trace before the text of messages logged at this
+    `file:line` location.
+
+`symbolize_stacktrace` (`bool`, default=`true`)
+
+:   Resolve the function names of stack frames in crash reports.
+
+`symbolize_line_info` (`bool`, default=`true`)
+
+:   Resolve the source files and line numbers of stack frames, if the library
+    was built with [line information](failures.md#resolving-file-names-and-line-numbers).
+
+`addr2line_timeout_ms` (`int32`, default=2000)
+
+:   Wait no longer than this many milliseconds for `addr2line` to resolve one
+    address.
 
 ## Colorizing Output
 
 ng-log colorizes messages logged to a terminal, as well as crash stack
 traces produced by the [failure signal
-handler](failures.md#stacktrace-as-default-failure-handler) or an
-unsatisfied `CHECK`/`LOG(FATAL)`. Colorizing is opt-out, not opt-in: it
+handler](failures.md#stacktrace-as-default-failure-handler). The stack trace
+that an unsatisfied `CHECK` or `LOG(FATAL)` prints is colored only once
+`InstallFailureSignalHandler()` has been called.
+Colorizing is opt-out, not opt-in: it
 defaults to on, and is automatically disabled unless it is actually safe
 to colorize, namely the destination must be a real terminal (not a pipe
 or a redirected file), and the terminal must not have opted out via a
-nonempty [`NO_COLOR`](https://no-color.org) environment variable or
-`TERM=dumb`. A `CLICOLOR_FORCE` environment variable with a value other
-than empty or `0` enables colors for pipes and files as well, unless
-`NO_COLOR` disables them.
+nonempty [`NO_COLOR`](https://no-color.org) environment variable or,
+outside Windows, `TERM=dumb`. A `CLICOLOR_FORCE` environment variable with
+a value other than empty or `0` enables colors for pipes and files as well,
+unless `NO_COLOR` disables them.
 
 Each field of a log line's prefix, severity character, timestamp,
 thread id, and `file:line` reference, is colorized separately, and the
@@ -429,8 +537,8 @@ as well as a colorized, hyperlinked crash trace.
 
 `colorlogtostderr` (`bool`, default=`true`)
 
-:   Color log messages written to `stderr`, including crash stack traces.
-    Set to `false` to disable coloring.
+:   Color log messages written to `stderr`, including the stack traces of the
+    failure signal handler. Set to `false` to disable coloring.
 
 `colorlogtostdout` (`bool`, default=`true`)
 

@@ -22,7 +22,7 @@ deadlock.
 
 For above reason, if you use a 64-bit system and you need
 `InstallFailureSignalHandler()`, we strongly recommend you install `libunwind`
-before trying to configure or install ng-log. libunwind can be found
+before building ng-log. libunwind can be found
 [here](http://download.savannah.nongnu.org/releases/libunwind/libunwind-snap-070410.tar.gz).
 
 Even if you already have `libunwind` installed, you will probably still need to
@@ -53,9 +53,11 @@ two kinds of stack-unwinder:
 
 As we already mentioned, glibc's unwinder has a deadlock issue. However, if you
 don't use `InstallFailureSignalHandler()` or you don't worry about the rare
-possibilities of deadlocks, you can use this stack-unwinder. If you specify no
-options and `libunwind` isn't detected on your system, the configure script
-chooses this unwinder by default.
+possibilities of deadlocks, you can use this stack-unwinder. CMake selects the
+first available unwinder in the order `libunwind`, `_Unwind_Backtrace`, frame
+pointers, Windows, and glibc's `backtrace()`. The `WITH_UNWIND` option, one of
+`libunwind`, which is the default, `unwind` or `none`, limits which of the
+first two it considers.
 
 ### Frame Pointer based Stack-unwinder
 

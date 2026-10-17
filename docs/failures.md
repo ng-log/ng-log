@@ -21,7 +21,7 @@ ansi2html using these commands:
 cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug -DWITH_LINE_INFO=auto
 cmake --build build-debug --target color_stacktrace_example
 env -u NO_COLOR TERM=xterm-256color script -q -c 'build-debug/color_stacktrace_example' /tmp/ng-log-color-stacktrace.typescript
-perl -0pe 's/\r//g; s/\AScript started.*?\n//s; s/\nScript done.*\z//s; s/\e\]8;;[^\e]*\e\\//g; s/\A.*?(?=\*\*\* Aborted)//s' /tmp/ng-log-color-stacktrace.typescript | ansi2html -i -W -s xterm | perl -pe 's{<span style="color: #00cdcd">((src|examples)/([^:<]+):([0-9]+))</span>}{<a href="https://github.com/ng-log/ng-log/blob/master/$2/$3#L$4" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">$1</span></a>}g' > docs/failure-stacktrace.html
+perl -0pe 's/\r//g; s/\AScript started.*?\n//s; s/\nScript done.*\z//s; s/\e\]8;;[^\e]*\e\\//g; s/\A.*?(?=\*\*\* Aborted)//s' /tmp/ng-log-color-stacktrace.typescript | ansi2html -i -W -s xterm | perl -pe 's{<span style="color: #00cdcd">((src|examples)/([^:<]+):([0-9]+))</span>}{<a href="https://github.com/ng-log/ng-log/blob/master/$2/$3" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">$1</span></a>}g' > docs/failure-stacktrace.html
 -->
 
 The example intentionally aborts, so a nonzero exit status is expected. The
@@ -54,10 +54,6 @@ and special-name forms emitted by current C++ compilers. Its output is
 intentionally abbreviated for signal-handler use. Function parameter types and
 template argument types are validated and then omitted, while the enclosing
 class, function, constructor, destructor, and operator names are retained.
-Applications that need the platform's complete spelling can call
-`nglog::DemangleWithSystem()` on demand outside signal handlers. The system
-demangler may allocate memory, and it may use different spelling because it
-prints the omitted types and applies its own formatting rules.
 
 ## Customizing Handler Output
 
@@ -103,10 +99,12 @@ supported[^1] by ng-log.
 
 [^1]: To extract the stack trace, ng-log currently supports the following targets:
 
+    * `libunwind`,
+    * `_Unwind_Backtrace` of the compiler's runtime,
     * x86, x86_64,
     * PowerPC architectures,
-    * `libunwind`,
-    * and the Debug Help Library (`dbghelp`) on Windows.
+    * the Debug Help Library (`dbghelp`) on Windows,
+    * and `backtrace()` of `execinfo.h`.
 
 ## Resolving File Names and Line Numbers
 

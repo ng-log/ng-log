@@ -7,7 +7,7 @@ SPDX-License-Identifier: BSD-3-Clause
 
 # ng-log
 
-ng-log (formerly Google Logging Library or glog) is a C++14 library
+ng-log, a community maintained successor to Google's glog, is a C++14 library
 that implements application-level logging. The library provides logging APIs
 based on C++-style streams and various helper macros.
 

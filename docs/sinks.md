@@ -22,7 +22,7 @@ class LogSink {
   virtual void send(LogSeverity severity, const char* full_filename,
                     const char* base_filename, int line,
                     const LogMessageTime& time, const char* message,
-                    std::size_t message_len);
+                    std::size_t message_len) = 0;
 };
 ```
 
@@ -38,7 +38,7 @@ messages.
 
 ## Registering Log Sinks
 
-To use the custom sink and instance of the above interface implementation must
+To use the custom sink, an instance of the above interface implementation must
 be registered using `nglog::AddLogSink` which expects a pointer to the
 `nglog::LogSink` instance. To unregister use `nglog::RemoveLogSink`. Both
 functions are thread-safe.
@@ -49,18 +49,21 @@ functions are thread-safe.
 
 ## Direct Logging
 
-Instead of registering the sink, we can directly use to log messages. While `#!
-LOG_TO_SINK(sink, severity)` allows to log both to the sink and to a global log
-registry, e.g., a file, `#!cpp LOG_TO_SINK_BUT_NOT_TO_LOGFILE(sink, severity)`
-will avoid the latter.
+Instead of registering the sink, we can log messages to it directly. While
+`#!cpp LOG_TO_SINK(sink, severity)` logs both to the sink and to the global log
+destinations, e.g., a file, `#!cpp LOG_TO_SINK_BUT_NOT_TO_LOGFILE(sink, severity)`
+avoids the latter.
 
 !!! example "Using a custom sink"
     ``` cpp title="custom_sink.cc"
-    -8<- "examples/custom_sink.cc:33:"
+    -8<- "examples/custom_sink.cc:18:51"
+
+    -8<- "examples/custom_sink.cc:53:70"
     ```
 
-    1. `MySink` implements a custom sink that sends log messages to `std::cout`.
-    2. The custom sink must be registered to for use with existing logging
+    1. `MyLogSink` implements a custom sink that sends log messages to
+       `std::cout`.
+    2. The custom sink must be registered for use with existing logging
        macros.
     3. Once the custom sink is no longer needed we remove it from the registry.
     4. A sink does not need to be registered globally. However, then, messages
@@ -72,9 +75,9 @@ will avoid the latter.
     <div class="annotate" markdown>
 
     ``` title="Custom sink output"
-    INFO custom_sink.cc:63 logging to MySink
-    INFO custom_sink.cc:68 direct logging
-    INFO custom_sink.cc:69 direct logging but not to file (1)
+    INFO custom_sink.cc:62 logging to MySink
+    INFO custom_sink.cc:67 direct logging
+    INFO custom_sink.cc:68 direct logging but not to file (1)
     ```
 
     </div>
@@ -89,6 +92,6 @@ will avoid the latter.
     Running on machine: pc
     Running duration (h:mm:ss): 0:00:00
     Log line format: [IWEF]yyyymmdd hh:mm:ss.uuuuuu threadid file:line] msg
-    I20240611 13:24:27.476620 126237946035776 custom_sink.cc:63] logging to MySink
-    I20240611 13:24:27.476796 126237946035776 custom_sink.cc:68] direct logging
+    I20240611 13:24:27.476620 126237946035776 custom_sink.cc:62] logging to MySink
+    I20240611 13:24:27.476796 126237946035776 custom_sink.cc:67] direct logging
     ```
