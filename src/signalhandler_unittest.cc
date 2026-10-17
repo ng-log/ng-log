@@ -259,12 +259,9 @@ static ColorlogtostderrResult RunColorlogtostderrChild(const char* self_path) {
     return result;
   }
 
-  if (waitpid(pid, &result.status, 0) != pid) {
-    result.error = "waitpid failed: ";
-    result.error += strerror(errno);
-    return result;
-  }
-
+  // Drains the output while the child runs, so that it never blocks on a
+  // full pseudo-terminal. Reading fails with EIO once the child and every
+  // process it spawned have closed the slave.
   char buffer[kOutputBufferSize];
   for (;;) {
     const ssize_t bytes_read = read(master.get(), buffer, sizeof(buffer));
@@ -280,6 +277,11 @@ static ColorlogtostderrResult RunColorlogtostderrChild(const char* self_path) {
       result.error += strerror(errno);
     }
     break;
+  }
+
+  if (waitpid(pid, &result.status, 0) != pid) {
+    result.error = "waitpid failed: ";
+    result.error += strerror(errno);
   }
   result.completed = result.error.empty();
   return result;
