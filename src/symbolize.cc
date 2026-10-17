@@ -1231,6 +1231,14 @@ static char* GetHex(const char* start, const char* end, std::uint64_t* hex) {
   return const_cast<char*>(p);
 }
 
+// Files stay open while symbolization may run addr2line, which must not
+// inherit them.
+#    ifdef O_CLOEXEC
+constexpr int kOpenFlags = O_RDONLY | O_CLOEXEC;
+#    else
+constexpr int kOpenFlags = O_RDONLY;
+#    endif
+
 // Searches for the object file (from /proc/self/maps) that contains
 // the specified pc.  If found, sets |start_address| to the start address
 // of where this object file is mapped in memory, sets the module base
@@ -1244,13 +1252,13 @@ static FileDescriptor OpenObjectFileContainingPcAndGetStartAddress(
     std::uint64_t pc, std::uint64_t& start_address, std::uint64_t& base_address,
     char* out_file_name, std::size_t out_file_name_size) {
   FileDescriptor maps_fd{
-      FailureRetry([] { return open("/proc/self/maps", O_RDONLY); })};
+      FailureRetry([] { return open("/proc/self/maps", kOpenFlags); })};
   if (!maps_fd) {
     return nullptr;
   }
 
   FileDescriptor mem_fd{
-      FailureRetry([] { return open("/proc/self/mem", O_RDONLY); })};
+      FailureRetry([] { return open("/proc/self/mem", kOpenFlags); })};
   if (!mem_fd) {
     return nullptr;
   }
@@ -1385,7 +1393,7 @@ static FileDescriptor OpenObjectFileContainingPcAndGetStartAddress(
 
     // Finally, "cursor" now points to file name of our interest.
     return FileDescriptor{
-        FailureRetry([cursor] { return open(cursor, O_RDONLY); })};
+        FailureRetry([cursor] { return open(cursor, kOpenFlags); })};
   }
 }
 

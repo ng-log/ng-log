@@ -13,14 +13,19 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <csignal>
 #include <cstddef>
+#include <cstdlib>
 #include <string>
+#include <thread>
 #include <type_traits>
 #include <utility>
 
 #include "config.h"
 #include "ng-log/platform.h"
+#include "testing_utilities.h"
 
 #ifdef NGLOG_OS_WINDOWS
 #  include <gmock/gmock.h>
@@ -28,18 +33,34 @@
 #  include <windows.h>
 
 #  include <array>
+#  include <cstdint>
+#  include <cstdio>
 #  include <cstring>
 #  include <vector>
 
 #  include "internal/utf8.h"
 #  include "long_path_test.h"
+#else
+#  include <fcntl.h>
 #endif
+
+#if !defined(NGLOG_OS_WINDOWS) && \
+    (defined(HAVE_FORK) || (defined(HAVE__FORK) && defined(HAVE_EXECV)))
+#  include <sys/wait.h>
+#  include <unistd.h>
+#endif  // POSIX fork() support
+
+#if !defined(NGLOG_OS_WINDOWS) && defined(HAVE_FORK)
+#  include <sys/types.h>
+
+#  include <cerrno>
+
+#  include "subprocess_fork.h"
+#endif  // POSIX fork() fallback
 
 #if !defined(NGLOG_OS_WINDOWS) && defined(HAVE__FORK) && defined(HAVE_EXECV)
 #  include <pthread.h>
-#  include <unistd.h>
-
-#  include <csignal>
+#  include <sys/stat.h>
 #endif  // POSIX signal-safe subprocess support
 
 using namespace nglog;
@@ -224,6 +245,112 @@ TYPED_TEST(SubprocessTest, WaitReportsUnsuccessfulExit) {
   EXPECT_EQ(1, result.exit_code);
 }
 
+TYPED_TEST(SubprocessTest, WaitAcceptsTheMaximumTimeout) {
+  typename TestFixture::Process process;
+  char* argv[] = {helper_path, fail_flag, nullptr};
+  char* envp[] = {nullptr};
+
+  ASSERT_TRUE(process.Spawn(argv, envp));
+  process.CloseStdin();
+
+  const auto result = process.Wait(std::chrono::milliseconds::max());
+  EXPECT_EQ(nglog::SubprocessWaitResult::kExited, result.status);
+}
+
+// The smallest timeout does not wait at all, like any negative one.
+TYPED_TEST(SubprocessTest, WaitAcceptsTheMinimumTimeout) {
+  typename TestFixture::Process process;
+  char* argv[] = {helper_path, hang_flag, nullptr};
+  char* envp[] = {nullptr};
+
+  ASSERT_TRUE(process.Spawn(argv, envp));
+  process.CloseStdin();
+
+  const auto result = process.Wait(std::chrono::milliseconds::min());
+  EXPECT_EQ(nglog::SubprocessWaitResult::kTimedOut, result.status);
+}
+
+#ifndef NGLOG_OS_WINDOWS
+namespace {
+
+// Lists the descriptors besides the standard streams that every program this
+// process executes inherits, in the format of the helper's --list-fds.
+std::string InheritableDescriptors() {
+  constexpr int kHighestListedDescriptor = 256;
+  std::string listed;
+  for (int fd = STDERR_FILENO + 1; fd <= kHighestListedDescriptor; ++fd) {
+    const int flags = fcntl(fd, F_GETFD);
+    if (flags != -1 && (flags & FD_CLOEXEC) == 0) {
+      listed += std::to_string(fd) + '\n';
+    }
+  }
+  return listed;
+}
+
+}  // namespace
+
+// Descriptors that the test runner passed to this process without
+// close-on-exec reach the child as well and are not caused by the spawn.
+TYPED_TEST(SubprocessTest, ChildInheritsOnlyTheStandardStreams) {
+  typename TestFixture::Process process;
+  char option[] = "--list-fds";
+  char* argv[] = {helper_path, option, nullptr};
+  char* envp[] = {nullptr};
+
+  const std::string expected = InheritableDescriptors();
+  ASSERT_TRUE(process.Spawn(argv, envp));
+  process.CloseStdin();
+
+  EXPECT_EQ(ReadStdoutToEnd(process), expected);
+  process.Wait(kTimeout);
+}
+#endif
+
+#ifdef NGLOG_OS_WINDOWS
+// Another spawn may hold an inheritable pipe end at the same time, which only
+// its own child may receive.
+TYPED_TEST(SubprocessTest, ChildInheritsNoHandlesOfOtherSpawns) {
+  SECURITY_ATTRIBUTES inheritable{};
+  inheritable.nLength = sizeof(inheritable);
+  inheritable.bInheritHandle = TRUE;
+  HANDLE read_end = nullptr;
+  HANDLE write_end = nullptr;
+  ASSERT_TRUE(CreatePipe(&read_end, &write_end, &inheritable, 0));
+  constexpr std::size_t kHandleValueSize = 32;
+  char value[kHandleValueSize];
+  std::snprintf(value, sizeof(value), "%llx",
+                static_cast<unsigned long long>(
+                    reinterpret_cast<std::uintptr_t>(write_end)));
+
+  typename TestFixture::Process process;
+  char option[] = "--check-handle";
+  char* argv[] = {helper_path, option, value, nullptr};
+  char* envp[] = {nullptr};
+  ASSERT_TRUE(process.Spawn(argv, envp));
+  process.CloseStdin();
+
+  EXPECT_EQ(ReadStdoutToEnd(process), "clean");
+  process.Wait(kTimeout);
+  CloseHandle(read_end);
+  CloseHandle(write_end);
+}
+#endif
+
+TYPED_TEST(SubprocessTest, PassesUtf8Environment) {
+  typename TestFixture::Process process;
+  char option[] = "--echo-env";
+  char name[] = "NGLOG_SUBPROCESS_TEST_VALUE";
+  char entry[] = "NGLOG_SUBPROCESS_TEST_VALUE=caf\xC3\xA9";
+  char* argv[] = {helper_path, option, name, nullptr};
+  char* envp[] = {entry, nullptr};
+
+  ASSERT_TRUE(process.Spawn(argv, envp));
+  process.CloseStdin();
+
+  EXPECT_EQ(ReadStdoutToEnd(process), "caf\xC3\xA9");
+  process.Wait(kTimeout);
+}
+
 TYPED_TEST(SubprocessTest, SpawnFailsForANonExistentProgram) {
   typename TestFixture::Process process;
   char program[] = "nglog-subprocess-unittest-does-not-exist";
@@ -380,6 +507,41 @@ TEST(Subprocess, ResolvesBareNameFromApplicationDirectory) {
   EXPECT_TRUE(SpawnAndReap(argv, envp));
 }
 
+// A program in the current directory, such as a download folder, must not
+// replace a program looked up by name.
+TEST(Subprocess, DoesNotResolveBareNameFromCurrentDirectory) {
+  std::string directory_path;
+  ASSERT_TRUE(nglog::internal::GetTempPathUtf8(&directory_path));
+  directory_path +=
+      nglog::testing_internal::UniqueTemporaryName("nglog_subprocess_cwd_");
+  std::wstring directory;
+  ASSERT_TRUE(nglog::internal::Utf8ToWide(directory_path.data(),
+                                          directory_path.size(), &directory));
+  ASSERT_TRUE(CreateDirectoryW(directory.c_str(), nullptr));
+
+  std::wstring source_path;
+  ASSERT_TRUE(nglog::internal::Utf8ToWide(SUBPROCESS_HELPER_PATH,
+                                          std::strlen(SUBPROCESS_HELPER_PATH),
+                                          &source_path));
+  constexpr char kPlantedName[] = "nglog_planted_helper";
+  const std::wstring planted_path = directory + L"\\nglog_planted_helper.exe";
+  ASSERT_TRUE(CopyFileW(source_path.c_str(), planted_path.c_str(), FALSE));
+
+  bool spawned = false;
+  {
+    const ScopedProcessEnvironment saved_environment;
+    ASSERT_TRUE(SetCurrentDirectoryW(directory.c_str()));
+    ASSERT_TRUE(SetEnvironmentVariableW(L"PATH", nullptr));
+    std::vector<char> program = MutableCString(kPlantedName);
+    char* argv[] = {program.data(), nullptr};
+    char* envp[] = {nullptr};
+    spawned = SpawnAndReap(argv, envp);
+  }
+  EXPECT_TRUE(DeleteFileW(planted_path.c_str()));
+  EXPECT_TRUE(RemoveDirectoryW(directory.c_str()));
+  EXPECT_FALSE(spawned);
+}
+
 TEST(Subprocess, ResolvesExecutableBeyondMaxPath) {
   nglog::testing_internal::LongPathTestDirectory directory;
   const std::string directory_name =
@@ -445,6 +607,126 @@ TYPED_TEST(SubprocessTest, OperatorBoolReflectsSpawnState) {
   process.CloseStdin();
   process.Wait(kTimeout);
 }
+
+// Without pipe2(), pipes become close-on-exec only after their creation, so
+// the test races on such systems.
+#if !defined(NGLOG_OS_WINDOWS) && defined(HAVE_PIPE2)
+namespace {
+
+// Highest descriptor that a forked child inspects for inherited pipes.
+constexpr int kHighestInspectedDescriptor = 256;
+// Exit code of a forked child that found a pipe without close-on-exec.
+constexpr int kInheritablePipeExitCode = 3;
+
+// Forks a child that reports whether this process holds a pipe that a
+// program it executes would inherit. Uses only async-signal-safe calls in the
+// child, since other threads keep running in the parent.
+bool HoldsInheritablePipe() {
+  const pid_t pid = fork();
+  if (pid == 0) {
+    for (int fd = STDERR_FILENO + 1; fd <= kHighestInspectedDescriptor; ++fd) {
+      const int flags = fcntl(fd, F_GETFD);
+      struct stat status;
+      if (flags != -1 && (flags & FD_CLOEXEC) == 0 && fstat(fd, &status) == 0 &&
+          S_ISFIFO(status.st_mode)) {
+        _exit(kInheritablePipeExitCode);
+      }
+    }
+    _exit(EXIT_SUCCESS);
+  }
+  int status = 0;
+  return pid > 0 && waitpid(pid, &status, 0) == pid && WIFEXITED(status) &&
+         WEXITSTATUS(status) == kInheritablePipeExitCode;
+}
+
+}  // namespace
+
+// Pipes marked close-on-exec only after their creation leak into programs
+// that other threads start in between. The signal-safe mode is limited to
+// functions that signal-safety(7) lists and therefore keeps that window.
+TEST(Subprocess, PipesAreNeverInheritableByOtherPrograms) {
+  constexpr int kSpawns = 500;
+  if (HoldsInheritablePipe()) {
+    GTEST_SKIP() << "the test process holds an inheritable pipe already";
+  }
+
+  std::atomic<bool> done{false};
+  std::atomic<int> leaks{0};
+  std::thread observer{[&done, &leaks] {
+    while (!done.load(std::memory_order_relaxed)) {
+      if (HoldsInheritablePipe()) {
+        leaks.fetch_add(1, std::memory_order_relaxed);
+      }
+    }
+  }};
+  for (int i = 0; i < kSpawns; ++i) {
+    Subprocess<> process;
+    char* argv[] = {helper_path, fail_flag, nullptr};
+    char* envp[] = {nullptr};
+    if (process.Spawn(argv, envp)) {
+      process.CloseStdin();
+      process.Wait(kTimeout);
+    }
+  }
+  done.store(true, std::memory_order_relaxed);
+  observer.join();
+
+  EXPECT_EQ(leaks.load(), 0);
+}
+#endif
+
+#if !defined(NGLOG_OS_WINDOWS) && defined(GTEST_HAS_DEATH_TEST)
+// Exits successfully if waiting for a child that has been reaped already
+// reports its exit status as unavailable.
+template <typename Process>
+[[noreturn]] void WaitForChildReapedElsewhere() {
+  // With SIGCHLD ignored, the system reaps children itself.
+  std::signal(SIGCHLD, SIG_IGN);
+  Process process;
+  char* argv[] = {helper_path, nullptr};
+  char* envp[] = {nullptr};
+  if (!process.Spawn(argv, envp)) {
+    std::exit(EXIT_FAILURE);
+  }
+  process.CloseStdin();
+  ReadStdoutToEnd(process);
+  const auto result = process.Wait(kTimeout);
+  std::exit(result.status == nglog::SubprocessWaitResult::kUnavailable
+                ? EXIT_SUCCESS
+                : EXIT_FAILURE);
+}
+
+// Exits successfully if waiting for an unresponsive child reports the timeout
+// although the system reaps the killed child itself.
+template <typename Process>
+[[noreturn]] void WaitForUnresponsiveChildReapedElsewhere() {
+  std::signal(SIGCHLD, SIG_IGN);
+  Process process;
+  char* argv[] = {helper_path, hang_flag, nullptr};
+  char* envp[] = {nullptr};
+  if (!process.Spawn(argv, envp)) {
+    std::exit(EXIT_FAILURE);
+  }
+  process.CloseStdin();
+  const auto result = process.Wait(kUnresponsiveTimeout);
+  std::exit(result.status == nglog::SubprocessWaitResult::kTimedOut
+                ? EXIT_SUCCESS
+                : EXIT_FAILURE);
+}
+
+// The exit status of a child reaped elsewhere is unavailable, and its process
+// ID may already belong to another process, which must not be killed.
+TYPED_TEST(SubprocessTest, WaitReportsAChildReapedElsewhere) {
+  EXPECT_EXIT(WaitForChildReapedElsewhere<typename TestFixture::Process>(),
+              ::testing::ExitedWithCode(EXIT_SUCCESS), "");
+}
+
+TYPED_TEST(SubprocessTest, WaitReportsTheTimeoutOfAChildReapedElsewhere) {
+  EXPECT_EXIT(
+      WaitForUnresponsiveChildReapedElsewhere<typename TestFixture::Process>(),
+      ::testing::ExitedWithCode(EXIT_SUCCESS), "");
+}
+#endif
 
 TYPED_TEST(SubprocessTest, OperationsOnAnUnspawnedInstanceAreNoOps) {
   typename TestFixture::Process process;
@@ -658,6 +940,100 @@ TEST(Subprocess, SignalSafeModeHandlesClosedStandardInput) {
   EXPECT_EQ(SubprocessWaitResult::kExited, process.Wait(kTimeout).status);
 }
 #endif  // POSIX signal-safe subprocess support
+
+#if !defined(NGLOG_OS_WINDOWS) && defined(HAVE_FORK)
+namespace {
+
+// Runs the helper through the fork() fallback of normal subprocesses, which
+// systems without posix_spawn() use, and returns what it writes to stdout.
+std::string RunWithForkFallback(char* const argv[], char* const envp[],
+                                internal::ForkFunction fork_process = &fork) {
+  int stdin_fds[2];
+  int stdout_fds[2];
+  int exec_error_fds[2];
+  // Only a failed exec writes to the error pipe, which exec closes otherwise.
+  if (pipe(stdin_fds) != 0 || pipe(stdout_fds) != 0 ||
+      pipe(exec_error_fds) != 0 ||
+      fcntl(exec_error_fds[1], F_SETFD, FD_CLOEXEC) != 0) {
+    ADD_FAILURE() << "pipe() failed with errno " << errno;
+    return {};
+  }
+
+  const pid_t pid = internal::SpawnProcessWithFork(
+      argv, envp, std::getenv("PATH"), stdin_fds[0], stdout_fds[1],
+      exec_error_fds[1], fork_process, &internal::ExecuteWithExecvp);
+  close(stdin_fds[0]);
+  close(stdin_fds[1]);
+  close(stdout_fds[1]);
+  close(exec_error_fds[1]);
+
+  std::string output;
+  char buffer[kOutputBufferSize];
+  ssize_t count;
+  while ((count = read(stdout_fds[0], buffer, sizeof(buffer))) > 0) {
+    output.append(buffer, static_cast<std::size_t>(count));
+  }
+  close(stdout_fds[0]);
+
+  int exec_error = 0;
+  EXPECT_EQ(0, read(exec_error_fds[0], &exec_error, sizeof(exec_error)))
+      << "exec failed with errno " << exec_error;
+  close(exec_error_fds[0]);
+
+  if (pid > 0) {
+    int status = 0;
+    EXPECT_EQ(pid, waitpid(pid, &status, 0));
+  } else {
+    ADD_FAILURE() << "fork() failed with errno " << errno;
+  }
+  return output;
+}
+
+}  // namespace
+
+TEST(Subprocess, ForkFallbackPassesTheEnvironment) {
+  char option[] = "--echo-env";
+  char name[] = "NGLOG_SUBPROCESS_TEST_VALUE";
+  char entry[] = "NGLOG_SUBPROCESS_TEST_VALUE=fork";
+  char* argv[] = {helper_path, option, name, nullptr};
+  char* envp[] = {entry, nullptr};
+
+  EXPECT_EQ(RunWithForkFallback(argv, envp), "fork");
+}
+
+// Without a standard error stream, the null device opens as descriptor 2 in
+// the child and must stay open as its stderr.
+TEST(Subprocess, ForkFallbackGivesTheChildStderrWhenItHasNone) {
+  char option[] = "--check-stderr";
+  char* argv[] = {helper_path, option, nullptr};
+  char* envp[] = {nullptr};
+  const auto fork_without_stderr = []() -> pid_t {
+    const pid_t pid = fork();
+    if (pid == 0) {
+      close(STDERR_FILENO);
+    }
+    return pid;
+  };
+
+  EXPECT_EQ(RunWithForkFallback(argv, envp, fork_without_stderr), "open");
+}
+
+TEST(Subprocess, ForkFallbackSearchesThePathOfThisProcess) {
+  const std::string path = helper_path;
+  const std::size_t separator = path.rfind('/');
+  ASSERT_NE(std::string::npos, separator);
+  const nglog::ScopedEnvironmentVariable search_path{
+      "PATH", path.substr(0, separator).c_str()};
+
+  std::string program = path.substr(separator + 1);
+  char option[] = "--echo-env";
+  char name[] = "NGLOG_SUBPROCESS_TEST_VALUE";
+  char entry[] = "NGLOG_SUBPROCESS_TEST_VALUE=path";
+  char* argv[] = {&program[0], option, name, nullptr};
+  char* envp[] = {entry, nullptr};
+  EXPECT_EQ(RunWithForkFallback(argv, envp), "path");
+}
+#endif  // POSIX fork() fallback
 
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
