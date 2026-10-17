@@ -8,10 +8,11 @@
 
 #include "libbacktrace.h"
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <cstring>
-#include <iostream>
 
 #include "config.h"
 #include "ng-log/flags.h"
@@ -20,56 +21,62 @@
 #include "utilities.h"
 
 using namespace nglog;
+using testing::AllOf;
+using testing::HasSubstr;
+using testing::Not;
+
+namespace {
+
+constexpr int kLine = 42;
+
+}  // namespace
 
 // Tests for FormatLibbacktraceLocation.
 
 TEST(FormatLibbacktraceLocation, ResolvedLocation) {
+  constexpr char kExpected[] = "src/libbacktrace.cc:42 ";
   char out[64];
-  const std::size_t written =
-      FormatLibbacktraceLocation("src/libbacktrace.cc", 42, out, sizeof(out));
-  EXPECT_EQ(std::strlen("src/libbacktrace.cc:42 "), written);
-  EXPECT_STREQ("src/libbacktrace.cc:42 ", out);
+  EXPECT_EQ(std::strlen(kExpected),
+            FormatLibbacktraceLocation("src/libbacktrace.cc", kLine, out,
+                                       sizeof(out)));
+  EXPECT_STREQ(kExpected, out);
 }
 
 TEST(FormatLibbacktraceLocation, RejectsNullFilename) {
   char out[64];
-  EXPECT_EQ(0U, FormatLibbacktraceLocation(nullptr, 42, out, sizeof(out)));
+  EXPECT_EQ(0U, FormatLibbacktraceLocation(nullptr, kLine, out, sizeof(out)));
 }
 
 TEST(FormatLibbacktraceLocation, RejectsEmptyFilename) {
   char out[64];
-  EXPECT_EQ(0U, FormatLibbacktraceLocation("", 42, out, sizeof(out)));
+  EXPECT_EQ(0U, FormatLibbacktraceLocation("", kLine, out, sizeof(out)));
 }
 
 TEST(FormatLibbacktraceLocation, RejectsZeroSizedOutputBuffer) {
   char out[64];
-  EXPECT_EQ(0U, FormatLibbacktraceLocation("src/libbacktrace.cc", 42, out, 0));
+  EXPECT_EQ(0U,
+            FormatLibbacktraceLocation("src/libbacktrace.cc", kLine, out, 0));
 }
 
 TEST(FormatLibbacktraceLocation, RejectsWhenOutputDoesNotFit) {
-  constexpr char kFilename[] = "src/libbacktrace.cc";
   char out[8];  // Too small for "src/libbacktrace.cc:42 " + '\0'.
-  EXPECT_EQ(0U, FormatLibbacktraceLocation(kFilename, 42, out, sizeof(out)));
+  EXPECT_EQ(0U, FormatLibbacktraceLocation("src/libbacktrace.cc", kLine, out,
+                                           sizeof(out)));
 }
 
 TEST(FormatLibbacktraceLocation, SucceedsWhenOutputExactlyFits) {
-  constexpr char kFilename[] = "a.cc";
   constexpr char kExpected[] = "a.cc:1 ";
   char out[sizeof(kExpected)];
-  const std::size_t written =
-      FormatLibbacktraceLocation(kFilename, 1, out, sizeof(out));
-  EXPECT_EQ(std::strlen(kExpected), written);
+  EXPECT_EQ(std::strlen(kExpected),
+            FormatLibbacktraceLocation("a.cc", 1, out, sizeof(out)));
   EXPECT_STREQ(kExpected, out);
 }
 
 TEST(FormatLibbacktraceLocation, RejectsWhenOutputIsOneByteTooSmall) {
-  constexpr char kFilename[] = "a.cc";
   constexpr char kExpected[] = "a.cc:1 ";
   char out[sizeof(kExpected) - 1];
-  EXPECT_EQ(0U, FormatLibbacktraceLocation(kFilename, 1, out, sizeof(out)));
+  EXPECT_EQ(0U, FormatLibbacktraceLocation("a.cc", 1, out, sizeof(out)));
 }
-
-// Tests for LibbacktraceSymbolizeCallback, exercised through Symbolize().
 
 namespace {
 
@@ -79,66 +86,58 @@ void FunctionSymbolizedForLibbacktraceTest() {
   a = a + 1;
 }
 
-const char* TrySymbolize(void* pc, char* out, std::size_t out_size) {
-  if (Symbolize(pc, out, out_size)) {
-    return out;
-  }
-  return nullptr;
+void* SymbolizedFunctionAddress() {
+  return reinterpret_cast<void*>(&FunctionSymbolizedForLibbacktraceTest);
 }
 
 }  // namespace
 
-TEST(LibbacktraceSymbolizeCallback, ResolvesFileAndLine) {
-  nglog::SetFlag(FLAGS_symbolize_line_info, true);
-  EXPECT_TRUE(InstallLibbacktraceSymbolizeCallback());
-
-  char symbol[4096];
-  const char* result = TrySymbolize(
-      reinterpret_cast<void*>(&FunctionSymbolizedForLibbacktraceTest), symbol,
-      sizeof(symbol));
-  CHECK(result != nullptr);
-  InstallSymbolizeCallback(nullptr);
-
-  if (std::strstr(result, "libbacktrace_unittest.cc:") == nullptr) {
-    std::cerr << "libbacktrace has no debug info for this binary: skipping"
-              << std::endl;
-    return;
+// Exercises LibbacktraceSymbolizeCallback through Symbolize(). Every test
+// installs the callback itself, so the fixture only restores the defaults
+// that main() establishes.
+class LibbacktraceSymbolizeCallback : public testing::Test {
+ protected:
+  static bool InstallCallback(bool line_info) {
+    nglog::SetFlag(FLAGS_symbolize_line_info, line_info);
+    return InstallLibbacktraceSymbolizeCallback();
   }
-  EXPECT_NE(nullptr,
-            std::strstr(result, "FunctionSymbolizedForLibbacktraceTest"));
+
+  void TearDown() override {
+    nglog::SetFlag(FLAGS_symbolize_line_info, true);
+    InstallSymbolizeCallback(nullptr);
+  }
+
+  static constexpr std::size_t kSymbolBufferSize = 4096;
+  char symbol_[kSymbolBufferSize];
+};
+
+TEST_F(LibbacktraceSymbolizeCallback, ResolvesFileAndLine) {
+  EXPECT_TRUE(InstallCallback(true));
+  ASSERT_TRUE(Symbolize(SymbolizedFunctionAddress(), symbol_, sizeof(symbol_)));
+
+  if (!testing::Value(symbol_, HasSubstr("libbacktrace_unittest.cc:"))) {
+    GTEST_SKIP() << "libbacktrace has no debug info for this binary";
+  }
+  EXPECT_THAT(symbol_, HasSubstr("FunctionSymbolizedForLibbacktraceTest"));
 }
 
-TEST(LibbacktraceSymbolizeCallback, DisabledByFlag) {
-  nglog::SetFlag(FLAGS_symbolize_line_info, false);
-  EXPECT_TRUE(InstallLibbacktraceSymbolizeCallback());
-
-  char symbol[4096];
-  const char* result = TrySymbolize(
-      reinterpret_cast<void*>(&FunctionSymbolizedForLibbacktraceTest), symbol,
-      sizeof(symbol));
-  CHECK(result != nullptr);
-  EXPECT_EQ(nullptr, std::strstr(result, "libbacktrace_unittest.cc:"));
-  EXPECT_NE(nullptr,
-            std::strstr(result, "FunctionSymbolizedForLibbacktraceTest"));
-
-  nglog::SetFlag(FLAGS_symbolize_line_info, true);
-  InstallSymbolizeCallback(nullptr);
+TEST_F(LibbacktraceSymbolizeCallback, DisabledByFlag) {
+  EXPECT_TRUE(InstallCallback(false));
+  ASSERT_TRUE(Symbolize(SymbolizedFunctionAddress(), symbol_, sizeof(symbol_)));
+  EXPECT_THAT(symbol_,
+              AllOf(Not(HasSubstr("libbacktrace_unittest.cc:")),
+                    HasSubstr("FunctionSymbolizedForLibbacktraceTest")));
 }
 
-TEST(LibbacktraceSymbolizeCallback, NoDebugInfoForAddress) {
-  nglog::SetFlag(FLAGS_symbolize_line_info, true);
-  EXPECT_TRUE(InstallLibbacktraceSymbolizeCallback());
-
-  char symbol[4096];
+TEST_F(LibbacktraceSymbolizeCallback, NoDebugInfoForAddress) {
+  EXPECT_TRUE(InstallCallback(true));
   // An address this low can never fall inside a loaded module, so
   // backtrace_pcinfo() reports no location for it. Exercises the "not
   // found" path in LibbacktraceSymbolizeCallback() the way a stack frame
   // in a module without debug info would.
-  const char* result =
-      TrySymbolize(reinterpret_cast<void*>(0x1), symbol, sizeof(symbol));
-  EXPECT_EQ(nullptr, result);
-
-  InstallSymbolizeCallback(nullptr);
+  constexpr std::uintptr_t kUnmappedAddress = 0x1;
+  EXPECT_FALSE(Symbolize(reinterpret_cast<void*>(kUnmappedAddress), symbol_,
+                         sizeof(symbol_)));
 }
 
 // Tests for the SymbolizeAndDemangle() branch itself, exercised through
@@ -146,22 +145,15 @@ TEST(LibbacktraceSymbolizeCallback, NoDebugInfoForAddress) {
 
 TEST(Symbolize, RejectsZeroSizedOutputBuffer) {
   char out[1];
-  EXPECT_FALSE(Symbolize(
-      reinterpret_cast<void*>(&FunctionSymbolizedForLibbacktraceTest), out, 0));
+  EXPECT_FALSE(Symbolize(SymbolizedFunctionAddress(), out, 0));
 }
 
-TEST(Symbolize, RejectsTruncatedSymbolName) {
+TEST_F(LibbacktraceSymbolizeCallback, RejectsTruncatedSymbolName) {
+  InstallCallback(false);
   constexpr std::size_t kOutputSize = 8;
   char out[kOutputSize];
-  nglog::SetFlag(FLAGS_symbolize_line_info, false);
-  InstallLibbacktraceSymbolizeCallback();
-
-  EXPECT_FALSE(
-      Symbolize(reinterpret_cast<void*>(&FunctionSymbolizedForLibbacktraceTest),
-                out, sizeof(out), SymbolizeOptions::kNoLineNumbers));
-
-  nglog::SetFlag(FLAGS_symbolize_line_info, true);
-  InstallSymbolizeCallback(nullptr);
+  EXPECT_FALSE(Symbolize(SymbolizedFunctionAddress(), out, sizeof(out),
+                         SymbolizeOptions::kNoLineNumbers));
 }
 
 int main(int argc, char** argv) {
