@@ -88,8 +88,9 @@ determined according to the following rules.
 
 :   The directory is determined by referencing the environment variables
 
-    1.  `TMPDIR`
-    2.  `TMP`
+    1.  `TEST_TMPDIR`
+    2.  `TMPDIR`
+    3.  `TMP`
 
     if set with a fallback to `/tmp/`.
 
@@ -107,7 +108,7 @@ The default path to a log file on Linux, for instance, could be
 
     /tmp/hello_world.example.com.hamaji.log.INFO.20080709-222411.10474
 
-By default, ng-log echos `ERROR` and `FATAL` messages to standard error in
+By default, ng-log echoes `ERROR` and `FATAL` messages to standard error in
 addition to log files.
 
 ## Log Line Prefix Format
@@ -133,8 +134,8 @@ where the fields are defined as follows:
 !!! example "Default log line prefix format"
 
     ```
-    I1103 11:57:31.739339 24395 nglog.cc:2341] Command line: ./some_prog
-    I1103 11:57:31.739403 24395 nglog.cc:2342] Process id 24395
+    I20261103 11:57:31.739339 140195849348928 main.cc:41] Starting up
+    W20261103 11:57:31.739403 140195849348928 main.cc:42] Disk is full
     ```
 
 !!! note
@@ -321,7 +322,7 @@ VLOG_EVERY_N(1, 10)
       "with --v=1 or more. Present occurrence is " << nglog::COUNTER;
 VLOG_IF_EVERY_N(1, (size > 1024), 10)
    << "I’m printed on every 10th occurrence of case when size is more "
-      " than 1024, when you run the program with --v=1 or more. ";
+      "than 1024, when you run the program with --v=1 or more. "
       "Present occurrence is " << nglog::COUNTER;
 ```
 
@@ -384,15 +385,13 @@ here. In particular, the arguments may be temporary expressions which will end
 up being destroyed at the end of the apparent statement, for example:
 
 ``` cpp
-CHECK_EQ(string("abc")[1], ’b’);
+CHECK_EQ(std::string("abc")[1], 'b');
 ```
 
-The compiler reports an error if one of the arguments is a pointer and the other
-is `#!cpp nullptr`. To work around this, simply `#!cpp static_cast` `#!cpp
-nullptr` to the type of the desired pointer.
+A pointer can be compared with `#!cpp nullptr` directly:
 
 ``` cpp
-CHECK_EQ(some_ptr, static_cast<SomeType*>(nullptr));
+CHECK_EQ(some_ptr, nullptr);
 ```
 
 Better yet, use the `CHECK_NOTNULL` macro:
@@ -460,7 +459,7 @@ PCHECK(write(1, nullptr, 2) >= 0) << "Write nullptr failed";
 
 This check fails with the following error message.
 
-    F0825 185142 test.cc:22] Check failed: write(1, nullptr, 2) >= 0 Write nullptr failed: Bad address [14]
+    F20260825 18:51:42.123456 140195849348928 test.cc:22] Check failed: write(1, nullptr, 2) >= 0 Write nullptr failed: Bad address [14]
 
 ## Syslog
 

@@ -128,7 +128,7 @@
 //         "with --v=1 or more. Present occurrence is " << nglog::COUNTER;
 //   VLOG_IF_EVERY_N(1, (size > 1024), 10)
 //      << "I'm printed on every 10th occurrence of case when size is more "
-//         " than 1024, when you run the program with --v=1 or more. ";
+//         "than 1024, when you run the program with --v=1 or more. "
 //         "Present occurrence is " << nglog::COUNTER;
 //
 // The supported severity levels for macros that allow you to specify one

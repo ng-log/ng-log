@@ -121,4 +121,4 @@ ng-log is licensed under the 3-Clause BSD License. Code inherited from glog is
 copyrighted by Google Inc., later changes by the ng-log contributors. Each file
 states its copyright and license in SPDX tags as required by
 [REUSE](https://reuse.software/). The [license documentation](docs/license.md)
-lists the few files licensed differently.
+lists the file licensed differently.
