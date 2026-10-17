@@ -854,6 +854,9 @@ int* allocInt() {
 }  // namespace
 
 TEST(DeathNoAllocNewHook, logging) {
+#  ifdef NGLOG_TEST_NO_ALLOCATION_HOOKS
+  GTEST_SKIP() << "the allocation hooks are unavailable";
+#  endif
   // Avoid unused warnings under MinGW
   //
   // NOTE MSVC produces warning C4551 here if we do not take the address of the
@@ -1606,6 +1609,9 @@ void RecordMessageBufferAllocation(std::size_t size) {
 #endif
 
 TEST(Logging, ThrowingSinkReleasesThreadMessageBuffer) {
+#ifdef NGLOG_TEST_NO_ALLOCATION_HOOKS
+  GTEST_SKIP() << "the allocation hooks are unavailable";
+#endif
 #if defined(GTEST_HAS_DEATH_TEST)
   ASSERT_EXIT(
       {

@@ -126,8 +126,6 @@ jobs:
       actions: read
       contents: read
       security-events: write
-    env:
-      BUILDDIR: 'build_${{matrix.sys}}-${{matrix.env}}-C++${{matrix.std}}-${{matrix.build_type}}-${{matrix.lib}}'
     defaults:
       run:
         shell: msys2 {0}

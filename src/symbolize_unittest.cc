@@ -981,13 +981,15 @@ static const char* SymbolizeStackConsumption(void* pc, int* stack_consumed) {
 // Symbolize stack consumption should be within 4kB.
 constexpr int kStackConsumptionUpperLimit = 4096;
 
-// AddressSanitizer runs signal handlers with its own stack accounting, and
-// ThreadSanitizer defers them and runs them inside its own frames, so the
-// alternate signal stack does not reflect what Symbolize() consumes.
+// AddressSanitizer runs signal handlers with its own stack accounting,
+// ThreadSanitizer defers them and runs them inside its own frames, and
+// MemorySanitizer runs them inside its own wrapper, so the alternate signal
+// stack does not reflect what Symbolize() consumes.
 #      if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
 #        define NGLOG_TEST_SANITIZED_SIGNAL_HANDLERS 1
 #      elif defined(__has_feature)
-#        if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
+#        if __has_feature(address_sanitizer) || \
+            __has_feature(thread_sanitizer) || __has_feature(memory_sanitizer)
 #          define NGLOG_TEST_SANITIZED_SIGNAL_HANDLERS 1
 #        endif
 #      endif
@@ -1085,6 +1087,10 @@ TEST(Symbolize, PCInsideNonInlineFunction) {
 }
 
 TEST(Symbolize, PCInsideInlineFunction) {
+#    if defined(__clang__)
+  // Clang does not inline functions that take the address of a label.
+  GTEST_SKIP() << "the compiler does not inline the function under test";
+#    endif
   TestWithPCInsideInlineFunction();
 #    if !defined(TEST_WITH_LABEL_ADDRESSES)
   GTEST_SKIP() << "the compiler does not support this symbolization test";

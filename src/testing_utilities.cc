@@ -310,6 +310,7 @@ bool UnwinderWalksPastMaxStackDumpFrames() {
 
 }  // namespace nglog
 
+#ifndef NGLOG_TEST_NO_ALLOCATION_HOOKS
 // noinline prevents a -Wmismatched-new-delete false positive: GCC loses
 // track of the malloc/free pairing across inlined operator new/delete.
 // See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=103993
@@ -363,3 +364,4 @@ bool UnwinderWalksPastMaxStackDumpFrames() {
 [[gnu::noinline]] void operator delete[](void* p, std::size_t) noexcept {
   free(p);
 }
+#endif  // NGLOG_TEST_NO_ALLOCATION_HOOKS

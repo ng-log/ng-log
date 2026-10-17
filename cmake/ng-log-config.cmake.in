@@ -70,23 +70,25 @@ if (ng-log_experimental_FOUND AND NOT TARGET ng-log::experimental)
       set (_ng-log_QUIET)
     endif (ng-log_FIND_QUIETLY)
 
-    nglog_check_experimental_logging (_ng-log_EXPERIMENTAL_LOGGING_COMPILES
+    # The check defines a macro named after its result, which must be a valid
+    # identifier, since compilers warn about the name otherwise.
+    nglog_check_experimental_logging (_nglog_EXPERIMENTAL_LOGGING_COMPILES
       ${_ng-log_QUIET} INCLUDES ${_ng-log_INCLUDE_DIRECTORIES})
 
     unset (_ng-log_INCLUDE_DIRECTORIES)
     unset (_ng-log_QUIET)
 
-    if (_ng-log_EXPERIMENTAL_LOGGING_COMPILES)
+    if (_nglog_EXPERIMENTAL_LOGGING_COMPILES)
       add_library (ng-log::experimental INTERFACE IMPORTED)
       set_target_properties (ng-log::experimental PROPERTIES
         INTERFACE_COMPILE_FEATURES cxx_std_20
         INTERFACE_LINK_LIBRARIES ng-log::ng-log)
-    else (_ng-log_EXPERIMENTAL_LOGGING_COMPILES)
+    else (_nglog_EXPERIMENTAL_LOGGING_COMPILES)
       set (ng-log_experimental_FOUND FALSE)
       set (_ng-log_EXPERIMENTAL_MISSING_REASON "the C++ compiler \
 ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} does not support the \
 experimental logging functions")
-    endif (_ng-log_EXPERIMENTAL_LOGGING_COMPILES)
+    endif (_nglog_EXPERIMENTAL_LOGGING_COMPILES)
   endif (NOT CMAKE_CXX_COMPILER_LOADED)
 endif (ng-log_experimental_FOUND AND NOT TARGET ng-log::experimental)
 
