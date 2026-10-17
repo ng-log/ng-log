@@ -1679,11 +1679,12 @@ if (BUILD_TESTING AND GTest_FOUND)
     -Dng-log_DIR=${ng-log_BINARY_DIR}
     --test-command ng-log_dcheck
   )
-  # There should be no output
+  # None of the debug-only statements may produce output. The build output
+  # is part of the test output, so match the messages themselves.
   set_tests_properties (dcheck_off PROPERTIES
     DISABLED $<NOT:$<CONFIG:Release,MinSizeRel>>
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:ng-log>"
-    PASS_REGULAR_EXPRESSION ""
+    FAIL_REGULAR_EXPRESSION "no output;Assert failed"
   )
 endif (BUILD_TESTING AND GTest_FOUND)
 
