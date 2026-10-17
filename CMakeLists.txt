@@ -794,14 +794,25 @@ if (WITH_FUZZING AND NOT WITH_FUZZING STREQUAL none)
     src/fuzz_demangle.cc
   )
 
+  # The demangler is not exported from the shared library. Link the objects
+  # directly instead.
+  target_compile_definitions (fuzz_demangle PRIVATE NGLOG_STATIC_DEFINE
+    $<TARGET_PROPERTY:ng-log,COMPILE_DEFINITIONS>)
+  target_compile_features (fuzz_demangle PRIVATE
+    $<TARGET_PROPERTY:ng-log,COMPILE_FEATURES>)
+  target_include_directories (fuzz_demangle PRIVATE
+    $<TARGET_PROPERTY:ng-log,INCLUDE_DIRECTORIES>)
+  target_link_libraries (fuzz_demangle PRIVATE
+    $<TARGET_OBJECTS:ng-log_internal>
+    $<TARGET_PROPERTY:ng-log,LINK_LIBRARIES>)
+
   if (WITH_FUZZING STREQUAL "ossfuzz")
     set (LIB_FUZZING_ENGINE $ENV{LIB_FUZZING_ENGINE})
-    target_link_libraries (fuzz_demangle PRIVATE ng-log ${LIB_FUZZING_ENGINE})
+    target_link_libraries (fuzz_demangle PRIVATE ${LIB_FUZZING_ENGINE})
   elseif (WITH_FUZZING STREQUAL "libfuzzer")
     # The fuzzing engine provides main() and must therefore also be linked.
     target_compile_options (fuzz_demangle PRIVATE -fsanitize=fuzzer)
     target_link_options (fuzz_demangle PRIVATE -fsanitize=fuzzer)
-    target_link_libraries (fuzz_demangle PRIVATE ng-log)
   else (WITH_FUZZING STREQUAL "libfuzzer")
     message (FATAL_ERROR "Unsupported fuzzing engine ${WITH_FUZZING}")
   endif (WITH_FUZZING STREQUAL "ossfuzz")
