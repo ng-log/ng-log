@@ -1169,17 +1169,12 @@ if (BUILD_TESTING AND GTest_FOUND)
     target_link_libraries (signalhandler_unittest PRIVATE ng-log_test)
   endif (HAVE_STACKTRACE AND HAVE_SYMBOLIZE)
 
-  # FIXME: Skip flaky test. Match GoogleTest's bound assertion message.
-  set (logging_unittest_SKIP_REGULAR_EXPRESSION
-    [=[Expected: \(time_ns\) (>=|<=) \(k(Minimum|Maximum)Period\), actual: [0-9]+ vs [0-9]+]=])
-
   gtest_discover_tests (logging_unittest
     TEST_PREFIX logging.
     DISCOVERY_TIMEOUT 30
     DISCOVERY_MODE PRE_TEST
     PROPERTIES
       TIMEOUT 30
-      SKIP_REGULAR_EXPRESSION "${logging_unittest_SKIP_REGULAR_EXPRESSION}"
   )
 
   gtest_discover_tests (preinit_warning_unittest

@@ -13,6 +13,7 @@
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
+#include <future>
 #include <initializer_list>
 #include <new>
 #include <ostream>
@@ -1132,17 +1133,17 @@ TEST(Flags, UsageCallbacksMayUseFlagRegistry) {
           nglog::GetAllFlags(&flags);
           help.Write("Usage callback completed.");
         });
-        std::atomic<bool> completed{false};
+        // A deadlock never resolves, so the generous deadline only
+        // separates it from a slow but correct run.
+        constexpr std::chrono::seconds kDeadlockTimeout{30};
+        std::promise<void> completed;
+        std::future<void> completion = completed.get_future();
         std::thread usage_thread([&completed] {
           nglog::ProgramUsage();
-          completed.store(true, std::memory_order_release);
+          completed.set_value();
         });
-        for (int attempt = 0;
-             attempt < 100 && !completed.load(std::memory_order_acquire);
-             ++attempt) {
-          std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
-        if (!completed.load(std::memory_order_acquire)) {
+        if (completion.wait_for(kDeadlockTimeout) !=
+            std::future_status::ready) {
           std::exit(EXIT_FAILURE);
         }
         usage_thread.join();
@@ -1700,7 +1701,9 @@ TEST(Flags, ProcessFlagRegistryLeavesNoFilesBehind) {
 
 // Emscripten provides fork, which always fails.
 #if defined(HAVE_FORK) && !defined(NGLOG_OS_EMSCRIPTEN)
-constexpr int kChildTimeoutMilliseconds = 5000;
+// A deadlocked child never finishes, so the generous timeout only separates it
+// from a child that a loaded machine delays.
+constexpr int kChildTimeoutMilliseconds = 30000;
 constexpr int kChildPollMilliseconds = 10;
 
 // Waits for a forked child and reports whether it exited successfully before

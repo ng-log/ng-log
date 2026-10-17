@@ -1063,6 +1063,13 @@ int main(int argc, char** argv) {
   // not affected by whatever callback InitializeLogging() may have
   // installed.
   InstallSymbolizeCallback(nullptr);
+#    if defined(HAVE_ADDR2LINE)
+  // Symbolization spawns addr2line, which a loaded machine can stall for
+  // longer than the default timeout. None of the tests measure time, so let
+  // addr2line finish however long it takes.
+  nglog::SetFlag(FLAGS_addr2line_timeout_ms,
+                 std::numeric_limits<nglog::int32>::max());
+#    endif
 #  endif  // defined(HAVE_ELF_H) || defined(HAVE_SYS_EXEC_ELF_H)
 #endif    // HAVE_SYMBOLIZE
   return RUN_ALL_TESTS();

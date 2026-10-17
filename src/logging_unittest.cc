@@ -209,18 +209,19 @@ std::string ReadFileContents(const std::string& path) {
 }
 
 #ifdef NGLOG_OS_WINDOWS
-// Bounds waiting for a child process.
-constexpr DWORD kChildProcessTimeoutMilliseconds = 10'000;
-// Time the system takes to release the locks of a terminated process.
-constexpr DWORD kLockReleaseWaitMilliseconds = 100;
+// Bounds waiting for a child process. The tests do not measure time, so the
+// bound only needs to end a hang. It stays below the CTest timeout so that a
+// hang is reported by the test itself.
+constexpr DWORD kChildProcessTimeoutMilliseconds = 20'000;
 
 // Creates a file at `ready_path` to signal the parent and keeps the process
-// alive until the parent terminates it.
+// alive until the parent terminates it. The process exits on its own only
+// after the parent stopped waiting for it.
 void SignalReadyAndHold(const char* ready_path) {
   std::ofstream ready_file{ready_path};
   ready_file << "ready";
   ready_file.close();
-  Sleep(kChildProcessTimeoutMilliseconds);
+  Sleep(2 * kChildProcessTimeoutMilliseconds);
 }
 
 OVERLAPPED MakeLogFileLockRegion() {
@@ -278,6 +279,28 @@ bool WaitForFile(const std::string& path) {
   return PollUntil([&path] {
     return GetFileAttributesA(path.c_str()) != INVALID_FILE_ATTRIBUTES;
   });
+}
+
+/**
+ * Waits until no process holds the log file lock of the file at `path`. The
+ * system releases the locks of a terminated process asynchronously.
+ */
+bool WaitForLogFileUnlock(const std::string& path) {
+  WindowsHandle file_handle{
+      CreateFileA(path.c_str(), GENERIC_READ | GENERIC_WRITE,
+                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                  nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)};
+  if (file_handle.get() == INVALID_HANDLE_VALUE) {
+    return false;
+  }
+  OVERLAPPED region = MakeLogFileLockRegion();
+  if (!PollUntil([&file_handle, &region] {
+        return TryLockLogFile(file_handle.get(), &region);
+      })) {
+    return false;
+  }
+  return UnlockFileEx(file_handle.get(), 0, kLogFileLockLength, 0, &region) !=
+         FALSE;
 }
 #endif
 
@@ -1033,7 +1056,9 @@ TEST(Logging, RegisteredSinkCanLogDuringSend) {
 TEST(Logging, RegisteredSinkCanRemoveItself) {
 #if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && \
     defined(GTEST_HAS_DEATH_TEST)
-  constexpr unsigned kDeathTestTimeoutSeconds = 2;
+  // Reports a deadlock in the child before the CTest timeout ends the test,
+  // yet leaves ample room for stalls on a loaded machine.
+  constexpr unsigned kDeathTestTimeoutSeconds = 20;
   ASSERT_EXIT(
       {
         alarm(kDeathTestTimeoutSeconds);
@@ -1049,7 +1074,9 @@ TEST(Logging, RegisteredSinkCanRemoveItself) {
 TEST(Logging, CustomLoggerCanLogDuringWrite) {
 #if defined(HAVE_SYS_WAIT_H) && defined(HAVE_UNISTD_H) && \
     defined(GTEST_HAS_DEATH_TEST)
-  constexpr unsigned kDeathTestTimeoutSeconds = 2;
+  // Reports a deadlock in the child before the CTest timeout ends the test,
+  // yet leaves ample room for stalls on a loaded machine.
+  constexpr unsigned kDeathTestTimeoutSeconds = 20;
   ASSERT_EXIT(
       {
         alarm(kDeathTestTimeoutSeconds);
@@ -1840,7 +1867,7 @@ TEST(Logging, LockedOversizedFileIsNotTruncated) {
   EXPECT_EQ(WaitForSingleObject(process_handle.get(),
                                 kChildProcessTimeoutMilliseconds),
             WAIT_OBJECT_0);
-  Sleep(kLockReleaseWaitMilliseconds);
+  EXPECT_TRUE(WaitForLogFileUnlock(dest));
 
   EXPECT_EQ(ReadFileContents(dest), original_contents);
 
@@ -1852,7 +1879,9 @@ TEST(Logging, LockedOversizedFileIsNotTruncated) {
 TEST(Logging, LogFileIsNotInheritedByChildProcesses) {
 #if defined(NGLOG_OS_WINDOWS) && defined(HAVE_SUBPROCESS)
   using namespace std::chrono_literals;
-  constexpr auto kChildTimeout = 10s;
+  // The test does not measure time, so the bound only needs to end a hang
+  // before the CTest timeout does.
+  constexpr auto kChildTimeout = 20s;
 
   nglog::ScopedFlags<> saver;
   nglog::SetFlag(FLAGS_logtostderr, false);
@@ -1923,7 +1952,7 @@ TEST(Logging, FileLockFailureReportsWindowsError) {
   EXPECT_EQ(WaitForSingleObject(process_handle.get(),
                                 kChildProcessTimeoutMilliseconds),
             WAIT_OBJECT_0);
-  Sleep(kLockReleaseWaitMilliseconds);
+  EXPECT_TRUE(WaitForLogFileUnlock(dest));
 
   LogToStderr();
   DeleteFiles(dest + "*");
@@ -2526,68 +2555,34 @@ TEST(Logging, CustomLoggerDeletionOnShutdown) {
   EXPECT_TRUE(IsLoggingInitialized());
 }
 
-namespace LogTimes {
-// Log a "message" every 10ms, 10 times. These numbers are nice compromise
-// between total running time of 100ms and the period of 10ms. The period is
-// large enough such that any CPU and OS scheduling variation shouldn't affect
-// the results from the ideal case by more than 5% (500us or 0.5ms)
-constexpr std::int64_t LOG_PERIOD_NS = 10000000;    // 10ms
-constexpr std::int64_t LOG_PERIOD_TOL_NS = 500000;  // 500us
-
-// Set an upper limit for the number of times the stream operator can be
-// called. Make sure not to exceed this number of times the stream operator is
-// called, since it is also the array size and will be indexed by the stream
-// operator.
-constexpr size_t MAX_CALLS = 10;
-}  // namespace LogTimes
-
-struct LogTimeRecorder {
-  LogTimeRecorder() = default;
-  size_t m_streamTimes{0};
-  std::chrono::steady_clock::time_point m_callTimes[LogTimes::MAX_CALLS];
-};
-// The stream operator is called by LOG_EVERY_T every time a logging event
-// occurs. Make sure to save the times for each call as they will be used later
-// to verify the time delta between each call.
-std::ostream& operator<<(std::ostream& stream, LogTimeRecorder& t) {
-  t.m_callTimes[t.m_streamTimes++] = std::chrono::steady_clock::now();
-  return stream;
-}
-// get elapsed time in nanoseconds
-std::int64_t elapsedTime_ns(const std::chrono::steady_clock::time_point& begin,
-                            const std::chrono::steady_clock::time_point& end) {
-  return std::chrono::duration_cast<std::chrono::nanoseconds>((end - begin))
-      .count();
-}
-
 TEST(Logging, LogPeriodically) {
+  using namespace std::chrono_literals;
   fprintf(stderr, "==== Test log periodically\n");
 
-  LogTimeRecorder timeLogger;
+  constexpr std::chrono::nanoseconds kPeriod = 10ms;
+  constexpr double kPeriodSeconds =
+      std::chrono::duration<double>(kPeriod).count();
+  // Converting the period to seconds and back may round it down.
+  constexpr std::chrono::nanoseconds kRoundingTolerance = 1us;
+  constexpr int kMessageCount = 10;
 
-  constexpr double LOG_PERIOD_SEC = LogTimes::LOG_PERIOD_NS * 1e-9;
-
-  while (timeLogger.m_streamTimes < LogTimes::MAX_CALLS) {
-    LOG_EVERY_T(INFO, LOG_PERIOD_SEC)
-        << timeLogger << "Timed Message #" << timeLogger.m_streamTimes;
+  int logged = 0;
+  const auto start = std::chrono::steady_clock::now();
+  while (logged < kMessageCount) {
+    LOG_EVERY_T(INFO, kPeriodSeconds) << "Timed Message #" << logged++;
   }
+  const auto elapsed = std::chrono::steady_clock::now() - start;
 
-  // Calculate time between each call in nanoseconds for higher resolution to
-  // minimize error.
-  std::int64_t nsBetweenCalls[LogTimes::MAX_CALLS - 1];
-  for (size_t i = 1; i < LogTimes::MAX_CALLS; ++i) {
-    nsBetweenCalls[i - 1] = elapsedTime_ns(timeLogger.m_callTimes[i - 1],
-                                           timeLogger.m_callTimes[i]);
-  }
-
-  constexpr std::int64_t kMinimumPeriod =
-      LogTimes::LOG_PERIOD_NS - LogTimes::LOG_PERIOD_TOL_NS;
-  constexpr std::int64_t kMaximumPeriod =
-      LogTimes::LOG_PERIOD_NS + LogTimes::LOG_PERIOD_TOL_NS;
-  for (const std::int64_t time_ns : nsBetweenCalls) {
-    EXPECT_GE(time_ns, kMinimumPeriod);
-    EXPECT_LE(time_ns, kMaximumPeriod);
-  }
+  // Consecutive messages are more than one period apart. The total duration
+  // is measured around the loop rather than between messages, so that a
+  // stall between the logging decision and a timestamp cannot shorten it. A
+  // stall only lengthens the duration, so there is no upper bound, and a
+  // macro that never logs again hangs until the CTest timeout.
+  constexpr std::chrono::nanoseconds kMinimumElapsed =
+      (kMessageCount - 1) * (kPeriod - kRoundingTolerance);
+  EXPECT_GE(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count(),
+      kMinimumElapsed.count());
 }
 
 namespace nglog {
@@ -2639,68 +2634,57 @@ class TestLogSinkWriter {
 
   // Just buffer it (can't use LOG() here).
   void Buffer(const string& message) {
-    mutex_.lock();
-    RAW_LOG(INFO, "Buffering");
-    messages_.push(message);
-    mutex_.unlock();
+    {
+      std::lock_guard<std::mutex> lock{mutex_};
+      RAW_LOG(INFO, "Buffering");
+      messages_.push(message);
+    }
     RAW_LOG(INFO, "Buffered");
   }
 
   // Wait for the buffer to clear (can't use LOG() here).
   void Wait() {
-    using namespace std::chrono_literals;
     RAW_LOG(INFO, "Waiting");
-    mutex_.lock();
-    while (!NoWork()) {
-      mutex_.unlock();
-      std::this_thread::sleep_for(1ms);
-      mutex_.lock();
-    }
+    std::unique_lock<std::mutex> lock{mutex_};
+    waiting_ = true;
+    condition_.notify_all();
+    condition_.wait(lock, [this] { return messages_.empty(); });
+    waiting_ = false;
     RAW_LOG(INFO, "Waited");
-    mutex_.unlock();
   }
 
   // Trigger thread exit.
   void Stop() {
-    std::lock_guard<std::mutex> l(mutex_);
-    should_exit_ = true;
+    {
+      std::lock_guard<std::mutex> lock{mutex_};
+      should_exit_ = true;
+    }
+    condition_.notify_all();
   }
 
   void Join() { t_.join(); }
 
  private:
-  // helpers ---------------
-
-  // For creating a "Condition".
-  bool NoWork() { return messages_.empty(); }
-  bool HaveWork() { return !messages_.empty() || should_exit_; }
-
   // Thread body; CAN use LOG() here!
   void Run() {
-    using namespace std::chrono_literals;
+    std::unique_lock<std::mutex> lock{mutex_};
     while (true) {
-      mutex_.lock();
-      while (!HaveWork()) {
-        mutex_.unlock();
-        std::this_thread::sleep_for(1ms);
-        mutex_.lock();
-      }
-      if (should_exit_ && messages_.empty()) {
-        mutex_.unlock();
+      // A message is processed only once the logging thread waits for it.
+      // This orders the output of both threads deterministically for the
+      // golden file comparison regardless of how either thread is scheduled.
+      condition_.wait(lock, [this] {
+        return should_exit_ || (waiting_ && !messages_.empty());
+      });
+      if (messages_.empty()) {
         break;
       }
-      // Give the main thread time to log its message,
-      // so that we get a reliable log capture to compare to golden file.
-      // Same for the other sleep below.
-      std::this_thread::sleep_for(20ms);
       RAW_LOG(INFO, "Sink got a messages");  // only RAW_LOG under mutex_ here
       const string message = messages_.front();
       // Normally this would be some more real/involved logging logic
       // where LOG() usage can't be eliminated,
       // e.g. pushing the message over with an RPC:
       const size_t messages_left = messages_.size() - 1;
-      mutex_.unlock();
-      std::this_thread::sleep_for(20ms);
+      lock.unlock();
       // May not use LOG while holding mutex_, because Buffer()
       // acquires mutex_, and Buffer is called from LOG(),
       // which has its own internal mutex:
@@ -2712,15 +2696,16 @@ class TestLogSinkWriter {
       // Pop only now: Wait() (and thus WaitTillSent()) treats an empty
       // queue as "message sent", so popping earlier would let it return
       // before the lines above are actually printed.
-      std::lock_guard<std::mutex> l(mutex_);
+      lock.lock();
       messages_.pop();
+      condition_.notify_all();
     }
   }
 
-  // data ---------------
-
   std::mutex mutex_;
+  std::condition_variable condition_;
   bool should_exit_{false};
+  bool waiting_{false};
   queue<string> messages_;  // messages to be logged
   std::thread t_;
 };
