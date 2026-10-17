@@ -650,7 +650,6 @@ add_library (ng-log_internal OBJECT
   ${NGLOG_SRCS}
 )
 target_compile_features (ng-log_internal PUBLIC $<TARGET_PROPERTY:ng-log,COMPILE_FEATURES>)
-set_target_properties (ng-log_internal PROPERTIES DEFINE_SYMBOL ng_log_EXPORTS)
 
 # GCC emits GNU unique symbols for some standard library templates, and glibc
 # never unloads a module that defines such a symbol. Without them, a module
@@ -752,8 +751,6 @@ if (CYGWIN OR WIN32)
     "$<BUILD_INTERFACE:${ng-log_SOURCE_DIR}/src/windows>"
     PRIVATE ${ng-log_SOURCE_DIR}/src/windows)
 endif (CYGWIN OR WIN32)
-
-set_target_properties (ng-log PROPERTIES DEFINE_SYMBOL ng_log_EXPORTS)
 
 target_include_directories (ng-log_internal PUBLIC
   $<TARGET_PROPERTY:ng-log,INCLUDE_DIRECTORIES>)
