@@ -1248,7 +1248,7 @@ static void GetFiles(const string& pattern, vector<string>* files) {
                                     &wide_pattern));
   WIN32_FIND_DATAW data;
   WindowsHandle handle{FindFirstFileW(wide_pattern.c_str(), &data)};
-  size_t index = pattern.rfind('\\');
+  size_t index = pattern.find_last_of("\\/");
   if (index == string::npos) {
     LOG(FATAL) << "No directory separator.";
   }
