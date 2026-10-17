@@ -450,7 +450,7 @@ int main(int argc, char** argv) {
   // Setting a custom prefix generator (it will use the default format so that
   // the golden outputs can be reused):
   g_prefix_attacher_data = "good data";
-  InitializeLogging(argv[0]);
+  InitializeTestLogging(argv[0]);
   InstallPrefixFormatter(&PrefixAttacher, &g_prefix_attacher_data);
 
   EXPECT_TRUE(IsLoggingInitialized());

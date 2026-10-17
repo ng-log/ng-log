@@ -745,7 +745,7 @@ TEST(Hyperlink, UriReflectsConstructorArguments) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  InitializeLogging(argv[0]);
+  InitializeTestLogging(argv[0]);
   testing::InitGoogleTest(&argc, argv);
   nglog::ParseCommandLineFlags(&argc, &argv,
                                nglog::FlagParsingMode::kRemoveFlags);

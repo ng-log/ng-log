@@ -18,6 +18,8 @@
 #include <mutex>
 #include <thread>
 
+#include "testing_utilities.h"
+
 namespace {
 
 using nglog::nglog_testing::ScopedMockLog;
@@ -144,7 +146,7 @@ TEST(ScopedMockLogTest, SinkCallbackCanLogWhileSinksChange) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  nglog::InitializeLogging(argv[0]);
+  nglog::InitializeTestLogging(argv[0]);
   // A shared GoogleMock library carries its own copy of GoogleTest, which
   // InitGoogleMock initializes instead of the one the tests run in.
   testing::InitGoogleTest(&argc, argv);

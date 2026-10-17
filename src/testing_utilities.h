@@ -31,6 +31,15 @@ const std::string& SystemTmpDir();
 const std::string& TestTmpDir();
 const std::string& TestSrcDir();
 
+/**
+ * Initializes logging with log files in the private temporary directory of
+ * the test process. Concurrently running test processes of the same program
+ * would otherwise create log files of the same name wherever process
+ * identifiers repeat, such as on Emscripten, and report the collision on
+ * stderr.
+ */
+void InitializeTestLogging(const char* program);
+
 // Placeholder pointer value logged by tests so that Munge() can normalize
 // it to a fixed golden-file placeholder regardless of the actual pointer
 // value produced at runtime.

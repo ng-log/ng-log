@@ -180,6 +180,11 @@ const std::string& TestTmpDir() {
   return dir.path();
 }
 
+void InitializeTestLogging(const char* program) {
+  SetFlag(FLAGS_log_dir, TestTmpDir());
+  InitializeLogging(program);
+}
+
 const std::string& TestSrcDir() {
   static const std::string dir = TEST_SRC_DIR;
   return dir;
