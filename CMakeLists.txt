@@ -22,13 +22,6 @@ project (ng-log
   LANGUAGES CXX
 )
 
-set (CPACK_PACKAGE_NAME ng-log)
-set (CPACK_PACKAGE_DESCRIPTION_SUMMARY "C++ logging library")
-set (CPACK_PACKAGE_VERSION_MAJOR ${ng-log_VERSION_MAJOR})
-set (CPACK_PACKAGE_VERSION_MINOR ${ng-log_VERSION_MINOR})
-set (CPACK_PACKAGE_VERSION_PATCH ${ng-log_VERSION_PATCH})
-set (CPACK_PACKAGE_VERSION ${ng-log_VERSION})
-
 list (APPEND CMAKE_MODULE_PATH ${ng-log_SOURCE_DIR}/cmake)
 
 include (CheckCXXSourceCompiles)
@@ -39,7 +32,6 @@ include (CheckStructHasMember)
 include (CheckTypeSize)
 include (CMakePackageConfigHelpers)
 include (CMakePushCheckState)
-include (CPack)
 include (CTest)
 include (GenerateExportHeader)
 include (GetCacheVariables)
@@ -1769,3 +1761,16 @@ if (CMAKE_VERSION VERSION_GREATER_EQUAL 4.3
   endif (COMMAND cmake_diagnostic)
 endif (CMAKE_VERSION VERSION_GREATER_EQUAL 4.3
   AND CMAKE_EXPERIMENTAL_GENERATE_SBOM)
+
+# CPack describes the installation of the top level project and takes the
+# install components that are defined when it is included.
+if (PROJECT_IS_TOP_LEVEL)
+  set (CPACK_PACKAGE_NAME ng-log)
+  set (CPACK_PACKAGE_DESCRIPTION_SUMMARY "C++ logging library")
+  set (CPACK_PACKAGE_VERSION_MAJOR ${ng-log_VERSION_MAJOR})
+  set (CPACK_PACKAGE_VERSION_MINOR ${ng-log_VERSION_MINOR})
+  set (CPACK_PACKAGE_VERSION_PATCH ${ng-log_VERSION_PATCH})
+  set (CPACK_PACKAGE_VERSION ${ng-log_VERSION})
+
+  include (CPack)
+endif (PROJECT_IS_TOP_LEVEL)
