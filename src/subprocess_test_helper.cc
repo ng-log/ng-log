@@ -6,7 +6,9 @@
 //
 // A tiny, dependency-free companion program for subprocess_unittest.cc. With no
 // arguments, copies stdin to stdout until EOF. With "--hang", never exits on
-// its own, to exercise Subprocess::Wait()'s forced termination. Kept
+// its own, to exercise Subprocess::Wait()'s forced termination. With
+// "--echo-arg", writes the following argument to stdout. With "--fail", exits
+// unsuccessfully. Kept
 // independent of ng-log/the platform port so it builds identically, without
 // relying on a shell or OS-shipped utility being present, on every platform
 // Subprocess itself supports.

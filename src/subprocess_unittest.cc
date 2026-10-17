@@ -10,6 +10,7 @@
 
 #include "subprocess.h"
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -43,6 +44,10 @@ namespace {
 
 constexpr std::chrono::milliseconds kTimeout = 5s;
 
+// Bounds waits on a helper that never exits on its own, which only forced
+// termination ends.
+constexpr std::chrono::milliseconds kUnresponsiveTimeout = 100ms;
+
 // Large enough to hold the echoed message with room to spare.
 constexpr std::size_t kOutputBufferSize = 64;
 
@@ -71,7 +76,22 @@ template <SubprocessMode mode>
 struct SubprocessTestMode {
   static_assert(kSubprocessModeIsSpecialized<mode>,
                 "subprocess test mode must be specialized");
+  static constexpr SubprocessMode kMode = mode;
   using Process = Subprocess<mode>;
+};
+
+// Names each typed test instantiation after the subprocess mode it covers.
+struct SubprocessModeName {
+  template <typename Mode>
+  static std::string GetName(int /*index*/) {
+    switch (Mode::kMode) {
+      case SubprocessMode::kNormal:
+        return "Normal";
+      case SubprocessMode::kSignalSafe:
+        return "SignalSafe";
+    }
+    return {};
+  }
 };
 
 template <bool signal_safe_specialized>
@@ -98,8 +118,28 @@ class SubprocessTest : public ::testing::Test {
   using Process = typename Mode::Process;
 };
 
-TYPED_TEST_SUITE(SubprocessTest, SubprocessTestTypes,
-                 ::testing::internal::DefaultNameGenerator);
+TYPED_TEST_SUITE(SubprocessTest, SubprocessTestTypes, SubprocessModeName);
+
+// Reads the standard output of |process| until end of file or until the
+// output buffer is full.
+template <typename Process>
+std::string ReadStdoutToEnd(Process& process) {
+  char out[kOutputBufferSize];
+  std::size_t total_read = 0;
+
+  while (total_read < sizeof(out)) {
+    const std::size_t bytes_read = process.ReadStdout(
+        out + total_read, sizeof(out) - total_read, kTimeout);
+
+    if (bytes_read == 0) {
+      break;
+    }
+
+    total_read += bytes_read;
+  }
+
+  return std::string(out, total_read);
+}
 
 #if !defined(NGLOG_OS_WINDOWS) && defined(HAVE__FORK) && defined(HAVE_EXECV)
 volatile sig_atomic_t atfork_prepare_called = 0;
@@ -142,21 +182,7 @@ TYPED_TEST(SubprocessTest, EchoesStdinToStdout) {
 
   process.CloseStdin();
 
-  char out[kOutputBufferSize] = {};
-  std::size_t total_read = 0;
-
-  while (total_read < sizeof(out)) {
-    const std::size_t bytes_read = process.ReadStdout(
-        out + total_read, sizeof(out) - total_read, kTimeout);
-
-    if (bytes_read == 0) {
-      break;
-    }
-
-    total_read += bytes_read;
-  }
-
-  EXPECT_EQ(std::string(out, total_read), message);
+  EXPECT_EQ(ReadStdoutToEnd(process), message);
 
   process.Wait(kTimeout);
 }
@@ -173,7 +199,7 @@ TYPED_TEST(SubprocessTest, WaitTerminatesAnUnresponsiveProcess) {
   // The helper never exits on its own with --hang. This must return
   // promptly, having forcibly terminated it, rather than hanging the
   // test itself.
-  const auto result = process.Wait(100ms);
+  const auto result = process.Wait(kUnresponsiveTimeout);
   EXPECT_EQ(nglog::SubprocessWaitResult::kTimedOut, result.status);
 }
 
@@ -235,14 +261,41 @@ class ScopedProcessEnvironment final {
   bool has_path_ = false;
 };
 
+constexpr char kExecutableExtension[] = ".exe";
+
+// Returns a mutable NUL-terminated copy of |text| for use in an argument
+// vector.
+std::vector<char> MutableCString(const std::string& text) {
+  std::vector<char> result(text.begin(), text.end());
+  result.push_back('\0');
+  return result;
+}
+
+// Spawns a process and reaps it right away. On failure, reports the error of
+// the spawn and stores it in |spawn_error| if given.
+::testing::AssertionResult SpawnAndReap(char** argv, char** envp,
+                                        DWORD* spawn_error = nullptr) {
+  Subprocess<> process;
+  const bool spawned = process.Spawn(argv, envp);
+  const DWORD error = GetLastError();
+  if (spawn_error != nullptr) {
+    *spawn_error = error;
+  }
+  if (!spawned) {
+    return ::testing::AssertionFailure() << "CreateProcessW error " << error;
+  }
+  process.CloseStdin();
+  process.Wait(kTimeout);
+  return ::testing::AssertionSuccess();
+}
+
 }  // namespace
 
 TEST(Subprocess, SpawnsFromUtf8ExecutablePath) {
   std::string temporary_path;
   ASSERT_TRUE(nglog::internal::GetTempPathUtf8(&temporary_path));
-  temporary_path += "nglog_subprocess_\xE2\x82\xAC_" +
-                    std::to_string(_getpid()) + "_" +
-                    std::to_string(GetTickCount64());
+  temporary_path += nglog::testing_internal::UniqueTemporaryName(
+      "nglog_subprocess_\xE2\x82\xAC_");
 
   std::wstring wide_directory;
   ASSERT_TRUE(nglog::internal::Utf8ToWide(
@@ -259,20 +312,12 @@ TEST(Subprocess, SpawnsFromUtf8ExecutablePath) {
   std::string executable_path;
   ASSERT_TRUE(nglog::internal::WideToUtf8(
       copied_path.data(), copied_path.size(), &executable_path));
-  std::vector<char> executable(executable_path.begin(), executable_path.end());
-  executable.push_back('\0');
+  std::vector<char> executable = MutableCString(executable_path);
   char* argv[] = {executable.data(), nullptr};
   char* envp[] = {nullptr};
-  Subprocess<> process;
-  const bool spawned = process.Spawn(argv, envp);
-  const DWORD spawn_error = GetLastError();
-  if (spawned) {
-    process.CloseStdin();
-    process.Wait(kTimeout);
-  }
+  EXPECT_TRUE(SpawnAndReap(argv, envp));
   EXPECT_TRUE(DeleteFileW(copied_path.c_str()));
   EXPECT_TRUE(RemoveDirectoryW(wide_directory.c_str()));
-  ASSERT_TRUE(spawned) << "CreateProcessW error " << spawn_error;
 }
 
 TEST(Subprocess, PassesUtf8Arguments) {
@@ -286,37 +331,19 @@ TEST(Subprocess, PassesUtf8Arguments) {
   ASSERT_TRUE(process.Spawn(argv, envp));
   process.CloseStdin();
 
-  char output[kOutputBufferSize] = {};
-  const std::size_t bytes_read =
-      process.ReadStdout(output, sizeof(output), kTimeout);
-  EXPECT_EQ(std::string(output, bytes_read), argument);
+  EXPECT_EQ(ReadStdoutToEnd(process), argument);
   process.Wait(kTimeout);
 }
 
 TEST(Subprocess, AppendsExecutableExtensionToPath) {
   std::string program_path = SUBPROCESS_HELPER_PATH;
-  constexpr char kExecutableExtension[] = ".exe";
-  constexpr std::size_t kExecutableExtensionLength =
-      sizeof(kExecutableExtension) - 1;
-  ASSERT_GT(program_path.size(), kExecutableExtensionLength);
-  ASSERT_EQ(
-      program_path.compare(program_path.size() - kExecutableExtensionLength,
-                           kExecutableExtensionLength, kExecutableExtension),
-      0);
-  program_path.resize(program_path.size() - kExecutableExtensionLength);
+  ASSERT_THAT(program_path, ::testing::EndsWith(kExecutableExtension));
+  program_path.resize(program_path.size() - std::strlen(kExecutableExtension));
 
-  std::vector<char> program(program_path.begin(), program_path.end());
-  program.push_back('\0');
+  std::vector<char> program = MutableCString(program_path);
   char* argv[] = {program.data(), nullptr};
   char* envp[] = {nullptr};
-  Subprocess<> process;
-  const bool spawned = process.Spawn(argv, envp);
-  const DWORD spawn_error = GetLastError();
-  if (spawned) {
-    process.CloseStdin();
-    process.Wait(kTimeout);
-  }
-  ASSERT_TRUE(spawned) << "CreateProcessW error " << spawn_error;
+  EXPECT_TRUE(SpawnAndReap(argv, envp));
 }
 
 TEST(Subprocess, ResolvesBareNameFromApplicationDirectory) {
@@ -324,14 +351,9 @@ TEST(Subprocess, ResolvesBareNameFromApplicationDirectory) {
   const std::size_t separator = helper_path.find_last_of("\\/");
   ASSERT_NE(separator, std::string::npos);
   std::string helper_name = helper_path.substr(separator + 1);
-  constexpr char kExecutableExtension[] = ".exe";
-  constexpr std::size_t kExecutableExtensionLength =
-      sizeof(kExecutableExtension) - 1;
-  if (helper_name.size() > kExecutableExtensionLength &&
-      helper_name.compare(helper_name.size() - kExecutableExtensionLength,
-                          kExecutableExtensionLength,
-                          kExecutableExtension) == 0) {
-    helper_name.resize(helper_name.size() - kExecutableExtensionLength);
+  if (::testing::Value(helper_name,
+                       ::testing::EndsWith(kExecutableExtension))) {
+    helper_name.resize(helper_name.size() - std::strlen(kExecutableExtension));
   }
 
   // Neither the search path nor the current directory contains the helper,
@@ -344,25 +366,17 @@ TEST(Subprocess, ResolvesBareNameFromApplicationDirectory) {
   ASSERT_TRUE(SetCurrentDirectoryW(temporary_directory.data()));
   ASSERT_TRUE(SetEnvironmentVariableW(L"PATH", nullptr));
 
-  std::vector<char> program(helper_name.begin(), helper_name.end());
-  program.push_back('\0');
+  std::vector<char> program = MutableCString(helper_name);
   char* argv[] = {program.data(), nullptr};
   char* envp[] = {nullptr};
-  Subprocess<> process;
-  const bool spawned = process.Spawn(argv, envp);
-  const DWORD spawn_error = GetLastError();
-  if (spawned) {
-    process.CloseStdin();
-    process.Wait(kTimeout);
-  }
-  ASSERT_TRUE(spawned) << "CreateProcessW error " << spawn_error;
+  EXPECT_TRUE(SpawnAndReap(argv, envp));
 }
 
 TEST(Subprocess, ResolvesExecutableBeyondMaxPath) {
   nglog::testing_internal::LongPathTestDirectory directory;
-  const std::string directory_name = "nglog_subprocess_long_path_" +
-                                     std::to_string(_getpid()) + "_" +
-                                     std::to_string(GetTickCount64());
+  const std::string directory_name =
+      nglog::testing_internal::UniqueTemporaryName(
+          "nglog_subprocess_long_path_");
   ASSERT_TRUE(directory.CreateInTemporaryDirectory(directory_name));
 
   std::wstring helper_path;
@@ -382,44 +396,32 @@ TEST(Subprocess, ResolvesExecutableBeyondMaxPath) {
   char empty_path[] = "PATH=";
   char* argv[] = {helper_name, nullptr};
   char* envp[] = {empty_path, nullptr};
-  Subprocess<> process;
-  const bool spawned = process.Spawn(argv, envp);
-  const DWORD spawn_error = GetLastError();
-  if (spawned) {
-    process.CloseStdin();
-    process.Wait(kTimeout);
-  }
-  if (!spawned && spawn_error == ERROR_INVALID_NAME &&
-      nglog::testing_internal::IsWine()) {
-    EXPECT_TRUE(DeleteFileW(copied_helper.c_str()));
-    GTEST_SKIP() << "Wine does not launch executables through extended paths";
-  }
+  DWORD spawn_error = ERROR_SUCCESS;
+  const ::testing::AssertionResult spawned =
+      SpawnAndReap(argv, envp, &spawn_error);
   if (!spawned) {
     EXPECT_TRUE(DeleteFileW(copied_helper.c_str()));
+    if (spawn_error == ERROR_INVALID_NAME &&
+        nglog::testing_internal::IsWine()) {
+      GTEST_SKIP() << "Wine does not launch executables through extended paths";
+    }
   }
-  ASSERT_TRUE(spawned) << "CreateProcessW error " << spawn_error;
+  ASSERT_TRUE(spawned);
 
   std::string copied_helper_utf8;
   ASSERT_TRUE(nglog::internal::WideToUtf8(
       copied_helper.data(), copied_helper.size(), &copied_helper_utf8));
-  std::vector<char> explicit_helper(copied_helper_utf8.begin(),
-                                    copied_helper_utf8.end());
-  explicit_helper.push_back('\0');
+  std::vector<char> explicit_helper = MutableCString(copied_helper_utf8);
   char* explicit_argv[] = {explicit_helper.data(), nullptr};
-  Subprocess<> explicit_process;
-  const bool explicit_spawned = explicit_process.Spawn(explicit_argv, envp);
-  const DWORD explicit_spawn_error = GetLastError();
-  if (explicit_spawned) {
-    explicit_process.CloseStdin();
-    explicit_process.Wait(kTimeout);
-  }
+  DWORD explicit_spawn_error = ERROR_SUCCESS;
+  const ::testing::AssertionResult explicit_spawned =
+      SpawnAndReap(explicit_argv, envp, &explicit_spawn_error);
   EXPECT_TRUE(DeleteFileW(copied_helper.c_str()));
   if (!explicit_spawned && explicit_spawn_error == ERROR_INVALID_NAME &&
       nglog::testing_internal::IsWine()) {
     GTEST_SKIP() << "Wine does not launch executables through extended paths";
   }
-  ASSERT_TRUE(explicit_spawned)
-      << "CreateProcessW error " << explicit_spawn_error;
+  ASSERT_TRUE(explicit_spawned);
 }
 #endif
 
@@ -456,7 +458,7 @@ TYPED_TEST(SubprocessTest, WriteStdinReturnsZeroOnceAfterCloseStdin) {
   process.CloseStdin();
   EXPECT_EQ(0U, process.WriteStdin("x", 1, kTimeout));
 
-  process.Wait(100ms);
+  process.Wait(kUnresponsiveTimeout);
 }
 
 TYPED_TEST(SubprocessTest, NegativeTimeoutDoesNotWaitIndefinitely) {
@@ -470,7 +472,7 @@ TYPED_TEST(SubprocessTest, NegativeTimeoutDoesNotWaitIndefinitely) {
   char out[kOutputBufferSize];
   EXPECT_EQ(0U, process.ReadStdout(out, sizeof(out), -1ms));
 
-  process.Wait(100ms);
+  process.Wait(kUnresponsiveTimeout);
 }
 
 TYPED_TEST(SubprocessTest, MoveConstructionTransfersOwnership) {
@@ -491,9 +493,7 @@ TYPED_TEST(SubprocessTest, MoveConstructionTransfersOwnership) {
             sizeof(message) - 1);
   moved.CloseStdin();
 
-  char out[kOutputBufferSize] = {};
-  const std::size_t bytes_read = moved.ReadStdout(out, sizeof(out), kTimeout);
-  EXPECT_EQ(std::string(out, bytes_read), message);
+  EXPECT_EQ(ReadStdoutToEnd(moved), message);
 
   moved.Wait(kTimeout);
 }
@@ -518,7 +518,7 @@ TYPED_TEST(SubprocessTest, MoveAssignmentReplacesAndReapsThePreviousProcess) {
   EXPECT_TRUE(second);
 
   second.CloseStdin();
-  second.Wait(100ms);
+  second.Wait(kUnresponsiveTimeout);
 }
 
 TYPED_TEST(SubprocessTest, DestructorReapsAStillRunningProcess) {
@@ -556,7 +556,7 @@ TYPED_TEST(SubprocessTest, WriteStdinTimesOutOnceThePipeFillsUp) {
   }
 
   EXPECT_TRUE(saw_timeout);
-  process.Wait(100ms);
+  process.Wait(kUnresponsiveTimeout);
 }
 
 TYPED_TEST(SubprocessTest, ZeroTimeoutReadsDoNotLoseOutput) {
@@ -605,6 +605,7 @@ TYPED_TEST(SubprocessTest, ZeroTimeoutReadsDoNotLoseOutput) {
 
   EXPECT_EQ(kTotalSize, sent);
   ASSERT_EQ(sent, received.size());
+  // Compares without printing both strings, which would flood the log.
   EXPECT_TRUE(received == expected);
 }
 
@@ -645,10 +646,7 @@ TEST(Subprocess, SignalSafeModeHandlesClosedStandardInput) {
             process.WriteStdin(message, sizeof(message) - 1, kTimeout));
   process.CloseStdin();
 
-  char output[kOutputBufferSize] = {};
-  const std::size_t bytes_read =
-      process.ReadStdout(output, sizeof(output), kTimeout);
-  EXPECT_EQ(std::string(message), std::string(output, bytes_read));
+  EXPECT_EQ(ReadStdoutToEnd(process), message);
   EXPECT_EQ(SubprocessWaitResult::kExited, process.Wait(kTimeout).status);
 }
 #endif  // POSIX signal-safe subprocess support
