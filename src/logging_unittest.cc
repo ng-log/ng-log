@@ -2042,6 +2042,8 @@ TEST(Logging, Extension) {
 
   // Release file handle for the destination file to unlock the file in Windows.
   LogToStderr();
+  // Log files of later tests must not inherit the extension.
+  SetLogFilenameExtension("");
   DeleteFiles(dest + "*");
 }
 
