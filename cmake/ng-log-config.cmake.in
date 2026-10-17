@@ -69,24 +69,26 @@ if (ng-log_experimental_FOUND AND NOT TARGET ng-log::experimental)
       set (_ng-log_QUIET)
     endif (ng-log_FIND_QUIETLY)
 
-    nglog_check_experimental_logging (_ng-log_EXPERIMENTAL_LOGGING_COMPILES
+    # The check defines a macro named after its result, which must be a valid
+    # identifier, since compilers warn about the name otherwise.
+    nglog_check_experimental_logging (_nglog_EXPERIMENTAL_LOGGING_COMPILES
       ${_ng-log_QUIET} INCLUDES ${_ng-log_INCLUDE_DIRECTORIES})
 
     # The module target provides the headers as well but breaks the generation
     # of build systems that cannot import modules.
-    if (_ng-log_EXPERIMENTAL_LOGGING_COMPILES AND _ng-log_EXPERIMENTAL_MODULE)
+    if (_nglog_EXPERIMENTAL_LOGGING_COMPILES AND _ng-log_EXPERIMENTAL_MODULE)
       nglog_check_experimental_module (_ng-log_EXPERIMENTAL_MODULE_IMPORTABLE
         ${_ng-log_QUIET})
-    else (_ng-log_EXPERIMENTAL_LOGGING_COMPILES AND _ng-log_EXPERIMENTAL_MODULE)
+    else (_nglog_EXPERIMENTAL_LOGGING_COMPILES AND _ng-log_EXPERIMENTAL_MODULE)
       set (_ng-log_EXPERIMENTAL_MODULE_IMPORTABLE OFF)
-    endif (_ng-log_EXPERIMENTAL_LOGGING_COMPILES AND _ng-log_EXPERIMENTAL_MODULE)
+    endif (_nglog_EXPERIMENTAL_LOGGING_COMPILES AND _ng-log_EXPERIMENTAL_MODULE)
 
     unset (_ng-log_INCLUDE_DIRECTORIES)
     unset (_ng-log_QUIET)
 
     if (_ng-log_EXPERIMENTAL_MODULE_IMPORTABLE)
       include (${CMAKE_CURRENT_LIST_DIR}/ng-log-experimental-targets.cmake)
-    elseif (_ng-log_EXPERIMENTAL_LOGGING_COMPILES)
+    elseif (_nglog_EXPERIMENTAL_LOGGING_COMPILES)
       add_library (ng-log::experimental INTERFACE IMPORTED)
       set_target_properties (ng-log::experimental PROPERTIES
         INTERFACE_COMPILE_FEATURES cxx_std_20

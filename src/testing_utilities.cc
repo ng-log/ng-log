@@ -261,6 +261,17 @@ std::string ScopedStreamCapture::Peek() const {
   return output;
 }
 
+bool WriteCompletely(int fd, const char* data, std::size_t size) noexcept {
+  return internal::SafeWrite(fd, data, size) ==
+         static_cast<std::intmax_t>(size);
+}
+
+void WriteToStderrOrExit(const char* data, std::size_t size) noexcept {
+  if (!WriteCompletely(fileno(stderr), data, size)) {
+    std::_Exit(kStderrWriteFailureExitCode);
+  }
+}
+
 void (*g_new_hook)() = nullptr;
 void (*g_new_size_hook)(std::size_t) = nullptr;
 void (*g_allocation_hook)(void* pointer, std::size_t size) = nullptr;
@@ -312,6 +323,7 @@ bool UnwinderWalksPastMaxStackDumpFrames() {
 
 }  // namespace nglog
 
+#ifndef NGLOG_TEST_NO_ALLOCATION_HOOKS
 // noinline prevents a -Wmismatched-new-delete false positive: GCC loses
 // track of the malloc/free pairing across inlined operator new/delete.
 // See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=103993
@@ -391,3 +403,4 @@ bool UnwinderWalksPastMaxStackDumpFrames() {
   }
   free(p);
 }
+#endif  // NGLOG_TEST_NO_ALLOCATION_HOOKS

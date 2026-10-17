@@ -19,6 +19,7 @@
 #include <cerrno>
 #include <chrono>
 #include <csignal>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -56,6 +57,7 @@
 #  include <sys/syscall.h>
 #endif  // defined(NGLOG_OS_LINUX)
 #if !defined(NGLOG_OS_WINDOWS)
+#  include <pthread.h>
 #  include <sys/wait.h>
 #endif
 #if defined(_MSC_VER)
@@ -118,35 +120,21 @@ constexpr char kReentryMarker[] = "reentering the failure signal handler";
 // Precedes every chunk of the failure dump that WriteWithMarker() receives.
 constexpr char kCustomWriterMarker[] = "custom writer: ";
 
-static void DieInThread() {
-  std::ostringstream oss;
-  oss << std::showbase << std::hex << std::this_thread::get_id();
-
-  fprintf(stderr, "%s%s\n", kDyingThreadMarker, oss.str().c_str());
-  raise(SIGFPE);
-}
-
-static void WriteToStderr(const char* data, std::size_t size) {
-  if (write(fileno(stderr), data, size) < 0) {
-    // Ignore errors.
-  }
-}
-
 // Marks every chunk of the failure dump to tell it apart from the output of
 // the default writer.
 static void WriteWithMarker(const char* data, std::size_t size) {
-  WriteToStderr(kCustomWriterMarker, sizeof(kCustomWriterMarker) - 1);
-  WriteToStderr(data, size);
+  WriteToStderrOrExit(kCustomWriterMarker, sizeof(kCustomWriterMarker) - 1);
+  WriteToStderrOrExit(data, size);
 }
 
 // The first time this runs, it crashes again with a different signal
 // while the first crash is still being dumped.
 static void WriteAndReenter(const char* data, std::size_t size) {
-  WriteToStderr(data, size);
+  WriteToStderrOrExit(data, size);
   static std::atomic_flag entered = ATOMIC_FLAG_INIT;
   if (!entered.test_and_set()) {
-    WriteToStderr(kReentryMarker, sizeof(kReentryMarker) - 1);
-    WriteToStderr("\n", 1);
+    WriteToStderrOrExit(kReentryMarker, sizeof(kReentryMarker) - 1);
+    WriteToStderrOrExit("\n", 1);
     raise(SIGTERM);
   }
 }
@@ -269,7 +257,7 @@ static bool ExpectChildDiesBySignalWithOutput(
   std::ifstream input{path, std::ios::binary};
   const std::string contents{std::istreambuf_iterator<char>{input},
                              std::istreambuf_iterator<char>{}};
-  WriteToStderr(contents.data(), contents.size());
+  WriteToStderrOrExit(contents.data(), contents.size());
 
   if (!completed) {
     return false;
@@ -549,6 +537,20 @@ MATCHER_P2(RepeatsPrintedValue, marker, field,
 
 }  // namespace
 
+// Prints the POSIX thread handle in hexadecimal like the dump does. libc++
+// prints std::thread::id in decimal regardless of the stream flags.
+static void DieInThread() {
+  const pthread_t thread = pthread_self();
+  std::uintptr_t thread_value = 0;
+  std::memcpy(&thread_value, &thread,
+              std::min(sizeof(thread_value), sizeof(thread)));
+  std::ostringstream oss;
+  oss << std::showbase << std::hex << thread_value;
+
+  fprintf(stderr, "%s%s\n", kDyingThreadMarker, oss.str().c_str());
+  raise(SIGFPE);
+}
+
 // The dump identifies the thread that received the signal.
 TEST(SignalHandler, DumpReportsDyingThread) {
   ASSERT_DEATH(
@@ -683,6 +685,9 @@ TEST(SignalHandler, ColorlogtostderrDisablesAnsi) {
 #  if defined(HAVE_STACKTRACE) && defined(HAVE_SYMBOLIZE) && \
       (defined(HAVE_ADDR2LINE) || defined(HAVE_LIBBACKTRACE))
 TEST(SignalHandler, HyperlinkedStackFramesDoNotAllocate) {
+#    ifdef NGLOG_TEST_NO_ALLOCATION_HOOKS
+  GTEST_SKIP() << "the allocation hooks are unavailable";
+#    endif
   // Hyperlinks need source locations, which builds without debug information
   // lack.
   char symbol[kSymbolBufferSize];

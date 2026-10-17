@@ -391,6 +391,9 @@ std::ptrdiff_t LiveAllocationCount() {
 }
 
 TEST(utilities, ShutdownLoggingReleasesProgramName) {
+#ifdef NGLOG_TEST_NO_ALLOCATION_HOOKS
+  GTEST_SKIP() << "the allocation hooks are unavailable";
+#endif
   static const std::string previous = ProgramInvocationShortName();
   ShutdownLogging();
   const std::string program(kLongProgramNameLength, 'p');

@@ -477,7 +477,8 @@ void DumpSignalInfo(int signal_number, siginfo_t* siginfo) {
 
   {
     // Streams use locales and may allocate, which a signal handler must not.
-    // The value matches what std::thread::id prints for POSIX threads.
+    // The value is the POSIX thread handle in hexadecimal. Standard libraries
+    // disagree on how std::thread::id prints, so it cannot serve instead.
     const pthread_t thread = pthread_self();
     std::uintptr_t thread_value = 0;
     std::memcpy(&thread_value, &thread,

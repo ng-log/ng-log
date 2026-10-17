@@ -34,12 +34,6 @@
 #include "testing_utilities.h"
 #include "utilities.h"
 
-#if defined(NGLOG_OS_WINDOWS)
-#  include <io.h>
-#else
-#  include <unistd.h>
-#endif
-
 namespace {
 
 using namespace ngx_testing;
@@ -458,18 +452,10 @@ TEST(ExperimentalSetupFatalHandlerDeathTest, SetFatalHandlerRejectsNull) {
 // Precedes every chunk of the failure dump the writer receives.
 constexpr std::string_view kFailureWriterMarker = "experimental writer: ";
 
-void WriteToStderr(std::string_view data) {
-#    if defined(NGLOG_OS_WINDOWS)
-  static_cast<void>(
-      _write(_fileno(stderr), data.data(), static_cast<unsigned>(data.size())));
-#    else
-  static_cast<void>(write(fileno(stderr), data.data(), data.size()));
-#    endif
-}
-
 void WriteWithMarker(std::string_view data) {
-  WriteToStderr(kFailureWriterMarker);
-  WriteToStderr(data);
+  nglog::WriteToStderrOrExit(kFailureWriterMarker.data(),
+                             kFailureWriterMarker.size());
+  nglog::WriteToStderrOrExit(data.data(), data.size());
 }
 
 TEST(ExperimentalSetupFailureWriterDeathTest, WriterReceivesDump) {

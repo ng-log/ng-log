@@ -156,6 +156,50 @@ class ScopedStreamCapture final {
   FileDescriptor original_;
 };
 
+/**
+ * Writes the data to the file descriptor with a single async-signal-safe
+ * system call and returns whether the call wrote all of it.
+ */
+bool WriteCompletely(int fd, const char* data, std::size_t size) noexcept;
+
+//! Exit code of a process that failed to write to stderr from a signal handler.
+constexpr int kStderrWriteFailureExitCode = 125;
+
+/**
+ * Writes the data to stderr from code that cannot report an error otherwise,
+ * such as a failure writer in a signal handler. The process exits with
+ * kStderrWriteFailureExitCode unless the data is written completely.
+ */
+void WriteToStderrOrExit(const char* data, std::size_t size) noexcept;
+
+// MemorySanitizer defines the global allocation functions itself, so a program
+// cannot replace them to observe allocations.
+#if defined(__has_feature)
+#  if __has_feature(memory_sanitizer)
+#    define NGLOG_TEST_NO_ALLOCATION_HOOKS 1
+#  endif
+#endif
+
+// ThreadSanitizer terminates a child of a multithreaded process once the child
+// starts a thread.
+#ifdef __SANITIZE_THREAD__
+#  define NGLOG_TEST_NO_THREADS_AFTER_FORK 1
+#elif defined(__has_feature)
+#  if __has_feature(thread_sanitizer)
+#    define NGLOG_TEST_NO_THREADS_AFTER_FORK 1
+#  endif
+#endif
+
+// LeakSanitizer reports what the threads of a multithreaded process own once a
+// child of the process exits, since those threads do not exist in the child.
+#ifdef __SANITIZE_ADDRESS__
+#  define NGLOG_TEST_NO_LEAK_CHECK_AFTER_FORK 1
+#elif defined(__has_feature)
+#  if __has_feature(address_sanitizer) || __has_feature(leak_sanitizer)
+#    define NGLOG_TEST_NO_LEAK_CHECK_AFTER_FORK 1
+#  endif
+#endif
+
 // Add hook for operator new to ensure there are no memory allocation.
 extern void (*g_new_hook)();
 // Receives the size of every allocation through operator new.

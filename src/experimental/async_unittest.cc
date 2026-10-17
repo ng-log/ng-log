@@ -671,6 +671,9 @@ TEST_F(ExperimentalAsync, FailedCheckTerminatesCallerAfterPendingMessages) {
 // A forked child, which lacks the logging thread of its parent, passes its
 // messages to a logging thread of its own.
 TEST_F(ExperimentalAsync, ForkedChildLogs) {
+#  ifdef NGLOG_TEST_NO_THREADS_AFTER_FORK
+  GTEST_SKIP() << "the child cannot start its logging thread";
+#  endif
   ThreadRecordingSink sink;
   ngx::Log(ngx::Async | ngx::ToSink{&sink} | ngx::SkipLogFile, "parent");
   nglog::FlushLogFiles(NGLOG_INFO);
@@ -684,6 +687,13 @@ TEST_F(ExperimentalAsync, ForkedChildLogs) {
 
 // Messages pending in the parent while it forks are sent by the parent only.
 TEST_F(ExperimentalAsync, ForkedChildDoesNotSendMessagesOfParent) {
+#  ifdef NGLOG_TEST_NO_THREADS_AFTER_FORK
+  GTEST_SKIP() << "the child cannot start its logging thread";
+#  endif
+#  ifdef NGLOG_TEST_NO_LEAK_CHECK_AFTER_FORK
+  GTEST_SKIP() << "the child leaks the messages that threads of the parent "
+                  "hold";
+#  endif
   GatedSink held;
   ngx::Log(ngx::Async | ngx::ToSink{&held} | ngx::SkipLogFile, "held");
   ASSERT_TRUE(held.WaitUntilEntered()) << "the logging thread is not held";
@@ -704,6 +714,13 @@ TEST_F(ExperimentalAsync, ForkedChildDoesNotSendMessagesOfParent) {
 // A child forked while the queue of its parent is full logs without waiting
 // for the space the messages of its parent take.
 TEST_F(ExperimentalAsync, ForkedChildStartsWithEmptyQueue) {
+#  ifdef NGLOG_TEST_NO_THREADS_AFTER_FORK
+  GTEST_SKIP() << "the child cannot start its logging thread";
+#  endif
+#  ifdef NGLOG_TEST_NO_LEAK_CHECK_AFTER_FORK
+  GTEST_SKIP() << "the child leaks the messages that threads of the parent "
+                  "hold";
+#  endif
   QueueFiller filler;
   ASSERT_TRUE(filler.holds_logging_thread())
       << "the logging thread is not held";
