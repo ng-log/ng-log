@@ -32,10 +32,9 @@
 
 using namespace nglog;
 using namespace nglog::internal;
-using testing::HasSubstr;
 using testing::IsEmpty;
 using testing::IsNull;
-using testing::Not;
+using testing::NotNull;
 #ifdef NGLOG_OS_WINDOWS
 using testing::ElementsAre;
 using testing::StrEq;
@@ -115,44 +114,64 @@ TEST(ShouldEnableHyperlinks, RejectsUnknownTerminal) {
                                       nullptr, nullptr));
 }
 
-TEST(FormatAnsiSequence, IncludesForegroundAndStyle) {
-  char buf[32];
-  ColorSpec{Color::kRed, TextStyle::kNone, Color::kDefault}.FormatAnsiSequence(
-      buf, sizeof(buf));
-  EXPECT_STREQ("\033[31m", buf);
+constexpr std::size_t kAnsiSequenceBufferSize = 32;
 
-  ColorSpec{Color::kGray, TextStyle::kNone, Color::kDefault}.FormatAnsiSequence(
-      buf, sizeof(buf));
-  EXPECT_STREQ("\033[90m", buf);
+struct AnsiSequenceCase {
+  const char* name;
+  ColorSpec spec;
+  const char* expected;
+};
 
-  ColorSpec{Color::kGreen, TextStyle::kBold, Color::kDefault}
-      .FormatAnsiSequence(buf, sizeof(buf));
-  EXPECT_STREQ("\033[1;32m", buf);
+class FormatAnsiSequenceTest : public testing::TestWithParam<AnsiSequenceCase> {
+};
+
+TEST_P(FormatAnsiSequenceTest, ProducesExpectedSequence) {
+  char buf[kAnsiSequenceBufferSize];
+  GetParam().spec.FormatAnsiSequence(buf, sizeof(buf));
+  EXPECT_STREQ(GetParam().expected, buf);
 }
 
-TEST(FormatAnsiSequence, IncludesBackground) {
-  char buf[32];
-  ColorSpec{Color::kWhite, TextStyle::kNone, Color::kBlue}.FormatAnsiSequence(
-      buf, sizeof(buf));
-  EXPECT_STREQ("\033[37;44m", buf);
-}
-
-TEST(FormatAnsiSequence, SupportsRgb) {
-  char buf[32];
-  ColorSpec{RgbColor{255, 128, 0}, TextStyle::kNone, Color::kDefault}
-      .FormatAnsiSequence(buf, sizeof(buf));
-  EXPECT_STREQ("\033[38;2;255;128;0m", buf);
-}
+INSTANTIATE_TEST_SUITE_P(
+    Styles, FormatAnsiSequenceTest,
+    testing::Values(
+        AnsiSequenceCase{
+            "Foreground",
+            ColorSpec{Color::kRed, TextStyle::kNone, Color::kDefault},
+            "\033[31m"},
+        AnsiSequenceCase{
+            "BrightForeground",
+            ColorSpec{Color::kGray, TextStyle::kNone, Color::kDefault},
+            "\033[90m"},
+        AnsiSequenceCase{
+            "ForegroundAndStyle",
+            ColorSpec{Color::kGreen, TextStyle::kBold, Color::kDefault},
+            "\033[1;32m"},
+        AnsiSequenceCase{
+            "Background",
+            ColorSpec{Color::kWhite, TextStyle::kNone, Color::kBlue},
+            "\033[37;44m"},
+        AnsiSequenceCase{
+            "Rgb",
+            ColorSpec{RgbColor{255, 128, 0}, TextStyle::kNone, Color::kDefault},
+            "\033[38;2;255;128;0m"},
+        AnsiSequenceCase{"CombinedTextStyles",
+                         ColorSpec{Color::kDefault,
+                                   TextStyle::kDim | TextStyle::kItalic |
+                                       TextStyle::kUnderline,
+                                   Color::kDefault},
+                         "\033[2;3;4;39m"}),
+    CaseName{});
 
 TEST(FormatAnsiSequence, NeverOverflowsAndAlwaysTerminates) {
-  char buf[6];
+  constexpr std::size_t kTooSmallBufferSize = 6;
+  char buf[kTooSmallBufferSize];
   ColorSpec{Color::kGreen, TextStyle::kBold, Color::kDefault}
       .FormatAnsiSequence(buf, sizeof(buf));
   // Whatever got written must be NUL-terminated within bounds.
-  EXPECT_THAT(std::memchr(buf, '\0', sizeof(buf)), Not(IsNull()));
+  EXPECT_THAT(std::memchr(buf, '\0', sizeof(buf)), NotNull());
 }
 
-TEST(FormatAnsiSequence, HandlesSmallBuffersAndAllTextStyles) {
+TEST(FormatAnsiSequence, HandlesSmallBuffers) {
   char buf[1] = {'x'};
   ColorSpec{Color::kDefault, TextStyle::kNone, Color::kDefault}
       .FormatAnsiSequence(buf, 0);
@@ -161,13 +180,6 @@ TEST(FormatAnsiSequence, HandlesSmallBuffersAndAllTextStyles) {
   ColorSpec{Color::kDefault, TextStyle::kNone, Color::kDefault}
       .FormatAnsiSequence(buf, sizeof(buf));
   EXPECT_EQ(buf[0], '\0');
-
-  char sequence[32];
-  ColorSpec{Color::kDefault,
-            TextStyle::kDim | TextStyle::kItalic | TextStyle::kUnderline,
-            Color::kDefault}
-      .FormatAnsiSequence(sequence, sizeof(sequence));
-  EXPECT_STREQ("\033[2;3;4;39m", sequence);
 }
 
 TEST(TextStyle, OperatorsUseTheEnumUnderlyingType) {
@@ -270,319 +282,237 @@ TEST(Theme, SetAndGetRoundTrip) {
   const ColorSpec spec{Color::kBrightMagenta, TextStyle::kUnderline,
                        Color::kDefault};
   theme.Set(Role::kStackFunction, spec);
-  EXPECT_EQ(theme.Get(Role::kStackFunction).foreground, spec.foreground);
+  EXPECT_EQ(theme.Get(Role::kStackFunction), spec);
 }
 
-TEST(BuildFileLineUri, AcceptsPosixAbsolutePath) {
-  char uri[256];
-  const std::string span = "/src/foo.cc:42";
-  EXPECT_TRUE(BuildFileLineUri(span.c_str(), span.size(),
-                               /*base_path=*/nullptr, /*host=*/nullptr, uri,
-                               sizeof(uri)));
-  EXPECT_STREQ("file://localhost/src/foo.cc", uri);
-}
+constexpr std::size_t kUriBufferSize = 256;
 
 TEST(BuildFileUriWithoutLine, AcceptsPosixAbsolutePath) {
-  char uri[256];
+  char uri[kUriBufferSize];
   const std::string path = "/src/foo.cc";
-  EXPECT_TRUE(BuildFileUri(path.c_str(), path.size(), /*base_path=*/nullptr,
+  ASSERT_TRUE(BuildFileUri(path.c_str(), path.size(), /*base_path=*/nullptr,
                            /*host=*/nullptr, uri, sizeof(uri)));
   EXPECT_STREQ("file://localhost/src/foo.cc", uri);
 }
 
-TEST(BuildFileLineUri, AcceptsWindowsAbsolutePath) {
-  char uri[256];
-  const std::string span = "C:\\src\\foo.cc:42";
-  EXPECT_TRUE(BuildFileLineUri(span.c_str(), span.size(),
-                               /*base_path=*/nullptr, /*host=*/nullptr, uri,
-                               sizeof(uri)));
-  EXPECT_STREQ("file://localhost/C:/src/foo.cc", uri);
+struct FileLineUriCase {
+  const char* name;
+  const char* span;
+  const char* base_path;
+  const char* host;
+  const char* expected;
+};
+
+class BuildFileLineUriAccepts : public testing::TestWithParam<FileLineUriCase> {
+};
+
+TEST_P(BuildFileLineUriAccepts, ProducesFileUriWithoutLineNumber) {
+  const FileLineUriCase& param = GetParam();
+  char uri[kUriBufferSize];
+  ASSERT_TRUE(BuildFileLineUri(param.span, std::strlen(param.span),
+                               param.base_path, param.host, uri, sizeof(uri)));
+  EXPECT_STREQ(param.expected, uri);
 }
 
-TEST(BuildFileLineUri, EncodesPathCharactersReservedByUris) {
-  char uri[256];
-  const std::string span = "/src/a file#part?.cc:42";
-  EXPECT_TRUE(BuildFileLineUri(span.c_str(), span.size(),
-                               /*base_path=*/nullptr, /*host=*/nullptr, uri,
-                               sizeof(uri)));
-  EXPECT_STREQ("file://localhost/src/a%20file%23part%3F.cc", uri);
+INSTANTIATE_TEST_SUITE_P(
+    Spans, BuildFileLineUriAccepts,
+    testing::Values(
+        FileLineUriCase{"PosixAbsolutePath", "/src/foo.cc:42", nullptr, nullptr,
+                        "file://localhost/src/foo.cc"},
+        FileLineUriCase{"WindowsAbsolutePath", "C:\\src\\foo.cc:42", nullptr,
+                        nullptr, "file://localhost/C:/src/foo.cc"},
+        FileLineUriCase{"EncodesPathCharactersReservedByUris",
+                        "/src/a file#part?.cc:42", nullptr, nullptr,
+                        "file://localhost/src/a%20file%23part%3F.cc"},
+        FileLineUriCase{"EncodesWindowsPathSeparators", "C:\\src\\a file.cc:42",
+                        nullptr, nullptr,
+                        "file://localhost/C:/src/a%20file.cc"},
+        FileLineUriCase{"NormalizesWindowsBasePathSeparators", "src\\foo.cc:42",
+                        "C:\\build", nullptr,
+                        "file://localhost/C:/build/src/foo.cc"},
+        FileLineUriCase{"UsesSuppliedHost", "/src/foo.cc:42", nullptr,
+                        "my-host", "file://my-host/src/foo.cc"},
+        FileLineUriCase{"ResolvesRelativePathAgainstBasePath", "src/foo.cc:42",
+                        "/build", nullptr, "file://localhost/build/src/foo.cc"},
+        FileLineUriCase{"DoesNotDuplicateSeparatorWhenJoiningBasePath",
+                        "src/foo.cc:42", "/build/", nullptr,
+                        "file://localhost/build/src/foo.cc"},
+        FileLineUriCase{"IgnoresBasePathWhenSpanIsAlreadyAbsolute",
+                        "/src/foo.cc:42", "/build", nullptr,
+                        "file://localhost/src/foo.cc"},
+        FileLineUriCase{"HandlesRepeatedSeparatorsInAPath",
+                        "/src//nested/foo.cc:42", nullptr, nullptr,
+                        "file://localhost/src//nested/foo.cc"},
+        // The libbacktrace and addr2line symbolize backends keep a
+        // decorative ':' after the line number as part of the "file:line"
+        // span so it renders in the same color as the rest of the span, as
+        // done by DumpStackFrameInfo() in signalhandler.cc. The line number
+        // must not leak into the URI because of that trailing ':', or the
+        // link opens a nonexistent "foo.cc:42" path instead of "foo.cc".
+        FileLineUriCase{"IgnoresTrailingDecorativeColonAfterLineNumber",
+                        "/src/foo.cc:42:", nullptr, nullptr,
+                        "file://localhost/src/foo.cc"}),
+    CaseName{});
+
+class BuildFileLineUriRejects : public testing::TestWithParam<FileLineUriCase> {
+};
+
+TEST_P(BuildFileLineUriRejects, ReturnsFalse) {
+  const FileLineUriCase& param = GetParam();
+  char uri[kUriBufferSize];
+  EXPECT_FALSE(BuildFileLineUri(param.span, std::strlen(param.span),
+                                param.base_path, param.host, uri, sizeof(uri)));
 }
 
-TEST(BuildFileLineUri, EncodesWindowsPathSeparators) {
-  char uri[256];
-  const std::string span = "C:\\src\\a file.cc:42";
-  EXPECT_TRUE(BuildFileLineUri(span.c_str(), span.size(),
-                               /*base_path=*/nullptr, /*host=*/nullptr, uri,
-                               sizeof(uri)));
-  EXPECT_STREQ("file://localhost/C:/src/a%20file.cc", uri);
-}
-
-TEST(BuildFileLineUri, NormalizesWindowsBasePathSeparators) {
-  char uri[256];
-  const std::string span = "src\\foo.cc:42";
-  EXPECT_TRUE(BuildFileLineUri(span.c_str(), span.size(), "C:\\build",
-                               /*host=*/nullptr, uri, sizeof(uri)));
-  EXPECT_STREQ("file://localhost/C:/build/src/foo.cc", uri);
-}
-
-TEST(BuildFileLineUri, UsesSuppliedHost) {
-  char uri[256];
-  const std::string span = "/src/foo.cc:42";
-  EXPECT_TRUE(BuildFileLineUri(span.c_str(), span.size(),
-                               /*base_path=*/nullptr, "my-host", uri,
-                               sizeof(uri)));
-  EXPECT_STREQ("file://my-host/src/foo.cc", uri);
-}
-
-TEST(BuildFileLineUri, ResolvesRelativePathAgainstBasePath) {
-  char uri[256];
-  const std::string span = "src/foo.cc:42";
-  EXPECT_TRUE(BuildFileLineUri(span.c_str(), span.size(), "/build",
-                               /*host=*/nullptr, uri, sizeof(uri)));
-  EXPECT_STREQ("file://localhost/build/src/foo.cc", uri);
-}
-
-TEST(BuildFileLineUri, DoesNotDuplicateSeparatorWhenJoiningBasePath) {
-  char uri[256];
-  const std::string span = "src/foo.cc:42";
-  EXPECT_TRUE(BuildFileLineUri(span.c_str(), span.size(), "/build/",
-                               /*host=*/nullptr, uri, sizeof(uri)));
-  EXPECT_STREQ("file://localhost/build/src/foo.cc", uri);
-}
-
-TEST(BuildFileLineUri, IgnoresBasePathWhenSpanIsAlreadyAbsolute) {
-  char uri[256];
-  const std::string span = "/src/foo.cc:42";
-  EXPECT_TRUE(BuildFileLineUri(span.c_str(), span.size(), "/build",
-                               /*host=*/nullptr, uri, sizeof(uri)));
-  EXPECT_STREQ("file://localhost/src/foo.cc", uri);
-}
-
-TEST(BuildFileLineUri, RejectsRelativePathWithoutBasePath) {
-  char uri[256];
-  const std::string span = "src/foo.cc:42";
-  EXPECT_FALSE(BuildFileLineUri(span.c_str(), span.size(),
-                                /*base_path=*/nullptr, /*host=*/nullptr, uri,
-                                sizeof(uri)));
-  EXPECT_FALSE(BuildFileLineUri(span.c_str(), span.size(), /*base_path=*/"",
-                                /*host=*/nullptr, uri, sizeof(uri)));
-}
-
-TEST(BuildFileLineUri, RejectsRelativeBasePath) {
-  char uri[256];
-  const std::string span = "src/foo.cc:42";
-  EXPECT_FALSE(BuildFileLineUri(span.c_str(), span.size(), "relative/build",
-                                /*host=*/nullptr, uri, sizeof(uri)));
-}
-
-TEST(BuildFileLineUri, RejectsMissingLineNumber) {
-  char uri[256];
-  const std::string span = "/src/foo.cc";
-  EXPECT_FALSE(BuildFileLineUri(span.c_str(), span.size(),
-                                /*base_path=*/nullptr, /*host=*/nullptr, uri,
-                                sizeof(uri)));
-}
+INSTANTIATE_TEST_SUITE_P(
+    Spans, BuildFileLineUriRejects,
+    testing::Values(FileLineUriCase{"RelativePathWithoutBasePath",
+                                    "src/foo.cc:42", nullptr, nullptr, nullptr},
+                    FileLineUriCase{"RelativePathWithEmptyBasePath",
+                                    "src/foo.cc:42", "", nullptr, nullptr},
+                    FileLineUriCase{"RelativeBasePath", "src/foo.cc:42",
+                                    "relative/build", nullptr, nullptr},
+                    FileLineUriCase{"MissingLineNumber", "/src/foo.cc", nullptr,
+                                    nullptr, nullptr}),
+    CaseName{});
 
 TEST(BuildFileLineUri, RejectsTooSmallBuffer) {
-  char uri[4];
+  constexpr std::size_t kTooSmallBufferSize = 4;
+  char uri[kTooSmallBufferSize];
   const std::string span = "/src/foo.cc:42";
   EXPECT_FALSE(BuildFileLineUri(span.c_str(), span.size(),
                                 /*base_path=*/nullptr, /*host=*/nullptr, uri,
                                 sizeof(uri)));
 }
 
-TEST(BuildFileLineUri, HandlesRepeatedSeparatorsInAPath) {
-  char uri[256];
-  const std::string span = "/src//nested/foo.cc:42";
-  EXPECT_TRUE(BuildFileLineUri(span.c_str(), span.size(),
-                               /*base_path=*/nullptr, /*host=*/nullptr, uri,
-                               sizeof(uri)));
-  EXPECT_STREQ("file://localhost/src//nested/foo.cc", uri);
-}
+struct SpanCase {
+  const char* name;
+  const char* span;
+};
 
-// The libbacktrace/addr2line symbolize backends keep a decorative ':'
-// after the line number as part of the "file:line" span passed here, so
-// it renders in the same color as the rest of the span (see
-// DumpStackFrameInfo() in signalhandler.cc). The line number must not
-// leak into the URI just because of that trailing ':', or the link opens
-// a nonexistent "foo.cc:42" path instead of "foo.cc".
-TEST(BuildFileLineUri, IgnoresTrailingDecorativeColonAfterLineNumber) {
-  char uri[256];
-  const std::string span = "/src/foo.cc:42:";
-  EXPECT_TRUE(BuildFileLineUri(span.c_str(), span.size(),
-                               /*base_path=*/nullptr, /*host=*/nullptr, uri,
-                               sizeof(uri)));
-  EXPECT_STREQ("file://localhost/src/foo.cc", uri);
-}
+class SplitFileLineSpanAccepts : public testing::TestWithParam<SpanCase> {};
 
-TEST(SplitFileLineSpan, SplitsPlainFileLine) {
-  const std::string span = "/src/foo.cc:42";
-  const char* path;
-  std::size_t path_length;
-  const char* line;
-  std::size_t line_length;
-  ASSERT_TRUE(SplitFileLineSpan(span.c_str(), span.size(), &path, &path_length,
+TEST_P(SplitFileLineSpanAccepts, SplitsPathAndLineNumber) {
+  const char* const span = GetParam().span;
+  const char* path = nullptr;
+  std::size_t path_length = 0;
+  const char* line = nullptr;
+  std::size_t line_length = 0;
+  ASSERT_TRUE(SplitFileLineSpan(span, std::strlen(span), &path, &path_length,
                                 &line, &line_length));
   EXPECT_EQ(std::string(path, path_length), "/src/foo.cc");
   EXPECT_EQ(std::string(line, line_length), "42");
 }
 
-TEST(SplitFileLineSpan, IgnoresTrailingDecorativeColon) {
-  const std::string span = "/src/foo.cc:42:";
-  const char* path;
-  std::size_t path_length;
-  const char* line;
-  std::size_t line_length;
-  ASSERT_TRUE(SplitFileLineSpan(span.c_str(), span.size(), &path, &path_length,
-                                &line, &line_length));
-  EXPECT_EQ(std::string(path, path_length), "/src/foo.cc");
-  EXPECT_EQ(std::string(line, line_length), "42");
-}
+INSTANTIATE_TEST_SUITE_P(
+    Spans, SplitFileLineSpanAccepts,
+    testing::Values(SpanCase{"PlainFileLine", "/src/foo.cc:42"},
+                    SpanCase{"TrailingDecorativeColon", "/src/foo.cc:42:"}),
+    CaseName{});
 
-TEST(SplitFileLineSpan, RejectsMissingLineNumber) {
-  const std::string span = "/src/foo.cc";
-  const char* path;
-  std::size_t path_length;
-  const char* line;
-  std::size_t line_length;
-  EXPECT_FALSE(SplitFileLineSpan(span.c_str(), span.size(), &path, &path_length,
+class SplitFileLineSpanRejects : public testing::TestWithParam<SpanCase> {};
+
+TEST_P(SplitFileLineSpanRejects, ReturnsFalse) {
+  const char* const span = GetParam().span;
+  const char* path = nullptr;
+  std::size_t path_length = 0;
+  const char* line = nullptr;
+  std::size_t line_length = 0;
+  EXPECT_FALSE(SplitFileLineSpan(span, std::strlen(span), &path, &path_length,
                                  &line, &line_length));
 }
 
-TEST(SplitFileLineSpan, RejectsMissingSeparator) {
-  const std::string span = "42";
-  const char* path;
-  std::size_t path_length;
-  const char* line;
-  std::size_t line_length;
-  EXPECT_FALSE(SplitFileLineSpan(span.c_str(), span.size(), &path, &path_length,
-                                 &line, &line_length));
-}
+INSTANTIATE_TEST_SUITE_P(Spans, SplitFileLineSpanRejects,
+                         testing::Values(SpanCase{"MissingLineNumber",
+                                                  "/src/foo.cc"},
+                                         SpanCase{"MissingSeparator", "42"},
+                                         SpanCase{"EmptyPath", ":42"}),
+                         CaseName{});
 
-TEST(SplitFileLineSpan, RejectsEmptyPath) {
-  const std::string span = ":42";
-  const char* path;
-  std::size_t path_length;
-  const char* line;
-  std::size_t line_length;
-  EXPECT_FALSE(SplitFileLineSpan(span.c_str(), span.size(), &path, &path_length,
-                                 &line, &line_length));
-}
+constexpr std::size_t kDisplayPathBufferSize = 128;
+constexpr std::size_t kSingleComponentLength = 44;
+constexpr std::size_t kUnseparatedPathLength = 45;
+constexpr char kOutOfTreePath[] =
+    "/usr/include/x86_64-linux-gnu/c++/16/bits/mutex.h";
 
-TEST(FormatDisplayPath, RelativeToCwd) {
-  char out[128];
-  const std::string path = "/home/user/project/src/foo.cc";
-  FormatDisplayPath(path.c_str(), path.size(), "/home/user/project",
-                    /*prefix_components=*/2, /*suffix_components=*/2, out,
+struct DisplayPathCase {
+  const char* name;
+  std::string path;
+  const char* cwd;
+  std::size_t prefix_components;
+  std::size_t suffix_components;
+  std::string expected;
+};
+
+class FormatDisplayPathTest : public testing::TestWithParam<DisplayPathCase> {};
+
+TEST_P(FormatDisplayPathTest, ProducesExpectedPath) {
+  const DisplayPathCase& param = GetParam();
+  char out[kDisplayPathBufferSize];
+  FormatDisplayPath(param.path.c_str(), param.path.size(), param.cwd,
+                    param.prefix_components, param.suffix_components, out,
                     sizeof(out));
-  EXPECT_STREQ("src/foo.cc", out);
+  EXPECT_EQ(out, param.expected);
 }
 
-TEST(FormatDisplayPath, RelativeToRootCwdKeepsFirstComponent) {
-  char out[128];
-  const std::string path = "/foo.cc";
-  FormatDisplayPath(path.c_str(), path.size(), "/",
-                    /*prefix_components=*/2, /*suffix_components=*/2, out,
-                    sizeof(out));
-  EXPECT_STREQ("foo.cc", out);
-}
-
-TEST(FormatDisplayPath, ShortPathUnchanged) {
-  char out[128];
-  const std::string path = "/usr/foo.h";
-  FormatDisplayPath(path.c_str(), path.size(), /*cwd=*/nullptr,
-                    /*prefix_components=*/2, /*suffix_components=*/2, out,
-                    sizeof(out));
-  EXPECT_STREQ("/usr/foo.h", out);
-}
-
-TEST(FormatDisplayPath, CompactsOutOfTreePathWithPrefixAndSuffix) {
-  char out[128];
-  const std::string path = "/usr/include/x86_64-linux-gnu/c++/16/bits/mutex.h";
-  FormatDisplayPath(path.c_str(), path.size(), "/home/user/project",
-                    /*prefix_components=*/2, /*suffix_components=*/2, out,
-                    sizeof(out));
-  EXPECT_STREQ("/usr/include/.../bits/mutex.h", out);
-}
-
-TEST(FormatDisplayPath, PrefixAndSuffixDoNotOverlap) {
-  char out[128];
-  // Exactly 3 components ("aaa...", "bbb...", "ccc....h"): a 2-component
-  // prefix and a 2-component suffix would each have to include the
-  // middle "bbb..." component, so it is dropped instead of being shown
-  // (and colored) twice.
-  const std::string path =
-      "/aaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbb/cccccccccc.h";
-  FormatDisplayPath(path.c_str(), path.size(), /*cwd=*/nullptr,
-                    /*prefix_components=*/2, /*suffix_components=*/2, out,
-                    sizeof(out));
-  EXPECT_THAT(std::string(out), Not(HasSubstr("aaa")));
-  // The exact match below also confirms the shared "bbb..." component
-  // was not duplicated between the prefix and the suffix.
-  EXPECT_STREQ(".../bbbbbbbbbbbbbbbbbbbb/cccccccccc.h", out);
-}
-
-TEST(FormatDisplayPath, ComponentCountsAreAdjustable) {
-  char out[128];
-  const std::string path = "/usr/include/x86_64-linux-gnu/c++/16/bits/mutex.h";
-  FormatDisplayPath(path.c_str(), path.size(), /*cwd=*/nullptr,
-                    /*prefix_components=*/1, /*suffix_components=*/1, out,
-                    sizeof(out));
-  EXPECT_STREQ("/usr/.../mutex.h", out);
-}
-
-TEST(FormatDisplayPath, ZeroPrefixComponentsOmitsPrefix) {
-  char out[128];
-  const std::string path = "/usr/include/x86_64-linux-gnu/c++/16/bits/mutex.h";
-  FormatDisplayPath(path.c_str(), path.size(), /*cwd=*/nullptr,
-                    /*prefix_components=*/0, /*suffix_components=*/2, out,
-                    sizeof(out));
-  EXPECT_STREQ(".../bits/mutex.h", out);
-}
-
-TEST(FormatDisplayPath, TooFewComponentsForPrefixShowsWholeRemainder) {
-  char out[128];
-  // A single component (no internal separator at all): there is nothing
-  // to split into a disjoint prefix and suffix, so the whole thing (minus
-  // the leading "/") is shown after the ellipsis, same as the
-  // too-few-components fallback used when the prefix and suffix would
-  // otherwise overlap.
-  const std::string path = "/" + std::string(44, 'a');
-  FormatDisplayPath(path.c_str(), path.size(), /*cwd=*/nullptr,
-                    /*prefix_components=*/2, /*suffix_components=*/2, out,
-                    sizeof(out));
-  const std::string expected = ".../" + std::string(44, 'a');
-  EXPECT_STREQ(expected.c_str(), out);
-}
-
-TEST(FormatDisplayPath, NoSeparatorAtAllShowsWholePath) {
-  char out[128];
-  // No leading "/" and no internal separator either (not a realistic
-  // absolute path, but FormatDisplayPath must still degrade gracefully
-  // rather than misbehave on it).
-  const std::string path(45, 'b');
-  FormatDisplayPath(path.c_str(), path.size(), /*cwd=*/nullptr,
-                    /*prefix_components=*/2, /*suffix_components=*/2, out,
-                    sizeof(out));
-  const std::string expected = ".../" + path;
-  EXPECT_STREQ(expected.c_str(), out);
-}
-
-TEST(FormatDisplayPath, EmptyPathProducesEmptyResult) {
-  char out[128];
-  FormatDisplayPath("", 0, /*cwd=*/nullptr, /*prefix_components=*/2,
-                    /*suffix_components=*/2, out, sizeof(out));
-  EXPECT_STREQ("", out);
-}
+INSTANTIATE_TEST_SUITE_P(
+    Paths, FormatDisplayPathTest,
+    testing::Values(
+        DisplayPathCase{"RelativeToCwd", "/home/user/project/src/foo.cc",
+                        "/home/user/project", 2, 2, "src/foo.cc"},
+        DisplayPathCase{"RelativeToRootCwdKeepsFirstComponent", "/foo.cc", "/",
+                        2, 2, "foo.cc"},
+        DisplayPathCase{"ShortPathUnchanged", "/usr/foo.h", nullptr, 2, 2,
+                        "/usr/foo.h"},
+        DisplayPathCase{"CompactsOutOfTreePathWithPrefixAndSuffix",
+                        kOutOfTreePath, "/home/user/project", 2, 2,
+                        "/usr/include/.../bits/mutex.h"},
+        // Exactly three components: a two-component prefix and a
+        // two-component suffix would each have to include the middle
+        // component, so the prefix is dropped instead of showing and
+        // coloring the middle component twice.
+        DisplayPathCase{
+            "PrefixAndSuffixDoNotOverlap",
+            "/aaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbb/cccccccccc.h", nullptr,
+            2, 2, ".../bbbbbbbbbbbbbbbbbbbb/cccccccccc.h"},
+        DisplayPathCase{"ComponentCountsAreAdjustable", kOutOfTreePath, nullptr,
+                        1, 1, "/usr/.../mutex.h"},
+        DisplayPathCase{"ZeroPrefixComponentsOmitsPrefix", kOutOfTreePath,
+                        nullptr, 0, 2, ".../bits/mutex.h"},
+        // A single component without any internal separator cannot be split
+        // into a disjoint prefix and suffix. The whole component without
+        // the leading "/" is shown after the ellipsis, the same fallback
+        // used when the prefix and suffix would otherwise overlap.
+        DisplayPathCase{"TooFewComponentsForPrefixShowsWholeRemainder",
+                        "/" + std::string(kSingleComponentLength, 'a'), nullptr,
+                        2, 2,
+                        ".../" + std::string(kSingleComponentLength, 'a')},
+        // Neither a leading "/" nor an internal separator is unrealistic for
+        // an absolute path, but the formatting must still degrade
+        // gracefully.
+        DisplayPathCase{"NoSeparatorAtAllShowsWholePath",
+                        std::string(kUnseparatedPathLength, 'b'), nullptr, 2, 2,
+                        ".../" + std::string(kUnseparatedPathLength, 'b')},
+        DisplayPathCase{"EmptyPathProducesEmptyResult", "", nullptr, 2, 2, ""}),
+    CaseName{});
 
 TEST(FormatDisplayPath, TruncatesToFitSmallBuffer) {
-  char out[8];
-  const std::string path = "/usr/include/x86_64-linux-gnu/c++/16/bits/mutex.h";
+  constexpr std::size_t kTooSmallBufferSize = 8;
+  char out[kTooSmallBufferSize];
+  const std::string path = kOutOfTreePath;
   FormatDisplayPath(path.c_str(), path.size(), /*cwd=*/nullptr,
                     /*prefix_components=*/2, /*suffix_components=*/2, out,
                     sizeof(out));
   // Never overflows the destination buffer, and always NUL-terminates.
-  EXPECT_LT(std::strlen(out), sizeof(out));
+  EXPECT_THAT(std::memchr(out, '\0', sizeof(out)), NotNull());
+}
+
+TEST(FormatDisplayPath, LeavesZeroSizedOutputUntouched) {
+  char out[1] = {'x'};
+  const std::string path = "/a/very/long/path/to/file.cc";
+  FormatDisplayPath(path.c_str(), path.size(), /*cwd=*/nullptr,
+                    /*prefix_components=*/1, /*suffix_components=*/1, out, 0);
+  EXPECT_EQ(out[0], 'x');
 }
 
 TEST(FormatSymbolizedFrame, PlacesWindowsFileLineBeforeFunction) {
@@ -590,7 +520,7 @@ TEST(FormatSymbolizedFrame, PlacesWindowsFileLineBeforeFunction) {
   constexpr char kPath[] = "D:\\a\\ng-log\\ng-log\\src\\logging.cc:2224";
   constexpr char kSymbol[] =
       "nglog::LogMessage::Fail (D:\\a\\ng-log\\ng-log\\src\\logging.cc:2224)";
-  char out[128];
+  char out[kDisplayPathBufferSize];
   const std::size_t file_line_offset = sizeof(kFunction) + 1;
   const std::size_t file_line_length = sizeof(kPath) - 1;
 
@@ -603,7 +533,7 @@ TEST(FormatSymbolizedFrame, PlacesWindowsFileLineBeforeFunction) {
 
 TEST(FormatSymbolizedFrame, KeepsPosixFileLineBeforeFunction) {
   constexpr char kSymbol[] = "/home/project/src/logging.cc:2224 function()";
-  char out[128];
+  char out[kDisplayPathBufferSize];
   constexpr std::size_t kFileLineLength =
       sizeof("/home/project/src/logging.cc:2224") - 1;
 
@@ -611,14 +541,6 @@ TEST(FormatSymbolizedFrame, KeepsPosixFileLineBeforeFunction) {
                         kFileLineLength, "/home/project", out, sizeof(out));
 
   EXPECT_STREQ("src/logging.cc:2224 function()", out);
-}
-
-TEST(FormatDisplayPath, LeavesZeroSizedOutputUntouched) {
-  char out[1] = {'x'};
-  const std::string path = "/a/very/long/path/to/file.cc";
-  FormatDisplayPath(path.c_str(), path.size(), /*cwd=*/nullptr,
-                    /*prefix_components=*/1, /*suffix_components=*/1, out, 0);
-  EXPECT_EQ(out[0], 'x');
 }
 
 TEST(SourceLocation, CachesHostAndWorkingDirectory) {
@@ -736,10 +658,10 @@ TEST(Hyperlink, UriReflectsConstructorArguments) {
   EXPECT_STREQ("file:///a", hyperlink.uri());
 
   const Hyperlink null_hyperlink(nullptr);
-  EXPECT_EQ(null_hyperlink.uri(), nullptr);
+  EXPECT_THAT(null_hyperlink.uri(), IsNull());
 
   const Hyperlink default_constructed;
-  EXPECT_EQ(default_constructed.uri(), nullptr);
+  EXPECT_THAT(default_constructed.uri(), IsNull());
 }
 
 }  // namespace

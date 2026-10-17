@@ -8,9 +8,12 @@
 #include <gtest/gtest.h>
 
 #include <cerrno>
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "internal/style_recorder.h"
 #include "internal/theme.h"
@@ -18,34 +21,41 @@
 #include "ng-log/logging.h"
 #include "testing_utilities.h"
 
+using testing::AllOf;
+using testing::ElementsAre;
+using testing::Field;
 using testing::HasSubstr;
+using testing::IsEmpty;
+using testing::IsNull;
 
 using namespace nglog;
 using namespace nglog::internal;
 
 namespace {
 
-using nglog::LogMessage;
+constexpr char kSourceFile[] = "attributes.cc";
+constexpr int kSourceLine = 42;
 
 TEST(ColorAttributes, DirectAppendPreservesPlainText) {
   std::string message;
+  const std::string text = "direct";
   const TextAttributes attributes{
       ColorSpec{Color::kYellow, TextStyle::kNone, Color::kDefault},
       Hyperlink("file:///tmp/example.cc")};
 
   {
-    LogMessage log("attributes.cc", 42, NGLOG_INFO, &message);
-    log.AppendText("direct", 6, attributes);
+    LogMessage log(kSourceFile, kSourceLine, NGLOG_INFO, &message);
+    log.AppendText(text.data(), text.size(), attributes);
   }
 
-  EXPECT_EQ(message, "direct");
+  EXPECT_EQ(message, text);
 }
 
 TEST(ColorAttributes, StyledValueWorksWithLogStream) {
   std::string message;
 
   {
-    LogMessage log("attributes.cc", 42, NGLOG_INFO, &message);
+    LogMessage log(kSourceFile, kSourceLine, NGLOG_INFO, &message);
     log.stream() << Styled(
         ColorSpec{Color::kCyan, TextStyle::kNone, Color::kDefault},
         std::string("value"));
@@ -62,8 +72,41 @@ TEST(ColorAttributes, StyledValueWorksWithOrdinaryStream) {
   EXPECT_EQ(output.str(), "value");
 }
 
+//! Copies the spans of the recorder into a container for matching.
+std::vector<StyleRecorder::Span> RecordedSpans(const StyleRecorder& recorder) {
+  std::vector<StyleRecorder::Span> spans;
+  for (std::size_t index = 0; index < recorder.size(); ++index) {
+    spans.push_back(recorder.span(index));
+  }
+  return spans;
+}
+
+MATCHER_P2(SpanCovers, begin, end,
+           "covers [" + testing::PrintToString(begin) + ", " +
+               testing::PrintToString(end) + ")") {
+  *result_listener << "covers [" << arg.begin << ", " << arg.end << ")";
+  return arg.begin == begin && arg.end == end;
+}
+
+//! Matches a recorded span covering [begin, end) in the given color.
+auto ColoredSpanCovers(std::size_t begin, std::size_t end,
+                       const ColorSpec& color) {
+  return AllOf(SpanCovers(begin, end),
+               Field(&StyleRecorder::Span::attributes,
+                     Field(&TextAttributes::color, color)));
+}
+
+//! Records the given number of adjacent single-character spans.
+void RecordAdjacentSpans(StyleRecorder& recorder, std::size_t count,
+                         const TextAttributes& attributes) {
+  for (std::size_t index = 0; index < count; ++index) {
+    recorder.Push(index, attributes);
+    recorder.Pop(index + 1);
+  }
+}
+
 TEST(ColorAttributes, NestedStylesRestoreThePreviousStyle) {
-  nglog::internal::StyleRecorder recorder;
+  StyleRecorder recorder;
   const TextAttributes outer{
       ColorSpec{Color::kYellow, TextStyle::kNone, Color::kDefault},
       Hyperlink()};
@@ -75,20 +118,14 @@ TEST(ColorAttributes, NestedStylesRestoreThePreviousStyle) {
   recorder.Pop(4);
   recorder.Pop(6);
 
-  ASSERT_EQ(recorder.size(), 3U);
-  EXPECT_EQ(recorder.span(0).begin, 0U);
-  EXPECT_EQ(recorder.span(0).end, 2U);
-  EXPECT_EQ(recorder.span(0).attributes.color, outer.color);
-  EXPECT_EQ(recorder.span(1).begin, 2U);
-  EXPECT_EQ(recorder.span(1).end, 4U);
-  EXPECT_EQ(recorder.span(1).attributes.color, inner.color);
-  EXPECT_EQ(recorder.span(2).begin, 4U);
-  EXPECT_EQ(recorder.span(2).end, 6U);
-  EXPECT_EQ(recorder.span(2).attributes.color, outer.color);
+  EXPECT_THAT(RecordedSpans(recorder),
+              ElementsAre(ColoredSpanCovers(0U, 2U, outer.color),
+                          ColoredSpanCovers(2U, 4U, inner.color),
+                          ColoredSpanCovers(4U, 6U, outer.color)));
 }
 
 TEST(ColorAttributes, HyperlinkUriIsCopiedIntoTheRecordedSpan) {
-  nglog::internal::StyleRecorder recorder;
+  StyleRecorder recorder;
   std::string uri = "file:///tmp/example.cc#part";
   recorder.Push(0, TextAttributes{ColorSpec{}, Hyperlink(uri.c_str())});
   uri = "changed";
@@ -100,26 +137,26 @@ TEST(ColorAttributes, HyperlinkUriIsCopiedIntoTheRecordedSpan) {
 }
 
 TEST(ColorAttributes, OversizedHyperlinkUriDisablesStyling) {
-  nglog::internal::StyleRecorder recorder;
-  const std::string uri(nglog::internal::StyleRecorder::kMaxUriBytes, 'u');
+  StyleRecorder recorder;
+  const std::string uri(StyleRecorder::kMaxUriBytes, 'u');
 
   recorder.Push(0, TextAttributes{ColorSpec{}, Hyperlink(uri.c_str())});
   recorder.Pop(2);
 
-  EXPECT_EQ(recorder.size(), 0U);
+  EXPECT_THAT(RecordedSpans(recorder), IsEmpty());
 }
 
 TEST(ColorAttributes, NullHyperlinkUriIsStoredWithoutAUri) {
-  nglog::internal::StyleRecorder recorder;
+  StyleRecorder recorder;
   recorder.Push(0, TextAttributes{ColorSpec{}, Hyperlink(nullptr)});
   recorder.Pop(1);
 
   ASSERT_EQ(recorder.size(), 1U);
-  EXPECT_EQ(recorder.span(0).attributes.hyperlink.uri(), nullptr);
+  EXPECT_THAT(recorder.span(0).attributes.hyperlink.uri(), IsNull());
 }
 
 TEST(ColorAttributes, ClosingAnActiveStyleRecordsItsFinalSpan) {
-  nglog::internal::StyleRecorder recorder;
+  StyleRecorder recorder;
   const TextAttributes attributes{ColorSpec{}, Hyperlink()};
 
   recorder.Pop(1);
@@ -127,74 +164,62 @@ TEST(ColorAttributes, ClosingAnActiveStyleRecordsItsFinalSpan) {
   recorder.Close(5);
   recorder.Close(6);
 
-  ASSERT_EQ(recorder.size(), 1U);
-  EXPECT_EQ(recorder.span(0).begin, 1U);
-  EXPECT_EQ(recorder.span(0).end, 5U);
+  EXPECT_THAT(RecordedSpans(recorder), ElementsAre(SpanCovers(1U, 5U)));
 }
 
 TEST(ColorAttributes, ActiveStyleLimitFallsBackToPlainText) {
-  nglog::internal::StyleRecorder recorder;
+  StyleRecorder recorder;
   const TextAttributes attributes{ColorSpec{}, Hyperlink()};
 
-  for (std::size_t index = 0;
-       index <= nglog::internal::StyleRecorder::kMaxSpans; ++index) {
+  for (std::size_t index = 0; index <= StyleRecorder::kMaxSpans; ++index) {
     recorder.Push(0, attributes);
   }
 
-  EXPECT_EQ(recorder.size(), 0U);
+  EXPECT_THAT(RecordedSpans(recorder), IsEmpty());
 }
 
-TEST(ColorAttributes, FailedRecordingRemainsDisabled) {
+TEST(ColorAttributes, FailedNestedRecordingRemainsDisabled) {
   const TextAttributes attributes{ColorSpec{}, Hyperlink()};
+  StyleRecorder recorder;
+  RecordAdjacentSpans(recorder, StyleRecorder::kMaxSpans, attributes);
 
-  nglog::internal::StyleRecorder nested_recorder;
-  for (std::size_t index = 0; index < nglog::internal::StyleRecorder::kMaxSpans;
-       ++index) {
-    nested_recorder.Push(index, attributes);
-    nested_recorder.Pop(index + 1);
-  }
-  nested_recorder.Push(0, attributes);
-  nested_recorder.Push(1, attributes);
-  EXPECT_EQ(nested_recorder.size(), 0U);
-  nested_recorder.Push(2, attributes);
-  nested_recorder.Close(3);
+  recorder.Push(0, attributes);
+  recorder.Push(1, attributes);
+  EXPECT_THAT(RecordedSpans(recorder), IsEmpty());
+  recorder.Push(2, attributes);
+  recorder.Close(3);
+  EXPECT_THAT(RecordedSpans(recorder), IsEmpty());
+}
 
-  nglog::internal::StyleRecorder close_recorder;
-  for (std::size_t index = 0; index < nglog::internal::StyleRecorder::kMaxSpans;
-       ++index) {
-    close_recorder.Push(index, attributes);
-    close_recorder.Pop(index + 1);
-  }
-  close_recorder.Push(0, attributes);
-  close_recorder.Close(1);
-  EXPECT_EQ(close_recorder.size(), 0U);
+TEST(ColorAttributes, FailedClosingRecordingRemainsDisabled) {
+  const TextAttributes attributes{ColorSpec{}, Hyperlink()};
+  StyleRecorder recorder;
+  RecordAdjacentSpans(recorder, StyleRecorder::kMaxSpans, attributes);
+
+  recorder.Push(0, attributes);
+  recorder.Close(1);
+  EXPECT_THAT(RecordedSpans(recorder), IsEmpty());
 }
 
 TEST(ColorAttributes, ExcessiveStyleSpansFallBackToPlainText) {
-  nglog::internal::StyleRecorder recorder;
-  const TextAttributes attributes{ColorSpec{}, Hyperlink()};
+  StyleRecorder recorder;
+  RecordAdjacentSpans(recorder, StyleRecorder::kMaxSpans + 1,
+                      TextAttributes{ColorSpec{}, Hyperlink()});
 
-  for (std::size_t index = 0;
-       index <= nglog::internal::StyleRecorder::kMaxSpans; ++index) {
-    recorder.Push(index, attributes);
-    recorder.Pop(index + 1);
-  }
-
-  EXPECT_EQ(recorder.size(), 0U);
+  EXPECT_THAT(RecordedSpans(recorder), IsEmpty());
 }
 
 TEST(ColorAttributes, TruncatedStyledTextRemainsBounded) {
-  const bool old_log_prefix = nglog::GetFlag(FLAGS_log_prefix);
-  nglog::SetFlag(FLAGS_log_prefix, false);
   std::string message;
   const std::string text(LogMessage::kMaxLogMessageLen + 1, 'x');
 
   {
-    LogMessage log("attributes.cc", 42, NGLOG_INFO, &message);
+    const auto flags =
+        nglog::MakeScopedFlags(nglog::MakeScopedFlag(FLAGS_log_prefix, false));
+    LogMessage log(kSourceFile, kSourceLine, NGLOG_INFO, &message);
     log.AppendText(text.data(), text.size(), TextAttributes{});
   }
 
-  nglog::SetFlag(FLAGS_log_prefix, old_log_prefix);
   EXPECT_EQ(message.size(), LogMessage::kMaxLogMessageLen - 2);
   EXPECT_EQ(message.back(), 'x');
 }
@@ -209,19 +234,23 @@ TEST(ColorAttributes, ErrnoThemeUsesDistinctRoles) {
 }
 
 #if !defined(NGLOG_OS_WINDOWS)
-TEST(ColorAttributes, DefaultPrefixRetainsPerFieldColors) {
-  ASSERT_EQ(setenv("CLICOLOR_FORCE", "1", 1), 0);
-  ASSERT_EQ(setenv("TERM", "xterm", 1), 0);
-  unsetenv("NO_COLOR");
+//! Forces colored log output to stderr and restores flags and environment.
+class ColoredStderr : public testing::Test {
+ protected:
+  void SetUp() override {
+    nglog::SetFlag(FLAGS_logtostderr, true);
+    nglog::SetFlag(FLAGS_colorlogtostderr, true);
+    nglog::SetFlag(FLAGS_log_prefix, false);
+  }
 
-  const bool old_logtostderr = nglog::GetFlag(FLAGS_logtostderr);
-  const bool old_colorlogtostderr = nglog::GetFlag(FLAGS_colorlogtostderr);
-  const bool old_log_prefix = nglog::GetFlag(FLAGS_log_prefix);
-  const int old_minloglevel = nglog::GetFlag(FLAGS_minloglevel);
-  const bool old_symbolize_hyperlinks =
-      nglog::GetFlag(FLAGS_symbolize_hyperlinks);
-  nglog::SetFlag(FLAGS_logtostderr, true);
-  nglog::SetFlag(FLAGS_colorlogtostderr, true);
+ private:
+  nglog::ScopedFlags<> saved_flags_;
+  nglog::ScopedEnvironmentVariable clicolor_force_{"CLICOLOR_FORCE", "1"};
+  nglog::ScopedEnvironmentVariable term_{"TERM", "xterm"};
+  nglog::ScopedEnvironmentVariable no_color_{"NO_COLOR", nullptr};
+};
+
+TEST_F(ColoredStderr, DefaultPrefixRetainsPerFieldColors) {
   nglog::SetFlag(FLAGS_log_prefix, true);
   nglog::SetFlag(FLAGS_minloglevel, static_cast<std::int32_t>(NGLOG_INFO));
   nglog::SetFlag(FLAGS_symbolize_hyperlinks, false);
@@ -230,37 +259,18 @@ TEST(ColorAttributes, DefaultPrefixRetainsPerFieldColors) {
   LOG(INFO) << "colored default prefix";
   const std::string output = GetCapturedTestStderr();
 
-  nglog::SetFlag(FLAGS_logtostderr, old_logtostderr);
-  nglog::SetFlag(FLAGS_colorlogtostderr, old_colorlogtostderr);
-  nglog::SetFlag(FLAGS_log_prefix, old_log_prefix);
-  nglog::SetFlag(FLAGS_minloglevel, old_minloglevel);
-  nglog::SetFlag(FLAGS_symbolize_hyperlinks, old_symbolize_hyperlinks);
-
-  EXPECT_THAT(output, HasSubstr("\033[34m"));
-  EXPECT_THAT(output, HasSubstr("\033[35m"));
-  EXPECT_THAT(output, HasSubstr("\033[36m"));
-  EXPECT_THAT(output, HasSubstr("\033[90m]"));
+  EXPECT_THAT(output, AllOf(HasSubstr("\033[34m"), HasSubstr("\033[35m"),
+                            HasSubstr("\033[36m"), HasSubstr("\033[90m]")));
 }
 
-TEST(ColorAttributes, RendersStyledSpansAndHyperlinksOnAnsiOutput) {
-  ASSERT_EQ(setenv("CLICOLOR_FORCE", "1", 1), 0);
-  ASSERT_EQ(setenv("TERM", "xterm", 1), 0);
-  ASSERT_EQ(setenv("TERM_PROGRAM", "iTerm.app", 1), 0);
-  unsetenv("NO_COLOR");
-
-  const bool old_logtostderr = nglog::GetFlag(FLAGS_logtostderr);
-  const bool old_colorlogtostderr = nglog::GetFlag(FLAGS_colorlogtostderr);
-  const bool old_log_prefix = nglog::GetFlag(FLAGS_log_prefix);
-  const bool old_symbolize_hyperlinks =
-      nglog::GetFlag(FLAGS_symbolize_hyperlinks);
-  nglog::SetFlag(FLAGS_logtostderr, true);
-  nglog::SetFlag(FLAGS_colorlogtostderr, true);
-  nglog::SetFlag(FLAGS_log_prefix, false);
+TEST_F(ColoredStderr, RendersStyledSpansAndHyperlinksOnAnsiOutput) {
+  const nglog::ScopedEnvironmentVariable term_program{"TERM_PROGRAM",
+                                                      "iTerm.app"};
   nglog::SetFlag(FLAGS_symbolize_hyperlinks, true);
 
   CaptureTestStderr();
   {
-    LogMessage log("attributes.cc", 42, NGLOG_INFO);
+    LogMessage log(kSourceFile, kSourceLine, NGLOG_INFO);
     log.stream() << "before"
                  << Styled(
                         TextAttributes{ColorSpec{Color::kCyan, TextStyle::kBold,
@@ -273,65 +283,27 @@ TEST(ColorAttributes, RendersStyledSpansAndHyperlinksOnAnsiOutput) {
   PLOG(INFO) << "plog";
   const std::string output = GetCapturedTestStderr();
 
-  nglog::SetFlag(FLAGS_logtostderr, old_logtostderr);
-  nglog::SetFlag(FLAGS_colorlogtostderr, old_colorlogtostderr);
-  nglog::SetFlag(FLAGS_log_prefix, old_log_prefix);
-  nglog::SetFlag(FLAGS_symbolize_hyperlinks, old_symbolize_hyperlinks);
-
   EXPECT_THAT(
       output,
-      HasSubstr("\033]8;;file:///tmp/example.cc\033\\\033[1;36mlinked"));
-  EXPECT_THAT(output, HasSubstr("before"));
-  EXPECT_THAT(output, HasSubstr("after"));
-  EXPECT_THAT(output, HasSubstr("\033[2;39m: "));
-  EXPECT_THAT(output,
-              HasSubstr("\033[1;36m [" + std::to_string(ENOENT) + "]\033[0m"));
+      AllOf(HasSubstr("\033]8;;file:///tmp/example.cc\033\\\033[1;36mlinked"),
+            HasSubstr("before"), HasSubstr("after"), HasSubstr("\033[2;39m: "),
+            HasSubstr("\033[1;36m [" + std::to_string(ENOENT) + "]\033[0m")));
 }
 
-TEST(ColorAttributes, ResetsAttributesBeforeTheLineEnding) {
-  ASSERT_EQ(setenv("CLICOLOR_FORCE", "1", 1), 0);
-  ASSERT_EQ(setenv("TERM", "xterm", 1), 0);
-  unsetenv("NO_COLOR");
-
-  const bool old_logtostderr = nglog::GetFlag(FLAGS_logtostderr);
-  const bool old_colorlogtostderr = nglog::GetFlag(FLAGS_colorlogtostderr);
-  const bool old_log_prefix = nglog::GetFlag(FLAGS_log_prefix);
-  nglog::SetFlag(FLAGS_logtostderr, true);
-  nglog::SetFlag(FLAGS_colorlogtostderr, true);
-  nglog::SetFlag(FLAGS_log_prefix, false);
-
+TEST_F(ColoredStderr, ResetsAttributesBeforeTheLineEnding) {
   CaptureTestStderr();
   LOG(INFO) << "colored line";
   const std::string output = GetCapturedTestStderr();
 
-  nglog::SetFlag(FLAGS_logtostderr, old_logtostderr);
-  nglog::SetFlag(FLAGS_colorlogtostderr, old_colorlogtostderr);
-  nglog::SetFlag(FLAGS_log_prefix, old_log_prefix);
-
   EXPECT_THAT(output, HasSubstr("colored line\033[0m\n"));
 }
 
-TEST(ColorAttributes, ResetsAndReappliesAttributesForEachLine) {
-  ASSERT_EQ(setenv("CLICOLOR_FORCE", "1", 1), 0);
-  ASSERT_EQ(setenv("TERM", "xterm", 1), 0);
-  unsetenv("NO_COLOR");
-
-  const bool old_logtostderr = nglog::GetFlag(FLAGS_logtostderr);
-  const bool old_colorlogtostderr = nglog::GetFlag(FLAGS_colorlogtostderr);
-  const bool old_log_prefix = nglog::GetFlag(FLAGS_log_prefix);
-  nglog::SetFlag(FLAGS_logtostderr, true);
-  nglog::SetFlag(FLAGS_colorlogtostderr, true);
-  nglog::SetFlag(FLAGS_log_prefix, false);
-
+TEST_F(ColoredStderr, ResetsAndReappliesAttributesForEachLine) {
   CaptureTestStderr();
   LOG(INFO) << Styled(
       ColorSpec{Color::kCyan, TextStyle::kBold, Color::kDefault},
       "first\nsecond");
   const std::string output = GetCapturedTestStderr();
-
-  nglog::SetFlag(FLAGS_logtostderr, old_logtostderr);
-  nglog::SetFlag(FLAGS_colorlogtostderr, old_colorlogtostderr);
-  nglog::SetFlag(FLAGS_log_prefix, old_log_prefix);
 
   EXPECT_THAT(output, HasSubstr("first\033[0m\n\033[1;36msecond\033[0m\n"));
 }
