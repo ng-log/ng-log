@@ -790,6 +790,10 @@ endif (WITH_FUZZING AND NOT WITH_FUZZING STREQUAL none)
 if (BUILD_TESTING AND GTest_FOUND)
   include (GoogleTest)
 
+  # Discover tests when running them so that the build does not depend on
+  # executing test programs.
+  set (CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE PRE_TEST)
+
   add_library (ng-log_testing_utilities OBJECT
     src/testing_utilities.cc
   )
@@ -848,7 +852,6 @@ if (BUILD_TESTING AND GTest_FOUND)
   gtest_discover_tests (platform_unittest
     TEST_PREFIX platform.
     DISCOVERY_TIMEOUT 30
-    DISCOVERY_MODE PRE_TEST
   )
 
   add_executable (flags_unittest
@@ -933,14 +936,12 @@ if (BUILD_TESTING AND GTest_FOUND)
     gtest_discover_tests (flags_library_copies_unittest
       TEST_PREFIX flags.copies.
       DISCOVERY_TIMEOUT 30
-      DISCOVERY_MODE PRE_TEST
     )
   endif (WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
   gtest_discover_tests (flags_unittest
     TEST_PREFIX flags.
     DISCOVERY_TIMEOUT 30
-    DISCOVERY_MODE PRE_TEST
   )
 
   add_executable (flags_static_initialization_unittest
@@ -972,7 +973,6 @@ if (BUILD_TESTING AND GTest_FOUND)
   gtest_discover_tests (logtostdout_unittest
     TEST_PREFIX logtostdout.
     DISCOVERY_TIMEOUT 30
-    DISCOVERY_MODE PRE_TEST
   )
 
   add_executable (stl_logging_unittest
@@ -1098,7 +1098,6 @@ if (BUILD_TESTING AND GTest_FOUND)
   gtest_discover_tests (demangle_unittest
     TEST_PREFIX demangle.
     DISCOVERY_TIMEOUT 30
-    DISCOVERY_MODE PRE_TEST
   )
 
   add_executable (color_unittest
@@ -1110,7 +1109,6 @@ if (BUILD_TESTING AND GTest_FOUND)
   gtest_discover_tests (color_unittest
     TEST_PREFIX color.
     DISCOVERY_TIMEOUT 30
-    DISCOVERY_MODE PRE_TEST
   )
 
   if (HAVE_STACKTRACE)
@@ -1131,7 +1129,6 @@ if (BUILD_TESTING AND GTest_FOUND)
   gtest_discover_tests (testing_utilities_unittest
     TEST_PREFIX testing_utilities.
     DISCOVERY_TIMEOUT 30
-    DISCOVERY_MODE PRE_TEST
   )
 
   add_executable (utilities_unittest
@@ -1143,7 +1140,6 @@ if (BUILD_TESTING AND GTest_FOUND)
   gtest_discover_tests (utilities_unittest
     TEST_PREFIX utilities.
     DISCOVERY_TIMEOUT 30
-    DISCOVERY_MODE PRE_TEST
   )
 
   if (HAVE_STACKTRACE AND HAVE_SYMBOLIZE)
@@ -1157,7 +1153,6 @@ if (BUILD_TESTING AND GTest_FOUND)
   gtest_discover_tests (logging_unittest
     TEST_PREFIX logging.
     DISCOVERY_TIMEOUT 30
-    DISCOVERY_MODE PRE_TEST
     PROPERTIES
       TIMEOUT 30
   )
@@ -1165,7 +1160,6 @@ if (BUILD_TESTING AND GTest_FOUND)
   gtest_discover_tests (preinit_warning_unittest
     TEST_PREFIX preinit_warning.
     DISCOVERY_TIMEOUT 30
-    DISCOVERY_MODE PRE_TEST
   )
 
   gtest_discover_tests (color_attributes_unittest
@@ -1177,7 +1171,6 @@ if (BUILD_TESTING AND GTest_FOUND)
     gtest_discover_tests (signalhandler_unittest
       TEST_PREFIX signalhandler.
       DISCOVERY_TIMEOUT 30
-      DISCOVERY_MODE PRE_TEST
     )
 
     if (HAVE_SIGACTION)
@@ -1195,7 +1188,6 @@ if (BUILD_TESTING AND GTest_FOUND)
     gtest_discover_tests (stacktrace_unittest
       TEST_PREFIX stacktrace.
       DISCOVERY_TIMEOUT 30
-      DISCOVERY_MODE PRE_TEST
       PROPERTIES TIMEOUT 30
     )
   endif (TARGET stacktrace_unittest)
@@ -1203,14 +1195,12 @@ if (BUILD_TESTING AND GTest_FOUND)
   gtest_discover_tests (stl_logging_unittest
     TEST_PREFIX stl_logging.
     DISCOVERY_TIMEOUT 30
-    DISCOVERY_MODE PRE_TEST
   )
 
   if (TARGET symbolize_unittest)
     gtest_discover_tests (symbolize_unittest
       TEST_PREFIX symbolize.
       DISCOVERY_TIMEOUT 30
-      DISCOVERY_MODE PRE_TEST
     )
   endif (TARGET symbolize_unittest)
 
@@ -1218,7 +1208,6 @@ if (BUILD_TESTING AND GTest_FOUND)
     gtest_discover_tests (addr2line_unittest
       TEST_PREFIX addr2line.
       DISCOVERY_TIMEOUT 30
-      DISCOVERY_MODE PRE_TEST
     )
   endif (TARGET addr2line_unittest)
 
@@ -1226,7 +1215,6 @@ if (BUILD_TESTING AND GTest_FOUND)
     gtest_discover_tests (subprocess_unittest
       TEST_PREFIX subprocess.
       DISCOVERY_TIMEOUT 30
-      DISCOVERY_MODE PRE_TEST
     )
   endif (TARGET subprocess_unittest)
 
@@ -1234,7 +1222,6 @@ if (BUILD_TESTING AND GTest_FOUND)
     gtest_discover_tests (libbacktrace_unittest
       TEST_PREFIX libbacktrace.
       DISCOVERY_TIMEOUT 30
-      DISCOVERY_MODE PRE_TEST
     )
   endif (TARGET libbacktrace_unittest)
 
@@ -1248,7 +1235,6 @@ if (BUILD_TESTING AND GTest_FOUND)
   gtest_discover_tests (mock-log_unittest
     TEST_PREFIX mock-log.
     DISCOVERY_TIMEOUT 30
-    DISCOVERY_MODE PRE_TEST
     PROPERTIES
       # Reports deadlocks without failing slow runs on overloaded runners.
       TIMEOUT 60
@@ -1388,7 +1374,6 @@ if (BUILD_TESTING AND GTest_FOUND)
   gtest_discover_tests (striplog0_unittest
     TEST_PREFIX striplog0.
     DISCOVERY_TIMEOUT 30
-    DISCOVERY_MODE PRE_TEST
   )
 
   add_executable (striplog2_unittest
@@ -1400,7 +1385,6 @@ if (BUILD_TESTING AND GTest_FOUND)
   gtest_discover_tests (striplog2_unittest
     TEST_PREFIX striplog2.
     DISCOVERY_TIMEOUT 30
-    DISCOVERY_MODE PRE_TEST
   )
 
   add_executable (striplog10_unittest
@@ -1417,7 +1401,6 @@ if (BUILD_TESTING AND GTest_FOUND)
   gtest_discover_tests (striplog10_unittest
     TEST_PREFIX striplog10.
     DISCOVERY_TIMEOUT 30
-    DISCOVERY_MODE PRE_TEST
   )
 
   add_test (NAME flags_declaration COMMAND ${CMAKE_CTEST_COMMAND}
