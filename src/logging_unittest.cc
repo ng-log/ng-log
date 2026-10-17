@@ -1320,6 +1320,34 @@ TEST(Logging, ConcurrentFullDiskWrites) {
 }
 #endif
 
+#if !defined(NGLOG_OS_WINDOWS) && defined(GTEST_HAS_DEATH_TEST)
+namespace {
+
+// Logs a colored message while the program exits.
+struct LogsColoredOnDestruction {
+  ~LogsColoredOnDestruction() { LOG(ERROR) << "logged during exit"; }
+};
+
+}  // namespace
+
+// Objects with static storage duration are destroyed after the thread_local
+// objects of the exiting thread, so logging from their destructors must not
+// rely on thread_local storage.
+TEST(Logging, ColoredLoggingDuringExitWritesTheMessage) {
+  EXPECT_EXIT(
+      {
+        setenv("CLICOLOR_FORCE", "1", 1);
+        unsetenv("NO_COLOR");
+        nglog::SetFlag(FLAGS_logtostderr, true);
+        nglog::SetFlag(FLAGS_colorlogtostderr, true);
+        LOG(ERROR) << "logged before exit";
+        static LogsColoredOnDestruction logs_on_destruction;
+        std::exit(EXIT_SUCCESS);
+      },
+      testing::ExitedWithCode(EXIT_SUCCESS), "logged during exit");
+}
+#endif
+
 #if !defined(NGLOG_OS_WINDOWS)
 TEST(Logging, ReprintFatalMessageDoesNotColorStderr) {
   const ScopedEnvironmentVariable clicolor_force{"CLICOLOR_FORCE", "1"};

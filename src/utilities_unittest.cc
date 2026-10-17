@@ -350,8 +350,10 @@ TEST(EmscriptenConsole, MapsSeverityToConsoleLevel) {
             internal::EmscriptenLogLevel::kWarn);
   EXPECT_EQ(internal::EmscriptenLogLevelForSeverity(NGLOG_ERROR),
             internal::EmscriptenLogLevel::kError);
+  // The debug console only links with assertions enabled and shows messages
+  // as warnings in browsers.
   EXPECT_EQ(internal::EmscriptenLogLevelForSeverity(NGLOG_FATAL),
-            internal::EmscriptenLogLevel::kDbg);
+            internal::EmscriptenLogLevel::kError);
 }
 
 TEST(utilities, TrimTrailingCRLFRemovesTrailingNewlines) {
@@ -1136,6 +1138,41 @@ TEST(Utf8Output, KeepsSurrogatePairsWithinWideChunks) {
     output += chunk;
   }
   EXPECT_EQ(output, message);
+}
+
+TEST(Utf8StandardStream, RedirectionToReusedHandleWritesFile) {
+  DWORD mode = 0;
+  const std::intptr_t console_handle = _get_osfhandle(_fileno(stderr));
+  if (!GetConsoleMode(reinterpret_cast<HANDLE>(console_handle), &mode)) {
+    GTEST_SKIP() << "standard error is not a console";
+  }
+  const int saved_stderr = _dup(_fileno(stderr));
+  ASSERT_NE(saved_stderr, -1);
+  constexpr char kAscii[] = "x\n";
+  ASSERT_TRUE(nglog::internal::WriteUtf8(stderr, kAscii, sizeof(kAscii) - 1));
+
+  // Reopening the stream closes the console handle, whose value the file
+  // handle usually reuses.
+  const std::string path = TestTmpDir() + "/redirected_stderr";
+  ASSERT_NE(std::freopen(path.c_str(), "wb", stderr), nullptr);
+  const bool reused = _get_osfhandle(_fileno(stderr)) == console_handle;
+  const std::string message = "caf\xC3\xA9";
+  const bool written =
+      nglog::internal::WriteUtf8(stderr, message.data(), message.size());
+  std::fflush(stderr);
+  ASSERT_EQ(_dup2(saved_stderr, _fileno(stderr)), 0);
+  _close(saved_stderr);
+
+  if (!reused) {
+    GTEST_SKIP() << "the file did not reuse the console handle value";
+  }
+  EXPECT_TRUE(written);
+  std::FILE* const input = std::fopen(path.c_str(), "rb");
+  ASSERT_NE(input, nullptr);
+  std::string contents(message.size() + 1, '\0');
+  contents.resize(std::fread(&contents[0], 1, contents.size(), input));
+  std::fclose(input);
+  EXPECT_EQ(contents, message);
 }
 
 TEST_F(Utf8ConsoleOutput, WritesUnicode) {

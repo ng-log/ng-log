@@ -16,7 +16,6 @@ enum class EmscriptenLogLevel {
   kOut,
   kWarn,
   kError,
-  kDbg,
 };
 
 EmscriptenLogLevel EmscriptenLogLevelForSeverity(LogSeverity severity);

@@ -591,6 +591,20 @@ bool IsConsoleStream(std::FILE* output, HANDLE handle) {
   return state->is_console;
 }
 
+// Windows reuses the values of closed handles, so a stream redirected to a
+// file can get the value of the console handle it replaced. Probes the handle
+// again after a failed console write and returns whether it is still a
+// console.
+bool RefreshConsoleStream(std::FILE* output, HANDLE handle) {
+  ConsoleState* const state = GetConsoleState(output);
+  const bool is_console = IsConsoleHandle(handle);
+  if (state != nullptr) {
+    state->handle = reinterpret_cast<std::intptr_t>(handle);
+    state->is_console = is_console;
+  }
+  return is_console;
+}
+
 bool WriteBytesToHandle(HANDLE handle, const char* input,
                         std::size_t input_length) {
   constexpr std::size_t kMaximumWriteLength =
@@ -759,7 +773,12 @@ bool WriteUtf8(std::FILE* output, const char* input, std::size_t input_length) {
     if (std::fflush(output) != 0) {
       return false;
     }
-    return WriteUtf8ToConsole(handle, input, input_length);
+    if (WriteUtf8ToConsole(handle, input, input_length)) {
+      return true;
+    }
+    if (RefreshConsoleStream(output, handle)) {
+      return false;
+    }
   }
 #endif
 

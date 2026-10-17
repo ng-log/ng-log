@@ -41,7 +41,9 @@ NGLOG_NO_EXPORT bool ShouldEnableHyperlinks(bool colorize,
                                             const char* konsole_version_env);
 
 #ifdef NGLOG_OS_WINDOWS
-NGLOG_NO_EXPORT WORD LegacyConsoleAttribute(ColorSpec spec);
+// Maps the spec to console attributes. Default colors keep the corresponding
+// bits of the current attributes.
+NGLOG_NO_EXPORT WORD LegacyConsoleAttribute(ColorSpec spec, WORD current);
 #endif
 
 }  // namespace internal

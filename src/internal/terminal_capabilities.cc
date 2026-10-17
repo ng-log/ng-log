@@ -41,7 +41,8 @@ EM_JS(int, nglog_get_node_environment_variable,
 #ifdef NGLOG_OS_WINDOWS
 #  include <windows.h>
 
-#  include <algorithm>
+#  include <cstdint>
+#  include <type_traits>
 #else
 #  ifdef HAVE_UNISTD_H
 #    include <unistd.h>
@@ -142,7 +143,8 @@ bool ComputeStreamSupportsHyperlinks(FILE* stream) {
 
 bool ShouldColorize(bool is_a_tty, const char* term, const char* no_color_env,
                     const char* clicolor_force_env) {
-  if (no_color_env != nullptr) {
+  // An empty NO_COLOR does not disable color, see https://no-color.org.
+  if (no_color_env != nullptr && no_color_env[0] != '\0') {
     return false;
   }
 
@@ -207,96 +209,113 @@ bool StreamSupportsHyperlinks(FILE* stream) {
 #ifdef NGLOG_OS_WINDOWS
 namespace {
 
-WORD LegacyColorBits(const ColorValue& value, bool is_background) {
-  const WORD red_bit = is_background ? BACKGROUND_RED : FOREGROUND_RED;
-  const WORD green_bit = is_background ? BACKGROUND_GREEN : FOREGROUND_GREEN;
-  const WORD blue_bit = is_background ? BACKGROUND_BLUE : FOREGROUND_BLUE;
+constexpr WORD kForegroundBits =
+    FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY;
+constexpr WORD kBackgroundBits =
+    BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_BLUE | BACKGROUND_INTENSITY;
 
-  if (value.kind == ColorValue::Kind::kRgb) {
-    constexpr std::uint8_t kRgbOnThreshold = 128;
-    return (value.rgb.red >= kRgbOnThreshold ? red_bit : 0) |
-           (value.rgb.green >= kRgbOnThreshold ? green_bit : 0) |
-           (value.rgb.blue >= kRgbOnThreshold ? blue_bit : 0);
+// The colors of the classic console palette in the order of their attribute
+// values, with red, green, blue and intensity as bits 2, 1, 0 and 3.
+struct PaletteEntry {
+  std::uint8_t red;
+  std::uint8_t green;
+  std::uint8_t blue;
+};
+
+constexpr PaletteEntry kConsolePalette[] = {
+    {0, 0, 0},       {0, 0, 128},   {0, 128, 0},   {0, 128, 128},
+    {128, 0, 0},     {128, 0, 128}, {128, 128, 0}, {192, 192, 192},
+    {128, 128, 128}, {0, 0, 255},   {0, 255, 0},   {0, 255, 255},
+    {255, 0, 0},     {255, 0, 255}, {255, 255, 0}, {255, 255, 255},
+};
+
+// Returns the foreground attribute bits of the palette color nearest to the
+// RGB color. Ties prefer the higher palette index.
+WORD NearestPaletteColor(const RgbColor& rgb) {
+  const auto distance = [&rgb](const PaletteEntry& entry) {
+    const int red = rgb.red - entry.red;
+    const int green = rgb.green - entry.green;
+    const int blue = rgb.blue - entry.blue;
+    return red * red + green * green + blue * blue;
+  };
+  WORD nearest = 0;
+  int nearest_distance = distance(kConsolePalette[0]);
+  constexpr WORD kPaletteSize = std::extent<decltype(kConsolePalette)>::value;
+  for (WORD index = 1; index < kPaletteSize; ++index) {
+    const int candidate_distance = distance(kConsolePalette[index]);
+    if (candidate_distance <= nearest_distance) {
+      nearest = index;
+      nearest_distance = candidate_distance;
+    }
   }
-
-  switch (value.named) {
-    case Color::kBlack:
-    case Color::kGray:
-      return 0;
-    case Color::kRed:
-    case Color::kBrightRed:
-      return red_bit;
-    case Color::kGreen:
-    case Color::kBrightGreen:
-      return green_bit;
-    case Color::kYellow:
-    case Color::kBrightYellow:
-      return red_bit | green_bit;
-    case Color::kBlue:
-    case Color::kBrightBlue:
-      return blue_bit;
-    case Color::kMagenta:
-    case Color::kBrightMagenta:
-      return red_bit | blue_bit;
-    case Color::kCyan:
-    case Color::kBrightCyan:
-      return green_bit | blue_bit;
-    case Color::kWhite:
-    case Color::kBrightWhite:
-    case Color::kDefault:
-      return red_bit | green_bit | blue_bit;
-  }
-
-  return red_bit | green_bit | blue_bit;
+  return nearest;
 }
 
-bool IsIntense(const ColorValue& value) {
+// Returns the foreground attribute bits of a color other than the default.
+WORD ForegroundColorBits(const ColorValue& value) {
   if (value.kind == ColorValue::Kind::kRgb) {
-    constexpr std::uint8_t kRgbBrightThreshold = 192;
-    const std::uint8_t max_channel =
-        std::max({value.rgb.red, value.rgb.green, value.rgb.blue});
-    return max_channel >= kRgbBrightThreshold;
+    return NearestPaletteColor(value.rgb);
   }
 
+  constexpr WORD kWhiteBits =
+      FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE;
   switch (value.named) {
-    case Color::kDefault:
     case Color::kBlack:
+      return 0;
     case Color::kRed:
+      return FOREGROUND_RED;
     case Color::kGreen:
+      return FOREGROUND_GREEN;
     case Color::kYellow:
+      return FOREGROUND_RED | FOREGROUND_GREEN;
     case Color::kBlue:
+      return FOREGROUND_BLUE;
     case Color::kMagenta:
+      return FOREGROUND_RED | FOREGROUND_BLUE;
     case Color::kCyan:
+      return FOREGROUND_GREEN | FOREGROUND_BLUE;
     case Color::kWhite:
-      return false;
+    case Color::kDefault:
+      return kWhiteBits;
     case Color::kGray:
+      return FOREGROUND_INTENSITY;
     case Color::kBrightRed:
+      return FOREGROUND_RED | FOREGROUND_INTENSITY;
     case Color::kBrightGreen:
+      return FOREGROUND_GREEN | FOREGROUND_INTENSITY;
     case Color::kBrightYellow:
+      return FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY;
     case Color::kBrightBlue:
+      return FOREGROUND_BLUE | FOREGROUND_INTENSITY;
     case Color::kBrightMagenta:
+      return FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_INTENSITY;
     case Color::kBrightCyan:
+      return FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY;
     case Color::kBrightWhite:
-      return true;
+      return kWhiteBits | FOREGROUND_INTENSITY;
   }
-  return false;
+  return kWhiteBits;
 }
 
 }  // namespace
 
-WORD LegacyConsoleAttribute(ColorSpec spec) {
-  WORD attribute = LegacyColorBits(spec.foreground, /*is_background=*/false);
+WORD LegacyConsoleAttribute(ColorSpec spec, WORD current) {
+  // Background bits mirror the foreground bits four positions higher.
+  constexpr unsigned kBackgroundShift = 4;
 
-  if (IsIntense(spec.foreground) || spec.style != TextStyle::kNone) {
+  WORD attribute = spec.foreground == ColorValue(Color::kDefault)
+                       ? static_cast<WORD>(current & kForegroundBits)
+                       : ForegroundColorBits(spec.foreground);
+  // The console cannot dim text, and other styles have no equivalent either.
+  if ((spec.style & TextStyle::kBold) != TextStyle::kNone) {
     attribute |= FOREGROUND_INTENSITY;
   }
 
-  if (spec.background != ColorValue(Color::kDefault)) {
-    attribute |= LegacyColorBits(spec.background, /*is_background=*/true);
-
-    if (IsIntense(spec.background)) {
-      attribute |= BACKGROUND_INTENSITY;
-    }
+  if (spec.background == ColorValue(Color::kDefault)) {
+    attribute |= current & kBackgroundBits;
+  } else {
+    attribute |= static_cast<WORD>(ForegroundColorBits(spec.background)
+                                   << kBackgroundShift);
   }
 
   return attribute;

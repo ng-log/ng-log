@@ -4,7 +4,6 @@
 //
 // Author: Sergiu Deitsch
 
-#include <algorithm>
 #include <cstddef>
 
 #include "ng-log/internal/color_spec.h"
@@ -27,6 +26,8 @@ constexpr int kSgrBackgroundBrightBase = 100;
 constexpr int kSgrForegroundExtended = 38;
 constexpr int kSgrBackgroundExtended = 48;
 constexpr int kSgrExtendedColorRgb = 2;
+// SGR codes never exceed three decimal digits.
+constexpr std::size_t kMaxSgrCodeDigits = 3;
 
 int NamedColorOffset(Color color) {
   switch (color) {
@@ -98,18 +99,16 @@ int NamedColorSgrCode(Color color, bool is_background) {
   return base + offset;
 }
 
-char* AppendSmallUint(char* cursor, char* const end, unsigned value) {
+// Writes the trailing decimal digits of the value that fit into the
+// non-empty range [begin, end) so that they end at "end", and returns the
+// position of the first digit.
+char* FormatSmallUint(const char* const begin, char* end, unsigned value) {
   constexpr unsigned kDecimalRadix = 10;
-  char* const start = cursor;
-  while (cursor < end) {
-    *cursor++ = static_cast<char>('0' + (value % kDecimalRadix));
+  do {
+    *--end = static_cast<char>('0' + (value % kDecimalRadix));
     value /= kDecimalRadix;
-    if (value == 0) {
-      break;
-    }
-  }
-  std::reverse(start, cursor);
-  return cursor;
+  } while (value != 0 && end != begin);
+  return end;
 }
 
 }  // namespace
@@ -118,24 +117,32 @@ void ColorSpec::FormatAnsiSequence(char* out, std::size_t out_size) const {
   if (out_size == 0) {
     return;
   }
-  if (out_size == 1) {
-    out[0] = '\0';
-    return;
-  }
 
+  // A truncated sequence would leave the terminal inside an unterminated
+  // escape sequence that consumes the text after it, so the sequence is
+  // written completely or not at all.
   char* cursor = out;
   char* const end = out + out_size - 1;
-  *cursor++ = '\033';
-  if (cursor < end) {
-    *cursor++ = '[';
-  }
-
-  bool first = true;
-  const auto append_code = [&cursor, &first, end](int code) {
-    if (!first && cursor < end) {
-      *cursor++ = ';';
+  bool fits = true;
+  const auto append_char = [&cursor, &fits, end](char c) {
+    if (cursor < end) {
+      *cursor++ = c;
+    } else {
+      fits = false;
     }
-    cursor = AppendSmallUint(cursor, end, static_cast<unsigned>(code));
+  };
+  bool first = true;
+  const auto append_code = [&append_char, &first](int code) {
+    if (!first) {
+      append_char(';');
+    }
+    char digits[kMaxSgrCodeDigits];
+    char* const digits_end = digits + sizeof(digits);
+    for (const char* digit =
+             FormatSmallUint(digits, digits_end, static_cast<unsigned>(code));
+         digit != digits_end; ++digit) {
+      append_char(*digit);
+    }
     first = false;
   };
   const auto append_color = [&append_code](const ColorValue& value,
@@ -152,6 +159,8 @@ void ColorSpec::FormatAnsiSequence(char* out, std::size_t out_size) const {
     }
   };
 
+  append_char('\033');
+  append_char('[');
   if ((style & TextStyle::kBold) != TextStyle::kNone) {
     append_code(kSgrBold);
   }
@@ -168,10 +177,8 @@ void ColorSpec::FormatAnsiSequence(char* out, std::size_t out_size) const {
   if (background != ColorValue(Color::kDefault)) {
     append_color(background, /*is_background=*/true);
   }
-  if (cursor < end) {
-    *cursor++ = 'm';
-  }
-  *cursor = '\0';
+  append_char('m');
+  *(fits ? cursor : out) = '\0';
 }
 
 }  // namespace internal

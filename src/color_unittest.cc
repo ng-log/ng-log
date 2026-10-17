@@ -51,10 +51,17 @@ TEST(Flags, SymbolizeFileBasePathIgnoresEnvironment) {
 }
 
 TEST(ShouldColorize, NoColorEnvWins) {
-  EXPECT_FALSE(ShouldColorize(/*is_a_tty=*/true, "xterm", /*no_color_env=*/"",
+  EXPECT_FALSE(ShouldColorize(/*is_a_tty=*/true, "xterm",
+                              /*no_color_env=*/"1",
                               /*clicolor_force_env=*/nullptr));
   EXPECT_FALSE(ShouldColorize(/*is_a_tty=*/true, "xterm",
                               /*no_color_env=*/"1", "1"));
+}
+
+// https://no-color.org disables color only for a nonempty NO_COLOR.
+TEST(ShouldColorize, EmptyNoColorEnvIsIgnored) {
+  EXPECT_TRUE(ShouldColorize(/*is_a_tty=*/true, "xterm", /*no_color_env=*/"",
+                             /*clicolor_force_env=*/nullptr));
 }
 
 TEST(ShouldColorize, CliColorForceOverridesNonTty) {
@@ -175,6 +182,15 @@ TEST(FormatAnsiSequence, NeverOverflowsAndAlwaysTerminates) {
   EXPECT_THAT(std::memchr(buf, '\0', sizeof(buf)), NotNull());
 }
 
+TEST(FormatAnsiSequence, OmitsSequenceThatDoesNotFit) {
+  // One byte short of "\033[1;32m" and its null character.
+  constexpr std::size_t kShortBufferSize = 7;
+  char buf[kShortBufferSize];
+  ColorSpec{Color::kGreen, TextStyle::kBold, Color::kDefault}
+      .FormatAnsiSequence(buf, sizeof(buf));
+  EXPECT_STREQ(buf, "");
+}
+
 TEST(FormatAnsiSequence, HandlesSmallBuffers) {
   char buf[1] = {'x'};
   ColorSpec{Color::kDefault, TextStyle::kNone, Color::kDefault}
@@ -195,22 +211,62 @@ TEST(TextStyle, OperatorsUseTheEnumUnderlyingType) {
 }
 
 #ifdef NGLOG_OS_WINDOWS
+// Light gray on black, the default attributes of a console.
+constexpr WORD kDefaultConsoleAttributes =
+    FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE;
+
 TEST(LegacyConsole, MapsStylesAndColorsToConsoleAttributes) {
   EXPECT_EQ(LegacyConsoleAttribute(
-                ColorSpec{Color::kRed, TextStyle::kNone, Color::kDefault}),
+                ColorSpec{Color::kRed, TextStyle::kNone, Color::kDefault},
+                kDefaultConsoleAttributes),
             FOREGROUND_RED);
   EXPECT_EQ(LegacyConsoleAttribute(
-                ColorSpec{Color::kBrightCyan, TextStyle::kBold, Color::kRed}),
+                ColorSpec{Color::kBrightCyan, TextStyle::kBold, Color::kRed},
+                kDefaultConsoleAttributes),
             FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY |
                 BACKGROUND_RED);
-  EXPECT_EQ(LegacyConsoleAttribute(ColorSpec{
-                RgbColor{128, 0, 255}, TextStyle::kNone, Color::kDefault}),
+  EXPECT_EQ(LegacyConsoleAttribute(ColorSpec{RgbColor{128, 0, 255},
+                                             TextStyle::kNone, Color::kDefault},
+                                   kDefaultConsoleAttributes),
             FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_INTENSITY);
-  EXPECT_EQ(LegacyConsoleAttribute(ColorSpec{Color::kDefault, TextStyle::kNone,
-                                             Color::kBrightWhite}),
-            FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE |
-                BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_BLUE |
-                BACKGROUND_INTENSITY);
+  EXPECT_EQ(
+      LegacyConsoleAttribute(
+          ColorSpec{Color::kDefault, TextStyle::kNone, Color::kBrightWhite},
+          kDefaultConsoleAttributes),
+      FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | BACKGROUND_RED |
+          BACKGROUND_GREEN | BACKGROUND_BLUE | BACKGROUND_INTENSITY);
+}
+
+TEST(LegacyConsole, DimTextIsNotIntensified) {
+  EXPECT_EQ(LegacyConsoleAttribute(
+                ColorSpec{Color::kDefault, TextStyle::kDim, Color::kDefault},
+                kDefaultConsoleAttributes),
+            kDefaultConsoleAttributes);
+}
+
+TEST(LegacyConsole, DefaultColorsKeepTheCurrentAttributes) {
+  constexpr WORD kCurrent =
+      FOREGROUND_GREEN | FOREGROUND_INTENSITY | BACKGROUND_BLUE;
+  EXPECT_EQ(
+      LegacyConsoleAttribute(
+          ColorSpec{Color::kRed, TextStyle::kNone, Color::kDefault}, kCurrent),
+      FOREGROUND_RED | BACKGROUND_BLUE);
+  EXPECT_EQ(
+      LegacyConsoleAttribute(
+          ColorSpec{Color::kDefault, TextStyle::kNone, Color::kRed}, kCurrent),
+      FOREGROUND_GREEN | FOREGROUND_INTENSITY | BACKGROUND_RED);
+}
+
+TEST(LegacyConsole, MapsRgbToTheNearestPaletteColor) {
+  // Dark gray is closer than black, which would be invisible on black.
+  EXPECT_EQ(LegacyConsoleAttribute(ColorSpec{RgbColor{100, 100, 100},
+                                             TextStyle::kNone, Color::kDefault},
+                                   kDefaultConsoleAttributes),
+            FOREGROUND_INTENSITY);
+  EXPECT_EQ(LegacyConsoleAttribute(ColorSpec{RgbColor{0, 0, 120},
+                                             TextStyle::kNone, Color::kDefault},
+                                   kDefaultConsoleAttributes),
+            FOREGROUND_BLUE);
 }
 
 TEST(LegacyConsole, AppliesAndRestoresAttributesAroundWrittenText) {
@@ -245,7 +301,8 @@ TEST(LegacyConsole, AppliesAndRestoresAttributesAroundWrittenText) {
                              write_text);
 
   EXPECT_THAT(applied_attributes,
-              ElementsAre(LegacyConsoleAttribute(spec), info.wAttributes));
+              ElementsAre(LegacyConsoleAttribute(spec, info.wAttributes),
+                          info.wAttributes));
   EXPECT_THAT(events, ElementsAre("set", "write", "set"));
   EXPECT_THAT(written_text, StrEq("styled"));
 }
@@ -583,8 +640,8 @@ TEST(StyledOutput, ResetsAttributesBeforeLineEndings) {
 // ShouldColorize()/ShouldEnableHyperlinks() logic tested above) to make
 // sure it runs to completion. The result depends on whatever environment
 // happens to run the test (e.g. whether stdout/stderr are a real terminal),
-// so nothing is asserted about it beyond that both calls agree with each
-// other run to run (the result is cached after the first call).
+// so nothing is asserted about it beyond that repeated calls in the same
+// environment agree with each other.
 TEST(StreamSupportsColor, StableAcrossRepeatedCalls) {
   EXPECT_EQ(StreamSupportsColor(stdout), StreamSupportsColor(stdout));
   EXPECT_EQ(StreamSupportsColor(stderr), StreamSupportsColor(stderr));
@@ -632,6 +689,19 @@ TEST(WithColor, WrapsBodyWhenEnabled) {
             ColorSpec{Color::kRed, TextStyle::kNone, Color::kDefault}, true,
             [&formatter] { formatter.AppendString("x", 1); });
   EXPECT_EQ(formatter.text, "\033[31mx\033[0m");
+}
+
+TEST(WithColor, WritesLongestSequenceCompletely) {
+  AppendOnlyFormatter formatter;
+  const RgbColor white{255, 255, 255};
+  WithColor(formatter,
+            ColorSpec{white,
+                      TextStyle::kBold | TextStyle::kDim | TextStyle::kItalic |
+                          TextStyle::kUnderline,
+                      white},
+            true, [&formatter] { formatter.AppendString("x", 1); });
+  EXPECT_EQ(formatter.text,
+            "\033[1;2;3;4;38;2;255;255;255;48;2;255;255;255mx\033[0m");
 }
 
 TEST(WithColor, SkipsEscapeCodesWhenDisabled) {

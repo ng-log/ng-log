@@ -402,7 +402,10 @@ unsatisfied `CHECK`/`LOG(FATAL)`. Colorizing is opt-out, not opt-in: it
 defaults to on, and is automatically disabled unless it is actually safe
 to colorize, namely the destination must be a real terminal (not a pipe
 or a redirected file), and the terminal must not have opted out via a
-[`NO_COLOR`](https://no-color.org) environment variable or `TERM=dumb`.
+nonempty [`NO_COLOR`](https://no-color.org) environment variable or
+`TERM=dumb`. A `CLICOLOR_FORCE` environment variable with a value other
+than empty or `0` enables colors for pipes and files as well, unless
+`NO_COLOR` disables them.
 
 Each field of a log line's prefix, severity character, timestamp,
 thread id, and `file:line` reference, is colorized separately, and the

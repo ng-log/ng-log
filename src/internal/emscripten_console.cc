@@ -24,9 +24,8 @@ EmscriptenLogLevel EmscriptenLogLevelForSeverity(LogSeverity severity) {
     case NGLOG_WARNING:
       return EmscriptenLogLevel::kWarn;
     case NGLOG_ERROR:
-      return EmscriptenLogLevel::kError;
     case NGLOG_FATAL:
-      return EmscriptenLogLevel::kDbg;
+      return EmscriptenLogLevel::kError;
   }
 
   std::abort();
@@ -43,13 +42,6 @@ void WriteEmscriptenLog(EmscriptenLogLevel level, const char* message) {
       break;
     case EmscriptenLogLevel::kError:
       emscripten_err(message);
-      break;
-    case EmscriptenLogLevel::kDbg:
-#  ifndef NDEBUG
-      _emscripten_dbg(message);
-#  else
-      emscripten_err(message);
-#  endif
       break;
   }
 #else

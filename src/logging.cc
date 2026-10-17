@@ -832,16 +832,42 @@ inline void LogDestination::SetEmailLogging(LogSeverity min_severity,
 }
 
 // Adapts a FILE* stream to the formatter that WithColor() in
-// internal/styled_output.h and Hyperlink::Wrap() expect. It only emits the
-// escape and hyperlink sequences. The body lambda they wrap writes the
-// colored content to the stream directly.
+// internal/styled_output.h and Hyperlink::Wrap() expect, and writes the
+// colored content as well.
 namespace {
 struct FileFormatter {
   FILE* output;
-  void AppendString(const char* text, size_t len) {
-    internal::WriteUtf8(output, text, len);
+  // Collects a line colored by escape sequences, so that it reaches the
+  // stream in a single write instead of one per field. Legacy console colors
+  // change the console state between writes and therefore write directly.
+  std::string* buffer = nullptr;
+
+  void AppendString(const char* text, size_t len) { Write(text, len); }
+
+  void Write(const char* text, size_t len) {
+    if (buffer != nullptr) {
+      buffer->append(text, len);
+    } else {
+      internal::WriteUtf8(output, text, len);
+    }
+  }
+
+  // Writes the collected line.
+  void Flush() {
+    if (buffer != nullptr) {
+      internal::WriteUtf8(output, buffer->data(), buffer->size());
+      buffer->clear();
+    }
   }
 };
+
+// Returns the buffer for a line colored by escape sequences, or null if the
+// mode writes each field directly. The buffer belongs to the caller, since
+// thread_local storage may already be destroyed when objects with static
+// storage duration log during exit.
+std::string* ColoredLineBuffer(ColorMode mode, std::string& buffer) {
+  return mode == ColorMode::kAnsi ? &buffer : nullptr;
+}
 }  // namespace
 
 // Writes a single field of "len" bytes starting at "text", bracketed with
@@ -859,18 +885,19 @@ static void WriteTerminalField(FILE* output, FileFormatter& formatter,
   }
   if (mode == ColorMode::kAnsi) {
     WithColor(formatter, spec, true,
-              [text, len, output] { internal::WriteUtf8(output, text, len); });
+              [text, len, &formatter] { formatter.Write(text, len); });
     return;
   }
 #ifdef NGLOG_OS_WINDOWS
   if (mode == ColorMode::kLegacyConsole) {
-    WithLegacyConsoleAttribute(output, spec, [text, len, output] {
-      internal::WriteUtf8(output, text, len);
-    });
+    WithLegacyConsoleAttribute(
+        output, spec, [text, len, &formatter] { formatter.Write(text, len); });
     return;
   }
+#else
+  static_cast<void>(output);
 #endif  // NGLOG_OS_WINDOWS
-  internal::WriteUtf8(output, text, len);
+  formatter.Write(text, len);
 }
 
 static void WriteStyledLogField(FILE* output, FileFormatter& formatter,
@@ -892,8 +919,9 @@ static void WriteStyledLogField(FILE* output, FileFormatter& formatter,
       write_colored();
     }
   };
-  const auto write_newline = [output](const char* newline, size_t newline_len) {
-    fwrite(newline, newline_len, 1, output);
+  const auto write_newline = [&formatter](const char* newline,
+                                          size_t newline_len) {
+    formatter.Write(newline, newline_len);
   };
   WriteTextByLines(text, len, write_line, write_newline);
 }
@@ -1065,7 +1093,8 @@ static void ColoredWriteToStderrOrStdoutWithFields(
 
     const Theme& theme = DefaultTheme();
     const ColorSpec text_spec = theme.Get(SeverityToRole(data.severity_));
-    FileFormatter formatter{output};
+    std::string line_buffer;
+    FileFormatter formatter{output, ColoredLineBuffer(mode, line_buffer)};
     const bool hyperlinks_enabled =
         mode == ColorMode::kAnsi &&
         nglog::GetFlag(FLAGS_symbolize_hyperlinks) &&
@@ -1079,6 +1108,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
                          hyperlinks_enabled, data.message_text_, 0,
                          data.num_chars_to_log_);
     }
+    formatter.Flush();
     MaybeFlushStdout(output, data.severity_);
     return;
   }
@@ -1105,7 +1135,8 @@ static void ColoredWriteToStderrOrStdoutWithFields(
   const bool text_colored = text_spec.foreground != Color::kDefault ||
                             text_spec.background != Color::kDefault ||
                             text_spec.style != TextStyle::kNone;
-  FileFormatter formatter{output};
+  std::string line_buffer;
+  FileFormatter formatter{output, ColoredLineBuffer(mode, line_buffer)};
 
   // The severity character, timestamp, thread id, file:line, and closing
   // "]" fields of the prefix are each colored separately. The message
@@ -1123,7 +1154,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
       TextAttributes{theme.Get(Role::kShellCommand), Hyperlink()}, false,
       message + pos, data.prefix_timestamp_len_);
   pos += data.prefix_timestamp_len_;
-  internal::WriteUtf8(output, message + pos, 1);
+  formatter.Write(message + pos, 1);
   pos += 1;
 
   WriteStyledLogField(
@@ -1131,7 +1162,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
       TextAttributes{theme.Get(Role::kLogThreadId), Hyperlink()}, false,
       message + pos, data.prefix_threadid_len_);
   pos += data.prefix_threadid_len_;
-  internal::WriteUtf8(output, message + pos, 1);
+  formatter.Write(message + pos, 1);
   pos += 1;
 
   char uri[1024];
@@ -1164,11 +1195,12 @@ static void ColoredWriteToStderrOrStdoutWithFields(
                       TextAttributes{theme.Get(Role::kLogBracket), Hyperlink()},
                       false, message + pos, 1);  // The "]" closing the prefix.
   pos += 1;
-  internal::WriteUtf8(output, message + pos, 1);
+  formatter.Write(message + pos, 1);
   pos += 1;
 
   if (!text_colored && data.styles_.size() == 0) {
-    internal::WriteUtf8(output, message + pos, len - pos);
+    formatter.Write(message + pos, len - pos);
+    formatter.Flush();
     MaybeFlushStdout(output, data.severity_);
     return;
   }
@@ -1178,6 +1210,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
                                   StreamSupportsHyperlinks(output);
   WriteStyledLogBody(output, formatter, mode, data.styles_, text_spec,
                      hyperlinks_enabled, message, pos, len);
+  formatter.Flush();
   MaybeFlushStdout(output, data.severity_);
 }
 

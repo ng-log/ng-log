@@ -38,7 +38,7 @@ inline void WithColor(Formatter& formatter, ColorSpec spec, bool enabled,
     body();
     return;
   }
-  char sequence[24];
+  char sequence[kMaxAnsiSequenceSize];
   spec.FormatAnsiSequence(sequence, sizeof(sequence));
   formatter.AppendString(sequence, std::strlen(sequence));
   body();
@@ -59,7 +59,7 @@ inline void WithLegacyConsoleAttribute(HANDLE handle, ColorSpec spec,
     return;
   }
   const WORD old_attrs = buffer_info.wAttributes;
-  if (!set_attribute(handle, LegacyConsoleAttribute(spec))) {
+  if (!set_attribute(handle, LegacyConsoleAttribute(spec, old_attrs))) {
     body();
     return;
   }
@@ -98,7 +98,7 @@ inline void WriteColoredField(ColorSpec spec, ColorMode mode,
     return;
   }
   if (mode == ColorMode::kAnsi) {
-    char sequence[24];
+    char sequence[kMaxAnsiSequenceSize];
     spec.FormatAnsiSequence(sequence, sizeof(sequence));
     WriteRawToStderr(sequence);
     write_content(text, len);
@@ -122,11 +122,11 @@ inline void WrapHyperlinkRaw(const Hyperlink& hyperlink, Body&& body) {
     body();
     return;
   }
-  WriteRawToStderr("\033]8;;");
+  WriteRawToStderr(kOsc8Prefix);
   WriteRawToStderr(hyperlink.uri());
-  WriteRawToStderr("\033\\");
+  WriteRawToStderr(kOsc8Separator);
   body();
-  WriteRawToStderr("\033]8;;\033\\");
+  WriteRawToStderr(kOsc8Close);
 }
 
 template <typename WriteLine, typename WriteNewline>
