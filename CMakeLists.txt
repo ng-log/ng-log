@@ -635,12 +635,9 @@ endif (WITH_LOCK_METRICS)
 
 # Some generators (such as Xcode) do not generate any output if the target does
 # not reference at least one source file.
-set (_ng-log_EMPTY_SOURCE ${ng-log_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/ng-log.cc)
+set (_ng-log_EMPTY_SOURCE ${ng-log_BINARY_DIR}/ng-log.cc)
 
-add_custom_command (
-  OUTPUT ${_ng-log_EMPTY_SOURCE}
-  COMMAND ${CMAKE_COMMAND} -E touch ${_ng-log_EMPTY_SOURCE}
-)
+file (CONFIGURE OUTPUT ${_ng-log_EMPTY_SOURCE} CONTENT "")
 
 add_library (ng-log
   $<TARGET_OBJECTS:ng-log_internal>
