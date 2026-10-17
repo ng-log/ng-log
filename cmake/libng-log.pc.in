@@ -11,6 +11,6 @@ includedir=@includedir@
 Name: libng-log
 Description: C++ logging framework
 Version: @VERSION@
-Libs: -L${libdir} -lng-log
+Libs: -L${libdir} -l@ng-log_pkgconfig_library@
 Libs.private: @ng-log_libraries_options_for_static_linking@
 Cflags: -I${includedir} @ng-log_pkgconfig_compile_options@

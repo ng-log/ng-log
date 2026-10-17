@@ -86,8 +86,10 @@ The following CMake options configure the build, for example with
 `WITH_PKGCONFIG` (default `OFF`)
 
 :   Install a pkg-config file. Its library name follows the build
-    configuration, such as `ng-logd` for debug builds. Installing several
-    configurations into one prefix keeps the file of the last one.
+    configuration, such as `ng-logd` for debug builds. A prefix holds a
+    single pkg-config file, so install each configuration into a prefix of
+    its own. The file locates the installation relative to itself, so the
+    installation can move.
 
 `WITH_LOCK_METRICS` (default `OFF`)
 
