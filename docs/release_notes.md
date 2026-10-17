@@ -57,9 +57,8 @@ SPDX-License-Identifier: BSD-3-Clause
 - Mark stack dumps truncated at 32 frames with `(More stack frames follow...)`
   by [@devtejasx]
 - Report thread names in failure signal dumps
-- Default to the async-signal-safe Itanium demangler, with system demangling
-  on demand
-  and parser fixes by [@devtejasx]
+- Default to the async-signal-safe Itanium demangler, with parser fixes by
+  [@devtejasx]
 - Support paths beyond `MAX_PATH` on Windows and `PATH_MAX` on POSIX
 - Allow flag access before `main` and during termination
 - Write UTF-8 log messages to the Windows console and debugger
