@@ -17,6 +17,7 @@
 #include <initializer_list>
 #include <regex>
 #include <string>
+#include <thread>
 
 #if defined(NGLOG_OS_WINDOWS) && defined(HAVE_GET_THREAD_DESCRIPTION)
 #  include <windows.h>
@@ -401,26 +402,37 @@ TEST(utilities, TrimTrailingCharacters) {
 }
 
 #if defined(NGLOG_OS_WINDOWS) && defined(HAVE_GET_THREAD_DESCRIPTION)
+// Names a thread of its own, so that the main thread keeps its name for the
+// tests after this one.
 TEST(utilities, SetThreadName) {
-  constexpr char kThreadName[] = "TestThread";
-  nglog::SetThreadName(kThreadName);
+  std::thread{[] {
+    constexpr char kThreadName[] = "TestThread";
+    nglog::SetThreadName(kThreadName);
 
-  PWSTR thread_name = nullptr;
-  ASSERT_TRUE(
-      SUCCEEDED(GetThreadDescription(GetCurrentThread(), &thread_name)));
-  ASSERT_NE(thread_name, nullptr);
-  EXPECT_STREQ(thread_name, L"TestThread");
-  LocalFree(thread_name);
+    PWSTR thread_name = nullptr;
+    ASSERT_TRUE(
+        SUCCEEDED(GetThreadDescription(GetCurrentThread(), &thread_name)));
+    ASSERT_NE(thread_name, nullptr);
+    EXPECT_STREQ(thread_name, L"TestThread");
+    LocalFree(thread_name);
+  }}.join();
 }
 #elif defined(HAVE_PTHREAD_GETNAME_NP)
+// Names a thread of its own, so that the main thread keeps its name for the
+// tests after this one.
 TEST(utilities, SetThreadName) {
-  constexpr char kThreadName[] = "TestThread";
-  nglog::SetThreadName(kThreadName);
+  std::thread{[] {
+    constexpr char kThreadName[] = "TestThread";
+    nglog::SetThreadName(kThreadName);
 
-  char thread_name[16];
-  ASSERT_EQ(
-      pthread_getname_np(pthread_self(), thread_name, sizeof(thread_name)), 0);
-  EXPECT_STREQ(thread_name, kThreadName);
+    // Thread names are limited to 16 bytes including the null character.
+    constexpr std::size_t kThreadNameSize = 16;
+    char thread_name[kThreadNameSize];
+    ASSERT_EQ(
+        pthread_getname_np(pthread_self(), thread_name, sizeof(thread_name)),
+        0);
+    EXPECT_STREQ(thread_name, kThreadName);
+  }}.join();
 }
 #endif
 

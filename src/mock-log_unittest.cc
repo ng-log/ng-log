@@ -17,7 +17,9 @@
 #include <cstddef>
 #include <mutex>
 #include <ostream>
+#include <string>
 #include <thread>
+#include <vector>
 
 #include "testing_utilities.h"
 
@@ -142,6 +144,74 @@ TEST(ScopedMockLogTest, SinkCallbackCanLogWhileSinksChange) {
 
   EXPECT_TRUE(sink.CallbackCompleted());
   nglog::RemoveLogSink(&sink);
+}
+
+// Discards every message.
+class DiscardingLogSink : public nglog::LogSink {
+ public:
+  void send(nglog::LogSeverity /* severity */, const char* /* full_filename */,
+            const char* /* base_filename */, int /* line */,
+            const nglog::LogMessageTime& /* time */, const char* /* message */,
+            size_t /* message_len */) override {}
+};
+
+// Logging to another sink also calls WaitTillSent() of every registered sink,
+// which must not report a message that the mock did not receive.
+TEST(ScopedMockLogTest, IgnoresMessagesOfOtherSinks) {
+  ScopedMockLog log;
+  EXPECT_CALL(log, Log(_, _, _)).Times(0);
+  DiscardingLogSink other;
+  LOG_TO_SINK_BUT_NOT_TO_LOGFILE(&other, INFO) << "logged elsewhere";
+}
+
+// A message logged to the mock as a sink of its own while the mock is
+// registered reaches it twice, and each delivery is reported.
+TEST(ScopedMockLogTest, ReportsEachDeliveryOfAMessage) {
+  ScopedMockLog log;
+  EXPECT_CALL(log, Log(_, _, StrEq("twice"))).Times(2);
+
+  LOG_TO_SINK(&log, INFO) << "twice";
+}
+
+// Each thread must see the message that it logged itself. The threads start
+// together to overlap as much as possible, since plain builds detect shared
+// state only when the threads interleave, unlike ThreadSanitizer.
+TEST(ScopedMockLogTest, InterceptsConcurrentLogs) {
+  constexpr int kThreads = 4;
+  constexpr int kMessagesPerThread = 2000;
+  testing::NiceMock<ScopedMockLog> log;
+  std::atomic<int> mismatches{0};
+  ON_CALL(log, Log(_, _, _))
+      .WillByDefault([&mismatches](nglog::LogSeverity, const std::string&,
+                                   const std::string& message) {
+        const std::string expected = std::to_string(
+            std::hash<std::thread::id>{}(std::this_thread::get_id()));
+        if (message != expected) {
+          mismatches.fetch_add(1, std::memory_order_relaxed);
+        }
+      });
+
+  std::atomic<int> waiting{kThreads};
+  const auto log_own_id = [&waiting] {
+    const std::string id = std::to_string(
+        std::hash<std::thread::id>{}(std::this_thread::get_id()));
+    waiting.fetch_sub(1, std::memory_order_acq_rel);
+    while (waiting.load(std::memory_order_acquire) > 0) {
+      std::this_thread::yield();
+    }
+    for (int i = 0; i < kMessagesPerThread; ++i) {
+      LOG(INFO) << id;
+    }
+  };
+  std::vector<std::thread> threads;
+  for (int i = 0; i < kThreads; ++i) {
+    threads.emplace_back(log_own_id);
+  }
+  for (std::thread& thread : threads) {
+    thread.join();
+  }
+
+  EXPECT_EQ(mismatches.load(), 0);
 }
 
 }  // namespace

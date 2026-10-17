@@ -22,6 +22,7 @@
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "config.h"
@@ -1602,6 +1603,10 @@ TEST(Flags, DefaultsAreDeterminedWhenTheFlagIsRegistered) {
 }
 
 TEST(Flags, FailedFirstUseLeavesTheFlagUsable) {
+  static bool already_ran = false;
+  if (std::exchange(already_ran, true)) {
+    GTEST_SKIP() << "the flag has been used for the first time already";
+  }
   static nglog::Flag<FragileValue> flag(nglog::internal::kStaticFlag,
                                         "fragile_flag", __FILE__, "",
                                         &MakeFragileValue);
