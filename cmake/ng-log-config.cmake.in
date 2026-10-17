@@ -10,10 +10,18 @@ endif (CMAKE_VERSION VERSION_LESS @ng-log_CMake_VERSION@)
 @PACKAGE_INIT@
 
 include (CMakeFindDependencyMacro)
-include (${CMAKE_CURRENT_LIST_DIR}/ng-log-modules.cmake)
 
-find_dependency (Threads)
-@Unwind_DEPENDENCY@
-@Libbacktrace_DEPENDENCY@
+# Extending the module path of the consumer would leak the bundled find
+# modules into unrelated lookups, and modules of the consumer earlier in the
+# path would shadow the bundled ones. Extend the path only within a block.
+# find_dependency reports a missing dependency and returns, which leaves the
+# block and propagates the result.
+block (SCOPE_FOR VARIABLES PROPAGATE ng-log_FOUND ng-log_NOT_FOUND_MESSAGE)
+  list (PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/modules")
+
+  find_dependency (Threads)
+  @Unwind_DEPENDENCY@
+  @Libbacktrace_DEPENDENCY@
+endblock ()
 
 include (${CMAKE_CURRENT_LIST_DIR}/ng-log-targets.cmake)
