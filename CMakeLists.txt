@@ -1227,13 +1227,10 @@ if (BUILD_TESTING AND GTest_FOUND)
   )
 
   if (TARGET symbolize_unittest)
-    # FIXME: Skip flaky test when compiled in C++20 mode
     gtest_discover_tests (symbolize_unittest
       TEST_PREFIX symbolize.
       DISCOVERY_TIMEOUT 30
       DISCOVERY_MODE PRE_TEST
-      PROPERTIES SKIP_REGULAR_EXPRESSION
-        [=[Check failed: streq\("nonstatic_func"\, TrySymbolize\(\(void \*\)\(&nonstatic_func\)\)\)]=]
     )
   endif (TARGET symbolize_unittest)
 
