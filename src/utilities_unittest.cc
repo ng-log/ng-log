@@ -6,6 +6,7 @@
 // Author: Shinichiro Hamaji
 #include "utilities.h"
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -265,6 +266,11 @@ TEST(utilities, InitializeLoggingDeathTest) {
   ASSERT_DEATH(InitializeLogging("foobar"), "");
 }
 #endif
+
+TEST(TestTmpDir, IsPrivateToTheProcess) {
+  EXPECT_NE(TestTmpDir(), SystemTmpDir());
+  EXPECT_THAT(TestTmpDir(), testing::StartsWith(SystemTmpDir()));
+}
 
 TEST(utilities, MakeLogFilename) {
   EXPECT_EQ(nglog::MakeLogFilename("/tmp/app[1].", "20260817-123456.42",

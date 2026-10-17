@@ -25,7 +25,9 @@
 #  include <unistd.h>
 #endif
 
-#ifndef NGLOG_OS_WINDOWS
+#ifdef NGLOG_OS_WINDOWS
+#  include "internal/utf8.h"
+#else
 #  include <ftw.h>
 #endif
 
@@ -48,7 +50,72 @@ std::string GetTempDir() {
   return temp_directories_list.front();
 }
 
-#ifndef NGLOG_OS_WINDOWS
+#ifdef NGLOG_OS_WINDOWS
+//! Removes a directory together with its contents.
+void RemoveDirectoryTree(const std::wstring& path) {
+  WIN32_FIND_DATAW entry;
+  const HANDLE find = FindFirstFileW((path + L"\\*").c_str(), &entry);
+  if (find != INVALID_HANDLE_VALUE) {
+    do {
+      const std::wstring name = entry.cFileName;
+      if (name == L"." || name == L"..") {
+        continue;
+      }
+      const std::wstring child = path + L'\\' + name;
+      const DWORD attributes = entry.dwFileAttributes;
+      if ((attributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
+        DeleteFileW(child.c_str());
+      } else if ((attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+        // Removes the link without following it.
+        RemoveDirectoryW(child.c_str());
+      } else {
+        RemoveDirectoryTree(child);
+      }
+    } while (FindNextFileW(find, &entry));
+    FindClose(find);
+  }
+  RemoveDirectoryW(path.c_str());
+}
+
+//! Directory that is created on construction and removed with its contents.
+class PrivateDirectory final {
+ public:
+  explicit PrivateDirectory(const std::string& parent) {
+    const std::string prefix =
+        parent + "/nglog-test-" + std::to_string(GetCurrentProcessId()) + '-';
+    // Directories left behind by an earlier process with the same identifier
+    // are skipped.
+    for (unsigned attempt = 0;; ++attempt) {
+      path_ = prefix + std::to_string(attempt);
+      if (!nglog::internal::Utf8ToWide(path_.data(), path_.size(),
+                                       &wide_path_)) {
+        std::fprintf(stderr, "Could not convert %s to UTF-16\n", path_.c_str());
+        std::exit(EXIT_FAILURE);
+      }
+      if (CreateDirectoryW(wide_path_.c_str(), nullptr)) {
+        return;
+      }
+      const DWORD error = GetLastError();
+      if (error != ERROR_ALREADY_EXISTS) {
+        std::fprintf(stderr, "Could not create directory %s: error %lu\n",
+                     path_.c_str(), static_cast<unsigned long>(error));
+        std::exit(EXIT_FAILURE);
+      }
+    }
+  }
+
+  ~PrivateDirectory() { RemoveDirectoryTree(wide_path_); }
+
+  PrivateDirectory(const PrivateDirectory& other) = delete;
+  PrivateDirectory& operator=(const PrivateDirectory& other) = delete;
+
+  const std::string& path() const noexcept { return path_; }
+
+ private:
+  std::string path_;
+  std::wstring wide_path_;
+};
+#else
 int RemoveDirectoryEntry(const char* path, const struct stat* /*status*/,
                          int /*type*/, struct FTW* /*position*/) {
   return std::remove(path);
@@ -84,7 +151,7 @@ class PrivateDirectory final {
   std::string path_;
   pid_t owner_;
 };
-#endif  // !NGLOG_OS_WINDOWS
+#endif  // NGLOG_OS_WINDOWS
 
 }  // namespace
 
@@ -105,17 +172,12 @@ const std::string& SystemTmpDir() {
 }
 
 const std::string& TestTmpDir() {
-#ifdef NGLOG_OS_WINDOWS
-  // No truncated directory listings have been observed on Windows, so the
-  // shared directory is kept there.
-  return SystemTmpDir();
-#else
-  // Emscripten ends a directory listing early when an entry vanishes while
-  // the listing is in progress. Each test process therefore uses a directory
-  // that no other process modifies.
+  // Each test process uses a directory that no other process modifies. Test
+  // files with fixed names therefore cannot collide between concurrent tests,
+  // and directory listings on Emscripten, which end early when an entry
+  // vanishes while the listing is in progress, stay complete.
   static const PrivateDirectory dir{SystemTmpDir()};
   return dir.path();
-#endif
 }
 
 const std::string& TestSrcDir() {
