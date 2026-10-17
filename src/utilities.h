@@ -142,9 +142,6 @@ const char* ProgramInvocationShortName();
 // such as a setuid program or one with file capabilities, inherits the
 // environment of its caller, which must not.
 bool TrustsEnvironment();
-std::int32_t GetMainThreadPid();
-bool PidHasChanged();
-
 const std::string& MyUserName();
 
 // Get the part of filepath after the last path separator.

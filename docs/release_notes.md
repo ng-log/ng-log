@@ -37,6 +37,8 @@ SPDX-License-Identifier: BSD-3-Clause
   `NGLOG_IF_DEBUG_MODE`
 - Remove the `nglog::int32`, `nglog::uint32`, `nglog::int64` and
   `nglog::uint64` aliases in favor of the `<cstdint>` types
+- Refuse symbolic links as log files on POSIX, except `/dev/stdout` and
+  `/dev/stderr`
 
 #### Features
 
@@ -81,6 +83,8 @@ SPDX-License-Identifier: BSD-3-Clause
 - Let `SetVLOGLevel` take precedence over matching `--vmodule` patterns
 - Serialize log file creation across processes on Windows
 - Fix `TruncateLogFile` corrupting log files with line breaks on Windows
+- Fix truncating oversized log files before locking them
+- Reopen log files in processes created by `fork`
 - Fix `RAW_LOG` truncating messages that exactly fill its buffer
 - Deliver email outside the logging lock
 - Make Windows log file handles non-inheritable

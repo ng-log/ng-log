@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <sys/types.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -2371,6 +2372,225 @@ TEST(Logging, TwoProcessesWrite) {
 #endif
 }
 
+#if defined(HAVE_UNISTD_H) && defined(HAVE_SYS_WAIT_H) && \
+    !defined(NGLOG_OS_WINDOWS) && !defined(NGLOG_OS_EMSCRIPTEN)
+namespace {
+
+std::ptrdiff_t CountLinesContaining(const std::string& contents,
+                                    const char* text) {
+  const std::vector<std::string> lines = SplitLines(contents);
+  return std::count_if(lines.begin(), lines.end(),
+                       [text](const std::string& line) {
+                         return line.find(text) != std::string::npos;
+                       });
+}
+
+// Matches a wait status of a process that exited with the given status.
+MATCHER_P(ExitsWithStatus, expected,
+          "exits with status " + testing::PrintToString(expected)) {
+  return WIFEXITED(arg) && WEXITSTATUS(arg) == expected;
+}
+
+}  // namespace
+#endif
+
+TEST(Logging, ForkedChildReopensEveryLogFile) {
+#if defined(HAVE_UNISTD_H) && defined(HAVE_SYS_WAIT_H) && \
+    !defined(NGLOG_OS_WINDOWS) && !defined(NGLOG_OS_EMSCRIPTEN)
+  auto save = nglog::MakeScopedFlags(
+      nglog::MakeScopedFlag(FLAGS_logtostderr, false),
+      nglog::MakeScopedFlag(FLAGS_logtostdout, false),
+      nglog::MakeScopedFlag(FLAGS_timestamp_in_logfile_name, true));
+
+  const std::string info_dest = TestTmpDir() + "/logging_test_fork_info.";
+  const std::string warning_dest = TestTmpDir() + "/logging_test_fork_warning.";
+  DeleteFiles(info_dest + "*");
+  DeleteFiles(warning_dest + "*");
+  SetLogDestination(NGLOG_INFO, info_dest.c_str());
+  SetLogDestination(NGLOG_WARNING, warning_dest.c_str());
+
+  constexpr char kParentMessage[] = "buffered parent message before fork";
+  constexpr char kParentWarning[] = "buffered parent warning before fork";
+  constexpr char kChildMessage[] = "child warning after fork";
+  // Leave the parent messages in the stdio buffers of both files.
+  LOG(INFO) << kParentMessage;
+  LOG(WARNING) << kParentWarning;
+
+  const pid_t pid = fork();
+  ASSERT_NE(pid, -1) << strerror(errno);
+  if (pid == 0) {
+    LOG(WARNING) << kChildMessage;
+    FlushLogFiles(NGLOG_INFO);
+    _exit(EXIT_SUCCESS);
+  }
+  int status = 0;
+  ASSERT_EQ(waitpid(pid, &status, 0), pid) << strerror(errno);
+  EXPECT_THAT(status, ExitsWithStatus(EXIT_SUCCESS));
+  FlushLogFiles(NGLOG_INFO);
+  LogToStderr();
+
+  const std::string child_suffix = "." + std::to_string(pid);
+  std::string parent_info;
+  std::string child_info;
+  for (const std::string& file : GetFiles(info_dest + "*")) {
+    if (file.size() >= child_suffix.size() &&
+        file.compare(file.size() - child_suffix.size(), child_suffix.size(),
+                     child_suffix) == 0) {
+      child_info += ReadFileContents(file);
+    } else {
+      parent_info += ReadFileContents(file);
+    }
+  }
+
+  std::string parent_warning;
+  for (const std::string& file : GetFiles(warning_dest + "*")) {
+    if (file.size() < child_suffix.size() ||
+        file.compare(file.size() - child_suffix.size(), child_suffix.size(),
+                     child_suffix) != 0) {
+      parent_warning += ReadFileContents(file);
+    }
+  }
+
+  EXPECT_THAT(child_info, HasSubstr(kChildMessage));
+  EXPECT_THAT(parent_info, Not(HasSubstr(kChildMessage)));
+  EXPECT_EQ(CountLinesContaining(parent_info, kParentMessage), 1);
+  EXPECT_EQ(CountLinesContaining(parent_warning, kParentWarning), 1);
+
+  DeleteFiles(info_dest + "*");
+  DeleteFiles(warning_dest + "*");
+#else
+  GTEST_SKIP() << "requires fork()";
+#endif
+}
+
+// Flushing writes the buffered lines of a file inherited from the parent,
+// which the parent writes itself.
+TEST(Logging, ForkedChildThatOnlyFlushesKeepsTheLinesOfTheParent) {
+#if defined(HAVE_UNISTD_H) && defined(HAVE_SYS_WAIT_H) && \
+    !defined(NGLOG_OS_WINDOWS) && !defined(NGLOG_OS_EMSCRIPTEN)
+  // LogToStderr() at the end also changes --stderrthreshold.
+  const nglog::ScopedFlags<> save_all;
+  auto save = nglog::MakeScopedFlags(
+      nglog::MakeScopedFlag(FLAGS_logtostderr, false),
+      nglog::MakeScopedFlag(FLAGS_logtostdout, false),
+      nglog::MakeScopedFlag(FLAGS_timestamp_in_logfile_name, true));
+
+  const std::string dest = TestTmpDir() + "/logging_test_fork_flush.";
+  DeleteFiles(dest + "*");
+  SetLogDestination(NGLOG_INFO, dest.c_str());
+
+  constexpr char kParentMessage[] = "buffered parent message before fork";
+  LOG(INFO) << kParentMessage;
+
+  const pid_t pid = fork();
+  ASSERT_NE(pid, -1) << strerror(errno);
+  if (pid == 0) {
+    FlushLogFiles(NGLOG_INFO);
+    _exit(EXIT_SUCCESS);
+  }
+  int status = 0;
+  ASSERT_EQ(waitpid(pid, &status, 0), pid) << strerror(errno);
+  EXPECT_THAT(status, ExitsWithStatus(EXIT_SUCCESS));
+  FlushLogFiles(NGLOG_INFO);
+  LogToStderr();
+
+  std::string contents;
+  for (const std::string& file : GetFiles(dest + "*")) {
+    contents += ReadFileContents(file);
+  }
+  EXPECT_EQ(CountLinesContaining(contents, kParentMessage), 1);
+
+  DeleteFiles(dest + "*");
+#else
+  GTEST_SKIP() << "requires fork()";
+#endif
+}
+
+// Changing the destination closes the inherited file, whose buffered lines
+// the parent writes itself.
+#if defined(HAVE_UNISTD_H) && defined(HAVE_SYS_WAIT_H) && \
+    !defined(NGLOG_OS_WINDOWS) && !defined(NGLOG_OS_EMSCRIPTEN)
+namespace {
+
+// Lets a forked child run the action while the parent holds a buffered line,
+// and returns how often the parent's log file contains that line.
+std::ptrdiff_t CountBufferedParentLinesAfterForkedChild(
+    void (*child_action)()) {
+  // LogToStderr() at the end also changes --stderrthreshold.
+  const nglog::ScopedFlags<> save_all;
+  auto save = nglog::MakeScopedFlags(
+      nglog::MakeScopedFlag(FLAGS_logtostderr, false),
+      nglog::MakeScopedFlag(FLAGS_logtostdout, false),
+      nglog::MakeScopedFlag(FLAGS_timestamp_in_logfile_name, true));
+
+  const std::string dest = TestTmpDir() + "/logging_test_fork_destination.";
+  DeleteFiles(dest + "*");
+  SetLogDestination(NGLOG_INFO, dest.c_str());
+
+  constexpr char kParentMessage[] = "buffered parent message before fork";
+  // Creating the file flushes the first message, so the second one stays
+  // buffered.
+  LOG(INFO) << "creates the file";
+  LOG(INFO) << kParentMessage;
+
+  const pid_t pid = fork();
+  if (pid == 0) {
+    child_action();
+    _exit(EXIT_SUCCESS);
+  }
+  int status = 0;
+  EXPECT_NE(pid, -1) << strerror(errno);
+  EXPECT_EQ(waitpid(pid, &status, 0), pid) << strerror(errno);
+  EXPECT_THAT(status, ExitsWithStatus(EXIT_SUCCESS));
+  FlushLogFiles(NGLOG_INFO);
+  LogToStderr();
+
+  std::string contents;
+  for (const std::string& file : GetFiles(dest + "*")) {
+    contents += ReadFileContents(file);
+  }
+  DeleteFiles(dest + "*");
+  return CountLinesContaining(contents, kParentMessage);
+}
+
+}  // namespace
+#endif
+
+TEST(Logging, ForkedChildThatChangesTheDestinationKeepsTheLinesOfTheParent) {
+#if defined(HAVE_UNISTD_H) && defined(HAVE_SYS_WAIT_H) && \
+    !defined(NGLOG_OS_WINDOWS) && !defined(NGLOG_OS_EMSCRIPTEN)
+  EXPECT_EQ(CountBufferedParentLinesAfterForkedChild([] {
+              const std::string child_dest =
+                  TestTmpDir() + "/logging_test_fork_destination.child.";
+              SetLogDestination(NGLOG_INFO, child_dest.c_str());
+            }),
+            1);
+#else
+  GTEST_SKIP() << "requires fork()";
+#endif
+}
+
+TEST(Logging, ForkedChildThatChangesTheExtensionKeepsTheLinesOfTheParent) {
+#if defined(HAVE_UNISTD_H) && defined(HAVE_SYS_WAIT_H) && \
+    !defined(NGLOG_OS_WINDOWS) && !defined(NGLOG_OS_EMSCRIPTEN)
+  EXPECT_EQ(CountBufferedParentLinesAfterForkedChild(
+                [] { SetLogFilenameExtension(".child"); }),
+            1);
+#else
+  GTEST_SKIP() << "requires fork()";
+#endif
+}
+
+TEST(Logging, ForkedChildThatShutsDownLoggingKeepsTheLinesOfTheParent) {
+#if defined(HAVE_UNISTD_H) && defined(HAVE_SYS_WAIT_H) && \
+    !defined(NGLOG_OS_WINDOWS) && !defined(NGLOG_OS_EMSCRIPTEN)
+  EXPECT_EQ(CountBufferedParentLinesAfterForkedChild([] { ShutdownLogging(); }),
+            1);
+#else
+  GTEST_SKIP() << "requires fork()";
+#endif
+}
+
 TEST(Logging, FileLockIsHeldAcrossProcesses) {
 #ifdef NGLOG_OS_WINDOWS
   nglog::ScopedFlags<> save;
@@ -2415,14 +2635,16 @@ TEST(Logging, FileLockIsHeldAcrossProcesses) {
 }
 
 TEST(Logging, LockedOversizedFileIsNotTruncated) {
-#ifdef NGLOG_OS_WINDOWS
+// Emscripten cannot fork.
+#if defined(NGLOG_OS_WINDOWS) ||                      \
+    (defined(HAVE_FCNTL) && defined(HAVE_UNISTD_H) && \
+     defined(HAVE_SYS_WAIT_H) && !defined(NGLOG_OS_EMSCRIPTEN))
   auto save = nglog::MakeScopedFlags(
       nglog::MakeScopedFlag(FLAGS_logtostderr, false),
       nglog::MakeScopedFlag(FLAGS_timestamp_in_logfile_name, false),
       nglog::MakeScopedFlag(FLAGS_max_log_size, 1U));
 
   const std::string dest = TestTmpDir() + "/logging_test_locked_oversized_file";
-  const std::string ready = dest + ".ready";
   const std::string preserved_prefix = "preserved logfile contents";
   constexpr std::size_t kOversizedFileSize = kMegabyte + 1U;
   DeleteFiles(dest + "*");
@@ -2434,6 +2656,8 @@ TEST(Logging, LockedOversizedFileIsNotTruncated) {
                static_cast<std::streamsize>(original_contents.size()));
   output.close();
 
+#  ifdef NGLOG_OS_WINDOWS
+  const std::string ready = dest + ".ready";
   const WindowsHandle process_handle =
       SpawnSelf("--nglog-hold-log-lock \"" + dest + "\" \"" + ready + '"');
   ASSERT_TRUE(process_handle);
@@ -2449,11 +2673,127 @@ TEST(Logging, LockedOversizedFileIsNotTruncated) {
                                 kChildProcessTimeoutMilliseconds),
             WAIT_OBJECT_0);
   EXPECT_TRUE(WaitForLogFileUnlock(dest));
+#  else
+  // Record locks belong to a process, so this process holds the lock and a
+  // child tries to log into the file.
+  FileDescriptor lock_fd{open(dest.c_str(), O_WRONLY)};
+  ASSERT_TRUE(lock_fd) << strerror(errno);
+  struct flock write_lock = {};
+  write_lock.l_type = F_WRLCK;
+  write_lock.l_whence = SEEK_SET;
+  ASSERT_NE(fcntl(lock_fd.get(), F_SETLK, &write_lock), -1) << strerror(errno);
 
-  EXPECT_EQ(ReadFileContents(dest), original_contents);
+  const pid_t pid = fork();
+  ASSERT_NE(pid, -1) << strerror(errno);
+  if (pid == 0) {
+    SetLogDestination(NGLOG_INFO, dest.c_str());
+    LOG(INFO) << "message that cannot be written while the file is locked";
+    _exit(EXIT_SUCCESS);
+  }
+  int status = 0;
+  ASSERT_EQ(waitpid(pid, &status, 0), pid) << strerror(errno);
+  EXPECT_THAT(status, ExitsWithStatus(EXIT_SUCCESS));
+  lock_fd.reset();
+#  endif
+
+  // Compare without printing a megabyte of contents on failure.
+  const std::string contents = ReadFileContents(dest);
+  EXPECT_EQ(contents.size(), original_contents.size());
+  EXPECT_TRUE(contents == original_contents);
 
   LogToStderr();
   DeleteFiles(dest + "*");
+#endif
+}
+
+TEST(Logging, TruncatedOversizedFileStartsWithOneHeader) {
+  auto save = nglog::MakeScopedFlags(
+      nglog::MakeScopedFlag(FLAGS_logtostderr, false),
+      nglog::MakeScopedFlag(FLAGS_timestamp_in_logfile_name, false),
+      nglog::MakeScopedFlag(FLAGS_log_file_header, true),
+      nglog::MakeScopedFlag(FLAGS_max_log_size, 1U));
+
+  const std::string dest =
+      TestTmpDir() + "/logging_test_truncated_oversized_file";
+  DeleteFiles(dest + "*");
+  {
+    std::ofstream output{dest, std::ios::binary};
+    const std::string oversized(kMegabyte + 1U, 'x');
+    output.write(oversized.data(),
+                 static_cast<std::streamsize>(oversized.size()));
+  }
+
+  SetLogDestination(NGLOG_INFO, dest.c_str());
+  LOG(INFO) << "first message after truncation";
+  LOG(INFO) << "second message after truncation";
+  FlushLogFiles(NGLOG_INFO);
+  LogToStderr();
+
+  const std::string contents = ReadFileContents(dest);
+  EXPECT_LT(contents.size(), kMegabyte);
+  const std::vector<std::string> lines = SplitLines(contents);
+  EXPECT_EQ(std::count_if(lines.begin(), lines.end(),
+                          [](const std::string& line) {
+                            return line.rfind("Log file created at:", 0) == 0;
+                          }),
+            1);
+
+  DeleteFiles(dest + "*");
+}
+
+TEST(Logging, LogFileIsNotOpenedThroughSymlink) {
+#if defined(HAVE_UNISTD_H) && !defined(NGLOG_OS_WINDOWS) && \
+    !defined(NGLOG_OS_EMSCRIPTEN)
+  auto save = nglog::MakeScopedFlags(
+      nglog::MakeScopedFlag(FLAGS_logtostderr, false),
+      nglog::MakeScopedFlag(FLAGS_timestamp_in_logfile_name, false));
+
+  const std::string dest = TestTmpDir() + "/logging_test_symlinked_log_file";
+  const std::string victim = dest + ".victim";
+  const std::string victim_contents = "contents that must stay unchanged";
+  DeleteFiles(dest + "*");
+  {
+    std::ofstream output{victim, std::ios::binary};
+    output << victim_contents;
+  }
+  ASSERT_EQ(symlink(victim.c_str(), dest.c_str()), 0) << strerror(errno);
+
+  SetLogDestination(NGLOG_INFO, dest.c_str());
+  ScopedStreamCapture capture{StandardStream::kStderr};
+  LOG(INFO) << "message that must not reach the symlink target";
+  FlushLogFiles(NGLOG_INFO);
+  EXPECT_THAT(capture.Stop(), HasSubstr("Could not create log file '"));
+  LogToStderr();
+
+  EXPECT_EQ(ReadFileContents(victim), victim_contents);
+
+  DeleteFiles(dest + "*");
+#else
+  GTEST_SKIP() << "requires symbolic links that open() does not follow";
+#endif
+}
+
+// The system provides the standard streams as symbolic links, which a fixed
+// log destination may name.
+TEST(Logging, LogFileCanBeAStandardStream) {
+#if defined(HAVE_UNISTD_H) && !defined(NGLOG_OS_WINDOWS) && \
+    !defined(NGLOG_OS_EMSCRIPTEN)
+  // LogToStderr() at the end also changes --stderrthreshold.
+  const nglog::ScopedFlags<> save_all;
+  auto save = nglog::MakeScopedFlags(
+      nglog::MakeScopedFlag(FLAGS_logtostderr, false),
+      nglog::MakeScopedFlag(FLAGS_timestamp_in_logfile_name, false));
+  constexpr char kMessage[] = "message to the standard output";
+
+  ScopedStreamCapture capture{StandardStream::kStdout};
+  SetLogDestination(NGLOG_INFO, "/dev/stdout");
+  LOG(INFO) << kMessage;
+  FlushLogFiles(NGLOG_INFO);
+  SetLogDestination(NGLOG_INFO, "");
+  EXPECT_THAT(capture.Stop(), HasSubstr(kMessage));
+  LogToStderr();
+#else
+  GTEST_SKIP() << "requires the standard streams as files";
 #endif
 }
 
