@@ -193,6 +193,7 @@ check_cxx_symbol_exists (fork unistd.h HAVE_FORK)
 check_cxx_symbol_exists (getauxval sys/auxv.h HAVE_GETAUXVAL)
 check_cxx_symbol_exists (issetugid unistd.h HAVE_ISSETUGID)
 check_cxx_symbol_exists (_Fork unistd.h HAVE__FORK)
+check_cxx_symbol_exists (mallinfo2 malloc.h HAVE_MALLINFO2)
 check_cxx_symbol_exists (nanosleep ctime HAVE_NANOSLEEP)
 check_cxx_symbol_exists (pipe unistd.h HAVE_PIPE)
 check_cxx_symbol_exists (pipe2 unistd.h HAVE_PIPE2)
@@ -1432,6 +1433,11 @@ logging libraries\"\n#endif\n")
     )
 
     target_link_libraries (stacktrace_unittest PRIVATE ng-log_test)
+
+    if (_ng-log_STACKTRACE_SOURCE MATCHES "stacktrace_generic")
+      target_compile_definitions (stacktrace_unittest PRIVATE
+        NGLOG_TEST_STACKTRACE_GENERIC)
+    endif (_ng-log_STACKTRACE_SOURCE MATCHES "stacktrace_generic")
   endif (HAVE_STACKTRACE)
 
   add_executable (testing_utilities_unittest

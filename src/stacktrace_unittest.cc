@@ -23,6 +23,12 @@
 #  include <execinfo.h>
 #endif
 
+#if defined(NGLOG_TEST_STACKTRACE_GENERIC) && defined(HAVE_MALLINFO2)
+#  include <malloc.h>
+
+#  include "testing_utilities.h"
+#endif
+
 #ifdef HAVE_STACKTRACE
 
 using testing::AllOf;
@@ -230,6 +236,47 @@ void handle_abort(int /*code*/) { std::exit(EXIT_FAILURE); }
 }  // namespace
 
 TEST(Stacktrace, StackTrace) { CheckStackTrace(0); }
+
+#  if defined(NGLOG_TEST_STACKTRACE_GENERIC) && defined(HAVE_MALLINFO2) && \
+      defined(GTEST_HAS_DEATH_TEST)
+namespace {
+
+// Exits successfully if the first stack trace of this process allocates no
+// memory.
+[[noreturn]] void TraceFirstStackWithoutAllocating() {
+  constexpr int kMaxDepth = 32;
+  void* stack[kMaxDepth];
+  const std::size_t allocated_before = mallinfo2().uordblks;
+  nglog::GetStackTrace(stack, kMaxDepth, 0);
+  const std::size_t allocated_after = mallinfo2().uordblks;
+  std::exit(allocated_after == allocated_before ? EXIT_SUCCESS : EXIT_FAILURE);
+}
+
+// Returns whether mallinfo2() accounts for allocations, which sanitizers that
+// replace the allocator do not report.
+bool MallinfoTracksAllocations() {
+  constexpr std::size_t kProbeSize = 64 * 1024;
+  const std::size_t allocated_before = mallinfo2().uordblks;
+  const std::unique_ptr<void, decltype(&std::free)> probe{
+      std::malloc(kProbeSize), &std::free};
+  return probe != nullptr && mallinfo2().uordblks != allocated_before;
+}
+
+}  // namespace
+
+// glibc loads its unwinder on the first backtrace() call, which allocates.
+// The failure signal handler may take the first stack trace of a process
+// that crashed inside the allocator.
+TEST(Stacktrace, FirstStackTraceDoesNotAllocate) {
+  if (!MallinfoTracksAllocations()) {
+    GTEST_SKIP() << "mallinfo2() does not account for allocations";
+  }
+  // The check needs a process that has not taken a stack trace yet.
+  const nglog::ScopedDeathTestStyle style{"threadsafe"};
+  EXPECT_EXIT(TraceFirstStackWithoutAllocating(),
+              testing::ExitedWithCode(EXIT_SUCCESS), "");
+}
+#  endif
 
 int main(int argc, char** argv) {
 #  if defined(_MSC_VER)

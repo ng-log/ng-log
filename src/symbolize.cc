@@ -1140,7 +1140,10 @@ class LineReader {
   //
   // Note: if the last line doesn't end with '\n', the line will be
   // dropped.  It's an intentional behavior to make the code simple.
+  // A line longer than the buffer is truncated to the buffer, which
+  // truncated() then reports.
   bool ReadLine(const char** bol, const char** eol) {
+    truncated_ = false;
     if (BufferIsEmpty()) {  // First time.
       const ssize_t num_bytes = ReadFromOffset(fd_, buf_, buf_len_, offset_);
       if (num_bytes <= 0) {  // EOF or error.
@@ -1171,8 +1174,14 @@ class LineReader {
       }
     }
     eol_ = FindLineFeed();
-    if (eol_ == nullptr) {  // '\n' not found.  Malformed line.
-      return false;
+    if (eol_ == nullptr) {
+      // A line that fills the whole buffer is truncated rather than
+      // rejected, so that the lines after it remain readable.
+      if (bol_ != buf_ || eod_ != buf_ + buf_len_ || !SkipRestOfLine()) {
+        return false;  // '\n' not found.  Malformed line.
+      }
+      eol_ = buf_ + buf_len_ - 1;
+      truncated_ = true;
     }
     *eol_ = '\0';  // Replace '\n' with '\0'.
 
@@ -1187,9 +1196,33 @@ class LineReader {
   // End of line.
   const char* eol() { return eol_; }
 
+  // Whether the last line read was longer than the buffer and cut off.
+  bool truncated() const noexcept { return truncated_; }
+
  private:
   LineReader(const LineReader&) = delete;
   void operator=(const LineReader&) = delete;
+
+  // Advances the file offset past the next line feed without touching the
+  // buffer. Returns false at the end of the file or on error.
+  bool SkipRestOfLine() {
+    constexpr std::size_t kSkipChunkSize = 256;
+    char chunk[kSkipChunkSize];
+    for (;;) {
+      const ssize_t num_bytes =
+          ReadFromOffset(fd_, chunk, sizeof(chunk), offset_);
+      if (num_bytes <= 0) {
+        return false;
+      }
+      const auto* const line_feed = static_cast<const char*>(
+          std::memchr(chunk, '\n', static_cast<std::size_t>(num_bytes)));
+      if (line_feed != nullptr) {
+        offset_ += static_cast<std::size_t>(line_feed - chunk) + 1;
+        return true;
+      }
+      offset_ += static_cast<std::size_t>(num_bytes);
+    }
+  }
 
   char* FindLineFeed() {
     return reinterpret_cast<char*>(
@@ -1209,6 +1242,7 @@ class LineReader {
   char* bol_;
   char* eol_;
   const char* eod_;  // End of data in "buf_".
+  bool truncated_{false};
 };
 }  // namespace
 
@@ -1272,6 +1306,11 @@ static FileDescriptor OpenObjectFileContainingPcAndGetStartAddress(
     const char* eol;
     if (!reader.ReadLine(&cursor, &eol)) {  // EOF or malformed line.
       return nullptr;
+    }
+    // The file name is the last field, so a truncated line names a prefix of
+    // the actual file, which must not be opened instead.
+    if (reader.truncated()) {
+      continue;
     }
 
     // Start parsing line in /proc/self/maps.  Here is an example:
@@ -1857,7 +1896,14 @@ bool Symbolize(void* pc, char* out, std::size_t out_size,
   if (frame != nullptr) {
     *frame = SymbolizedFrame{};
   }
-  return SymbolizeAndDemangle(pc, out, out_size, options, frame);
+  if (SymbolizeAndDemangle(pc, out, out_size, options, frame)) {
+    return true;
+  }
+  // A failed attempt may have recorded the location of output it discarded.
+  if (frame != nullptr) {
+    *frame = SymbolizedFrame{};
+  }
+  return false;
 }
 
 }  // namespace tools

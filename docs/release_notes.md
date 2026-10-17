@@ -104,6 +104,7 @@ SPDX-License-Identifier: BSD-3-Clause
   disposition changes
 - Report a zero UTC offset with `log_utc_time`
 - Fix shadowing warnings from `VLOG_IS_ON`
+- Skip sanitizer frames in `backtrace` stack traces
 - Keep `BUILD_SHARED_LIBS` from changing the library type of embedding
   projects
 

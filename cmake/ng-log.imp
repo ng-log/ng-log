@@ -29,4 +29,5 @@
   { symbol: ["WIFEXITED", "private", "<sys/wait.h>", "public"] },
   { symbol: ["WIFSIGNALED", "private", "<sys/wait.h>", "public"] },
   { symbol: ["WTERMSIG", "private", "<sys/wait.h>", "public"] },
+  { symbol: ["MAP_FIXED_NOREPLACE", "private", "<sys/mman.h>", "public"] },
 ]
