@@ -12,7 +12,6 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <cstring>
 #include <iostream>
 #include <string>
 
@@ -25,7 +24,8 @@ NGLOG_DEFINE(bool, demangle_filter, false,
              "Run demangle_unittest in filter mode");
 
 using namespace nglog;
-using testing::Eq;
+using testing::Contains;
+using testing::Each;
 using testing::HasSubstr;
 using testing::Not;
 using testing::StrEq;
@@ -63,6 +63,29 @@ TEST(Demangle, Windows) {
 
 #else
 
+// Large enough for every successfully demangled name in these tests.
+constexpr std::size_t kDemangleBufferSize = 256;
+
+MATCHER_P(DemanglesTo, expected,
+          std::string{negation ? "does not demangle to a name that "
+                               : "demangles to a name that "} +
+              testing::DescribeMatcher<std::string>(expected)) {
+  const std::string mangled{arg};
+  char demangled[kDemangleBufferSize];
+  if (!Demangle(mangled.c_str(), demangled, sizeof(demangled))) {
+    *result_listener << "cannot be demangled";
+    return false;
+  }
+  *result_listener << "demangles to \"" << demangled << '"';
+  return testing::ExplainMatchResult(
+      testing::MatcherCast<std::string>(expected), std::string{demangled},
+      result_listener);
+}
+
+testing::Matcher<std::string> FailsToDemangle() {
+  return Not(DemanglesTo(testing::_));
+}
+
 // Test corner cases of boundary conditions.
 TEST(Demangle, CornerCases) {
   const std::size_t size = 10;
@@ -88,11 +111,7 @@ TEST(Demangle, CxxSymbols) {
       "_ZNSt6vectorIiSaIiEEC1Ev",
   };
 
-  for (const char* mangled : mangled_symbols) {
-    const char* demangled = DemangleIt(mangled);
-    EXPECT_THAT(demangled, Not(StrEq(mangled)));
-    EXPECT_THAT(demangled, Not(HasSubstr("_Z")));
-  }
+  EXPECT_THAT(mangled_symbols, Each(DemanglesTo(Not(HasSubstr("_Z")))));
 }
 
 // Test handling of functions suffixed with .clone.N, which is used by GCC
@@ -100,25 +119,16 @@ TEST(Demangle, CxxSymbols) {
 // suffixes are used to indicate functions which have been cloned during
 // optimization.  We ignore these suffixes.
 TEST(Demangle, Clones) {
-  char tmp[20];
-  EXPECT_TRUE(Demangle("_ZL3Foov", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("Foo()"));
-  EXPECT_TRUE(Demangle("_ZL3Foov.clone.3", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("Foo()"));
-  EXPECT_TRUE(Demangle("_ZL3Foov.constprop.80", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("Foo()"));
-  EXPECT_TRUE(Demangle("_ZL3Foov.isra.18", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("Foo()"));
-  EXPECT_TRUE(Demangle("_ZL3Foov.isra.2.constprop.18", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("Foo()"));
-  EXPECT_TRUE(Demangle("_ZL3Foov.vendor_suffix", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("Foo()"));
+  EXPECT_THAT("_ZL3Foov", DemanglesTo("Foo()"));
+  EXPECT_THAT("_ZL3Foov.clone.3", DemanglesTo("Foo()"));
+  EXPECT_THAT("_ZL3Foov.constprop.80", DemanglesTo("Foo()"));
+  EXPECT_THAT("_ZL3Foov.isra.18", DemanglesTo("Foo()"));
+  EXPECT_THAT("_ZL3Foov.isra.2.constprop.18", DemanglesTo("Foo()"));
+  EXPECT_THAT("_ZL3Foov.vendor_suffix", DemanglesTo("Foo()"));
 }
 
 TEST(Demangle, UsesSignalSafeParserByDefault) {
-  char tmp[64];
-  EXPECT_TRUE(Demangle("_Z1fi", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("f()"));
+  EXPECT_THAT("_Z1fi", DemanglesTo("f()"));
 }
 
 TEST(Demangle, UsesSystemDemanglerOnDemand) {
@@ -147,8 +157,7 @@ TEST(Demangle, RejectsExcessivelyNestedTypes) {
   mangled.append(kMaximumNestedTypes, 'P');
   mangled += "v";
 
-  char tmp[64];
-  EXPECT_FALSE(Demangle(mangled.c_str(), tmp, sizeof(tmp)));
+  EXPECT_THAT(mangled, FailsToDemangle());
 }
 
 TEST(Demangle, RejectsExcessivelyNestedLocalEncodings) {
@@ -163,87 +172,56 @@ TEST(Demangle, RejectsExcessivelyNestedLocalEncodings) {
   EXPECT_FALSE(Demangle(mangled.c_str(), tmp, sizeof(tmp)));
 }
 
-struct ValidAbiDemangleCase {
-  const char* mangled;
-  const char* demangled;
-};
-
-class ValidAbiDemangleTest
-    : public testing::TestWithParam<ValidAbiDemangleCase> {};
-
-TEST_P(ValidAbiDemangleTest, ParsesName) {
-  char tmp[256];
-  EXPECT_TRUE(Demangle(GetParam().mangled, tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq(GetParam().demangled));
-}
-
-INSTANTIATE_TEST_SUITE_P(
-    ItaniumAbi, ValidAbiDemangleTest,
-    testing::Values(
-        ValidAbiDemangleCase{"_ZNR1A1fEv", "A::f() &"},
-        ValidAbiDemangleCase{"_ZNO1A1gEv", "A::g() &&"},
-        ValidAbiDemangleCase{"_ZN1AmiB3tagEv", "A::operator-()"},
-        ValidAbiDemangleCase{"_Z1fSsB1XS_", "f()"},
-        ValidAbiDemangleCase{"_Z1fIiEDtsrNT_1XE1yET_", "f<>()"},
-        ValidAbiDemangleCase{"_Z1fIiEDtptfp_gssr1A1BE1xET_", "f<>()"},
-        ValidAbiDemangleCase{"_Z1fIiEDTadsrT_onmiET_", "f<>()"},
-        ValidAbiDemangleCase{"_Z1fIXspLi1EEEvv", "f<>()"},
-        ValidAbiDemangleCase{"_Z1fIiEDtgs1xEv", "f<>()"},
-        ValidAbiDemangleCase{"_Z1fIiEDtsrT_IiE1xET_", "f<>()"},
-        ValidAbiDemangleCase{"_ZN1SIiE1xMUlvE_E", "S<>::x"},
-        ValidAbiDemangleCase{"_ZZN1S1fEiiEd0_UlvE_", "S::f()::"},
-        ValidAbiDemangleCase{"_Z3foov.vendor_suffix", "foo()"},
-        ValidAbiDemangleCase{"_Z3fooA999999999999999999999_i", "foo()"},
-        ValidAbiDemangleCase{"_ZZ1fvE1x__2147483648_", "f()::x"},
-        ValidAbiDemangleCase{"_ZZ1fvE1x__9223372036854775807_", "f()::x"},
-        ValidAbiDemangleCase{"_Z1fI1AI1AI1AI1AI1AI1AI1AIiEEEEEEEEvv", "f<>()"}),
-    [](const testing::TestParamInfo<ValidAbiDemangleCase>& info) {
-      return "Case" + std::to_string(info.index);
-    });
-
-struct InvalidAbiDemangleCase {
-  const char* mangled;
-};
-
-class InvalidAbiDemangleTest
-    : public testing::TestWithParam<InvalidAbiDemangleCase> {};
-
-TEST_P(InvalidAbiDemangleTest, RejectsName) {
-  char tmp[128];
-  EXPECT_FALSE(Demangle(GetParam().mangled, tmp, sizeof(tmp)));
-}
-
-INSTANTIATE_TEST_SUITE_P(
-    ItaniumAbi, InvalidAbiDemangleTest,
-    testing::Values(
-        InvalidAbiDemangleCase{"_ZC1v"}, InvalidAbiDemangleCase{"_ZD1v"},
-        InvalidAbiDemangleCase{"_ZCI11Av"}, InvalidAbiDemangleCase{"_Z01fv"},
-        InvalidAbiDemangleCase{"_Z02foov"}, InvalidAbiDemangleCase{"_Z1fA01_i"},
-        InvalidAbiDemangleCase{"_Z1fAn1_i"},
-        InvalidAbiDemangleCase{"_ZZ1fvE1x_10"},
-        InvalidAbiDemangleCase{"_ZZ1fvE1x__1_"},
-        InvalidAbiDemangleCase{"_ZZ1fvE1x__9223372036854775808_"},
-        InvalidAbiDemangleCase{"_ZZ1fvE1x__n9223372036854775808_"},
-        InvalidAbiDemangleCase{"_Z3foov."}, InvalidAbiDemangleCase{"_Z"},
-        InvalidAbiDemangleCase{"_Z1fIXplLi1EEEvv"},
-        InvalidAbiDemangleCase{"_Z1fILiEEvv"},
-        InvalidAbiDemangleCase{"_Z1fFvvROE"}),
-    [](const testing::TestParamInfo<InvalidAbiDemangleCase>& info) {
-      return "Case" + std::to_string(info.index);
-    });
-
 struct DemangleCase {
   std::string mangled;
   std::string demangled;
 };
 
+std::string MangledTestName(const std::string& mangled) {
+  std::string name = "Mangled";
+  for (const char character : mangled) {
+    if ((character >= 'a' && character <= 'z') ||
+        (character >= 'A' && character <= 'Z') ||
+        (character >= '0' && character <= '9') || character == '_') {
+      name.push_back(character);
+    } else {
+      name.push_back('_');
+    }
+  }
+  return name;
+}
+
+std::string DemangleCaseName(const testing::TestParamInfo<DemangleCase>& info) {
+  return MangledTestName(info.param.mangled);
+}
+
 class DemangleTest : public testing::TestWithParam<DemangleCase> {};
 
 TEST_P(DemangleTest, ParsesItaniumName) {
-  char tmp[128];
-  EXPECT_TRUE(Demangle(GetParam().mangled.c_str(), tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq(GetParam().demangled));
+  EXPECT_THAT(GetParam().mangled, DemanglesTo(GetParam().demangled));
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    ItaniumAbi, DemangleTest,
+    testing::Values(DemangleCase{"_ZNR1A1fEv", "A::f() &"},
+                    DemangleCase{"_ZNO1A1gEv", "A::g() &&"},
+                    DemangleCase{"_ZN1AmiB3tagEv", "A::operator-()"},
+                    DemangleCase{"_Z1fSsB1XS_", "f()"},
+                    DemangleCase{"_Z1fIiEDtsrNT_1XE1yET_", "f<>()"},
+                    DemangleCase{"_Z1fIiEDtptfp_gssr1A1BE1xET_", "f<>()"},
+                    DemangleCase{"_Z1fIiEDTadsrT_onmiET_", "f<>()"},
+                    DemangleCase{"_Z1fIXspLi1EEEvv", "f<>()"},
+                    DemangleCase{"_Z1fIiEDtgs1xEv", "f<>()"},
+                    DemangleCase{"_Z1fIiEDtsrT_IiE1xET_", "f<>()"},
+                    DemangleCase{"_ZN1SIiE1xMUlvE_E", "S<>::x"},
+                    DemangleCase{"_ZZN1S1fEiiEd0_UlvE_", "S::f()::"},
+                    DemangleCase{"_Z3foov.vendor_suffix", "foo()"},
+                    DemangleCase{"_Z3fooA999999999999999999999_i", "foo()"},
+                    DemangleCase{"_ZZ1fvE1x__2147483648_", "f()::x"},
+                    DemangleCase{"_ZZ1fvE1x__9223372036854775807_", "f()::x"},
+                    DemangleCase{"_Z1fI1AI1AI1AI1AI1AI1AI1AIiEEEEEEEEvv",
+                                 "f<>()"}),
+    DemangleCaseName);
 
 INSTANTIATE_TEST_SUITE_P(
     ModernItaniumNames, DemangleTest,
@@ -269,29 +247,33 @@ INSTANTIATE_TEST_SUITE_P(
         DemangleCase{"_Z4foldIJiiEEDTflplfp_EDpT_", "fold<>()"},
         DemangleCase{"_Z9qualifiedI1AEDtsrT_5valueEv", "qualified<>()"},
         DemangleCase{"_Z6nestedI1AEDtsrNT_5innerE5valueEv", "nested<>()"}),
-    [](const testing::TestParamInfo<DemangleCase>& info) {
-      return "Case" + std::to_string(info.index);
-    });
+    DemangleCaseName);
 
+class InvalidDemangleTest : public testing::TestWithParam<std::string> {};
+
+TEST_P(InvalidDemangleTest, RejectsName) {
+  EXPECT_THAT(GetParam(), FailsToDemangle());
+}
+
+INSTANTIATE_TEST_SUITE_P(ItaniumAbi, InvalidDemangleTest,
+                         testing::Values("_ZC1v", "_ZD1v", "_ZCI11Av", "_Z01fv",
+                                         "_Z02foov", "_Z1fA01_i", "_Z1fAn1_i",
+                                         "_ZZ1fvE1x_10", "_ZZ1fvE1x__1_",
+                                         "_ZZ1fvE1x__9223372036854775808_",
+                                         "_ZZ1fvE1x__n9223372036854775808_",
+                                         "_Z3foov.", "_Z", "_Z1fIXplLi1EEEvv",
+                                         "_Z1fILiEEvv", "_Z1fFvvROE"),
+                         [](const testing::TestParamInfo<std::string>& info) {
+                           return MangledTestName(info.param);
+                         });
+
+// The corpus falls back to the mangled name whenever demangling fails, which
+// keeps names that are not mangled, such as C linkage symbols, untouched.
 class CorpusDemangleTest : public testing::TestWithParam<DemangleCase> {};
 
 TEST_P(CorpusDemangleTest, DemanglesExpectedName) {
   EXPECT_THAT(DemangleIt(GetParam().mangled.c_str()),
               StrEq(GetParam().demangled));
-}
-
-std::string DemangleCaseName(const testing::TestParamInfo<DemangleCase>& info) {
-  std::string name = "Mangled";
-  for (const char character : info.param.mangled) {
-    if ((character >= 'a' && character <= 'z') ||
-        (character >= 'A' && character <= 'Z') ||
-        (character >= '0' && character <= '9') || character == '_') {
-      name.push_back(character);
-    } else {
-      name.push_back('_');
-    }
-  }
-  return name;
 }
 
 // Test cases for demangle_unittest. Each entry consists of a mangled and an
@@ -547,140 +529,96 @@ INSTANTIATE_TEST_SUITE_P(
     DemangleCaseName);
 
 TEST(Demangle, VendorQualifiedTypes) {
-  char tmp[64];
-  EXPECT_TRUE(Demangle("_Z3fooU3barIiiEi", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("foo()"));
+  EXPECT_THAT("_Z3fooU3barIiiEi", DemanglesTo("foo()"));
 }
 
 TEST(Demangle, ModernOperatorNames) {
-  char tmp[128];
-  EXPECT_TRUE(Demangle("_ZNK1SssERKS_", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("S::operator<=>()"));
+  EXPECT_THAT("_ZNK1SssERKS_", DemanglesTo("S::operator<=>()"));
 }
 
 TEST(Demangle, LiteralOperatorNames) {
-  char tmp[64];
-  EXPECT_TRUE(Demangle("_Zli2_xe", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("operator\"\" _x()"));
+  EXPECT_THAT("_Zli2_xe", DemanglesTo("operator\"\" _x()"));
 }
 
 TEST(Demangle, ComplexFloatingPointLiterals) {
-  char tmp[64];
-  EXPECT_TRUE(Demangle("_Z1fILf3f800000_40000000EEvv", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("f<>()"));
+  EXPECT_THAT("_Z1fILf3f800000_40000000EEvv", DemanglesTo("f<>()"));
 }
 
 TEST(Demangle, RequiresClauses) {
-  char tmp[128];
-  EXPECT_TRUE(Demangle("_Z3fooIiQgtstT_Li0EEiS0_", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("foo<>()"));
+  EXPECT_THAT("_Z3fooIiQgtstT_Li0EEiS0_", DemanglesTo("foo<>()"));
 }
 
 TEST(Demangle, ThreadLocalSpecialNames) {
-  char tmp[128];
-  EXPECT_TRUE(Demangle("_ZTWN2ns3varE", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("TLS wrapper function for ns::var"));
-  EXPECT_TRUE(Demangle("_ZTHN2ns3varE", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("TLS init function for ns::var"));
+  EXPECT_THAT("_ZTWN2ns3varE", DemanglesTo("TLS wrapper function for ns::var"));
+  EXPECT_THAT("_ZTHN2ns3varE", DemanglesTo("TLS init function for ns::var"));
 }
 
 TEST(Demangle, FailedParseClearsOutput) {
   char tmp[8] = {'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x'};
   EXPECT_FALSE(Demangle("_Z", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp[0], Eq('\0'));
+  EXPECT_EQ(tmp[0], '\0');
 }
 
-TEST(Demangle, UnnamedTypes) {
-  char tmp[128];
-  EXPECT_TRUE(Demangle("_Z1fN1SUt_E", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("f()"));
-}
+TEST(Demangle, UnnamedTypes) { EXPECT_THAT("_Z1fN1SUt_E", DemanglesTo("f()")); }
 
 TEST(Demangle, LambdaAndStructuredBindingNames) {
-  char tmp[128];
-  EXPECT_TRUE(Demangle("_ZZ1giENKUlvE_clEv", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("g()::operator()()"));
-  EXPECT_TRUE(Demangle("_ZDC1a1bE", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("[a, b]"));
+  EXPECT_THAT("_ZZ1giENKUlvE_clEv", DemanglesTo("g()::operator()()"));
+  EXPECT_THAT("_ZDC1a1bE", DemanglesTo("[a, b]"));
 }
 
 TEST(Demangle, SourceNamesHavePositiveLength) {
-  char tmp[32];
-  EXPECT_FALSE(Demangle("_Z0v", tmp, sizeof(tmp)));
-  EXPECT_FALSE(Demangle("_Z3foov!", tmp, sizeof(tmp)));
+  EXPECT_THAT("_Z0v", FailsToDemangle());
+  EXPECT_THAT("_Z3foov!", FailsToDemangle());
 }
 
 TEST(Demangle, InheritingConstructors) {
-  char tmp[64];
-  EXPECT_TRUE(Demangle("_ZN1DCI11AEv", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("D::A()"));
-  EXPECT_TRUE(Demangle("_ZN1DCI21AEv", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("D::A()"));
+  EXPECT_THAT("_ZN1DCI11AEv", DemanglesTo("D::A()"));
+  EXPECT_THAT("_ZN1DCI21AEv", DemanglesTo("D::A()"));
 }
 
 TEST(Demangle, StructorVariants) {
-  char tmp[64];
   // GCC emits C4/C5 and D4/D5 for the unified and COMDAT-folded structors.
-  EXPECT_TRUE(Demangle("_ZN1AC4Ev", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("A::A()"));
-  EXPECT_TRUE(Demangle("_ZN1AC5Ev", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("A::A()"));
-  EXPECT_TRUE(Demangle("_ZN1AD4Ev", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("A::~A()"));
-  EXPECT_TRUE(Demangle("_ZN1AD5Ev", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("A::~A()"));
+  EXPECT_THAT("_ZN1AC4Ev", DemanglesTo("A::A()"));
+  EXPECT_THAT("_ZN1AC5Ev", DemanglesTo("A::A()"));
+  EXPECT_THAT("_ZN1AD4Ev", DemanglesTo("A::~A()"));
+  EXPECT_THAT("_ZN1AD5Ev", DemanglesTo("A::~A()"));
   // The ABI reserves D3 but no compiler emits it, and there is no C0.
-  EXPECT_FALSE(Demangle("_ZN1AD3Ev", tmp, sizeof(tmp)));
-  EXPECT_FALSE(Demangle("_ZN1AC0Ev", tmp, sizeof(tmp)));
+  EXPECT_THAT("_ZN1AD3Ev", FailsToDemangle());
+  EXPECT_THAT("_ZN1AC0Ev", FailsToDemangle());
 }
 
 TEST(Demangle, DefaultArgumentScopes) {
-  char tmp[64];
   // The parameter number is optional; its absence designates the last
   // parameter.
-  EXPECT_TRUE(Demangle("_ZZ1fiEd_1x", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("f()::x"));
-  EXPECT_TRUE(Demangle("_ZZ1fiEd0_1x", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("f()::x"));
-  EXPECT_TRUE(Demangle("_ZZ1fiEd_NKUlvE_clEv", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("f()::operator()()"));
+  EXPECT_THAT("_ZZ1fiEd_1x", DemanglesTo("f()::x"));
+  EXPECT_THAT("_ZZ1fiEd0_1x", DemanglesTo("f()::x"));
+  EXPECT_THAT("_ZZ1fiEd_NKUlvE_clEv", DemanglesTo("f()::operator()()"));
 }
 
 TEST(Demangle, StdQualifiedUnresolvedNames) {
-  char tmp[64];
-  EXPECT_TRUE(Demangle("_Z1fIiEvNSt9enable_ifIXsrSt1A5valueEvE4typeE", tmp,
-                       sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("f<>()"));
-  EXPECT_TRUE(Demangle("_Z1fIiEvNSt9enable_ifIXsrSt1AI1BE5valueEvE4typeE", tmp,
-                       sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("f<>()"));
+  EXPECT_THAT("_Z1fIiEvNSt9enable_ifIXsrSt1A5valueEvE4typeE",
+              DemanglesTo("f<>()"));
+  EXPECT_THAT("_Z1fIiEvNSt9enable_ifIXsrSt1AI1BE5valueEvE4typeE",
+              DemanglesTo("f<>()"));
   // Only a single qualifier level may follow the std abbreviation.
-  EXPECT_FALSE(Demangle("_Z1fIiEvNSt9enable_ifIXsrSt1A1B5valueEvE4typeE", tmp,
-                        sizeof(tmp)));
+  EXPECT_THAT("_Z1fIiEvNSt9enable_ifIXsrSt1A1B5valueEvE4typeE",
+              FailsToDemangle());
 }
 
 TEST(Demangle, TransactionSafeEntryPoints) {
-  char tmp[64];
-  EXPECT_TRUE(Demangle("_ZGTt3foov", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("transaction clone for foo()"));
+  EXPECT_THAT("_ZGTt3foov", DemanglesTo("transaction clone for foo()"));
 }
 
 TEST(Demangle, DependentFunctionParameterReferences) {
-  char tmp[64];
-  EXPECT_TRUE(Demangle("_Z1fIiEDtfp_ET_", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("f<>()"));
+  EXPECT_THAT("_Z1fIiEDtfp_ET_", DemanglesTo("f<>()"));
 }
 
 TEST(Demangle, DependentMemberExpressions) {
-  char tmp[64];
-  EXPECT_TRUE(Demangle("_Z1fI1SEDtdtfp_1xET_", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("f<>()"));
+  EXPECT_THAT("_Z1fI1SEDtdtfp_1xET_", DemanglesTo("f<>()"));
 }
 
 TEST(Demangle, BracedExpressions) {
-  char tmp[64];
-  EXPECT_TRUE(Demangle("_Z1fI1SEDTtlT_fp_EEi", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("f<>()"));
+  EXPECT_THAT("_Z1fI1SEDTtlT_fp_EEi", DemanglesTo("f<>()"));
 }
 
 TEST(Demangle, RejectsDeeplyNestedBracedExpressions) {
@@ -691,34 +629,24 @@ TEST(Demangle, RejectsDeeplyNestedBracedExpressions) {
   }
   mangled += "fp_EEi";
 
-  char tmp[64];
-  EXPECT_FALSE(Demangle(mangled.c_str(), tmp, sizeof(tmp)));
+  EXPECT_THAT(mangled, FailsToDemangle());
 }
 
 TEST(Demangle, RequiresExpressions) {
-  char tmp[64];
-  EXPECT_TRUE(Demangle("_Z1fI1SEDTrqXdtfp_1xEET_", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("f<>()"));
+  EXPECT_THAT("_Z1fI1SEDTrqXdtfp_1xEET_", DemanglesTo("f<>()"));
 }
 
 TEST(Demangle, FunctionTypeExceptionSpecifications) {
-  char tmp[64];
-  EXPECT_TRUE(Demangle("_Z5takesPDoFvvE", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("takes()"));
+  EXPECT_THAT("_Z5takesPDoFvvE", DemanglesTo("takes()"));
 }
 
 TEST(Demangle, GuardAndTemporarySpecialNames) {
-  char tmp[128];
-  EXPECT_TRUE(Demangle("_ZGV1x", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("x"));
-  EXPECT_TRUE(Demangle("_ZGR1x_", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("x"));
+  EXPECT_THAT("_ZGV1x", DemanglesTo("x"));
+  EXPECT_THAT("_ZGR1x_", DemanglesTo("x"));
 }
 
 TEST(Demangle, ExtendedLocalDiscriminators) {
-  char tmp[64];
-  EXPECT_TRUE(Demangle("_ZZ1fvE1x__10_", tmp, sizeof(tmp)));
-  EXPECT_THAT(tmp, StrEq("f()::x"));
+  EXPECT_THAT("_ZZ1fvE1x__10_", DemanglesTo("f()::x"));
 }
 
 // Reconstructing a truncated constructor or destructor name must not read
@@ -757,13 +685,12 @@ TEST(Demangle, LongNameTruncation) {
   // result must be '\0'-terminated.
   char big[4096];
   if (Demangle(mangled, big, sizeof(big))) {
-    EXPECT_THAT(std::memchr(big, '\0', sizeof(big)), Not(testing::IsNull()));
+    EXPECT_THAT(big, Contains('\0'));
   }
 
   char small_buf[256];
   if (Demangle(mangled, small_buf, sizeof(small_buf))) {
-    EXPECT_THAT(std::memchr(small_buf, '\0', sizeof(small_buf)),
-                Not(testing::IsNull()));
+    EXPECT_THAT(small_buf, Contains('\0'));
   }
 }
 
