@@ -26,6 +26,18 @@
 #  include <unistd.h>
 #endif
 
+#if defined(__SANITIZE_ADDRESS__)
+#  define NGLOG_LEAK_SANITIZER 1
+#elif defined(__has_feature)
+#  if __has_feature(address_sanitizer) || __has_feature(leak_sanitizer)
+#    define NGLOG_LEAK_SANITIZER 1
+#  endif
+#endif
+
+#ifdef NGLOG_LEAK_SANITIZER
+#  include <sanitizer/lsan_interface.h>
+#endif
+
 namespace nglog {
 namespace internal {
 namespace {
@@ -223,8 +235,10 @@ bool ParseAnchorMapping(const std::string& line, std::uintptr_t* start) {
 }
 
 // Returns the lowest address at which an anchor is mapped, or null if there is
-// none. All instances agree on the lowest address when several anchors were
-// created concurrently.
+// none. Instances that create anchors concurrently agree on the lowest one
+// only if each maps its anchor before another one searches again. Instances
+// acquire the registry while registering their flags during static
+// initialization, which the dynamic loader serializes.
 Anchor* FindAnchor() {
   std::FILE* const mappings = std::fopen(kMappingsPath, "r");
   if (mappings == nullptr) {
@@ -275,7 +289,7 @@ SharedRegistry* AcquireSharedRegistry() {
       return candidate;
     }
     // Another instance may have created an anchor concurrently. The lowest
-    // address wins, and each creator removes an anchor that lost.
+    // address found wins, and each creator removes its anchor if it lost.
     anchor = FindAnchor();
     if (anchor != created) {
       munmap(created, sizeof(Anchor));
@@ -286,6 +300,12 @@ SharedRegistry* AcquireSharedRegistry() {
   }
   // The mapping stays for the lifetime of the process, so that instances
   // loaded later find the anchor.
+#  ifdef NGLOG_LEAK_SANITIZER
+  // Once every library instance that refers to the registry is unloaded, the
+  // anchor holds the only reference, but LeakSanitizer does not scan memory
+  // files. Its address is published here like any other live reference.
+  __lsan_register_root_region(anchor, sizeof(Anchor));
+#  endif
   return PublishSharedRegistry(*anchor, candidate);
 }
 

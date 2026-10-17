@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdio>
+#include <locale>
 #include <string>
 
 #include "config.h"
@@ -73,6 +74,28 @@ class ScopedEnvironmentVariable final {
   std::string name_;
   std::string previous_;
   bool had_previous_;
+};
+
+//! Groups the digits of numbers in threes like many locales do.
+class GroupingPunctuation : public std::numpunct<char> {
+ protected:
+  char do_thousands_sep() const override { return ','; }
+  std::string do_grouping() const override { return "\3"; }
+};
+
+//! Installs a global locale that groups digits and restores the previous one.
+class ScopedGroupingLocale {
+ public:
+  ScopedGroupingLocale()
+      : previous_{std::locale::global(
+            std::locale{std::locale::classic(), new GroupingPunctuation})} {}
+  ~ScopedGroupingLocale() { std::locale::global(previous_); }
+
+  ScopedGroupingLocale(const ScopedGroupingLocale&) = delete;
+  ScopedGroupingLocale& operator=(const ScopedGroupingLocale&) = delete;
+
+ private:
+  std::locale previous_;
 };
 
 #ifdef GTEST_HAS_DEATH_TEST
