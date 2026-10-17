@@ -303,10 +303,28 @@ static void DumpPC(DebugWriter* writerfn, void* arg, void* pc,
 }
 
 // Dump current stack trace as directed by writerfn
+// Ends a stack dump cut off at kMaxFrames, through the sink that
+// DumpPCAndSymbol() sent the frames to.
+static void DumpMoreFramesFollow(DebugWriter* writerfn, void* arg) {
+#  if defined(HAVE_SYMBOLIZE)
+  if (writerfn == &DebugWriteToStderr &&
+      nglog::GetFlag(FLAGS_symbolize_stacktrace)) {
+    DumpMoreStackFramesFollow();
+    return;
+  }
+#  endif
+  writerfn("    (More stack frames follow...)\n", arg);
+}
+
 static void DumpStackTrace(int skip_count, DebugWriter* writerfn, void* arg) {
-  // Print stack trace
-  void* stack[32];
+  // Print stack trace. One frame more than is printed is captured, so that a
+  // trace cut off at the limit says so instead of looking complete.
+  void* stack[kMaxFrames + 1];
   int depth = GetStackTrace(stack, ARRAYSIZE(stack), skip_count + 1);
+  const bool truncated = depth > kMaxFrames;
+  if (truncated) {
+    depth = kMaxFrames;
+  }
   for (int i = 0; i < depth; i++) {
 #  if defined(HAVE_SYMBOLIZE)
     if (nglog::GetFlag(FLAGS_symbolize_stacktrace)) {
@@ -317,6 +335,9 @@ static void DumpStackTrace(int skip_count, DebugWriter* writerfn, void* arg) {
 #  else
     DumpPC(writerfn, arg, stack[i], "    ");
 #  endif
+  }
+  if (truncated) {
+    DumpMoreFramesFollow(writerfn, arg);
   }
 }
 

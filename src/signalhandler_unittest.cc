@@ -333,6 +333,24 @@ TEST(SignalHandler, FailureDumpOrder) {
 }
 #  endif  // defined(HAVE_SIGACTION) && !defined(NGLOG_OS_WINDOWS)
 
+// Recurses `depth` frames before raising SIGSEGV. Storing the result in a
+// volatile keeps the recursive call from becoming a tail call or a loop.
+NGLOG_ATTRIBUTE_NOINLINE static int CrashAtDepth(int depth) {
+  if (depth > 0) {
+    volatile int result = CrashAtDepth(depth - 1);
+    return result + 1;
+  }
+  raise(SIGSEGV);
+  return 0;
+}
+
+TEST(SignalHandler, SaysWhenMoreFramesFollow) {
+  if (!UnwinderWalksPastMaxFrames()) {
+    GTEST_SKIP() << "the unwinder stops before kMaxFrames";
+  }
+  ASSERT_DEATH(CrashAtDepth(kMaxFrames + 8), "More stack frames follow");
+}
+
 #  if defined(NGLOG_OS_WINDOWS) && !defined(HAVE_ADDR2LINE)
 TEST(SignalHandler, SourceLocationPrecedesFunctionName) {
   ASSERT_DEATH(abort(), "signalhandler_unittest\\.cc:.*TestBody");

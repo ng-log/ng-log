@@ -737,13 +737,21 @@ static void HandleSignal(int signal_number
 #endif
 
 #ifdef HAVE_STACKTRACE
-  // Get the stack traces.
-  void* stack[32];
+  // Get the stack traces. One frame more than is printed is captured, so that
+  // a trace cut off at the limit says so instead of looking complete.
+  void* stack[kMaxFrames + 1];
   // +1 to exclude this function.
-  const int depth = GetStackTrace(stack, ARRAYSIZE(stack), 1);
+  int depth = GetStackTrace(stack, ARRAYSIZE(stack), 1);
+  const bool truncated = depth > kMaxFrames;
+  if (truncated) {
+    depth = kMaxFrames;
+  }
   // Dump the stack traces.
   for (int i = 0; i < depth; ++i) {
     DumpStackFrameInfoImpl("    ", stack[i]);
+  }
+  if (truncated) {
+    DumpMoreStackFramesFollow();
   }
 #endif
 
@@ -818,6 +826,12 @@ void FailureSignalHandler(int signal_number, siginfo_t* signal_info,
 #if !defined(NGLOG_OS_WINDOWS) || defined(HAVE_STACKTRACE)
 void DumpStackFrameInfo(const char* prefix, void* pc) {
   DumpStackFrameInfoImpl(prefix, pc);
+}
+
+void DumpMoreStackFramesFollow() {
+  // GDB's wording for a backtrace cut off at its limit.
+  constexpr char kMoreFrames[] = "    (More stack frames follow...)\n";
+  g_failure_writer(kMoreFrames, sizeof(kMoreFrames) - 1);
 }
 #endif
 
