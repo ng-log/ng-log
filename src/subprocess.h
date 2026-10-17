@@ -39,7 +39,9 @@ namespace nglog {
 inline namespace tools {
 
 struct SubprocessWaitResult {
-  enum Status { kExited, kTimedOut, kFailed };
+  // kUnavailable reports a process that exited and was reaped elsewhere, for
+  // example because SIGCHLD is ignored, so its exit status is unknown.
+  enum Status { kExited, kTimedOut, kFailed, kUnavailable };
 
   Status status;
   // Read exit_code only for kExited.
@@ -55,6 +57,13 @@ struct SubprocessWaitResult {
   static SubprocessWaitResult TimedOut() {
     SubprocessWaitResult result;
     result.status = kTimedOut;
+    return result;
+  }
+
+  static SubprocessWaitResult Unavailable() {
+    SubprocessWaitResult result;
+    result.status = kUnavailable;
+    result.exit_code = -1;
     return result;
   }
 
@@ -162,8 +171,9 @@ class NGLOG_NO_EXPORT Subprocess final {
                          std::chrono::milliseconds timeout) noexcept;
 
   // Waits for the process to exit, forcibly terminating it if |timeout|
-  // elapses first. Always reaps the process exactly once as long as
-  // Spawn() succeeded. Call at most once per Subprocess.
+  // elapses first. Reaps the process exactly once as long as Spawn()
+  // succeeded, unless the system or a signal handler reaped it already.
+  // Call at most once per Subprocess.
   SubprocessWaitResult Wait(std::chrono::milliseconds timeout) noexcept;
 
  private:

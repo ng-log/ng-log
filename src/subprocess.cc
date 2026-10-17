@@ -25,9 +25,11 @@
 
 #  ifdef NGLOG_OS_WINDOWS
 
+#    include <array>
 #    include <atomic>
 #    include <cstring>
 #    include <cwchar>
+#    include <initializer_list>
 #    include <limits>
 #    include <locale>
 #    include <memory>
@@ -115,22 +117,22 @@ bool HasPathEntry(char* const envp[], const std::locale& locale) {
 // at all, as one buffer of NUL-separated "NAME=VALUE" strings terminated
 // by an extra NUL, rather than an envp[] array.
 //
-// Without a PATH entry of its own, the child cannot resolve a bare
-// argv[0] (e.g. "addr2line") via CreateProcessW()'s own implicit search,
-// which looks at the *new* process' environment rather than this one's.
-// Carrying this process' own PATH through, even when the caller
-// otherwise wants a minimal child environment, matches what
-// posix_spawnp()/execvp() already guarantee on the POSIX side: argv[0]
-// resolves via the caller's PATH regardless of what envp the child
-// itself ends up running with.
-std::wstring BuildEnvironmentBlock(char* const envp[]) {
-  std::wstring block;
+// A block without a PATH entry receives the PATH of this process, so that
+// the child finds the programs it starts in turn even when the caller asks
+// for an otherwise minimal environment. The executable of the child itself
+// is resolved by this process beforehand, see ResolveExecutablePath().
+// Entries are UTF-8 like the arguments. Returns false for an entry that is
+// not valid UTF-8.
+bool BuildEnvironmentBlock(char* const envp[], std::wstring* environment) {
+  std::wstring& block = *environment;
+  block.clear();
 
   for (char* const* entry = envp; *entry != nullptr; ++entry) {
-    for (const char* p = *entry; *p != '\0'; ++p) {
-      block += static_cast<wchar_t>(static_cast<unsigned char>(*p));
+    std::wstring wide_entry;
+    if (!internal::Utf8ToWide(*entry, std::strlen(*entry), &wide_entry)) {
+      return false;
     }
-
+    block += wide_entry;
     block += L'\0';
   }
 
@@ -151,7 +153,7 @@ std::wstring BuildEnvironmentBlock(char* const envp[]) {
   }
 
   block += L'\0';
-  return block;
+  return true;
 }
 
 constexpr wchar_t kExecutableExtension[] = L".exe";
@@ -167,13 +169,49 @@ void AppendDefaultExtension(std::wstring* path) {
   }
 }
 
-// Searches the calling process' own directory, its current directory, the
-// system directories, and its own PATH environment variable, in that order.
+// Returns the directory that contains the executable of this process.
+bool GetApplicationDirectory(std::wstring* directory) {
+  std::vector<wchar_t> buffer(MAX_PATH);
+  while (true) {
+    const DWORD length = GetModuleFileNameW(nullptr, buffer.data(),
+                                            static_cast<DWORD>(buffer.size()));
+    if (length == 0) {
+      return false;
+    }
+    if (length < buffer.size()) {
+      directory->assign(buffer.data(), length);
+      const std::size_t separator = directory->find_last_of(L"\\/");
+      if (separator == std::wstring::npos) {
+        return false;
+      }
+      directory->resize(separator);
+      return true;
+    }
+    constexpr std::size_t kGrowthFactor = 2;
+    buffer.resize(buffer.size() * kGrowthFactor);
+  }
+}
+
+// Searches the directory of this process' executable and the system
+// directory. Unlike the default search order of SearchPathW(), it leaves out
+// the current directory, from which a planted program would run instead.
 bool SearchExecutable(const std::wstring& name, std::wstring* executable_path) {
+  std::wstring search_path;
+  if (!GetApplicationDirectory(&search_path)) {
+    return false;
+  }
+  std::array<wchar_t, MAX_PATH> system_directory = {};
+  const UINT system_length = GetSystemDirectoryW(
+      system_directory.data(), static_cast<UINT>(system_directory.size()));
+  if (system_length > 0 && system_length < system_directory.size()) {
+    search_path += L';';
+    search_path.append(system_directory.data(), system_length);
+  }
+
   std::vector<wchar_t> buffer(MAX_PATH);
   while (true) {
     const DWORD length =
-        SearchPathW(nullptr, name.c_str(), kExecutableExtension,
+        SearchPathW(search_path.c_str(), name.c_str(), kExecutableExtension,
                     static_cast<DWORD>(buffer.size()), buffer.data(), nullptr);
     if (length == 0) {
       return false;
@@ -187,8 +225,24 @@ bool SearchExecutable(const std::wstring& name, std::wstring* executable_path) {
   }
 }
 
-// Searches PATH entries that SearchPathW() cannot resolve because the
-// resulting path exceeds MAX_PATH.
+// Returns whether a PATH entry is a drive or UNC path rather than one relative
+// to the current directory.
+bool IsAbsoluteWindowsPath(const std::wstring& path) {
+  constexpr std::size_t kUncPrefixLength = 2;
+  constexpr std::size_t kDrivePrefixLength = 3;
+  const auto is_separator = [](wchar_t character) {
+    return character == L'\\' || character == L'/';
+  };
+  if (path.size() >= kUncPrefixLength && is_separator(path[0]) &&
+      is_separator(path[1])) {
+    return true;
+  }
+  return path.size() >= kDrivePrefixLength && path[1] == L':' &&
+         is_separator(path[2]);
+}
+
+// Searches the absolute entries of PATH, including those whose resulting path
+// exceeds MAX_PATH.
 bool FindExecutableInPath(const std::wstring& name,
                           std::wstring* executable_path) {
   const DWORD required_length = GetEnvironmentVariableW(L"PATH", nullptr, 0);
@@ -219,7 +273,8 @@ bool FindExecutableInPath(const std::wstring& name,
           entry.substr(kSingleCharacterLength, entry.size() - kQuotePairLength);
     }
 
-    if (!entry.empty()) {
+    // Relative entries refer to the current directory.
+    if (IsAbsoluteWindowsPath(entry)) {
       std::wstring candidate = std::move(entry);
       if (candidate.back() != L'\\' && candidate.back() != L'/') {
         candidate += L'\\';
@@ -250,8 +305,9 @@ bool FindExecutableInPath(const std::wstring& name,
 // Resolves a program name without a path separator using this process'
 // search order rather than leaving the lookup to CreateProcessW(). The
 // latter searches PATH from the environment block handed to the new
-// process, which would defeat a deliberately minimal child environment.
-// Falls back to |name| with the default extension if the search fails.
+// process, which would defeat a deliberately minimal child environment, and
+// the current directory, from which a planted program would run. Fails if
+// the search finds nothing.
 bool ResolveExecutablePath(const char* name, std::wstring* resolved_path) {
   std::wstring wide_name;
   if (!internal::Utf8ToWide(name, std::strlen(name), &wide_name)) {
@@ -264,13 +320,8 @@ bool ResolveExecutablePath(const char* name, std::wstring* resolved_path) {
                                         resolved_path);
   }
 
-  if (SearchExecutable(wide_name, resolved_path) ||
-      FindExecutableInPath(wide_name, resolved_path)) {
-    return true;
-  }
-  AppendDefaultExtension(&wide_name);
-  *resolved_path = std::move(wide_name);
-  return true;
+  return SearchExecutable(wide_name, resolved_path) ||
+         FindExecutableInPath(wide_name, resolved_path);
 }
 
 DWORD ClampTimeoutMillis(std::chrono::milliseconds timeout) {
@@ -471,7 +522,10 @@ bool Subprocess<SubprocessMode::kNormal>::Spawn(char* const argv[],
     AppendQuotedArg(wide_arg, command_line);
   }
 
-  std::wstring environment_block = BuildEnvironmentBlock(envp);
+  std::wstring environment_block;
+  if (!BuildEnvironmentBlock(envp, &environment_block)) {
+    return false;
+  }
 
   UniqueHandle stdin_write;
   UniqueHandle stdin_read;
@@ -499,12 +553,45 @@ bool Subprocess<SubprocessMode::kNormal>::Spawn(char* const argv[],
                                        &inheritable, OPEN_EXISTING,
                                        FILE_ATTRIBUTE_NORMAL, nullptr)};
 
-  STARTUPINFOW startup_info{};
-  startup_info.cb = sizeof(startup_info);
-  startup_info.dwFlags = STARTF_USESTDHANDLES;
-  startup_info.hStdInput = stdin_read.get();
-  startup_info.hStdOutput = stdout_write.get();
-  startup_info.hStdError = null_device.get();
+  // Without a list, the child would inherit every inheritable handle of this
+  // process, including the pipe ends that other threads create for their own
+  // children at the same time.
+  std::vector<HANDLE> inherited_handles;
+  for (const HANDLE handle :
+       {stdin_read.get(), stdout_write.get(), null_device.get()}) {
+    if (handle != nullptr && handle != INVALID_HANDLE_VALUE) {
+      inherited_handles.push_back(handle);
+    }
+  }
+  constexpr DWORD kAttributeCount = 1;
+  SIZE_T attribute_list_size = 0;
+  InitializeProcThreadAttributeList(nullptr, kAttributeCount, 0,
+                                    &attribute_list_size);
+  std::vector<unsigned char> attribute_storage(attribute_list_size);
+  auto* const attributes =
+      reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attribute_storage.data());
+  if (!InitializeProcThreadAttributeList(attributes, kAttributeCount, 0,
+                                         &attribute_list_size)) {
+    return false;
+  }
+  struct AttributeListDeleter {
+    LPPROC_THREAD_ATTRIBUTE_LIST list;
+    ~AttributeListDeleter() { DeleteProcThreadAttributeList(list); }
+  } const attribute_list_deleter{attributes};
+  if (!UpdateProcThreadAttribute(
+          attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+          inherited_handles.data(), inherited_handles.size() * sizeof(HANDLE),
+          nullptr, nullptr)) {
+    return false;
+  }
+
+  STARTUPINFOEXW startup_info{};
+  startup_info.StartupInfo.cb = sizeof(startup_info);
+  startup_info.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+  startup_info.StartupInfo.hStdInput = stdin_read.get();
+  startup_info.StartupInfo.hStdOutput = stdout_write.get();
+  startup_info.StartupInfo.hStdError = null_device.get();
+  startup_info.lpAttributeList = attributes;
 
   PROCESS_INFORMATION process_info{};
   // CreateProcessW() requires mutable buffers for the command line and
@@ -514,8 +601,10 @@ bool Subprocess<SubprocessMode::kNormal>::Spawn(char* const argv[],
   // contiguous and NUL-terminated, including when empty.
   const BOOL spawned = CreateProcessW(
       executable_path.c_str(), &command_line[0], nullptr, nullptr,
-      /*bInheritHandles=*/TRUE, CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,
-      &environment_block[0], nullptr, &startup_info, &process_info);
+      /*bInheritHandles=*/TRUE,
+      CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW |
+          EXTENDED_STARTUPINFO_PRESENT,
+      &environment_block[0], nullptr, &startup_info.StartupInfo, &process_info);
   const DWORD spawn_error = GetLastError();
 
   // These were only needed for the child to inherit. The child has its
@@ -646,6 +735,8 @@ SubprocessWaitResult Subprocess<SubprocessMode::kNormal>::Wait(
 #    ifdef HAVE_POSIX_SPAWN
 #      include <spawn.h>
 #    else
+#      include <cstdlib>
+
 #      include "subprocess_fork.h"
 #    endif  // HAVE_POSIX_SPAWN
 
@@ -665,16 +756,39 @@ auto FailureRetry(Functor run) noexcept(noexcept(run())) {
   return result;
 }
 
+#    ifndef HAVE_PIPE2
 // Marks |fd| close-on-exec, so it does not leak into a spawned child.
-// Without this, the child inherits all four pipe descriptors instead of
-// just its own stdin and stdout, including a copy of its own stdin
-// pipe's write end, which makes it unable to ever see EOF on stdin.
-// dup2() (used below to install the two ends the child does need)
-// clears FD_CLOEXEC on the target descriptor regardless of the source's
-// flags, so this does not affect the ends the child is meant to keep.
 bool SetCloseOnExec(int fd) {
   const int flags = ::fcntl(fd, F_GETFD);
   return flags != -1 && ::fcntl(fd, F_SETFD, flags | FD_CLOEXEC) != -1;
+}
+#    endif
+
+// Creates a pipe whose ends are close-on-exec. Without this, the child
+// inherits all four pipe descriptors instead of just its own stdin and stdout,
+// including a copy of its own stdin pipe's write end, which makes it unable
+// to ever see EOF on stdin. Setting the flag after creation would leak the
+// ends into programs that other threads start in between. dup2(), used to
+// install the two ends the child does need, clears FD_CLOEXEC on the target
+// descriptor, so this does not affect the ends the child is meant to keep.
+bool CreateCloseOnExecPipe(FileDescriptor* read_end,
+                           FileDescriptor* write_end) {
+  int fds[2];
+#    ifdef HAVE_PIPE2
+  if (::pipe2(fds, O_CLOEXEC) != 0) {
+    return false;
+  }
+  read_end->reset(fds[0]);
+  write_end->reset(fds[1]);
+  return true;
+#    else
+  if (::pipe(fds) != 0) {
+    return false;
+  }
+  read_end->reset(fds[0]);
+  write_end->reset(fds[1]);
+  return SetCloseOnExec(fds[0]) && SetCloseOnExec(fds[1]);
+#    endif
 }
 
 int ClampPollTimeout(std::chrono::milliseconds timeout) {
@@ -728,11 +842,15 @@ pid_t SpawnProcessNormal(char* const argv[], char* const envp[], int stdin_fd,
     return -1;
   }
 
-  posix_spawn_file_actions_adddup2(file_actions.get(), stdin_fd, STDIN_FILENO);
-  posix_spawn_file_actions_adddup2(file_actions.get(), stdout_fd,
-                                   STDOUT_FILENO);
-  posix_spawn_file_actions_addopen(file_actions.get(), STDERR_FILENO,
-                                   "/dev/null", O_WRONLY, 0);
+  // Without these actions, the child would use the streams of this process.
+  if (posix_spawn_file_actions_adddup2(file_actions.get(), stdin_fd,
+                                       STDIN_FILENO) != 0 ||
+      posix_spawn_file_actions_adddup2(file_actions.get(), stdout_fd,
+                                       STDOUT_FILENO) != 0 ||
+      posix_spawn_file_actions_addopen(file_actions.get(), STDERR_FILENO,
+                                       "/dev/null", O_WRONLY, 0) != 0) {
+    return -1;
+  }
 
   pid_t pid = -1;
   const int result =
@@ -745,9 +863,10 @@ pid_t SpawnProcessNormal(char* const argv[], char* const envp[], int stdin_fd,
 
 pid_t SpawnProcessNormal(char* const argv[], char* const envp[], int stdin_fd,
                          int stdout_fd, int exec_error_fd) {
-  return internal::SpawnProcessWithFork(argv, envp, stdin_fd, stdout_fd,
-                                        exec_error_fd, &fork,
-                                        &internal::ExecuteWithExecvp);
+  // Searches PATH like posix_spawnp().
+  return internal::SpawnProcessWithFork(argv, envp, std::getenv("PATH"),
+                                        stdin_fd, stdout_fd, exec_error_fd,
+                                        &fork, &internal::ExecuteWithExecvp);
 }
 
 #    endif  // HAVE_POSIX_SPAWN
@@ -821,41 +940,17 @@ bool Subprocess<SubprocessMode::kNormal>::Spawn(char* const argv[],
 
   FileDescriptor stdin_read;
   FileDescriptor stdin_write;
-  int stdin_fds[2];
-
-  if (::pipe(stdin_fds) != 0) {
-    return false;
-  }
-  stdin_read.reset(stdin_fds[0]);
-  stdin_write.reset(stdin_fds[1]);
-
   FileDescriptor stdout_read;
   FileDescriptor stdout_write;
-  int stdout_fds[2];
-
-  if (::pipe(stdout_fds) != 0) {
-    return false;
-  }
-  stdout_read.reset(stdout_fds[0]);
-  stdout_write.reset(stdout_fds[1]);
-
-  if (!SetCloseOnExec(stdin_read.get()) || !SetCloseOnExec(stdin_write.get()) ||
-      !SetCloseOnExec(stdout_read.get()) ||
-      !SetCloseOnExec(stdout_write.get())) {
+  if (!CreateCloseOnExecPipe(&stdin_read, &stdin_write) ||
+      !CreateCloseOnExecPipe(&stdout_read, &stdout_write)) {
     return false;
   }
 
 #    ifndef HAVE_POSIX_SPAWN
   FileDescriptor exec_error_read;
   FileDescriptor exec_error_write;
-  int exec_error_fds[2] = {-1, -1};
-  if (::pipe(exec_error_fds) != 0) {
-    return false;
-  }
-  exec_error_read.reset(exec_error_fds[0]);
-  exec_error_write.reset(exec_error_fds[1]);
-  if (!SetCloseOnExec(exec_error_read.get()) ||
-      !SetCloseOnExec(exec_error_write.get())) {
+  if (!CreateCloseOnExecPipe(&exec_error_read, &exec_error_write)) {
     return false;
   }
   const int exec_error_fd = exec_error_write.get();
@@ -967,7 +1062,15 @@ SubprocessWaitResult Subprocess<SubprocessMode::kNormal>::Wait(
     return SubprocessWaitResult::Failed();
   }
 
-  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  // Saturates instead of overflowing for timeouts that stand for waiting
+  // indefinitely, such as std::chrono::milliseconds::max(), and treats
+  // negative timeouts as zero.
+  const auto now = std::chrono::steady_clock::now();
+  const auto longest_timeout =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::time_point::max() - now);
+  const auto deadline = now + std::max(std::chrono::milliseconds::zero(),
+                                       std::min(timeout, longest_timeout));
   int status = 0;
   bool exited = false;
   bool wait_failed = false;
@@ -982,6 +1085,12 @@ SubprocessWaitResult Subprocess<SubprocessMode::kNormal>::Wait(
     }
 
     if (result < 0) {
+      if (errno == ECHILD) {
+        // Another waiter reaped the process. Its ID may belong to another
+        // process by now, so it must not be killed.
+        pid_ = -1;
+        return SubprocessWaitResult::Unavailable();
+      }
       wait_failed = true;
       break;
     }
@@ -1004,10 +1113,14 @@ SubprocessWaitResult Subprocess<SubprocessMode::kNormal>::Wait(
     const int kill_error = errno;
     const pid_t wait_result =
         FailureRetry([pid, &status] { return ::waitpid(pid, &status, 0); });
+    const int wait_error = errno;
     pid_ = -1;
 
     if (wait_result != pid) {
-      return SubprocessWaitResult::Failed();
+      // With SIGCHLD ignored, the system reaps the killed child itself.
+      return kill_result == 0 && wait_error == ECHILD
+                 ? SubprocessWaitResult::TimedOut()
+                 : SubprocessWaitResult::Failed();
     }
     if (wait_failed || (kill_result < 0 && kill_error != ESRCH)) {
       return SubprocessWaitResult::Failed();
