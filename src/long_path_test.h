@@ -21,6 +21,52 @@ inline bool IsWine() {
          GetProcAddress(ntdll, "wine_get_version") != nullptr;
 }
 
+/**
+ * Retrieves the path of the running executable.
+ *
+ * @return @c false if the path could not be determined.
+ */
+inline bool GetExecutablePath(std::wstring* path) {
+  constexpr DWORD kInitialLength = MAX_PATH;
+  constexpr std::size_t kGrowthFactor = 2;
+  std::vector<wchar_t> buffer(kInitialLength);
+  for (;;) {
+    const DWORD length = GetModuleFileNameW(nullptr, buffer.data(),
+                                            static_cast<DWORD>(buffer.size()));
+    if (length == 0) {
+      return false;
+    }
+    if (length < buffer.size()) {
+      path->assign(buffer.data(), length);
+      return true;
+    }
+    buffer.resize(buffer.size() * kGrowthFactor);
+  }
+}
+
+/**
+ * Converts an absolute drive or UNC path into its extended-length form.
+ *
+ * Paths that already carry the extended-length prefix are returned unchanged.
+ */
+inline std::wstring MakeExtendedPath(const std::wstring& path) {
+  constexpr wchar_t kExtendedPrefix[] = L"\\\\?\\";
+  constexpr wchar_t kUncPrefix[] = L"\\\\";
+  constexpr wchar_t kExtendedUncPrefix[] = L"\\\\?\\UNC\\";
+  constexpr std::size_t kExtendedPrefixLength =
+      sizeof(kExtendedPrefix) / sizeof(kExtendedPrefix[0]) - 1;
+  constexpr std::size_t kUncPrefixLength =
+      sizeof(kUncPrefix) / sizeof(kUncPrefix[0]) - 1;
+
+  if (path.compare(0, kExtendedPrefixLength, kExtendedPrefix) == 0) {
+    return path;
+  }
+  if (path.compare(0, kUncPrefixLength, kUncPrefix) == 0) {
+    return kExtendedUncPrefix + path.substr(kUncPrefixLength);
+  }
+  return kExtendedPrefix + path;
+}
+
 class LongPathTestDirectory final {
  public:
   LongPathTestDirectory() = default;
@@ -92,7 +138,7 @@ class LongPathTestDirectory final {
  private:
   bool CreateAtPath(const std::string& path, const std::wstring& wide_path) {
     relative_path_ = path;
-    extended_path_ = ToExtendedPath(wide_path);
+    extended_path_ = MakeExtendedPath(wide_path);
     if (!CreateCurrentDirectory()) {
       return false;
     }
@@ -118,17 +164,6 @@ class LongPathTestDirectory final {
     extended_path_ += L'\\';
     extended_path_ += kWideUtf8Component;
     return CreateCurrentDirectory();
-  }
-  static std::wstring ToExtendedPath(const std::wstring& path) {
-    constexpr wchar_t kUncPrefix[] = L"\\\\";
-    constexpr wchar_t kExtendedPrefix[] = L"\\\\?\\";
-    constexpr wchar_t kExtendedUncPrefix[] = L"\\\\?\\UNC\\";
-    constexpr std::size_t kUncPrefixLength =
-        sizeof(kUncPrefix) / sizeof(kUncPrefix[0]) - 1;
-    if (path.compare(0, kUncPrefixLength, kUncPrefix) == 0) {
-      return kExtendedUncPrefix + path.substr(kUncPrefixLength);
-    }
-    return kExtendedPrefix + path;
   }
 
   bool CreateCurrentDirectory() {

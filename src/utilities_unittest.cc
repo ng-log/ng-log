@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <regex>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -52,9 +53,42 @@ void LogSystemResultOutsideNamespace(DWORD result) { LOG_SYSRESULT(result); }
 
 #  include "long_path_test.h"
 
+using nglog::testing_internal::MakeExtendedPath;
+
 namespace {
 
-std::wstring MakeExtendedPath(const std::wstring& path);
+/**
+ * Creates, inspects and removes a file through the length-delimited UTF-8
+ * path functions.
+ *
+ * @param list_directory If not empty, the directory whose listing must
+ *   contain @p filename while the file exists.
+ */
+void ExpectFileRoundTripUtf8(const std::vector<char>& path,
+                             const std::string& list_directory = {},
+                             const std::string& filename = {}) {
+  constexpr int kExistenceMode = 0;
+  const int file_descriptor = nglog::internal::OpenUtf8(
+      path.data(), path.size(), _O_CREAT | _O_TRUNC | _O_WRONLY | _O_BINARY,
+      _S_IREAD | _S_IWRITE);
+  ASSERT_NE(file_descriptor, -1) << std::strerror(errno);
+  ASSERT_EQ(_close(file_descriptor), 0);
+
+  struct stat file_status = {};
+  EXPECT_EQ(nglog::internal::StatUtf8(path.data(), path.size(), &file_status),
+            0);
+  EXPECT_EQ(
+      nglog::internal::AccessUtf8(path.data(), path.size(), kExistenceMode), 0);
+
+  if (!list_directory.empty()) {
+    std::vector<std::string> entries;
+    EXPECT_TRUE(nglog::internal::ListDirectoryUtf8(
+        list_directory.data(), list_directory.size(), &entries));
+    EXPECT_THAT(entries, testing::Contains(filename));
+  }
+
+  EXPECT_EQ(nglog::internal::UnlinkUtf8(path.data(), path.size()), 0);
+}
 
 }  // namespace
 #endif
@@ -71,10 +105,22 @@ std::wstring MakeExtendedPath(const std::wstring& path);
 #endif
 
 using namespace nglog;
+using testing::AllOf;
+using testing::Contains;
+using testing::ElementsAreArray;
+using testing::IsEmpty;
+using testing::Not;
+using testing::StartsWith;
 
 namespace {
 
 constexpr char kPrintUserName[] = "--print-user-name";
+
+MATCHER_P(FullyMatches, regex,
+          std::string{negation ? "does not fully match" : "fully matches"} +
+              " the regular expression") {
+  return std::regex_match(arg, regex);
+}
 
 }  // namespace
 
@@ -218,17 +264,8 @@ TEST(utilities, NonAsciiUserEnvironmentIsUtf8) {
   constexpr char kExpectedUserName[] = "J\xc3\xbcrgen";
   constexpr std::size_t kReadBufferSize = 256;
 
-  std::vector<wchar_t> self_path(MAX_PATH);
-  for (;;) {
-    const DWORD length = GetModuleFileNameW(
-        nullptr, self_path.data(), static_cast<DWORD>(self_path.size()));
-    ASSERT_NE(length, 0U);
-    if (length < self_path.size()) {
-      self_path.resize(length);
-      break;
-    }
-    self_path.resize(self_path.size() * 2);
-  }
+  std::wstring self_path;
+  ASSERT_TRUE(nglog::testing_internal::GetExecutablePath(&self_path));
 
   const wchar_t* original_user = _wgetenv(kUserVariable);
   const std::wstring saved_user =
@@ -237,7 +274,7 @@ TEST(utilities, NonAsciiUserEnvironmentIsUtf8) {
 
   // cmd.exe strips the outer quotes and keeps the quoted executable path.
   const std::wstring command =
-      L"\"\"" + std::wstring(self_path.begin(), self_path.end()) + L"\" " +
+      L"\"\"" + self_path + L"\" " +
       std::wstring(kPrintUserName,
                    kPrintUserName + sizeof(kPrintUserName) - 1) +
       L"\"";
@@ -269,7 +306,7 @@ TEST(utilities, InitializeLoggingDeathTest) {
 
 TEST(TestTmpDir, IsPrivateToTheProcess) {
   EXPECT_NE(TestTmpDir(), SystemTmpDir());
-  EXPECT_THAT(TestTmpDir(), testing::StartsWith(SystemTmpDir()));
+  EXPECT_THAT(TestTmpDir(), StartsWith(SystemTmpDir()));
 }
 
 TEST(utilities, MakeLogFilename) {
@@ -284,22 +321,21 @@ TEST(utilities, MakeLogFilename) {
 TEST(utilities, MakeLogFilenameMatcher) {
   const std::regex timestamp_regex =
       nglog::tools::MakeLogFilenameMatcher("app[1].", ".foo+", true);
-  EXPECT_TRUE(
-      std::regex_match("app[1].20260817-123456.42.foo+", timestamp_regex));
-  EXPECT_FALSE(
-      std::regex_match("app11.20260817-123456.42.foo+", timestamp_regex));
+  EXPECT_THAT("app[1].20260817-123456.42.foo+", FullyMatches(timestamp_regex));
+  EXPECT_THAT("app11.20260817-123456.42.foo+",
+              Not(FullyMatches(timestamp_regex)));
 
   const std::regex non_timestamp_regex =
       nglog::tools::MakeLogFilenameMatcher("app[1].", ".foo+", false);
-  EXPECT_TRUE(std::regex_match("app[1]..foo+", non_timestamp_regex));
-  EXPECT_FALSE(
-      std::regex_match("app[1].20260817-123456.42.foo+", non_timestamp_regex));
+  EXPECT_THAT("app[1]..foo+", FullyMatches(non_timestamp_regex));
+  EXPECT_THAT("app[1].20260817-123456.42.foo+",
+              Not(FullyMatches(non_timestamp_regex)));
 }
 
 TEST(utilities, MakeLogFilenameMatcherRequiresBaseFilename) {
   const std::regex regex =
       nglog::tools::MakeLogFilenameMatcher("", ".foo+", true);
-  EXPECT_FALSE(std::regex_match("20260817-123456.42.foo+", regex));
+  EXPECT_THAT("20260817-123456.42.foo+", Not(FullyMatches(regex)));
 }
 
 TEST(EmscriptenConsole, MapsSeverityToConsoleLevel) {
@@ -378,7 +414,7 @@ TEST(WindowsUtf8Path, ConvertsWideTextIntoCallerBuffer) {
       kWide, sizeof(kWide) / sizeof(kWide[0]), output.data(), output.size(),
       &output_length));
   ASSERT_EQ(output_length, sizeof(kExpected));
-  EXPECT_EQ(std::memcmp(output.data(), kExpected, sizeof(kExpected)), 0);
+  EXPECT_THAT(output, ElementsAreArray(kExpected));
 }
 
 TEST(WindowsUtf8Path, RejectsSmallCallerBuffer) {
@@ -421,25 +457,7 @@ TEST(WindowsUtf8Path, RejectsInvalidUtf8) {
 TEST(WindowsUtf8Path, OperatesOnLengthDelimitedUtf8Path) {
   const std::string path =
       "nglog_unicode_path_" + std::to_string(_getpid()) + "_\xE2\x82\xAC.tmp";
-  const std::vector<char> length_delimited_path(path.begin(), path.end());
-
-  const int file_descriptor = nglog::internal::OpenUtf8(
-      length_delimited_path.data(), length_delimited_path.size(),
-      _O_CREAT | _O_TRUNC | _O_WRONLY | _O_BINARY, _S_IREAD | _S_IWRITE);
-  ASSERT_NE(file_descriptor, -1);
-  ASSERT_EQ(_close(file_descriptor), 0);
-
-  struct stat file_status = {};
-  EXPECT_EQ(
-      nglog::internal::StatUtf8(length_delimited_path.data(),
-                                length_delimited_path.size(), &file_status),
-      0);
-  EXPECT_EQ(nglog::internal::AccessUtf8(length_delimited_path.data(),
-                                        length_delimited_path.size(), 0),
-            0);
-  EXPECT_EQ(nglog::internal::UnlinkUtf8(length_delimited_path.data(),
-                                        length_delimited_path.size()),
-            0);
+  ExpectFileRoundTripUtf8(std::vector<char>(path.begin(), path.end()));
 }
 
 TEST(WindowsUtf8Path, GetsComputerNameAsUtf8) {
@@ -460,11 +478,11 @@ TEST(WindowsUtf8Path, GetsComputerNameAsUtf8) {
 TEST(WindowsUtf8Path, GetsSystemPathsAsUtf8) {
   std::string temporary_path;
   ASSERT_TRUE(nglog::internal::GetTempPathUtf8(&temporary_path));
-  EXPECT_FALSE(temporary_path.empty());
+  EXPECT_THAT(temporary_path, Not(IsEmpty()));
 
   std::string windows_path;
   ASSERT_TRUE(nglog::internal::GetWindowsDirectoryUtf8(&windows_path));
-  EXPECT_FALSE(windows_path.empty());
+  EXPECT_THAT(windows_path, Not(IsEmpty()));
 }
 
 TEST(WindowsUtf8Path, ListsUnicodeDirectoryEntries) {
@@ -563,7 +581,7 @@ TEST(Utf8Output, PreservesLengthDelimitedBytes) {
 
   char output[sizeof(message)] = {};
   ASSERT_EQ(std::fread(output, 1, sizeof(output), file), sizeof(output));
-  EXPECT_EQ(std::memcmp(output, message, sizeof(message)), 0);
+  EXPECT_THAT(output, ElementsAreArray(message));
 }
 
 #ifdef NGLOG_OS_WINDOWS
@@ -580,7 +598,7 @@ TEST(Utf8Output, PreservesRedirectedTextModeBytes) {
 
   char output[sizeof(kMessage)] = {};
   ASSERT_EQ(std::fread(output, 1, sizeof(output), file), sizeof(output));
-  EXPECT_EQ(std::memcmp(output, kMessage, sizeof(kMessage)), 0);
+  EXPECT_THAT(output, ElementsAreArray(kMessage));
 }
 
 TEST(Utf8Output, TranslatesNewlinesOfTextModeFile) {
@@ -654,7 +672,7 @@ TEST(Utf8Output, WritesSignalSafeLengthDelimitedBytes) {
 
   char output[sizeof(kMessage)] = {};
   ASSERT_EQ(std::fread(output, 1, sizeof(output), file), sizeof(output));
-  EXPECT_EQ(std::memcmp(output, kMessage, sizeof(kMessage)), 0);
+  EXPECT_THAT(output, ElementsAreArray(kMessage));
 }
 
 TEST(WindowsUtf8Path, ClassifiesLengthDelimitedPaths) {
@@ -703,8 +721,6 @@ TEST(WindowsUtf8Path, ClassifiesLengthDelimitedPaths) {
 TEST(WindowsUtf8Path, PreparesExtendedPaths) {
   constexpr wchar_t kExtendedUncPrefix[] = L"\\\\?\\UNC\\";
   constexpr wchar_t kExtendedPrefix[] = L"\\\\?\\";
-  constexpr std::size_t kExtendedPrefixLength =
-      sizeof(kExtendedPrefix) / sizeof(kExtendedPrefix[0]) - 1;
   constexpr wchar_t kUncPrefix[] = L"\\\\";
   constexpr std::size_t kUncPrefixLength =
       sizeof(kUncPrefix) / sizeof(kUncPrefix[0]) - 1;
@@ -732,9 +748,9 @@ TEST(WindowsUtf8Path, PreparesExtendedPaths) {
 
   ASSERT_TRUE(nglog::internal::PrepareWindowsPath(
       relative_path.data(), relative_path.size(), &prepared));
-  EXPECT_EQ(prepared.compare(0, kExtendedPrefixLength, kExtendedPrefix), 0);
-  EXPECT_EQ(prepared.find(L'/'), std::wstring::npos);
-  EXPECT_EQ(prepared.find(L"\\..\\"), std::wstring::npos);
+  EXPECT_THAT(prepared, testing::StartsWith(kExtendedPrefix));
+  EXPECT_THAT(prepared, Not(testing::HasSubstr(L"/")));
+  EXPECT_THAT(prepared, Not(testing::HasSubstr(L"\\..\\")));
 }
 
 TEST(WindowsUtf8Path, ExtendsShortRelativePathInLongCurrentDirectory) {
@@ -783,25 +799,7 @@ TEST(WindowsUtf8Path, ExtendsShortRelativePathInLongCurrentDirectory) {
 TEST(WindowsUtf8Path, OperatesOnLengthDelimitedAsciiPath) {
   const std::string path =
       "nglog_ascii_path_" + std::to_string(_getpid()) + ".tmp";
-  const std::vector<char> length_delimited_path(path.begin(), path.end());
-
-  const int file_descriptor = nglog::internal::OpenUtf8(
-      length_delimited_path.data(), length_delimited_path.size(),
-      _O_CREAT | _O_TRUNC | _O_WRONLY | _O_BINARY, _S_IREAD | _S_IWRITE);
-  ASSERT_NE(file_descriptor, -1);
-  ASSERT_EQ(_close(file_descriptor), 0);
-
-  struct stat file_status = {};
-  EXPECT_EQ(
-      nglog::internal::StatUtf8(length_delimited_path.data(),
-                                length_delimited_path.size(), &file_status),
-      0);
-  EXPECT_EQ(nglog::internal::AccessUtf8(length_delimited_path.data(),
-                                        length_delimited_path.size(), 0),
-            0);
-  EXPECT_EQ(nglog::internal::UnlinkUtf8(length_delimited_path.data(),
-                                        length_delimited_path.size()),
-            0);
+  ExpectFileRoundTripUtf8(std::vector<char>(path.begin(), path.end()));
 }
 
 TEST(WindowsUtf8Path, OperatesBeyondMaxPath) {
@@ -812,38 +810,12 @@ TEST(WindowsUtf8Path, OperatesBeyondMaxPath) {
 
   constexpr char kFilename[] = "log_\xE2\x82\xAC.txt";
   const std::string path = directory.ChildPath(kFilename);
-  const std::vector<char> length_delimited_path(path.begin(), path.end());
-
-  const int file_descriptor = nglog::internal::OpenUtf8(
-      length_delimited_path.data(), length_delimited_path.size(),
-      _O_CREAT | _O_TRUNC | _O_WRONLY | _O_BINARY, _S_IREAD | _S_IWRITE);
-  ASSERT_NE(file_descriptor, -1) << std::strerror(errno);
-  ASSERT_EQ(_close(file_descriptor), 0);
-
-  struct stat file_status = {};
-  EXPECT_EQ(
-      nglog::internal::StatUtf8(length_delimited_path.data(),
-                                length_delimited_path.size(), &file_status),
-      0);
-  EXPECT_EQ(nglog::internal::AccessUtf8(length_delimited_path.data(),
-                                        length_delimited_path.size(), 0),
-            0);
-
-  std::vector<std::string> entries;
-  ASSERT_TRUE(nglog::internal::ListDirectoryUtf8(
-      directory.relative_path().data(), directory.relative_path().size(),
-      &entries));
-  EXPECT_NE(std::find(entries.begin(), entries.end(), kFilename),
-            entries.end());
-
-  EXPECT_EQ(nglog::internal::UnlinkUtf8(length_delimited_path.data(),
-                                        length_delimited_path.size()),
-            0);
+  ExpectFileRoundTripUtf8(std::vector<char>(path.begin(), path.end()),
+                          directory.relative_path(), kFilename);
 }
 
 TEST(WindowsUtf8Path, OperatesOnExtendedLengthPath) {
   constexpr DWORD kRequiredSizeQuery = 0;
-  constexpr int kExistenceMode = 0;
   constexpr std::size_t kTerminatorLength = 1;
   const DWORD current_directory_buffer_length =
       GetCurrentDirectoryW(kRequiredSizeQuery, nullptr);
@@ -866,18 +838,7 @@ TEST(WindowsUtf8Path, OperatesOnExtendedLengthPath) {
   std::string path;
   ASSERT_TRUE(
       nglog::internal::WideToUtf8(wide_path.data(), wide_path.size(), &path));
-  const int file_descriptor = nglog::internal::OpenUtf8(
-      path.data(), path.size(), _O_CREAT | _O_TRUNC | _O_WRONLY | _O_BINARY,
-      _S_IREAD | _S_IWRITE);
-  ASSERT_NE(file_descriptor, -1);
-  ASSERT_EQ(_close(file_descriptor), 0);
-
-  struct stat file_status = {};
-  EXPECT_EQ(nglog::internal::StatUtf8(path.data(), path.size(), &file_status),
-            0);
-  EXPECT_EQ(
-      nglog::internal::AccessUtf8(path.data(), path.size(), kExistenceMode), 0);
-  EXPECT_EQ(nglog::internal::UnlinkUtf8(path.data(), path.size()), 0);
+  ExpectFileRoundTripUtf8(std::vector<char>(path.begin(), path.end()));
 }
 
 TEST(WindowsUtf8Path, MakesExtendedPathForDriveAndUncDirectories) {
@@ -910,61 +871,62 @@ TEST(Utf8Output, ClassifiesAsciiWithoutTerminator) {
       nglog::internal::IsAscii(kUtf8Message, sizeof(kUtf8Message) - 1));
 }
 
-TEST(Utf8Output, WritesAsciiToConsoleFileDescriptor) {
-  HANDLE console = CreateConsoleScreenBuffer(
-      GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
-      CONSOLE_TEXTMODE_BUFFER, nullptr);
-  if (console == INVALID_HANDLE_VALUE) {
-    GTEST_SKIP() << "Windows console is unavailable";
+namespace {
+
+// Provides a console screen buffer whose contents the tests read back. The
+// file descriptor owns the console handle.
+class Utf8ConsoleOutput : public testing::Test {
+ protected:
+  void SetUp() override {
+    console_ = CreateConsoleScreenBuffer(
+        GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+        nullptr, CONSOLE_TEXTMODE_BUFFER, nullptr);
+    if (console_ == INVALID_HANDLE_VALUE) {
+      GTEST_SKIP() << "Windows console is unavailable";
+    }
+
+    file_descriptor_ = _open_osfhandle(
+        reinterpret_cast<std::intptr_t>(console_), _O_WRONLY | _O_BINARY);
+    ASSERT_NE(file_descriptor_, -1);
   }
 
-  const int file_descriptor = _open_osfhandle(
-      reinterpret_cast<std::intptr_t>(console), _O_WRONLY | _O_BINARY);
-  ASSERT_NE(file_descriptor, -1);
+  // Reads up to the given number of characters starting at the position.
+  std::wstring ReadScreen(COORD position, std::size_t length) const {
+    std::wstring output(length, L'\0');
+    DWORD characters_read = 0;
+    EXPECT_TRUE(ReadConsoleOutputCharacterW(console_, &output[0],
+                                            static_cast<DWORD>(length),
+                                            position, &characters_read));
+    output.resize(characters_read);
+    return output;
+  }
 
+  HANDLE console_ = INVALID_HANDLE_VALUE;
+  int file_descriptor_ = -1;
+};
+
+}  // namespace
+
+TEST_F(Utf8ConsoleOutput, WritesAsciiToFileDescriptor) {
   constexpr std::array<char, 3> kMessage = {'l', 'o', 'g'};
-  ASSERT_TRUE(nglog::internal::WriteUtf8ToFileDescriptor(
-      file_descriptor, kMessage.data(), kMessage.size()));
-
-  std::array<wchar_t, kMessage.size()> output = {};
   constexpr COORD kPosition = {0, 0};
-  DWORD characters_read = 0;
-  ASSERT_TRUE(ReadConsoleOutputCharacterW(console, output.data(),
-                                          static_cast<DWORD>(output.size()),
-                                          kPosition, &characters_read));
-  ASSERT_EQ(characters_read, output.size());
-  EXPECT_EQ(std::wstring(L"log"), std::wstring(output.data(), characters_read));
-  _close(file_descriptor);
+  ASSERT_TRUE(nglog::internal::WriteUtf8ToFileDescriptor(
+      file_descriptor_, kMessage.data(), kMessage.size()));
+
+  EXPECT_EQ(ReadScreen(kPosition, kMessage.size()), L"log");
+  _close(file_descriptor_);
 }
 
-TEST(Utf8Output, WritesAsciiToConsoleFile) {
-  HANDLE console = CreateConsoleScreenBuffer(
-      GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
-      CONSOLE_TEXTMODE_BUFFER, nullptr);
-  if (console == INVALID_HANDLE_VALUE) {
-    GTEST_SKIP() << "Windows console is unavailable";
-  }
-
-  const int file_descriptor = _open_osfhandle(
-      reinterpret_cast<std::intptr_t>(console), _O_WRONLY | _O_BINARY);
-  ASSERT_NE(file_descriptor, -1);
-  const std::unique_ptr<std::FILE> stream_owner{_fdopen(file_descriptor, "wb")};
-  std::FILE* const stream = stream_owner.get();
+TEST_F(Utf8ConsoleOutput, WritesAsciiToFile) {
+  const std::unique_ptr<std::FILE> stream{_fdopen(file_descriptor_, "wb")};
   ASSERT_NE(stream, nullptr);
 
-  constexpr std::size_t kMessageLength = 3;
-  constexpr std::array<char, kMessageLength> kMessage = {'l', 'o', 'g'};
-  ASSERT_TRUE(
-      nglog::internal::WriteUtf8(stream, kMessage.data(), kMessage.size()));
-
-  std::array<wchar_t, kMessage.size()> output = {};
+  constexpr std::array<char, 3> kMessage = {'l', 'o', 'g'};
   constexpr COORD kPosition = {0, 0};
-  DWORD characters_read = 0;
-  ASSERT_TRUE(ReadConsoleOutputCharacterW(console, output.data(),
-                                          static_cast<DWORD>(output.size()),
-                                          kPosition, &characters_read));
-  ASSERT_EQ(characters_read, output.size());
-  EXPECT_EQ(std::wstring(L"log"), std::wstring(output.data(), characters_read));
+  ASSERT_TRUE(nglog::internal::WriteUtf8(stream.get(), kMessage.data(),
+                                         kMessage.size()));
+
+  EXPECT_EQ(ReadScreen(kPosition, kMessage.size()), L"log");
 }
 
 TEST(Utf8Output, PreservesRedirectedFileDescriptorBytes) {
@@ -1027,27 +989,6 @@ TEST(Utf8Output, PreservesAppendModeFileDescriptor) {
 }
 
 namespace {
-
-std::wstring MakeExtendedPath(const std::wstring& path) {
-  constexpr wchar_t kExtendedPrefix[] = L"\\\\?\\";
-  constexpr wchar_t kUncPrefix[] = L"\\\\";
-  constexpr wchar_t kExtendedUncPrefix[] = L"\\\\?\\UNC\\";
-  constexpr std::size_t kTerminatorLength = 1;
-  constexpr std::size_t kUncPrefixLength = 2;
-  constexpr std::size_t kExtendedPrefixLength =
-      sizeof(kExtendedPrefix) / sizeof(kExtendedPrefix[0]) - kTerminatorLength;
-
-  if (path.compare(0, kExtendedPrefixLength, kExtendedPrefix,
-                   kExtendedPrefixLength) == 0) {
-    return path;
-  }
-  if (path.compare(0, kUncPrefixLength, kUncPrefix, kUncPrefixLength) == 0) {
-    std::wstring extended_path = kExtendedUncPrefix;
-    extended_path.append(path, kUncPrefixLength, std::wstring::npos);
-    return extended_path;
-  }
-  return std::wstring(kExtendedPrefix) + path;
-}
 
 constexpr std::size_t kPartialWideWriteLength = 2;
 constexpr std::size_t kLargeUtf8MessageLength = 4096;
@@ -1123,7 +1064,7 @@ TEST(Utf8Output, RejectsSuccessfulWritesWithoutProgress) {
   EXPECT_FALSE(nglog::internal::WriteUtf8AsWide(
       kMessage, sizeof(kMessage) - kTerminatorLength, AppendWideOutput,
       &context));
-  EXPECT_TRUE(context.output.empty());
+  EXPECT_THAT(context.output, IsEmpty());
   EXPECT_EQ(context.calls, 1U);
 }
 
@@ -1151,10 +1092,12 @@ TEST(Utf8Output, WritesWideTextInLengthDelimitedChunks) {
 
 namespace {
 
-bool IsHighSurrogate(wchar_t character) {
+MATCHER(EndsWithHighSurrogate, std::string{negation ? "does not end" : "ends"} +
+                                   " with a high surrogate") {
   constexpr wchar_t kHighSurrogateMin = 0xD800;
   constexpr wchar_t kHighSurrogateMax = 0xDBFF;
-  return character >= kHighSurrogateMin && character <= kHighSurrogateMax;
+  return !arg.empty() && arg.back() >= kHighSurrogateMin &&
+         arg.back() <= kHighSurrogateMax;
 }
 
 bool RecordWideChunk(const wchar_t* input, std::size_t input_length,
@@ -1180,63 +1123,33 @@ TEST(Utf8Output, KeepsSurrogatePairsWithinWideChunks) {
   ASSERT_TRUE(nglog::internal::WriteWideAsChunks(message.data(), message.size(),
                                                  RecordWideChunk, &chunks));
 
+  EXPECT_THAT(chunks, testing::Each(
+                          AllOf(Not(IsEmpty()), Not(EndsWithHighSurrogate()))));
+
   std::wstring output;
   for (const std::wstring& chunk : chunks) {
-    ASSERT_FALSE(chunk.empty());
-    EXPECT_FALSE(IsHighSurrogate(chunk.back()))
-        << "chunk of length " << chunk.size() << " ends with a high surrogate";
     output += chunk;
   }
   EXPECT_EQ(output, message);
 }
 
-TEST(Utf8Output, WritesUnicodeToConsole) {
-  HANDLE console = CreateConsoleScreenBuffer(
-      GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
-      CONSOLE_TEXTMODE_BUFFER, nullptr);
-  if (console == INVALID_HANDLE_VALUE) {
-    GTEST_SKIP() << "Windows console is unavailable";
-  }
-
-  const int file_descriptor = _open_osfhandle(
-      reinterpret_cast<std::intptr_t>(console), _O_WRONLY | _O_BINARY);
-  ASSERT_NE(file_descriptor, -1);
-  const std::unique_ptr<std::FILE> stream_owner{_fdopen(file_descriptor, "wb")};
-  std::FILE* const stream = stream_owner.get();
+TEST_F(Utf8ConsoleOutput, WritesUnicode) {
+  const std::unique_ptr<std::FILE> stream{_fdopen(file_descriptor_, "wb")};
   ASSERT_NE(stream, nullptr);
 
   const std::string message = "caf\xC3\xA9 \xE2\x98\x83";
+  const std::wstring expected = L"caf\u00e9 \u2603";
+  constexpr COORD kPosition = {0, 0};
   ASSERT_TRUE(
-      nglog::internal::WriteUtf8(stream, message.data(), message.size()));
-
-  constexpr DWORD kExpectedCharacterCount = 6;
-  constexpr std::size_t kTerminatorLength = 1;
-  constexpr std::size_t kOutputBufferLength =
-      static_cast<std::size_t>(kExpectedCharacterCount) + kTerminatorLength;
-  std::array<wchar_t, kOutputBufferLength> output_buffer = {};
-  COORD position = {0, 0};
-  DWORD characters_read = 0;
-  ASSERT_TRUE(ReadConsoleOutputCharacterW(console, output_buffer.data(),
-                                          kExpectedCharacterCount, position,
-                                          &characters_read));
-  ASSERT_EQ(characters_read, kExpectedCharacterCount);
-  EXPECT_EQ(std::wstring(L"caf\u00e9 \u2603"),
-            std::wstring(output_buffer.data(), characters_read));
+      nglog::internal::WriteUtf8(stream.get(), message.data(), message.size()));
+  EXPECT_EQ(ReadScreen(kPosition, expected.size()), expected);
 
   constexpr char kInvalidMessage[] = {'a', '\xFF', 'b'};
-  constexpr std::size_t kInvalidMessageCharacterCount = 3;
-  EXPECT_TRUE(nglog::internal::WriteUtf8(stream, kInvalidMessage,
+  const std::wstring replaced = L"a\uFFFDb";
+  const COORD replaced_position = {static_cast<SHORT>(expected.size()), 0};
+  EXPECT_TRUE(nglog::internal::WriteUtf8(stream.get(), kInvalidMessage,
                                          sizeof(kInvalidMessage)));
-  std::array<wchar_t, kInvalidMessageCharacterCount> replaced_output = {};
-  const COORD replaced_position = {static_cast<SHORT>(kExpectedCharacterCount),
-                                   0};
-  ASSERT_TRUE(
-      ReadConsoleOutputCharacterW(console, replaced_output.data(),
-                                  static_cast<DWORD>(replaced_output.size()),
-                                  replaced_position, &characters_read));
-  ASSERT_EQ(characters_read, replaced_output.size());
-  EXPECT_EQ(std::wstring(L"a\uFFFDb"),
-            std::wstring(replaced_output.data(), characters_read));
+  EXPECT_EQ(ReadScreen(replaced_position, replaced.size()), replaced);
 }
 #endif
 
