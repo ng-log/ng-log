@@ -17,9 +17,11 @@
 #include <iomanip>
 #include <iterator>
 #include <limits>
+#include <locale>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <set>
 #include <sstream>
 #include <string>
@@ -221,7 +223,11 @@ void ResumeAfterFork() {
 #endif
 
 Registry* CreateRegistry() {
-  auto* const registry = new Registry;
+  // Flags remain usable during exit, so the registry is never destroyed. It
+  // lives in the static storage of this library instead of on the heap, so
+  // unloading a copy of the library leaves no allocation behind.
+  alignas(Registry) static unsigned char storage[sizeof(Registry)];
+  auto* const registry = new (storage) Registry;
 #ifdef HAVE_FORK
   pthread_atfork(&PrepareFork, &ResumeAfterFork, &ResumeAfterFork);
 #endif
@@ -247,6 +253,15 @@ constexpr char kGroupedOptionIndent[] = "    ";
 constexpr char kDefaultHelpIndent[] = "      ";
 constexpr char kGroupedHelpIndent[] = "        ";
 constexpr char kBuiltinHelpName[] = "help";
+// Command-line options start with this prefix.
+constexpr char kOptionPrefix[] = "--";
+// Ends the options, so that later arguments are kept even if they start with
+// the option prefix.
+constexpr char kEndOfOptions[] = "--";
+constexpr std::size_t kOptionPrefixLength = sizeof(kOptionPrefix) - 1;
+// Negates a boolean option, as in --nologtostderr.
+constexpr char kNegationPrefix[] = "no";
+constexpr std::size_t kNegationPrefixLength = sizeof(kNegationPrefix) - 1;
 constexpr char kBuiltinHelpDescription[] =
     "Show available command-line options and exit.";
 constexpr char kDefaultModuleHeader[] = "Options provided by";
@@ -299,7 +314,7 @@ void WriteErrorLabel(internal::ColorMode mode) {
   const internal::ColorMode mode = internal::StreamColorMode(stderr);
   WriteErrorLabel(mode);
   WriteStyled(message_spec, mode, std::string(" ") + action + " ");
-  WriteStyled(message_spec, mode, "--");
+  WriteStyled(message_spec, mode, kOptionPrefix);
   WriteStyled(option_spec, mode, flag.name());
   WriteStyled(message_spec, mode, ": " + error + "\n");
   std::fflush(stderr);
@@ -322,7 +337,7 @@ void WriteErrorLabel(internal::ColorMode mode) {
   const internal::ColorMode mode = internal::StreamColorMode(stderr);
   WriteErrorLabel(mode);
   WriteStyled(message_spec, mode, std::string(" ") + action + " ");
-  WriteStyled(message_spec, mode, "--");
+  WriteStyled(message_spec, mode, kOptionPrefix);
   WriteStyled(option_spec, mode, flag_name);
   WriteStyled(message_spec, mode, ": invalid value ");
   WriteStyled(value_spec, mode, details.invalid_value);
@@ -345,8 +360,10 @@ void WriteErrorLabel(internal::ColorMode mode) {
       }
       WriteStyled(value_spec, mode, details.expected_values[index]);
     }
-  } else {
+  } else if (!error.empty()) {
     WriteStyled(message_spec, mode, error);
+  } else {
+    WriteStyled(message_spec, mode, "expected a valid " + type_name);
   }
   WriteStyled(message_spec, mode, "\n");
   std::fflush(stderr);
@@ -381,7 +398,7 @@ void WriteSuggestedFlag(const std::string& misspelled,
       WriteStyled(spec, mode, text);
     }
   };
-  write_part(prefix_spec, "--");
+  write_part(prefix_spec, kOptionPrefix);
   write_part(option_spec, suggestion.substr(0, common_prefix));
   write_part(
       mismatch_spec,
@@ -413,8 +430,8 @@ void WriteSuggestedFlag(const std::string& misspelled,
     WriteStyled(suggestion_spec, mode, "?\n");
   }
   WriteStyled(message_spec, mode, "\nUse ");
-  WriteStyled(message_spec, mode, "--");
-  WriteStyled(option_spec, mode, "help");
+  WriteStyled(message_spec, mode, kOptionPrefix);
+  WriteStyled(option_spec, mode, kBuiltinHelpName);
   WriteStyled(message_spec, mode, " to list all available options.\n");
   std::fflush(stderr);
   std::exit(EXIT_FAILURE);
@@ -504,15 +521,14 @@ FlagBase* FindFlagLocked(const std::string& name) {
   if (direct != registry.flags.end()) {
     return direct->second;
   }
-  if (name.find('-') == std::string::npos) {
+  // Flag names cannot start with a hyphen, which therefore does not stand for
+  // a leading underscore.
+  if (name.empty() || name.front() == '-' ||
+      name.find('-') == std::string::npos) {
     return nullptr;
   }
   std::string normalized = name;
-  for (char& character : normalized) {
-    if (character == '-') {
-      character = '_';
-    }
-  }
+  std::replace(normalized.begin(), normalized.end(), '-', '_');
   const auto underscored = registry.flags.find(normalized);
   return underscored == registry.flags.end() ? nullptr : underscored->second;
 }
@@ -520,25 +536,36 @@ FlagBase* FindFlagLocked(const std::string& name) {
 // Returns whether the name selects the help option, a flag or the negation of
 // a boolean flag.
 bool IsLongOptionLocked(const std::string& name) {
-  if (name == "help" || FindFlagLocked(name) != nullptr) {
+  if (name == kBuiltinHelpName || FindFlagLocked(name) != nullptr) {
     return true;
   }
-  if (name.compare(0, 2, "no") != 0) {
+  if (name.compare(0, kNegationPrefixLength, kNegationPrefix) != 0) {
     return false;
   }
-  const FlagBase* const flag = FindFlagLocked(name.substr(2));
-  return flag != nullptr && std::strcmp(flag->type_name(), "bool") == 0;
+  const FlagBase* const flag =
+      FindFlagLocked(name.substr(kNegationPrefixLength));
+  return flag != nullptr &&
+         std::strcmp(flag->type_name(), FlagTraits<bool>::TypeName()) == 0;
 }
 
 // Returns the registered option closest to the name, or an empty string if
 // none is close enough.
 std::string FindClosestOptionLocked(const std::string& name) {
   Registry& registry = GetRegistry();
+  // Negated boolean options are candidates as well, so that a misspelled
+  // negation suggests one. Every flag may come with its negation, besides the
+  // built-in help.
+  constexpr std::size_t kNamesPerFlag = 2;
+  constexpr std::size_t kBuiltinNames = 1;
   std::vector<std::string> names;
-  names.reserve(registry.flags.size() + 1);
-  names.push_back("help");
+  names.reserve((kNamesPerFlag * registry.flags.size()) + kBuiltinNames);
+  names.emplace_back(kBuiltinHelpName);
   for (const auto& entry : registry.flags) {
     names.push_back(entry.first);
+    if (std::strcmp(entry.second->type_name(), FlagTraits<bool>::TypeName()) ==
+        0) {
+      names.push_back(kNegationPrefix + entry.first);
+    }
   }
   return internal::FindClosestMatch(name, names);
 }
@@ -588,7 +615,7 @@ internal::ColorSpec HelpStyleSpec(HelpTextStyle style) {
 
 void WriteBuiltinHelpOption(HelpWriter& help, const FlagInfo&) {
   help.Write(HelpTextStyle::kOptionPrefix,
-             std::string(kDefaultOptionIndent) + "--");
+             std::string(kDefaultOptionIndent) + kOptionPrefix);
   help.Write(HelpTextStyle::kOption, kBuiltinHelpName);
   help.Write("\n");
   help.Write(HelpTextStyle::kPlain,
@@ -826,7 +853,7 @@ void PrintHelpSnapshot(const HelpSnapshot& snapshot) {
                                        : std::size_t{1};
     const std::string default_value = DisplayDefaultValue(snapshot, flag);
     const std::string type = DisplayType(snapshot, flag);
-    WriteStyled(default_spec, mode, std::string(option_indent) + "--");
+    WriteStyled(default_spec, mode, std::string(option_indent) + kOptionPrefix);
     WriteStyled(name_spec, mode, flag.name);
     WriteStyled(help_spec, mode, "=");
     WriteStyled(type_spec, mode, type);
@@ -1117,6 +1144,8 @@ std::string FlagTraits<FileMode>::ToString(FileMode value) {
   // A leading zero marks the value as octal, as in chmod and C literals.
   constexpr int kMinimumDigits = 3;
   std::ostringstream text;
+  // Digit grouping of the global locale would produce text Parse() rejects.
+  text.imbue(std::locale::classic());
   text << '0' << std::oct << std::setfill('0') << std::setw(kMinimumDigits)
        << value.value();
   return text.str();
@@ -1210,7 +1239,7 @@ void WriteDiagnosticDetail(const internal::ColorSpec& label_spec,
       origin, std::strcmp(previous_filename, flag.filename()) == 0);
   WriteErrorLabel(mode);
   WriteStyled(text_spec, mode, " command-line option ");
-  WriteStyled(text_spec, mode, "--");
+  WriteStyled(text_spec, mode, kOptionPrefix);
   WriteStyled(option_spec, mode, flag.name());
   WriteStyled(text_spec, mode, " was defined more than once.\n");
   WriteDiagnosticDetail(
@@ -1238,7 +1267,7 @@ void WriteDiagnosticDetail(const internal::ColorSpec& label_spec,
   const internal::ColorSpec meta_spec = theme.Get(internal::Role::kHelpMeta);
   WriteErrorLabel(mode);
   WriteStyled(text_spec, mode, " command-line option ");
-  WriteStyled(text_spec, mode, "--");
+  WriteStyled(text_spec, mode, kOptionPrefix);
   WriteStyled(option_spec, mode, name);
   WriteStyled(text_spec, mode,
               " is declared with a different type than its definition.\n");
@@ -1268,7 +1297,7 @@ void WriteDiagnosticDetail(const internal::ColorSpec& label_spec,
   const internal::ColorSpec meta_spec = theme.Get(internal::Role::kHelpMeta);
   WriteErrorLabel(mode);
   WriteStyled(text_spec, mode, " command-line option ");
-  WriteStyled(text_spec, mode, "--");
+  WriteStyled(text_spec, mode, kOptionPrefix);
   WriteStyled(option_spec, mode, flag.name());
   WriteStyled(text_spec, mode, " was registered more than once.\n");
   WriteDiagnosticDetail(
@@ -1340,9 +1369,11 @@ bool IsValidFlagName(const char* name) {
       theme.Get(internal::Role::kHelpFlagName);
   const internal::ColorSpec meta_spec = theme.Get(internal::Role::kHelpMeta);
   WriteErrorLabel(mode);
-  WriteStyled(text_spec, mode, " command-line option --");
+  WriteStyled(text_spec, mode,
+              std::string(" command-line option ") + kOptionPrefix);
   WriteStyled(option_spec, mode, negation.name());
-  WriteStyled(text_spec, mode, " conflicts with the negation of --");
+  WriteStyled(text_spec, mode,
+              std::string(" conflicts with the negation of ") + kOptionPrefix);
   WriteStyled(option_spec, mode, flag.name());
   WriteStyled(text_spec, mode, ".\n");
   WriteDiagnosticDetail(
@@ -1353,7 +1384,8 @@ bool IsValidFlagName(const char* name) {
       std::string(flag.filename()) + " (" + flag.type_name() + ")");
   WriteDiagnosticDetail(
       text_spec, text_spec, mode, kRegistrationLabelWidth, "Reason",
-      std::string("--") + negation.name() + " disables --" + flag.name() +
+      std::string(kOptionPrefix) + negation.name() + " disables " +
+          kOptionPrefix + flag.name() +
           " on the command line. An option with\n"
           "that name would make the meaning depend on which options exist.");
   WriteDiagnosticDetail(text_spec, text_spec, mode, kRegistrationLabelWidth,
@@ -1382,7 +1414,7 @@ bool IsValidFlagName(const char* name) {
       theme.Get(internal::Role::kHelpFlagName);
   WriteErrorLabel(mode);
   WriteStyled(text_spec, mode, " command-line option ");
-  WriteStyled(text_spec, mode, "--");
+  WriteStyled(text_spec, mode, kOptionPrefix);
   WriteStyled(option_spec, mode, flag.name());
   WriteStyled(text_spec, mode, " is reserved for the built-in help option.\n");
   std::fflush(stderr);
@@ -1420,8 +1452,6 @@ void RegisterFlag(FlagBase& flag) {
   if (std::strcmp(flag.name(), kBuiltinHelpName) == 0) {
     AbortReservedFlag(flag);
   }
-  constexpr char kNegationPrefix[] = "no";
-  constexpr std::size_t kNegationPrefixLength = sizeof(kNegationPrefix) - 1;
   if (std::strcmp(flag.type_name(), FlagTraits<bool>::TypeName()) == 0) {
     const auto negation =
         registry.flags.find(std::string(kNegationPrefix) + flag.name());
@@ -1742,6 +1772,10 @@ FlagModule::~FlagModule() {
   registry.module_order.erase(std::remove(registry.module_order.begin(),
                                           registry.module_order.end(), name_),
                               registry.module_order.end());
+  if (registry.module_order.empty()) {
+    // Releases the memory of a copy of the library that is being unloaded.
+    registry.module_order.shrink_to_fit();
+  }
   for (auto& entry : registry.entries) {
     if (entry.second.module_identity == identity_.get()) {
       entry.second.module.clear();
@@ -1827,15 +1861,20 @@ bool SetCommandLineOption(const char* name, const char* value,
   FlagBase* const flag = FindFlagLocked(name);
   if (flag == nullptr) {
     if (error != nullptr) {
-      *error = "unknown command-line option";
+      *error =
+          std::string("unknown command-line option ") + kOptionPrefix + name;
     }
     return false;
   }
   std::string parse_error;
   const bool result = flag->SetFromString(value, &parse_error);
   if (!result && error != nullptr) {
-    *error = "invalid value " + std::string(value) + " for " +
-             flag->type_name() + " flag, " + parse_error;
+    // Quotes delimit empty values and values with surrounding spaces.
+    *error = "invalid value \"" + std::string(value) + "\" for " +
+             flag->type_name() + " flag";
+    if (!parse_error.empty()) {
+      *error += ", " + parse_error;
+    }
   }
   return result;
 }
@@ -1913,7 +1952,8 @@ std::uint32_t ParseCommandLineFlags(int* argc, char*** argv,
   bool end_of_flags = false;
   for (int input = 1; input < *argc; ++input) {
     char* const argument = (*argv)[input];
-    const bool separator = !end_of_flags && std::strcmp(argument, "--") == 0;
+    const bool separator =
+        !end_of_flags && std::strcmp(argument, kEndOfOptions) == 0;
     if (separator) {
       end_of_flags = true;
       // The separator is consumed like a flag, unless another parser handles
@@ -1924,7 +1964,8 @@ std::uint32_t ParseCommandLineFlags(int* argc, char*** argv,
       }
       continue;
     }
-    if (end_of_flags || std::strncmp(argument, "--", 2) != 0) {
+    if (end_of_flags ||
+        std::strncmp(argument, kOptionPrefix, kOptionPrefixLength) != 0) {
       // A single dash followed by a name is an option this parser does not
       // accept, whereas a lone dash conventionally denotes standard input.
       const bool single_dash = argument[0] == '-' && argument[1] != '\0';
@@ -1943,7 +1984,7 @@ std::uint32_t ParseCommandLineFlags(int* argc, char*** argv,
       continue;
     }
 
-    std::string name(argument + 2);
+    std::string name(argument + kOptionPrefixLength);
     std::string value;
     const std::size_t equals = name.find('=');
     if (equals != std::string::npos) {
@@ -1951,10 +1992,11 @@ std::uint32_t ParseCommandLineFlags(int* argc, char*** argv,
       name.erase(equals);
     }
 
-    if (name == "help") {
+    if (name == kBuiltinHelpName) {
       if (equals != std::string::npos) {
         lock.unlock();
-        ExitFlagError("command-line option --help does not accept a value");
+        ExitFlagError(std::string("command-line option ") + kOptionPrefix +
+                      kBuiltinHelpName + " does not accept a value");
       }
       HelpSnapshot snapshot;
       GetHelpSnapshotLocked(&snapshot);
@@ -1965,13 +2007,16 @@ std::uint32_t ParseCommandLineFlags(int* argc, char*** argv,
 
     bool negated = false;
     FlagBase* flag = FindFlagLocked(name);
-    if (flag == nullptr && name.compare(0, 2, "no") == 0) {
-      FlagBase* const candidate = FindFlagLocked(name.substr(2));
+    if (flag == nullptr &&
+        name.compare(0, kNegationPrefixLength, kNegationPrefix) == 0) {
+      FlagBase* const candidate =
+          FindFlagLocked(name.substr(kNegationPrefixLength));
       if (candidate != nullptr &&
-          std::strcmp(candidate->type_name(), "bool") != 0) {
+          std::strcmp(candidate->type_name(), FlagTraits<bool>::TypeName()) !=
+              0) {
         lock.unlock();
-        ExitFlagError("command-line option --" + name +
-                      " cannot be negated because it is not boolean");
+        ExitFlagError(std::string("command-line option ") + kOptionPrefix +
+                      name + " cannot be negated because it is not boolean");
       }
       flag = candidate;
       negated = flag != nullptr;
@@ -1985,24 +2030,25 @@ std::uint32_t ParseCommandLineFlags(int* argc, char*** argv,
       }
       const std::string suggestion = FindClosestOptionLocked(name);
       lock.unlock();
-      FatalUnknownFlag("--", name, suggestion);
+      FatalUnknownFlag(kOptionPrefix, name, suggestion);
     }
 
     if (negated) {
       if (equals != std::string::npos) {
         lock.unlock();
-        ExitFlagError("command-line option --" + name +
-                      " does not accept a value when negated");
+        ExitFlagError(std::string("command-line option ") + kOptionPrefix +
+                      name + " does not accept a value when negated");
       }
       value = "false";
     } else if (equals == std::string::npos &&
-               std::strcmp(flag->type_name(), "bool") == 0) {
+               std::strcmp(flag->type_name(), FlagTraits<bool>::TypeName()) ==
+                   0) {
       value = "true";
     } else if (equals == std::string::npos) {
       if (input + 1 >= *argc) {
         lock.unlock();
-        ExitFlagError("command-line option --" + name +
-                      " is missing its value");
+        ExitFlagError(std::string("command-line option ") + kOptionPrefix +
+                      name + " is missing its value");
       }
       value = (*argv)[++input];
     }

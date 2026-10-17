@@ -71,6 +71,11 @@ struct CustomFlagValue {
   }
 };
 
+// A value whose parser rejects every text without explaining why.
+struct SilentlyRejectedFlagValue {
+  int value;
+};
+
 struct ConstructibleOnlyFlagValue {
   explicit ConstructibleOnlyFlagValue(int value) : value(value) {}
   explicit ConstructibleOnlyFlagValue(const char* value)
@@ -101,6 +106,20 @@ struct DigitFlagTraits {
 template <>
 struct FlagTraits<CustomFlagValue> : DigitFlagTraits<CustomFlagValue> {
   static const char* TypeName() noexcept { return "custom"; }
+};
+
+template <>
+struct FlagTraits<SilentlyRejectedFlagValue> {
+  static const char* TypeName() noexcept { return "silent"; }
+
+  static bool Parse(const std::string&, SilentlyRejectedFlagValue*,
+                    std::string*) {
+    return false;
+  }
+
+  static std::string ToString(const SilentlyRejectedFlagValue& value) {
+    return std::to_string(value.value);
+  }
 };
 
 template <>
@@ -838,6 +857,55 @@ TEST(Flags, FuzzyMatchingUsesLevenshteinDistance) {
               testing::IsEmpty());
 }
 
+TEST(Flags, FuzzyMatchingRequiresACommonCharacter) {
+  EXPECT_THAT(nglog::internal::FindClosestMatch("xy", {"v", "help"}),
+              testing::IsEmpty());
+  EXPECT_THAT(nglog::internal::FindClosestMatch("vv", {"v"}),
+              testing::StrEq("v"));
+}
+
+// An unrelated candidate as distant as a related one does not hide it.
+TEST(Flags, FuzzyMatchingSkipsUnrelatedCandidatesOfEqualDistance) {
+  EXPECT_THAT(nglog::internal::FindClosestMatch("zz", {"help", "ab", "zzzz"}),
+              testing::StrEq("zzzz"));
+}
+
+#ifdef GTEST_HAS_DEATH_TEST
+TEST(Flags, MisspelledNegationSuggestsTheNegatedFlag) {
+  CommandLine command_line({"--no-test_bool_flag"});
+  ASSERT_EXIT(command_line.Parse(), testing::ExitedWithCode(EXIT_FAILURE),
+              "Did you mean .*no.*test_bool_flag");
+}
+
+// Without a range, expected values or an error of the parser, the message
+// still says what the value must be.
+TEST(Flags, InvalidValueWithoutParserErrorNamesTheExpectedType) {
+  ASSERT_EXIT(
+      {
+        const nglog::DynamicFlag<SilentlyRejectedFlagValue> flag(
+            "silently_rejected_test", __FILE__, "Test flag.",
+            SilentlyRejectedFlagValue{0});
+        CommandLine command_line({"--silently_rejected_test=x"});
+        command_line.Parse();
+        std::exit(EXIT_SUCCESS);
+      },
+      testing::ExitedWithCode(EXIT_FAILURE),
+      "invalid value .*x.* for .*silent.* flag, .*expected a valid silent");
+}
+
+TEST(Flags, LeadingHyphenDoesNotMatchLeadingUnderscore) {
+  ASSERT_EXIT(
+      {
+        const nglog::DynamicFlag<bool> flag("_leading_underscore_test",
+                                            __FILE__, "Test flag.", true);
+        CommandLine command_line({"--no-leading_underscore_test"});
+        command_line.Parse();
+        std::exit(EXIT_SUCCESS);
+      },
+      testing::ExitedWithCode(EXIT_FAILURE), "unknown command-line option");
+}
+#endif
+
 #ifdef GTEST_HAS_DEATH_TEST
 TEST(Flags, MisspelledHelpSuggestsHelp) {
   CommandLine command_line({"--halp"});
@@ -1244,6 +1312,17 @@ TEST(Flags, InvalidTypedValuePreservesCurrentValue) {
   EXPECT_EQ(23, nglog::GetFlag(FLAGS_test_int32_flag));
 }
 
+TEST(Flags, SetCommandLineOptionErrorsDelimitTheValueAndNameTheOption) {
+  nglog::ScopedFlags<> save;
+  std::string error;
+  EXPECT_FALSE(nglog::SetCommandLineOption("test_int32_flag", "", &error));
+  EXPECT_THAT(error, testing::HasSubstr("invalid value \"\" for int32"));
+  EXPECT_FALSE(nglog::SetCommandLineOption("test_int32_flag", "5 ", &error));
+  EXPECT_THAT(error, testing::HasSubstr("invalid value \"5 \" for int32"));
+  EXPECT_FALSE(nglog::SetCommandLineOption("no_such_option", "1", &error));
+  EXPECT_THAT(error, testing::HasSubstr("--no_such_option"));
+}
+
 #ifdef GTEST_HAS_DEATH_TEST
 TEST(Flags, InvalidCommandLineValueExitsWithFailureAndUsesTerminalStyling) {
   CommandLine command_line({"--test_uint32_flag=-1"});
@@ -1600,6 +1679,17 @@ TEST(Flags, FileModesUseOctalNotation) {
   EXPECT_THAT(
       nglog::FlagTraits<nglog::FileMode>::ToString(nglog::FileMode{07777}),
       testing::StrEq("07777"));
+}
+
+// Groups every three digits with a comma, as many locales do.
+TEST(Flags, FileModeFormattingIgnoresTheGlobalLocale) {
+  std::string text;
+  {
+    const nglog::ScopedGroupingLocale locale;
+    text = nglog::FlagTraits<nglog::FileMode>::ToString(nglog::FileMode{07777});
+  }
+
+  EXPECT_EQ(text, "07777");
 }
 
 TEST(Flags, FileModesRejectInvalidValues) {

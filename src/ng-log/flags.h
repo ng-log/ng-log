@@ -402,7 +402,10 @@ class NGLOG_EXPORT FlagBase {
 class NGLOG_EXPORT FlagGroup {
  public:
   // Associates an unassigned flag with this group. Returns false for an
-  // unknown flag or a flag already associated with a module or group.
+  // unknown flag or a flag already associated with a module or group. A flag
+  // is unknown until it has been registered, which NGLOG_DEFINE does during
+  // the static initialization of its translation unit and DynamicFlag does on
+  // construction.
   bool AddFlag(FlagBase& flag) const;
 
  private:

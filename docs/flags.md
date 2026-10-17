@@ -126,9 +126,10 @@ destructor of any translation unit, that is, before `main` and during program
 termination. This applies to the flags only. Logging itself is supported only
 while `main` runs. Before the flag is registered, it holds its declared default.
 The default is determined when the flag is first used or registered, whichever
-comes first, and does not change afterward. The default value expression may be
-evaluated more than once when threads use the flag concurrently for the first
-time, so it should not have side effects. The environment and the command line
+comes first. Afterward, only the environment variable of a flag module replaces
+it, when the flag is added to a group of that module. The default value
+expression may be evaluated more than once when threads use the flag
+concurrently for the first time, so it should not have side effects. The environment and the command line
 apply once the flag is registered and the arguments are parsed. An environment
 default does not replace a value that was set explicitly before. Restoring a
 saved value with `ScopedFlag` or `ScopedFlags` also restores whether the value
@@ -283,8 +284,14 @@ white, while the module name is highlighted in bold white. The header is
 followed by that module's flag groups and options. Groups are printed in
 alphabetical order and each group is separated by an empty line. A flag can be
 added to only one group. `FlagGroup::AddFlag` returns `false` for an unknown or
-already associated flag, or for a group owned by another module. The matching
-environment variable is applied as the flag default when `AddFlag` runs. The
+already associated flag, or for a group owned by another module. A flag is
+unknown until it has been registered. `NGLOG_DEFINE` registers a flag during
+the static initialization of the translation unit that defines it, and
+`DynamicFlag` registers on construction. Calling `AddFlag` from the static
+initializer of another translation unit therefore depends on the
+initialization order, so add flags of other translation units from `main` or
+later. The matching environment variable is applied as the
+flag default when `AddFlag` runs. The
 implicit `--help` option is always listed first and applies to all modules. The
 name `help` is reserved for this built-in option.
 
