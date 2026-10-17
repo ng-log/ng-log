@@ -42,6 +42,7 @@
 #include <sys/stat.h>
 #ifdef HAVE_UNISTD_H
 #  include <unistd.h>
+#  include <utime.h>
 #endif
 #ifdef HAVE_SYS_WAIT_H
 #  include <sys/wait.h>
@@ -2234,6 +2235,39 @@ TEST(Logging, TruncatesLongPath) {
 #endif
 }
 
+TEST(Logging, DisablingAnInactiveCleanerKeepsOverdueLogs) {
+#if defined(HAVE_UNISTD_H) && !defined(NGLOG_OS_WINDOWS)
+  auto save = nglog::MakeScopedFlags(
+      nglog::MakeScopedFlag(FLAGS_logtostderr, false),
+      nglog::MakeScopedFlag(FLAGS_timestamp_in_logfile_name, true));
+
+  const std::string dest = TestTmpDir() + "/logging_test_inactive_cleaner";
+  DeleteFiles(dest + "*");
+  SetLogDestination(NGLOG_INFO, dest.c_str());
+  LOG(INFO) << "message that registers the log file with the cleaner";
+  FlushLogFiles(NGLOG_INFO);
+  LogToStderr();
+
+  const std::string stale_path =
+      tools::MakeLogFilename(dest, "20200101-000000.1", std::string(), true);
+  {
+    std::ofstream stale{stale_path};
+  }
+  // Older than any overdue period a previous test may have left behind.
+  constexpr std::time_t kStaleAgeSeconds = 30 * 24 * 60 * 60;
+  struct utimbuf times;
+  times.actime = times.modtime = std::time(nullptr) - kStaleAgeSeconds;
+  ASSERT_EQ(utime(stale_path.c_str(), &times), 0) << strerror(errno);
+
+  DisableLogCleaner();
+
+  EXPECT_EQ(access(stale_path.c_str(), F_OK), 0);
+  DeleteFiles(dest + "*");
+#else
+  GTEST_SKIP() << "requires utime()";
+#endif
+}
+
 TEST(Logging, CleansLongPath) {
 #ifdef NGLOG_OS_WINDOWS
   using namespace std::chrono_literals;
@@ -2688,6 +2722,30 @@ TEST(Logging, CustomLoggerDeletionOnShutdown) {
   InitializeLogging(g_argv0);
   RestoreTestPrefixFormatter();
   EXPECT_TRUE(IsLoggingInitialized());
+}
+
+// A data race here only fails the test under ThreadSanitizer, which makes the
+// child exit with a nonzero status.
+TEST(Logging, ShutdownDoesNotRaceWithLogCleaner) {
+#if defined(GTEST_HAS_DEATH_TEST)
+  using namespace std::chrono_literals;
+  ASSERT_EXIT(
+      {
+        constexpr int kRounds = 20;
+        nglog::SetFlag(FLAGS_logtostderr, false);
+        nglog::SetFlag(FLAGS_logtostdout, false);
+        nglog::SetFlag(FLAGS_log_dir, TestTmpDir());
+        EnableLogCleaner(0h);
+        for (int i = 0; i < kRounds; ++i) {
+          LOG(INFO) << "message that makes the cleaner scan";
+          ShutdownLogging();
+          InitializeLogging(g_argv0);
+        }
+        DisableLogCleaner();
+        std::exit(EXIT_SUCCESS);
+      },
+      testing::ExitedWithCode(EXIT_SUCCESS), "");
+#endif
 }
 
 TEST(Logging, LogPeriodically) {

@@ -1861,10 +1861,8 @@ void LogFileObject::WriteUnlocked(
     // Let the log cleaner know about the naming pattern of the new file so
     // that logs matching it are removed once they become overdue.
     internal::g_log_cleaner.AddLogFile(
-        filename_source_, base_filename_, filename,
-        tools::MakeLogFilenameMatcher(
-            tools::const_basename(base_filename_.c_str()), filename_extension_,
-            GetFlag(FLAGS_timestamp_in_logfile_name)));
+        filename_source_, base_filename_, filename, filename_extension_,
+        GetFlag(FLAGS_timestamp_in_logfile_name));
 
     // Write a header message into the log file
     if (nglog::GetFlag(FLAGS_log_file_header)) {

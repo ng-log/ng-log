@@ -14,6 +14,7 @@
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include "internal/lock_metrics.h"
 #include "ng-log/export.h"
@@ -32,12 +33,14 @@ class NGLOG_NO_EXPORT LogCleaner {
   void Enable(const std::chrono::minutes& overdue);
   void Disable();
 
-  // Records a newly created log file and its naming pattern, then wakes up the
-  // cleaner thread so that logs which became overdue are removed promptly.
-  // Called by LogFileObject whenever it creates a log file.
+  // Records a newly created log file and the naming pattern given by the
+  // extension and whether names carry a timestamp, then wakes up the cleaner
+  // thread so that logs which became overdue are removed promptly. Called by
+  // LogFileObject whenever it creates a log file.
   void AddLogFile(LogFilenameSource filename_source,
                   const std::string& base_filename, const std::string& filename,
-                  const std::regex& filename_regex);
+                  const std::string& filename_extension,
+                  bool timestamp_in_logfile_name);
 
  private:
   // Naming pattern of the log files created by one LogFileObject together
@@ -50,6 +53,9 @@ class NGLOG_NO_EXPORT LogCleaner {
     std::regex filename_regex;
     std::unordered_map<std::string, std::unordered_set<std::string>>
         filenames_by_directory;
+    // Directories that may hold default log files. The cleaner thread must
+    // not read the global list, which ShutdownLogging() destroys.
+    std::vector<std::string> logging_directories;
     // Scans happen at fixed intervals, so schedule them on the steady clock
     // to stay unaffected by wall-clock adjustments (NTP, daylight saving).
     std::chrono::steady_clock::time_point next_cleanup_time;
@@ -61,8 +67,9 @@ class NGLOG_NO_EXPORT LogCleaner {
   // as soon as the cleaner is disabled.
   void Worker();
 
-  // Stops and joins the cleaner thread.
-  void Stop();
+  // Stops and joins the cleaner thread. Returns whether the cleaner was
+  // enabled.
+  bool Stop();
 
   static void CleanOverdueLogs(
       const std::chrono::system_clock::time_point& current_time,

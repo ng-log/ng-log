@@ -96,17 +96,19 @@ NGLOG_NO_EXPORT LogCleaner g_log_cleaner;
 
 LogCleaner::~LogCleaner() { Stop(); }
 
-void LogCleaner::Stop() {
+bool LogCleaner::Stop() {
   std::thread cleaner;
+  bool was_enabled = false;
   {
     std::lock_guard<CleanerMutex> l{mutex_};
-    enabled_ = false;
+    was_enabled = std::exchange(enabled_, false);
     cleaner = std::move(thread_);
   }
   cond_.notify_one();
   if (cleaner.joinable()) {
     cleaner.join();
   }
+  return was_enabled;
 }
 
 void LogCleaner::Enable(const std::chrono::minutes& overdue) {
@@ -127,7 +129,10 @@ void LogCleaner::Enable(const std::chrono::minutes& overdue) {
 }
 
 void LogCleaner::Disable() {
-  Stop();
+  // Disabling a cleaner that was never enabled must not delete anything.
+  if (!Stop()) {
+    return;
+  }
 
   // Callers disable the cleaner right before exiting and expect cleaning to
   // have happened by the time Disable() returns, so run a final scan here
@@ -150,7 +155,8 @@ void LogCleaner::Disable() {
 void LogCleaner::AddLogFile(LogFilenameSource filename_source,
                             const std::string& base_filename,
                             const std::string& filename,
-                            const std::regex& filename_regex) {
+                            const std::string& filename_extension,
+                            bool timestamp_in_logfile_name) {
   // The only caller, LogFileObject::Write(), already returns early when
   // filename_source is kSelected and base_filename is empty (that
   // combination means "don't write"), so this combination can never reach
@@ -169,7 +175,15 @@ void LogCleaner::AddLogFile(LogFilenameSource filename_source,
     std::lock_guard<internal::CleanerMutex> l{mutex_};
     LogFilePattern& pattern = patterns_[base_filename];
     pattern.filename_source = filename_source;
-    pattern.filename_regex = filename_regex;
+    // Compiling a regular expression fills a cache of the locale that
+    // libstdc++ does not synchronize, so log files that different threads
+    // create compile their patterns one at a time.
+    pattern.filename_regex = tools::MakeLogFilenameMatcher(
+        tools::const_basename(base_filename.c_str()), filename_extension,
+        timestamp_in_logfile_name);
+    if (filename_source == LogFilenameSource::kDefault) {
+      pattern.logging_directories = GetLoggingDirectories();
+    }
     pattern.filenames_by_directory[source_directory].insert(relative_filename);
     // A log file was just created: scan for overdue logs right away.
     pattern.next_cleanup_time = {};
@@ -246,7 +260,7 @@ void LogCleaner::CleanOverdueLogs(
   std::set<std::string> dirs;
 
   if (pattern.filename_source == LogFilenameSource::kDefault) {
-    for (const std::string& directory : GetLoggingDirectories()) {
+    for (const std::string& directory : pattern.logging_directories) {
       dirs.insert(directory.empty() ? "." : directory);
     }
   } else {
