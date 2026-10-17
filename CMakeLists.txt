@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-cmake_minimum_required (VERSION 3.22)
+cmake_minimum_required (VERSION 3.28...4.4)
 
 if (CMAKE_VERSION VERSION_GREATER_EQUAL 4.3)
   if (CMAKE_VERSION VERSION_LESS 4.4)
@@ -21,10 +21,6 @@ project (ng-log
   HOMEPAGE_URL https://github.com/ng-log/ng-log
   LANGUAGES CXX
 )
-
-if (POLICY CMP0219)
-  cmake_policy (SET CMP0219 NEW)
-endif (POLICY CMP0219)
 
 set (CPACK_PACKAGE_NAME ng-log)
 set (CPACK_PACKAGE_DESCRIPTION_SUMMARY "C++ logging library")

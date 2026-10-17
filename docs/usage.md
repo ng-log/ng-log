@@ -12,7 +12,7 @@ using a package manager, you can use the CMake command `#!cmake
 find_package` to build against ng-log in your CMake project as follows:
 
 ``` cmake title="CMakeLists.txt"
-cmake_minimum_required (VERSION 3.16)
+cmake_minimum_required (VERSION 3.28)
 project (myproj VERSION 1.0)
 
 find_package (ng-log 0.9.0 REQUIRED)
