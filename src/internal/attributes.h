@@ -49,7 +49,7 @@
 #  if defined(_MSC_VER)
 #    define NGLOG_UNREACHABLE __assume(false)
 #  elif defined(__has_builtin)
-#    if __has_builtin(unreachable)
+#    if __has_builtin(__builtin_unreachable)
 #      define NGLOG_UNREACHABLE __builtin_unreachable()
 #    endif
 #  endif

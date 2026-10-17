@@ -7,4 +7,11 @@
 
 #include <ng-log/vlog_is_on.h>
 
-int main() { VLOG_IS_ON(0); }
+namespace {
+
+// The macro must not shadow names of the calling code.
+bool IsOn(int level) { return VLOG_IS_ON(level); }
+
+}  // namespace
+
+int main() { return IsOn(0) ? 0 : 1; }
