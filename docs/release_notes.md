@@ -39,6 +39,8 @@ SPDX-License-Identifier: BSD-3-Clause
   filesystem operations
 - Breaking change: require Windows 8 or Windows Server 2012 or later
 - Breaking change: require CMake 3.28 or later to build and consume ng-log
+- Breaking change: the CMake package is only compatible with requests for the
+  same minor version
 - Omit the default header format when a custom prefix formatter is installed
 - Improve suppressed logging performance by avoiding message construction and
   reduce overhead when formatting default prefixes

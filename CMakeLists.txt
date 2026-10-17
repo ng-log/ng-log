@@ -1685,7 +1685,7 @@ configure_package_config_file (cmake/ng-log-config.cmake.in
 
 write_basic_package_version_file (
   ${ng-log_BINARY_DIR}/ng-log-config-version.cmake
-  COMPATIBILITY SameMajorVersion)
+  COMPATIBILITY SameMinorVersion)
 
 export (EXPORT ng-log-targets NAMESPACE ng-log:: FILE ng-log-targets.cmake)
 export (PACKAGE ng-log)
