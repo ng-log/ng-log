@@ -22,7 +22,6 @@
 
 namespace nglog {
 
-extern void (*g_logging_fail_func)();
 extern int posix_strerror_r(int err, char* buf, size_t len);
 extern std::string StrError(int err);
 
@@ -36,10 +35,6 @@ const std::string& TestSrcDir();
 // it to a fixed golden-file placeholder regardless of the actual pointer
 // value produced at runtime.
 constexpr std::uint32_t kPtrTestValue = 0x12345678;
-
-// ----------------------------------------------------------------------
-// Golden file functions
-// ----------------------------------------------------------------------
 
 // Read the entire content of a file as a string.
 std::string ReadEntireFile(FILE* file);

@@ -11,13 +11,12 @@
 #ifndef NGLOG_SRC_MOCK_LOG_H_
 #define NGLOG_SRC_MOCK_LOG_H_
 
-// For google. This must go first so we get _XOPEN_SOURCE.
 #include <gmock/gmock.h>
 
+#include <cstddef>
 #include <string>
 
 #include "ng-log/logging.h"
-#include "utilities.h"
 
 namespace nglog {
 namespace nglog_testing {
@@ -62,9 +61,9 @@ class ScopedMockLog : public nglog::LogSink {
   // for messages from different threads. In fact, if the same or multiple
   // expectations are matched on two threads concurrently, their actions will
   // be executed concurrently as well and may interleave.
-  MOCK_METHOD3(Log,
-               void(nglog::LogSeverity severity, const std::string& file_path,
-                    const std::string& message));
+  MOCK_METHOD(void, Log,
+              (nglog::LogSeverity severity, const std::string& file_path,
+               const std::string& message));
 
  private:
   // Implements the send() virtual function in class LogSink.
@@ -77,7 +76,7 @@ class ScopedMockLog : public nglog::LogSink {
   // tests.
   //
   // We still cannot call Log() directly, as it may invoke other LOG()
-  // messages, either due to Invoke, or due to an error logged in
+  // messages, either due to an action, or due to an error logged in
   // Google C++ Mocking Framework code, which would trigger a deadlock
   // since a lock is held during send().
   //
@@ -91,12 +90,12 @@ class ScopedMockLog : public nglog::LogSink {
   void send(nglog::LogSeverity severity, const char* full_filename,
             const char* /*base_filename*/, int /*line*/,
             const LogMessageTime& /*logmsgtime*/, const char* message,
-            size_t message_len) override {
+            std::size_t message_len) override {
     // We are only interested in the log severity, full file name, and
     // log message.
     message_info_.severity = severity;
     message_info_.file_path = full_filename;
-    message_info_.message = std::string(message, message_len);
+    message_info_.message.assign(message, message_len);
   }
 
   // Implements the WaitTillSent() virtual function in class LogSink.
@@ -110,7 +109,7 @@ class ScopedMockLog : public nglog::LogSink {
     // First, and very importantly, we save a copy of the message being
     // processed before calling Log(), since Log() may indirectly call send()
     // and WaitTillSent() in the same thread again.
-    MessageInfo message_info = message_info_;
+    const MessageInfo message_info = message_info_;
     Log(message_info.severity, message_info.file_path, message_info.message);
   }
 

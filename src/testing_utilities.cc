@@ -251,19 +251,24 @@ std::string GetCapturedTestOutput(int fd) {
   return content;
 }
 
-constexpr std::size_t kLoggingPrefixLength = 9;
+constexpr char kDatePlaceholder[] = "YEARDATE";
+constexpr std::size_t kDateLength = sizeof(kDatePlaceholder) - 1;
+//! Severity character followed by the date.
+constexpr std::size_t kLoggingPrefixLength = 1 + kDateLength;
 
 // Check if the string is [IWEF](\d{8}|YEARDATE)
 bool IsLoggingPrefix(const std::string& s, std::size_t offset) {
   if (offset > s.size() || s.size() - offset < kLoggingPrefixLength) {
     return false;
   }
-  if (s[offset] == '\0' || !strchr("IWEF", s[offset])) return false;
-  for (size_t i = 1; i <= 8; ++i) {
-    // Cast to unsigned char: passing a negative char (e.g. from non-ASCII
-    // log content) to isdigit() is undefined behavior.
+  if (s[offset] == '\0' || !strchr("IWEF", s[offset])) {
+    return false;
+  }
+  for (std::size_t i = 1; i <= kDateLength; ++i) {
+    // Passing a negative char such as one from non-ASCII log content to
+    // isdigit() is undefined behavior, hence the cast to unsigned char.
     if (!isdigit(static_cast<unsigned char>(s[offset + i])) &&
-        s[offset + i] != "YEARDATE"[i - 1]) {
+        s[offset + i] != kDatePlaceholder[i - 1]) {
       return false;
     }
   }
@@ -276,7 +281,10 @@ bool IsLoggingPrefix(const std::string& s, std::size_t offset) {
 //     I20200102 030405 logging_unittest.cc:345] RAW: vlog -1
 //  => IYEARDATE TIME__ logging_unittest.cc:LINE] RAW: vlog -1
 std::string MungeLine(const std::string& line) {
-  std::string before, logcode_date, time, thread_lineinfo;
+  std::string before;
+  std::string logcode_date;
+  std::string time;
+  std::string thread_lineinfo;
   std::size_t begin_of_logging_prefix = 0;
   for (; begin_of_logging_prefix + kLoggingPrefixLength < line.size();
        ++begin_of_logging_prefix) {
@@ -323,17 +331,18 @@ void StringReplace(std::string* str, const std::string& oldsub,
 std::string Munge(const std::string& filename) {
   std::unique_ptr<FILE> fp{fopen(filename.c_str(), "rb")};
   CHECK(fp != nullptr) << filename << ": couldn't open";
-  char buf[4096];
-  std::string result;
-  while (fgets(buf, 4095, fp.get())) {
-    std::string line = MungeLine(buf);
-    const size_t str_size = 256;
-    char null_str[str_size];
-    char ptr_str[str_size];
-    std::snprintf(null_str, str_size, "%p", static_cast<void*>(nullptr));
-    std::snprintf(ptr_str, str_size, "%p",
-                  reinterpret_cast<void*>(kPtrTestValue));
+  constexpr std::size_t kPointerBufferSize = 256;
+  char null_str[kPointerBufferSize];
+  char ptr_str[kPointerBufferSize];
+  std::snprintf(null_str, sizeof(null_str), "%p", static_cast<void*>(nullptr));
+  std::snprintf(ptr_str, sizeof(ptr_str), "%p",
+                reinterpret_cast<void*>(kPtrTestValue));
 
+  constexpr std::size_t kLineBufferSize = 4096;
+  char buf[kLineBufferSize];
+  std::string result;
+  while (fgets(buf, sizeof(buf) - 1, fp.get())) {
+    std::string line = MungeLine(buf);
     StringReplace(&line, "__NULLP__", null_str);
     StringReplace(&line, "__PTRTEST__", ptr_str);
 

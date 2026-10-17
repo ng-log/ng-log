@@ -14,14 +14,13 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstddef>
 #include <mutex>
-#include <string>
 #include <thread>
 
 namespace {
 
 using nglog::nglog_testing::ScopedMockLog;
-using std::string;
 using testing::_;
 using testing::EndsWith;
 using testing::InSequence;
@@ -146,6 +145,8 @@ TEST(ScopedMockLogTest, SinkCallbackCanLogWhileSinksChange) {
 
 int main(int argc, char** argv) {
   nglog::InitializeLogging(argv[0]);
+  // A shared GoogleMock library carries its own copy of GoogleTest, which
+  // InitGoogleMock initializes instead of the one the tests run in.
   testing::InitGoogleTest(&argc, argv);
   testing::InitGoogleMock(&argc, argv);
 
