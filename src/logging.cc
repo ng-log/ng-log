@@ -16,6 +16,7 @@
 #include <cerrno>  // for errno
 #include <chrono>
 #include <condition_variable>
+#include <csignal>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -85,6 +86,10 @@
 
 #ifdef HAVE_UNISTD_H
 #  include <unistd.h>
+#endif
+
+#ifdef HAVE_SYS_WAIT_H
+#  include <sys/wait.h>
 #endif
 
 #ifndef HAVE_MODE_T
@@ -2975,6 +2980,51 @@ static inline void trim(std::string& s) {
 }
 #endif
 
+#if defined(HAVE_SIGACTION) && !defined(NGLOG_OS_EMSCRIPTEN)
+namespace {
+
+// Keeps a mailer that exits without reading its input from terminating the
+// program with SIGPIPE. The signal is blocked in the calling thread only, and
+// a SIGPIPE raised meanwhile is discarded before the previous mask returns.
+class ScopedSigpipeBlock {
+ public:
+  ScopedSigpipeBlock() noexcept {
+    sigemptyset(&sigpipe_);
+    sigaddset(&sigpipe_, SIGPIPE);
+    sigset_t pending;
+    was_pending_ =
+        sigpending(&pending) == 0 && sigismember(&pending, SIGPIPE) == 1;
+    blocked_ = pthread_sigmask(SIG_BLOCK, &sigpipe_, &previous_) == 0;
+  }
+
+  ScopedSigpipeBlock(const ScopedSigpipeBlock&) = delete;
+  ScopedSigpipeBlock& operator=(const ScopedSigpipeBlock&) = delete;
+
+  ~ScopedSigpipeBlock() {
+    if (!blocked_) {
+      return;
+    }
+    const int saved_errno = errno;
+    sigset_t pending;
+    if (!was_pending_ && sigpending(&pending) == 0 &&
+        sigismember(&pending, SIGPIPE) == 1) {
+      int signal_number;
+      sigwait(&sigpipe_, &signal_number);
+    }
+    pthread_sigmask(SIG_SETMASK, &previous_, nullptr);
+    errno = saved_errno;
+  }
+
+ private:
+  sigset_t sigpipe_;
+  sigset_t previous_;
+  bool was_pending_{false};
+  bool blocked_{false};
+};
+
+}  // namespace
+#endif
+
 // use_logging controls whether the logging functions LOG/VLOG are used
 // to log errors.  It should be set to false when the caller holds the
 // log_mutex.
@@ -3057,13 +3107,24 @@ static bool SendEmailInternal(const char* dest, const char* subject,
     std::unique_ptr<FILE, PcloseDeleter> pipe{popen(cmd.c_str(), "w"),
                                               PcloseDeleter{&pclose_status}};
     if (pipe != nullptr) {
-      // Add the body if we have one
+#  ifdef HAVE_SIGACTION
+      // Spans both writing the body and closing the pipe, which flushes it.
+      // It starts after popen() so that the mailer inherits the signal mask
+      // of the program rather than a blocked SIGPIPE.
+      const ScopedSigpipeBlock sigpipe_block;
+#  endif
+      // Add the body if we have one. A mailer that exits without reading it
+      // leaves the write to fail, which the exit status does not show.
+      bool body_sent = true;
       if (body) {
-        std::fwrite(body, sizeof(char), std::strlen(body), pipe.get());
+        const std::size_t body_length = std::strlen(body);
+        body_sent = std::fwrite(body, sizeof(char), body_length, pipe.get()) ==
+                    body_length;
       }
+      body_sent = std::fflush(pipe.get()) == 0 && body_sent;
+      const int body_error = errno;
       pipe.reset();
-      const bool ok = pclose_status != -1;
-      if (!ok) {
+      if (pclose_status == -1) {
         if (use_logging) {
           LOG(ERROR) << "Problems sending mail to " << dest << ": "
                      << StrError(errno);
@@ -3071,8 +3132,61 @@ static bool SendEmailInternal(const char* dest, const char* subject,
           fprintf(stderr, "Problems sending mail to %s: %s\n", dest,
                   StrError(errno).c_str());
         }
+        return false;
       }
-      return ok;
+      // The mailer reports failures, including a missing mailer reported by
+      // the shell, only through its exit status.
+#  ifdef NGLOG_OS_WINDOWS
+      const int exit_status = pclose_status;
+#  else
+      if (WIFSIGNALED(pclose_status)) {
+        const int signal_number = WTERMSIG(pclose_status);
+        if (use_logging) {
+          LOG(ERROR) << "Mailer failed to send mail to " << dest
+                     << ": terminated by signal " << signal_number;
+        } else {
+          fprintf(stderr,
+                  "Mailer failed to send mail to %s: terminated by signal "
+                  "%d\n",
+                  dest, signal_number);
+        }
+        return false;
+      }
+      const int exit_status =
+          WIFEXITED(pclose_status) ? WEXITSTATUS(pclose_status) : -1;
+#  endif
+      if (exit_status != 0) {
+        std::string reason =
+            "exit status " + std::to_string(exit_status) + ", expected 0";
+#  ifndef NGLOG_OS_WINDOWS
+        // The shell that runs the mailer may report its termination by a
+        // signal as an exit status of 128 plus the signal number.
+        constexpr int kShellSignalStatusBase = 128;
+        if (exit_status > kShellSignalStatusBase) {
+          reason += ", as the shell reports termination by signal " +
+                    std::to_string(exit_status - kShellSignalStatusBase);
+        }
+#  endif
+        if (use_logging) {
+          LOG(ERROR) << "Mailer failed to send mail to " << dest << ": "
+                     << reason;
+        } else {
+          fprintf(stderr, "Mailer failed to send mail to %s: %s\n", dest,
+                  reason.c_str());
+        }
+        return false;
+      }
+      if (!body_sent) {
+        if (use_logging) {
+          LOG(ERROR) << "Mailer did not receive the mail to " << dest << ": "
+                     << StrError(body_error);
+        } else {
+          fprintf(stderr, "Mailer did not receive the mail to %s: %s\n", dest,
+                  StrError(body_error).c_str());
+        }
+        return false;
+      }
+      return true;
     } else {
       if (use_logging) {
         LOG(ERROR) << "Unable to send mail to " << dest;
