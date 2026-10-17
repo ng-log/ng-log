@@ -50,6 +50,8 @@
 #  include <utime.h>
 #endif
 #ifdef HAVE_SYS_WAIT_H
+// NOLINTNEXTLINE(modernize-deprecated-headers): POSIX SIGTERM
+#  include <signal.h>
 #  include <sys/wait.h>
 #endif
 #ifdef NGLOG_OS_WINDOWS
@@ -523,6 +525,15 @@ int RunSlowMailerScenario(const char* program, const char* marker_path,
   }
 
   other_logger.join();
+  // A mailer that runs under a logging lock delays the other log until the
+  // mailer gives up waiting for its release and exits.
+  const std::string base{marker_path};
+  if (MailerMarkerExists(base + ".exited")) {
+    std::fputs("the other log waited for the mailer\n", stdout);
+    mail_logger.join();
+    return EXIT_FAILURE;
+  }
+  std::ofstream{base + ".release"} << "release\n";
   mail_logger.join();
   std::fputs("passed\n", stdout);
   std::fflush(stdout);
@@ -4615,6 +4626,111 @@ TEST(LogMsgTime, gmtoffIsZeroForUtcTime) {
 TEST(EmailLogging, ValidAddress) {
   nglog::ScopedFlags<> save;
   nglog::SetFlag(FLAGS_logmailer, EMAIL_TEST_HELPER_PATH);
+
+  EXPECT_TRUE(
+      SendEmail("example@example.com", "Example subject", "Example body"));
+}
+
+TEST(EmailLogging, MissingMailerFails) {
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logmailer, TestTmpDir() + "/nonexistent_mailer");
+
+  ScopedStreamCapture capture{StandardStream::kStderr};
+  EXPECT_FALSE(
+      SendEmail("example@example.com", "Example subject", "Example body"));
+}
+
+#  if defined(GTEST_HAS_DEATH_TEST) && !defined(NGLOG_OS_WINDOWS)
+// The body exceeds the capacity of a pipe, so writing it fails once the shell
+// exits without reading it.
+TEST(EmailLogging, MailerThatIgnoresTheBodyDoesNotTerminate) {
+  EXPECT_EXIT(
+      {
+        nglog::SetFlag(FLAGS_logmailer, TestTmpDir() + "/nonexistent_mailer");
+        const std::string body(kMegabyte, 'x');
+        std::exit(
+            SendEmail("example@example.com", "Example subject", body.c_str())
+                ? EXIT_FAILURE
+                : EXIT_SUCCESS);
+      },
+      testing::ExitedWithCode(EXIT_SUCCESS), "");
+}
+#  endif
+
+#  ifndef NGLOG_OS_WINDOWS
+// The body exceeds the capacity of a pipe, so the mailer cannot have received
+// it although it exits successfully.
+TEST(EmailLogging, MailerThatExitsWithoutReadingTheBodyFails) {
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logmailer, EMAIL_TEST_HELPER_PATH);
+  const ScopedEnvironmentVariable ignore_input{"NGLOG_TEST_MAILER_IGNORE_INPUT",
+                                               "1"};
+  const std::string body(kMegabyte, 'x');
+
+  ScopedStreamCapture capture{StandardStream::kStderr};
+  EXPECT_FALSE(
+      SendEmail("example@example.com", "Example subject", body.c_str()));
+  EXPECT_THAT(
+      capture.Stop(),
+      HasSubstr("Mailer did not receive the mail to example@example.com"));
+}
+
+TEST(EmailLogging, MailerTerminatedBySignalNamesTheSignal) {
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logmailer, EMAIL_TEST_HELPER_PATH);
+  const ScopedEnvironmentVariable terminate{"NGLOG_TEST_MAILER_TERMINATE", "1"};
+
+  ScopedStreamCapture capture{StandardStream::kStderr};
+  EXPECT_FALSE(
+      SendEmail("example@example.com", "Example subject", "Example body"));
+  // Depending on the shell, the termination reaches this process directly or
+  // as the exit status of the shell.
+  EXPECT_THAT(capture.Stop(),
+              AllOf(HasSubstr("Mailer failed to send mail to "
+                              "example@example.com: "),
+                    HasSubstr("signal " + std::to_string(SIGTERM))));
+}
+
+// Shells report a command that a signal terminated with an exit status of 128
+// plus the signal number.
+TEST(EmailLogging, MailerExitStatusOfASignaledCommandNamesTheSignal) {
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logmailer, EMAIL_TEST_HELPER_PATH);
+  constexpr int kShellSignalStatusBase = 128;
+  const std::string status = std::to_string(kShellSignalStatusBase + SIGTERM);
+  const ScopedEnvironmentVariable exit_status{"NGLOG_TEST_MAILER_EXIT_STATUS",
+                                              status.c_str()};
+
+  ScopedStreamCapture capture{StandardStream::kStderr};
+  EXPECT_FALSE(
+      SendEmail("example@example.com", "Example subject", "Example body"));
+  EXPECT_THAT(capture.Stop(),
+              HasSubstr("exit status " + status +
+                        ", expected 0, as the shell reports termination by "
+                        "signal " +
+                        std::to_string(SIGTERM)));
+}
+#  endif
+
+TEST(EmailLogging, UnsuccessfulMailerFails) {
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logmailer, EMAIL_TEST_HELPER_PATH);
+  // The helper fails when it cannot create its marker file.
+  const ScopedEnvironmentVariable marker{
+      "NGLOG_TEST_MAILER_MARKER",
+      (TestTmpDir() + "/nonexistent_directory/marker").c_str()};
+
+  ScopedStreamCapture capture{StandardStream::kStderr};
+  EXPECT_FALSE(
+      SendEmail("example@example.com", "Example subject", "Example body"));
+}
+
+// Programs that the mailer runs rely on SIGPIPE to stop writing to a closed
+// pipe, so the mailer starts with the signal mask of the program.
+TEST(EmailLogging, MailerStartsWithSigpipeUnblocked) {
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logmailer, EMAIL_TEST_HELPER_PATH);
+  const ScopedEnvironmentVariable check{"NGLOG_TEST_MAILER_CHECK_SIGPIPE", "1"};
 
   EXPECT_TRUE(
       SendEmail("example@example.com", "Example subject", "Example body"));

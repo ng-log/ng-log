@@ -39,6 +39,8 @@ SPDX-License-Identifier: BSD-3-Clause
   `/dev/stderr`
 - Terminate on severities outside `NGLOG_INFO` through `NGLOG_FATAL`
   instead of reading out of bounds
+- Fail `SendEmail` unless the mailer receives the whole message and exits
+  with status 0
 
 #### Features
 
@@ -89,6 +91,7 @@ SPDX-License-Identifier: BSD-3-Clause
 - Reopen log files in processes created by `fork`
 - Fix `RAW_LOG` truncating messages that exactly fill its buffer
 - Deliver email outside the logging lock
+- Keep `SendEmail` from raising `SIGPIPE` when the mailer exits early
 - Make Windows log file handles non-inheritable
 - Fix log cleanup in non-ASCII Windows directories by [@devtejasx]
 - Encode Windows user names in log file names as UTF-8
