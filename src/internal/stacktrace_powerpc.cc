@@ -54,7 +54,6 @@ NGLOG_ATTRIBUTE_NOINLINE
 void StacktracePowerPCDummyFunction();
 void StacktracePowerPCDummyFunction() { __asm__ volatile(""); }
 
-// If you change this function, also change GetStackFrames below.
 int GetStackTrace(void** result, int max_depth, int skip_count) {
   void** sp;
   // Apple OS X uses an old version of gnu as -- both Darwin 7.9.0 (Panther)

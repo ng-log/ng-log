@@ -81,7 +81,6 @@ static void** NextStackFrame(void** old_sp) {
   return new_sp;
 }
 
-// If you change this function, also change GetStackFrames below.
 int GetStackTrace(void** result, int max_depth, int skip_count) {
   void** sp;
 
