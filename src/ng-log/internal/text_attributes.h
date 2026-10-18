@@ -7,6 +7,9 @@
 #ifndef NGLOG_INTERNAL_TEXT_ATTRIBUTES_H
 #define NGLOG_INTERNAL_TEXT_ATTRIBUTES_H
 
+// IWYU pragma: private, include "ng-log/logging.h"
+// IWYU pragma: friend "ng-log/internal/.*"
+
 #include "ng-log/internal/color_spec.h"
 #include "ng-log/internal/hyperlink.h"
 

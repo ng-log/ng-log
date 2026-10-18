@@ -7,6 +7,9 @@
 #ifndef NGLOG_INTERNAL_COLOR_SPEC_H
 #define NGLOG_INTERNAL_COLOR_SPEC_H
 
+// IWYU pragma: private, include "ng-log/logging.h"
+// IWYU pragma: friend "ng-log/internal/.*"
+
 #include <cstddef>
 
 #include "ng-log/internal/color.h"

@@ -7,6 +7,9 @@
 #ifndef NGLOG_INTERNAL_STYLE_MARKERS_H
 #define NGLOG_INTERNAL_STYLE_MARKERS_H
 
+// IWYU pragma: private, include "ng-log/logging.h"
+// IWYU pragma: friend "ng-log/internal/.*"
+
 #include "ng-log/internal/text_attributes.h"
 
 namespace nglog {

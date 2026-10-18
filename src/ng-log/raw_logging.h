@@ -13,9 +13,9 @@
 #define NGLOG_RAW_LOGGING_H
 
 #include "ng-log/export.h"
-#include "ng-log/log_severity.h"
+#include "ng-log/log_severity.h"  // IWYU pragma: export
 #include "ng-log/platform.h"
-#include "ng-log/vlog_is_on.h"
+#include "ng-log/vlog_is_on.h"  // IWYU pragma: export
 
 namespace nglog {
 

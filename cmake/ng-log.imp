@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: 2026 The ng-log contributors
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+[
+  # GoogleTest and GoogleMock are system headers.
+  { include: ["\"gmock/gmock.h\"", "private", "<gmock/gmock.h>", "public"] },
+  { include: ["\"gtest/gtest.h\"", "private", "<gtest/gtest.h>", "public"] },
+
+  # Google Benchmark splits its API across headers without IWYU pragmas.
+  { include: ["<benchmark/benchmark_api.h>", "private", "<benchmark/benchmark.h>", "public"] },
+  { include: ["<benchmark/counter.h>", "private", "<benchmark/benchmark.h>", "public"] },
+  { include: ["<benchmark/macros.h>", "private", "<benchmark/benchmark.h>", "public"] },
+  { include: ["<benchmark/managers.h>", "private", "<benchmark/benchmark.h>", "public"] },
+  { include: ["<benchmark/registration.h>", "private", "<benchmark/benchmark.h>", "public"] },
+  { include: ["<benchmark/reporter.h>", "private", "<benchmark/benchmark.h>", "public"] },
+  { include: ["<benchmark/state.h>", "private", "<benchmark/benchmark.h>", "public"] },
+  { include: ["<benchmark/statistics.h>", "private", "<benchmark/benchmark.h>", "public"] },
+  { include: ["<benchmark/sysinfo.h>", "private", "<benchmark/benchmark.h>", "public"] },
+  { include: ["<benchmark/types.h>", "private", "<benchmark/benchmark.h>", "public"] },
+  { include: ["<benchmark/utils.h>", "private", "<benchmark/benchmark.h>", "public"] },
+
+  # libunwind selects the header of the target architecture.
+  { include: ["@[\"<]libunwind-.*\\.h[\">]", "private", "<libunwind.h>", "public"] },
+
+  # Prefer the POSIX headers that declare these types and macros.
+  { symbol: ["winsize", "private", "<sys/ioctl.h>", "public"] },
+  { symbol: ["WEXITSTATUS", "private", "<sys/wait.h>", "public"] },
+  { symbol: ["WIFEXITED", "private", "<sys/wait.h>", "public"] },
+  { symbol: ["WIFSIGNALED", "private", "<sys/wait.h>", "public"] },
+  { symbol: ["WTERMSIG", "private", "<sys/wait.h>", "public"] },
+]

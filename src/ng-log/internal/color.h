@@ -7,6 +7,9 @@
 #ifndef NGLOG_INTERNAL_COLOR_H
 #define NGLOG_INTERNAL_COLOR_H
 
+// IWYU pragma: private, include "ng-log/logging.h"
+// IWYU pragma: friend "ng-log/internal/.*"
+
 #include <cstdint>
 
 namespace nglog {

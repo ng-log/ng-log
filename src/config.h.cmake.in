@@ -6,6 +6,10 @@
 #ifndef NGLOG_CONFIG_H
 #define NGLOG_CONFIG_H
 
+// Configuration macros are often tested only in preprocessor conditionals
+// that include-what-you-use cannot see in every configuration.
+// IWYU pragma: always_keep
+
 /* Define if you have the `dladdr' function */
 #cmakedefine HAVE_DLADDR
 

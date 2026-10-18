@@ -10,6 +10,10 @@
 #ifndef NGLOG_PLATFORM_H
 #define NGLOG_PLATFORM_H
 
+// Platform macros are often tested only in preprocessor conditionals that
+// include-what-you-use cannot see on every platform.
+// IWYU pragma: always_keep
+
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__)
 #  define NGLOG_OS_WINDOWS
 #elif defined(__CYGWIN__) || defined(__CYGWIN32__)
