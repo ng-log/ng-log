@@ -6,15 +6,17 @@
 #ifndef NGLOG_INTERNAL_UTF8_H_
 #define NGLOG_INTERNAL_UTF8_H_
 
-#include <cstddef>
 #include <cstdio>
-#include <string>
-#include <vector>
 
 #include "ng-log/export.h"
 #include "ng-log/platform.h"
 
-struct stat;
+#ifdef NGLOG_OS_WINDOWS
+#  include <string>
+#  include <vector>
+
+struct stat;  // IWYU pragma: keep
+#endif        // NGLOG_OS_WINDOWS
 
 namespace nglog {
 namespace internal {

@@ -24,12 +24,15 @@
 #include <type_traits>
 #include <vector>
 
+#include "config.h"
 #include "internal/levenshtein.h"
 #include "internal/process_flag_registry.h"
+#include "ng-log/platform.h"
 #include "testing_utilities.h"
 
 #if !defined(NGLOG_OS_WINDOWS)
 #  include <dirent.h>
+#  include <sys/types.h>
 #  include <sys/wait.h>
 #  include <unistd.h>
 #endif

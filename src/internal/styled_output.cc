@@ -6,12 +6,15 @@
 
 #include "styled_output.h"
 
+#include <cstdio>
 #include <cstring>
 
-#include "internal/utf8.h"
+#include "ng-log/platform.h"
 
 #ifdef NGLOG_OS_WINDOWS
 #  include <io.h>
+
+#  include "internal/utf8.h"
 #else
 #  include "config.h"
 #  ifdef HAVE_UNISTD_H

@@ -18,30 +18,27 @@
 #  include <windows.h>
 #else
 #  include <sys/stat.h>
-#  include <unistd.h>
+#  include <sys/types.h>
 #endif  // NGLOG_OS_WINDOWS
 
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
-#include <cwchar>
 #include <limits>
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "config.h"
-#include "internal/utf8.h"
 #ifdef NGLOG_OS_WINDOWS
+#  include "internal/utf8.h"
 #  include "long_path_test.h"
 #endif
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
+#include "ng-log/types.h"
 #include "symbolize.h"
 #include "testing_utilities.h"
-#include "utilities.h"
 
 using namespace nglog;
 

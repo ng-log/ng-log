@@ -6,6 +6,8 @@
 
 #include "subprocess.h"
 
+#include "config.h"
+#include "ng-log/platform.h"
 #include "utilities.h"
 
 // implementation uses posix_spawn() when available and retains the existing
@@ -636,14 +638,15 @@ SubprocessWaitResult Subprocess<SubprocessMode::kNormal>::Wait(
 
 #    include <fcntl.h>
 #    include <poll.h>
-#    include <signal.h>
+#    include <signal.h>  // IWYU pragma: keep
+// IWYU pragma: no_include <csignal>
 #    include <sys/wait.h>
 #    include <unistd.h>
 
-#    include "subprocess_fork.h"
-
 #    ifdef HAVE_POSIX_SPAWN
 #      include <spawn.h>
+#    else
+#      include "subprocess_fork.h"
 #    endif  // HAVE_POSIX_SPAWN
 
 namespace nglog {

@@ -13,12 +13,13 @@
 
 #include <cstdint>
 #include <cstring>
+#include <string>
 
 #include "config.h"
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
+#include "ng-log/platform.h"
 #include "symbolize.h"
-#include "utilities.h"
 
 using namespace nglog;
 using testing::AllOf;

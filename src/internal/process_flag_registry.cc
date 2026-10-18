@@ -6,7 +6,6 @@
 #include "process_flag_registry.h"
 
 #include <atomic>
-#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>

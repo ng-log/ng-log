@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <ratio>
 #include <regex>
 #include <string>
 #include <thread>
@@ -15,7 +16,7 @@
 #include <unordered_set>
 
 #include "internal/lock_metrics.h"
-#include "ng-log/logging.h"
+#include "ng-log/export.h"
 
 namespace nglog {
 namespace internal {

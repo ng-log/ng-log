@@ -10,22 +10,26 @@
 
 #include "subprocess.h"
 
-#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <array>
 #include <chrono>
 #include <cstddef>
-#include <cstring>
 #include <string>
 #include <type_traits>
 #include <utility>
-#include <vector>
+
+#include "config.h"
+#include "ng-log/platform.h"
 
 #ifdef NGLOG_OS_WINDOWS
+#  include <gmock/gmock.h>
 #  include <process.h>
 #  include <windows.h>
+
+#  include <array>
+#  include <cstring>
+#  include <vector>
 
 #  include "internal/utf8.h"
 #  include "long_path_test.h"
@@ -33,8 +37,9 @@
 
 #if !defined(NGLOG_OS_WINDOWS) && defined(HAVE__FORK) && defined(HAVE_EXECV)
 #  include <pthread.h>
-#  include <signal.h>
 #  include <unistd.h>
+
+#  include <csignal>
 #endif  // POSIX signal-safe subprocess support
 
 using namespace nglog;

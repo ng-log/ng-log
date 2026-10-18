@@ -7,21 +7,24 @@
 
 #include <sys/stat.h>
 
+#include <algorithm>
 #include <cassert>
 #include <chrono>
-#include <cstdint>
 #include <cstdio>
+#include <functional>  // IWYU pragma: keep
+#include <mutex>
 #include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "config.h"
 #include "internal/path.h"
+#include "ng-log/flags.h"
+#include "ng-log/logging.h"
+#include "ng-log/platform.h"
+#include "ng-log/types.h"
 #include "utilities.h"
-
-#ifdef HAVE_UNISTD_H
-#  include <unistd.h>
-#endif
 
 namespace nglog {
 namespace internal {

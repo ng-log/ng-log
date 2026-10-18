@@ -5,17 +5,9 @@
 
 #include "internal/utf8.h"
 
-#include <algorithm>
-#include <array>
 #include <cerrno>
-#include <climits>
-#include <cstdint>
-#include <cstring>
-#include <cwchar>
-#include <limits>
-#include <string>
-#include <utility>
-#include <vector>
+
+#include "ng-log/platform.h"
 
 #ifdef NGLOG_OS_WINDOWS
 #  include <fcntl.h>
@@ -25,6 +17,17 @@
 
 // The target architecture macros that pathcch.h requires come from windows.h.
 #  include <pathcch.h>
+
+#  include <algorithm>
+#  include <array>
+#  include <climits>
+#  include <cstdint>
+#  include <cstring>
+#  include <cwchar>
+#  include <limits>
+#  include <string>
+#  include <utility>
+#  include <vector>
 #endif
 
 namespace nglog {

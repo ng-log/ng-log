@@ -39,7 +39,8 @@
 
 #if defined(HAVE_LINK_H)
 #  include <link.h>  // For ElfW() macro.
-#elif defined(HAVE_ELF_H)
+#endif
+#if defined(HAVE_ELF_H)
 #  include <elf.h>
 #elif defined(HAVE_SYS_EXEC_ELF_H)
 #  include <sys/exec_elf.h>

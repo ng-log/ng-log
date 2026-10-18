@@ -6,12 +6,12 @@
 
 #include "terminal_capabilities.h"
 
-#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 
 #include "config.h"
+#include "ng-log/platform.h"
 
 #ifdef NGLOG_OS_EMSCRIPTEN
 #  include <emscripten.h>
@@ -40,6 +40,8 @@ EM_JS(int, nglog_get_node_environment_variable,
 
 #ifdef NGLOG_OS_WINDOWS
 #  include <windows.h>
+
+#  include <algorithm>
 #else
 #  ifdef HAVE_UNISTD_H
 #    include <unistd.h>

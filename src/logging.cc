@@ -12,23 +12,23 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <cassert>
 #include <cctype>  // for std::isspace
 #include <cerrno>  // for errno
 #include <chrono>
-#include <climits>
 #include <condition_variable>
-#include <cstdarg>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
+#include <exception>
 #include <iomanip>
 #include <iterator>
-#include <limits>
 #include <memory>
 #include <mutex>
+#include <new>
+#include <ratio>
 #include <regex>
 #include <shared_mutex>
 #include <sstream>
@@ -41,6 +41,7 @@
 #include <vector>
 
 #include "config.h"
+#include "internal/attributes.h"
 #include "internal/lock_metrics.h"
 #include "internal/log_cleaner.h"
 #include "internal/path.h"
@@ -50,9 +51,11 @@
 #include "internal/terminal_capabilities.h"
 #include "internal/theme.h"
 #include "internal/utf8.h"
+#include "ng-log/export.h"
 #include "ng-log/logging.h"
 #include "ng-log/platform.h"
 #include "ng-log/raw_logging.h"
+#include "ng-log/types.h"
 #include "stacktrace.h"
 #include "utilities.h"
 
@@ -64,9 +67,10 @@
 #  include <shlguid.h>
 #  include <shobjidl.h>
 #  include <windows.h>
-#endif
-#ifdef HAVE_PWD_H
-#  include <pwd.h>
+
+#  include <limits>
+#else
+#  include <strings.h>
 #endif
 #ifdef HAVE_SYS_UTSNAME_H
 #  include <sys/utsname.h>  // For uname.

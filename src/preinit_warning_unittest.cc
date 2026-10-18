@@ -7,9 +7,12 @@
 #include <gtest/gtest.h>
 
 #include <cstdlib>
+#include <ostream>
+#include <string>
 
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
+#include "ng-log/platform.h"
 #include "testing_utilities.h"
 
 using namespace nglog;

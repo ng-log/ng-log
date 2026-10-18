@@ -16,13 +16,14 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
-#include <string>
 #include <thread>
-#include <utility>
-#include <vector>
 
 #ifdef _WIN32
 #  include <windows.h>
+
+#  include <string>
+#  include <utility>
+#  include <vector>
 #endif
 
 namespace {

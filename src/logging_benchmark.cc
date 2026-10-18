@@ -7,12 +7,22 @@
 
 #include <benchmark/benchmark.h>
 
+#include <chrono>
+#include <cstddef>  // IWYU pragma: keep
 #include <cstdint>
-#include <cstdio>
 #include <memory>
+#include <ostream>
+#include <string>  // IWYU pragma: keep
 
 #include "internal/lock_metrics.h"
+#include "ng-log/flags.h"
 #include "ng-log/logging.h"
+#include "ng-log/types.h"
+
+#ifdef NGLOG_ENABLE_LOCK_METRICS
+#  include <cstdio>
+#  include <initializer_list>
+#endif
 
 using namespace nglog;
 

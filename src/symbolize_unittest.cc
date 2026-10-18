@@ -17,21 +17,30 @@
 #include <cstring>
 #include <iostream>
 #include <limits>
-#include <vector>
+#include <string>
 
 #include "config.h"
+#include "internal/attributes.h"
 #include "internal/checked_arithmetic.h"
+#include "ng-log/flags.h"
 #include "ng-log/logging.h"
-#include "stacktrace.h"
-#include "utilities.h"
+#include "ng-log/platform.h"
 
-#if defined(HAVE_LINK_H)
-#  include <fcntl.h>
+#ifdef HAVE_UNISTD_H
+#  include <unistd.h>
+#endif
+
+#if defined(HAVE_LINK_H) && !defined(HAVE_LIBBACKTRACE)
 #  include <sys/mman.h>
 #  include <sys/stat.h>
-#  include <unistd.h>
+#  include <sys/types.h>
 
+#  include <cstdlib>
 #  include <iterator>
+#  include <utility>
+#  include <vector>
+
+#  include "utilities.h"
 #endif
 
 using namespace std;

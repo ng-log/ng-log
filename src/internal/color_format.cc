@@ -5,6 +5,7 @@
 // Author: Sergiu Deitsch
 
 #include <algorithm>
+#include <cstddef>
 
 #include "ng-log/internal/color_spec.h"
 

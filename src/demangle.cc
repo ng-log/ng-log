@@ -10,6 +10,8 @@
 
 #include "demangle.h"
 
+#include <sys/types.h>
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -19,7 +21,8 @@
 #include <memory>
 #include <type_traits>
 
-#include "utilities.h"
+#include "config.h"
+#include "ng-log/platform.h"
 
 #if defined(HAVE___CXA_DEMANGLE)
 #  include <cxxabi.h>

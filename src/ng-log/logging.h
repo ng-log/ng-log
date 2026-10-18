@@ -1108,7 +1108,7 @@ class NGLOG_EXPORT LogStreamBuf : public std::streambuf {
 
 namespace internal {
 struct NGLOG_NO_EXPORT LogMessageData;
-class NGLOG_NO_EXPORT StyleRecorder;
+class StyleRecorder;
 }  // namespace internal
 
 //

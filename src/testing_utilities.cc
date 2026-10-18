@@ -16,6 +16,11 @@
 #include <sstream>
 #include <vector>
 
+#include "config.h"
+#include "ng-log/flags.h"
+#include "ng-log/logging.h"
+#include "ng-log/platform.h"
+
 #ifdef HAVE_UNISTD_H
 #  include <unistd.h>
 #endif

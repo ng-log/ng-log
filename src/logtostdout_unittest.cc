@@ -7,7 +7,9 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <cstdio>
+#include <ostream>
 #include <string>
 
 #include "ng-log/flags.h"

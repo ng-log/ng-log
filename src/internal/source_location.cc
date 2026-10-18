@@ -8,18 +8,18 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstdlib>
 #include <cstring>
 #include <iterator>
 #include <limits>
 #include <locale>
 
 #include "config.h"
-#include "internal/utf8.h"
 #include "ng-log/platform.h"
 
 #ifdef NGLOG_OS_WINDOWS
 #  include <windows.h>
+
+#  include "internal/utf8.h"
 #else
 #  ifdef HAVE_UNISTD_H
 #    include <unistd.h>

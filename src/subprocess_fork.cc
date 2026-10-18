@@ -4,6 +4,8 @@
 //
 // Author: Sergiu Deitsch
 
+#include "config.h"
+#include "ng-log/platform.h"
 #include "subprocess.h"
 
 // addr2line may run from a crash signal handler. Before exec, a child of a
@@ -20,15 +22,20 @@
 
 #  include <fcntl.h>
 #  include <poll.h>
-#  include <signal.h>  // NOLINT(modernize-deprecated-headers): POSIX SIGKILL
+// NOLINTNEXTLINE(modernize-deprecated-headers): POSIX SIGKILL
+#  include <signal.h>  // IWYU pragma: keep
+// IWYU pragma: no_include <csignal>
 #  include <sys/wait.h>
 #  include <unistd.h>
 
 #  include <cerrno>
+#  include <chrono>
+#  include <cstddef>
 #  include <limits>
 #  include <utility>
 
 #  include "subprocess_fork.h"
+#  include "utilities.h"
 
 namespace nglog {
 

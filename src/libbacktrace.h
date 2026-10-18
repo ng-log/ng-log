@@ -21,12 +21,13 @@
 #ifndef NGLOG_INTERNAL_LIBBACKTRACE_H
 #define NGLOG_INTERNAL_LIBBACKTRACE_H
 
-#include <cstddef>
-
 #include "config.h"
-#include "ng-log/export.h"
 
 #ifdef HAVE_LIBBACKTRACE
+
+#  include <cstddef>
+
+#  include "ng-log/export.h"
 
 struct backtrace_state;
 

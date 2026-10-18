@@ -9,45 +9,48 @@
 
 #include "utilities.h"
 
-#include <algorithm>
-#include <array>
+#include <sys/types.h>
+
 #include <atomic>
 #include <cerrno>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cwchar>
 #include <limits>
+#include <ostream>
 #include <string>
 #include <vector>
 
-#include "addr2line.h"
 #include "config.h"
 #include "initializer.h"
-#include "internal/emscripten_console.h"
 #include "internal/source_location.h"
-#include "internal/utf8.h"
-#include "libbacktrace.h"
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
+#include "ng-log/platform.h"
 #include "stacktrace.h"
 #include "symbolize.h"
+
+#if defined(HAVE_ADDR2LINE)
+#  include "addr2line.h"
+#elif defined(HAVE_LIBBACKTRACE)
+#  include "libbacktrace.h"
+#endif
 
 #ifdef NGLOG_OS_WINDOWS
 #  include <lmcons.h>
 #  include <windows.h>
+
+#  include <array>
+#  include <cwchar>
+
+#  include "internal/utf8.h"
 #endif
 #ifdef NGLOG_OS_ANDROID
 #  include <android/log.h>
 #endif
-#ifdef HAVE_SYS_TIME_H
-#  include <sys/time.h>
-#endif
-#if defined(HAVE_SYSCALL_H)
-#  include <syscall.h>  // for syscall()
-#elif defined(HAVE_SYS_SYSCALL_H)
-#  include <sys/syscall.h>  // for syscall()
+#ifdef NGLOG_OS_EMSCRIPTEN
+#  include "internal/emscripten_console.h"
 #endif
 #ifdef HAVE_SYSLOG_H
 #  include <syslog.h>
@@ -230,10 +233,6 @@ void SetThreadName(const char* name) {
 
 // The following APIs are all internal.
 #ifdef HAVE_STACKTRACE
-
-#  include "ng-log/flags.h"
-#  include "stacktrace.h"
-#  include "symbolize.h"
 
 namespace nglog {
 

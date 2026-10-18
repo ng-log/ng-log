@@ -12,6 +12,8 @@
 
 #include <csignal>
 #include <cstdlib>
+// Streaming into a log message requires it unless logging is stripped.
+#include <ostream>  // IWYU pragma: keep
 #include <string>
 
 #include "config.h"

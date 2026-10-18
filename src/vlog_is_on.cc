@@ -8,14 +8,18 @@
 // Broken out from logging.cc by Soren Lassen
 // logging_unittest.cc covers the functionality herein
 
+#include <atomic>
 #include <cerrno>
+#include <cstdint>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <string>
 
+#include "ng-log/export.h"
+#include "ng-log/flags.h"
 #include "ng-log/raw_logging.h"
+#include "ng-log/types.h"
 
 using std::string;
 

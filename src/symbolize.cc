@@ -30,14 +30,12 @@
 
 #include "symbolize.h"
 
-#include "utilities.h"
+#include "ng-log/platform.h"
 
 #if defined(HAVE_SYMBOLIZE)
 
-#  include <algorithm>
 #  include <cstdlib>
 #  include <cstring>
-#  include <limits>
 
 #  include "demangle.h"
 
@@ -203,26 +201,21 @@ static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
 
 #  elif defined(HAVE_LINK_H)
 
-#    if defined(HAVE_DLFCN_H)
-#      include <dlfcn.h>
-#    endif
 #    include <fcntl.h>
 #    include <sys/stat.h>
 #    include <sys/types.h>
 #    include <unistd.h>
 
+#    include <algorithm>
 #    include <cerrno>
 #    include <climits>
 #    include <cstddef>
 #    include <cstdint>
-#    include <cstdio>
-#    include <cstdlib>
-#    include <cstring>
+#    include <limits>
 
 #    include "config.h"
 #    include "internal/checked_arithmetic.h"
-#    include "ng-log/raw_logging.h"
-#    include "symbolize.h"
+#    include "utilities.h"
 
 namespace nglog {
 inline namespace tools {
@@ -1628,6 +1621,7 @@ static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
 #    include <windows.h>
 
 #    include <array>
+#    include <limits>
 #    include <string>
 
 #    include "addr2line.h"
@@ -1727,6 +1721,8 @@ static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
 #    include <windows.h>  // Must come before <dbghelp.h>
 #    include <dbghelp.h>
 // clang-format on
+
+#    include <cstdio>
 
 namespace nglog {
 inline namespace tools {

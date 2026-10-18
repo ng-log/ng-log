@@ -8,18 +8,19 @@
 #define NGLOG_INTERNAL_STYLED_OUTPUT_H
 
 #include <algorithm>
-#include <cstddef>
-#include <cstdio>
 #include <cstring>
 #include <utility>
 
 #include "ng-log/export.h"
 #include "ng-log/internal/hyperlink.h"
 #include "ng-log/internal/text_attributes.h"
+#include "ng-log/platform.h"
 #include "terminal_capabilities.h"
 
 #ifdef NGLOG_OS_WINDOWS
 #  include <windows.h>
+
+#  include <cstdio>
 #endif
 
 namespace nglog {

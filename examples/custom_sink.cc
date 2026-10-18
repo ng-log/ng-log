@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <iostream>
 #include <iterator>
+#include <string>
 
 namespace {
 

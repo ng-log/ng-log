@@ -7,23 +7,27 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <type_traits>
-#include <vector>
 
 #include "internal/source_location.h"
 #include "internal/styled_output.h"
 #include "internal/terminal_capabilities.h"
 #include "internal/theme.h"
-#include "internal/utf8.h"
+#include "ng-log/flags.h"
 #include "ng-log/internal/color_spec.h"
 #include "ng-log/internal/hyperlink.h"
-#include "ng-log/logging.h"
+#include "ng-log/platform.h"
 #include "testing_utilities.h"
 
 #ifdef NGLOG_OS_WINDOWS
 #  include <windows.h>
+
+#  include <vector>
+
+#  include "internal/utf8.h"
 #endif
 
 #ifdef NGLOG_OS_EMSCRIPTEN

@@ -14,6 +14,8 @@
 
 #include <cerrno>
 #include <cstdlib>
+#include <ostream>
+#include <string>
 
 #ifdef __unix__
 #  include <sys/resource.h>

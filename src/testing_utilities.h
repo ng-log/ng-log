@@ -15,7 +15,7 @@
 #include <string>
 
 #include "config.h"
-#include "ng-log/logging.h"
+#include "ng-log/platform.h"
 #include "utilities.h"
 
 #if defined(NGLOG_OS_WINDOWS)

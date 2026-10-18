@@ -14,11 +14,12 @@
 
 #include <iostream>
 #include <string>
+#include <utility>  // IWYU pragma: keep
 
 #include "config.h"
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
-#include "utilities.h"
+#include "ng-log/platform.h"
 
 NGLOG_DEFINE(bool, demangle_filter, false,
              "Run demangle_unittest in filter mode");

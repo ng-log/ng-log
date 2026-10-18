@@ -54,7 +54,7 @@ using ssize_t = SSIZE_T;
 using ssize_t = std::ptrdiff_t;
 #  endif
 #endif
-#include "internal/attributes.h"
+#include "ng-log/export.h"
 #include "ng-log/log_severity.h"
 #include "ng-log/types.h"
 

@@ -8,18 +8,14 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <sys/types.h>
 
-#include <algorithm>
 #include <array>
-#include <cerrno>
-#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
-#include <limits>
 #include <regex>
-#include <stdexcept>
 #include <string>
-#include <vector>
 
 #if defined(NGLOG_OS_WINDOWS) && defined(HAVE_GET_THREAD_DESCRIPTION)
 #  include <windows.h>
@@ -27,9 +23,11 @@
 #  include <pthread.h>
 #endif
 
+#include "config.h"
 #include "internal/emscripten_console.h"
 #include "internal/utf8.h"
 #include "ng-log/logging.h"
+#include "ng-log/platform.h"
 #include "testing_utilities.h"
 
 #ifdef NGLOG_OS_WINDOWS
@@ -50,6 +48,13 @@ void LogSystemResultOutsideNamespace(DWORD result) { LOG_SYSRESULT(result); }
 #  include <process.h>
 #  include <sys/stat.h>
 #  include <windows.h>
+
+#  include <algorithm>
+#  include <cerrno>
+#  include <cstdint>
+#  include <limits>
+#  include <stdexcept>
+#  include <vector>
 
 #  include "long_path_test.h"
 

@@ -7,6 +7,7 @@
 
 #include <cstdint>  // for uintptr_t
 
+#include "ng-log/platform.h"
 #include "utilities.h"  // for OS_* macros
 
 #if !defined(NGLOG_OS_WINDOWS)

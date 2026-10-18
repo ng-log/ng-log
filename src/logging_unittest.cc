@@ -6,21 +6,21 @@
 // Author: Ray Sidney
 
 #include <fcntl.h>
+#include <sys/types.h>
 
-#include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cwchar>
+#include <ctime>
 #include <fstream>
+#include <functional>
 #include <iomanip>
-#include <iostream>
 #include <iterator>
-#include <limits>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -28,7 +28,6 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -50,6 +49,10 @@
 #ifdef NGLOG_OS_WINDOWS
 #  include <windows.h>
 
+#  include <cwchar>
+#  include <limits>
+
+#  include "internal/utf8.h"
 #  include "long_path_test.h"
 #  include "windows/port.h"
 #endif
@@ -57,15 +60,16 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include "internal/lock_metrics.h"
+#ifdef NGLOG_ENABLE_LOCK_METRICS
+#  include "internal/lock_metrics.h"
+#endif
 #include "internal/path.h"
-#include "internal/utf8.h"
 #include "mock-log.h"
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "ng-log/platform.h"
 #include "ng-log/raw_logging.h"
-#include "stacktrace.h"
+#include "ng-log/types.h"
 #ifdef HAVE_SUBPROCESS
 #  include "subprocess.h"
 #endif

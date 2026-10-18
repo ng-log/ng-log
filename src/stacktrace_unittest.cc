@@ -12,11 +12,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
+#include <string>
 
 #include "config.h"
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
-#include "utilities.h"
+#include "ng-log/platform.h"
 
 #ifdef HAVE_EXECINFO_BACKTRACE_SYMBOLS
 #  include <execinfo.h>

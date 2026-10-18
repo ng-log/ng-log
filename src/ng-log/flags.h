@@ -28,9 +28,6 @@
 
 namespace nglog {
 
-class FlagBase;
-class FlagGroup;
-
 // A file permission mode whose string form uses octal notation, e.g., 0644.
 class FileMode {
  public:
@@ -310,8 +307,6 @@ using HelpMessageFunction = std::function<void(HelpWriter&)>;
 // constant initialized.
 using HelpCallback = void (*)(HelpWriter&);
 struct FlagInfo;
-template <typename T>
-class ScopedFlag;
 // Writes one flag's help entry. The callback replaces the generated entry and
 // is responsible for writing all required line breaks.
 using FlagHelpFunction = std::function<void(HelpWriter&, const FlagInfo&)>;
@@ -717,9 +712,6 @@ struct FlagInfo {
   // Empty means that the flag is listed without a named module.
   std::string module;
 };
-
-template <typename... Pairs>
-class ScopedFlags;
 
 // Describes one typed flag value to save and restore. The value is not
 // restored if the flag was destroyed or replaced in the meantime.

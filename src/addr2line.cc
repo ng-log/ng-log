@@ -23,9 +23,9 @@
 
 #  include "demangle.h"
 #  include "ng-log/flags.h"
+#  include "ng-log/platform.h"
 #  include "subprocess.h"
 #  include "symbolize.h"
-#  include "utilities.h"
 
 namespace nglog {
 inline namespace tools {

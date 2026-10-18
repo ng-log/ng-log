@@ -8,18 +8,23 @@
 #include <cctype>
 #include <cerrno>
 #include <cinttypes>
-#include <cstdint>
+#include <cstddef>
+#include <cstdint>  // IWYU pragma: keep
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <iomanip>
+#include <iterator>
 #include <limits>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <sstream>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -27,8 +32,10 @@
 #include "flag_display.h"
 #include "levenshtein.h"
 #include "ng-log/flags.h"
+#include "ng-log/platform.h"
 #include "process_flag_registry.h"
 #include "styled_output.h"
+#include "terminal_capabilities.h"
 #include "theme.h"
 
 #ifdef NGLOG_OS_WINDOWS

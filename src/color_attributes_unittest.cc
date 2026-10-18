@@ -10,15 +10,17 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <sstream>
 #include <string>
+#include <utility>  // IWYU pragma: keep
 #include <vector>
 
 #include "internal/style_recorder.h"
 #include "internal/theme.h"
+#include "ng-log/flags.h"
 #include "ng-log/internal/styled_value.h"
 #include "ng-log/logging.h"
+#include "ng-log/platform.h"
 #include "testing_utilities.h"
 
 using testing::AllOf;

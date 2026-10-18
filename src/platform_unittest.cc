@@ -6,11 +6,13 @@
 
 #include "ng-log/platform.h"
 
+#include <gtest/gtest.h>
+
 #include <cstdint>
 #include <cstdio>
+#include <string>
 #include <type_traits>
 
-#include "gtest/gtest.h"
 #include "internal/attributes.h"
 #include "utilities.h"
 

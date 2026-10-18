@@ -12,6 +12,7 @@
 #define NGLOG_SRC_MOCK_LOG_H_
 
 #include <gmock/gmock.h>
+#include <gtest/gtest.h>
 
 #include <cstddef>
 #include <string>

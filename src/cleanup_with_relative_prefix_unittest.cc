@@ -3,9 +3,14 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+#include <gtest/gtest.h>
+
 #include <chrono>
+#include <ostream>
+#include <string>
 
 #include "cleanup_test.h"
+#include "ng-log/logging.h"
 
 TEST(CleanImmediatelyWithRelativePrefix, logging) {
   using namespace std::chrono_literals;

@@ -10,10 +10,11 @@
 #include <algorithm>
 #include <atomic>
 #include <csignal>
-#include <cstddef>
+#include <cstddef>  // IWYU pragma: keep
+#include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <ctime>
-#include <cwchar>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -23,10 +24,10 @@
 #include "internal/styled_output.h"
 #include "internal/terminal_capabilities.h"
 #include "internal/theme.h"
-#include "internal/utf8.h"
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "ng-log/platform.h"
+#include "ng-log/types.h"
 #include "stacktrace.h"
 #include "symbolize.h"
 #include "utilities.h"
@@ -43,12 +44,13 @@
 #ifdef HAVE_UNISTD_H
 #  include <unistd.h>
 #endif
-#if defined(HAVE_SYS_SYSCALL_H) && defined(HAVE_SYS_TYPES_H)
+#ifdef HAVE_SYS_SYSCALL_H
 #  include <sys/syscall.h>
-#  include <sys/types.h>
 #endif
 #ifdef NGLOG_OS_WINDOWS
 #  include <windows.h>
+
+#  include "internal/utf8.h"
 #else  // !defined(NGLOG_OS_WINDOWS)
 #  ifdef HAVE_SCHED_YIELD
 #    include <sched.h>

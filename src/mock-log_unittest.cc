@@ -16,6 +16,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <mutex>
+#include <ostream>
 #include <thread>
 
 #include "testing_utilities.h"

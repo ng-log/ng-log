@@ -12,6 +12,7 @@
 
 #include "internal/flag_display.h"
 #include "ng-log/log_severity.h"
+#include "ng-log/platform.h"
 
 namespace {
 

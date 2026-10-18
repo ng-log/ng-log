@@ -2,10 +2,15 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+#include <gtest/gtest.h>
+
 #include <chrono>
+#include <ostream>
 #include <string>
 
 #include "cleanup_test.h"
+#include "ng-log/logging.h"
+#include "ng-log/platform.h"
 
 #ifdef NGLOG_OS_WINDOWS
 #  include <windows.h>

@@ -6,7 +6,6 @@
 #ifndef NGLOG_INTERNAL_PROCESS_FLAG_REGISTRY_H
 #define NGLOG_INTERNAL_PROCESS_FLAG_REGISTRY_H
 
-#include <cstdint>
 #include <string>
 
 namespace nglog {

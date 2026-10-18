@@ -16,7 +16,7 @@
 
 #  include "ng-log/export.h"
 
-struct stat;
+struct stat;  // IWYU pragma: keep
 
 namespace nglog {
 namespace internal {
