@@ -9,11 +9,17 @@ SPDX-License-Identifier: BSD-3-Clause
 
 ng-log defines a series of macros that simplify many common logging tasks. You
 can log messages by [severity level](#severity-levels), [control
-logging](flags.md) behavior from the command line, log based on
+logging](../flags.md) behavior from the command line, log based on
 [conditionals](#conditional-occasional-logging), abort the program when
 [expected conditions](#runtime-checks) are not met, introduce your [own logging
 levels](#verbose-logging), [customize the prefix](#format-customization)
 attached to log messages, and more.
+
+!!! info "Planned deprecation"
+    The [experimental logging functions](experimental.md) are planned to
+    supersede the macros in ng-log 0.10.0, after which the macros would be
+    deprecated and eventually removed. Nothing is deprecated yet and the plan
+    may change.
 
 
 ## Severity Levels
@@ -66,7 +72,7 @@ determined according to the following rules.
     filesystem APIs. Invalid UTF-8 paths are rejected. Directory enumeration
     uses Unicode Windows APIs so every entry name can be represented. MSVC users
     should also review the [compiler character set
-    guidance](windows.md#compiler-character-sets) when non-ASCII filenames
+    guidance](../windows.md#compiler-character-sets) when non-ASCII filenames
     appear in source files or narrow string literals. This support requires
     Windows 8 or Windows Server 2012 or later.
 
@@ -75,7 +81,7 @@ determined according to the following rules.
     Output containing non-ASCII characters is converted to UTF-16 and written
     with Unicode console APIs. Redirected output remains UTF-8. Debugger output
     uses the Unicode debugger API. MSVC users should also review the [compiler
-    character set guidance](windows.md#compiler-character-sets) when non-ASCII
+    character set guidance](../windows.md#compiler-character-sets) when non-ASCII
     text appears in source files or narrow string literals.
 
 **non-Windows**
@@ -286,7 +292,7 @@ The module name is matched against the source filename base, which is the part
 before the first period. A trailing `-inl` suffix is removed before matching.
 The wildcard patterns support both `*` (matches 0 or more characters) and `?`
 (matches any single character). Please also refer to [command line
-flags](flags.md) for more information.
+flags](../flags.md) for more information.
 
 There's also `#!cpp VLOG_IS_ON(n)` "verbose level" condition macro. This macro
 returns `#!cpp true` when the effective verbose level from `--v` or the

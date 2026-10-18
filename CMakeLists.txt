@@ -49,6 +49,8 @@ option (WITH_LOCK_METRICS
   "Enable internal lock contention metrics" OFF)
 option (PRINT_UNSYMBOLIZED_STACK_TRACES
   "Print file offsets in traces instead of symbolizing" OFF)
+option (WITH_EXPERIMENTAL
+  "Build the experimental logging functions if the compiler supports them" ON)
 option (WITH_PKGCONFIG "Enable pkg-config support" OFF)
 option (WITH_SYMBOLIZE "Enable symbolize module" ON)
 
@@ -525,6 +527,10 @@ if (HAVE_LIBBACKTRACE)
   list (APPEND _ng-log_FIND_MODULES FindLibbacktrace.cmake)
 endif (HAVE_LIBBACKTRACE)
 
+# The package configuration checks whether the compiler of the consumer
+# supports the experimental logging functions.
+list (APPEND _ng-log_FIND_MODULES CheckExperimentalLogging.cmake)
+
 foreach (_ng-log_FIND_MODULE IN LISTS _ng-log_FIND_MODULES)
   configure_file (cmake/${_ng-log_FIND_MODULE}
     ${ng-log_BINARY_DIR}/modules/${_ng-log_FIND_MODULE} COPYONLY)
@@ -552,6 +558,33 @@ set (NGLOG_PUBLIC_H
   src/ng-log/vlog_is_on.h
 )
 
+# Unless WITH_EXPERIMENTAL is disabled, the experimental logging functions are
+# built whenever the compiler supports them.
+include (cmake/CheckExperimentalLogging.cmake)
+
+if (WITH_EXPERIMENTAL)
+  nglog_check_experimental_logging (HAVE_EXPERIMENTAL_LOGGING
+    INCLUDES ${ng-log_SOURCE_DIR}/src)
+else (WITH_EXPERIMENTAL)
+  # Shadows the cached result of an earlier check.
+  set (HAVE_EXPERIMENTAL_LOGGING OFF)
+endif (WITH_EXPERIMENTAL)
+
+if (HAVE_EXPERIMENTAL_LOGGING)
+  set (NGLOG_EXPERIMENTAL_PUBLIC_H
+    src/ng-log/experimental/attributes.h
+    src/ng-log/experimental/ensure.h
+    src/ng-log/experimental/format.h
+    src/ng-log/experimental/log.h
+    src/ng-log/experimental/log_call.h
+    src/ng-log/experimental/logging.h
+    src/ng-log/experimental/requirements.h
+    src/ng-log/experimental/signal_safe_log.h
+    src/ng-log/experimental/sink.h
+  )
+  list (APPEND NGLOG_PUBLIC_H ${NGLOG_EXPERIMENTAL_PUBLIC_H})
+endif (HAVE_EXPERIMENTAL_LOGGING)
+
 set (NGLOG_SRCS
   ${NGLOG_PUBLIC_H}
   src/addr2line.cc
@@ -578,6 +611,7 @@ set (NGLOG_SRCS
   src/internal/path.h
   src/internal/process_flag_registry.cc
   src/internal/process_flag_registry.h
+  src/internal/raw_log.h
   src/internal/source_location.cc
   src/internal/source_location.h
   src/internal/style_recorder.cc
@@ -648,6 +682,38 @@ add_library (ng-log
 target_compile_features (ng-log PUBLIC cxx_std_14)
 
 add_library (ng-log::ng-log ALIAS ng-log)
+
+if (HAVE_EXPERIMENTAL_LOGGING)
+  add_library (ng-log_experimental_objects OBJECT
+    src/experimental/attributes.cc
+    src/experimental/context.h
+    src/experimental/ensure.cc
+    src/experimental/log.cc
+    src/experimental/signal_safe_log.cc
+    src/experimental/site.cc
+  )
+
+  target_compile_features (ng-log_experimental_objects PRIVATE cxx_std_20)
+
+  target_include_directories (ng-log_experimental_objects PRIVATE
+    $<TARGET_PROPERTY:ng-log_internal,INCLUDE_DIRECTORIES>)
+  # Compiles like the remainder of the library, including its exports.
+  target_compile_definitions (ng-log_experimental_objects PRIVATE
+    $<TARGET_PROPERTY:ng-log_internal,COMPILE_DEFINITIONS>)
+  target_compile_options (ng-log_experimental_objects PRIVATE
+    $<TARGET_PROPERTY:ng-log_internal,COMPILE_OPTIONS>)
+
+  target_sources (ng-log PRIVATE $<TARGET_OBJECTS:ng-log_experimental_objects>)
+
+  # Consumers of the experimental logging functions require C++20, unlike
+  # those of the remainder of the library. The package configuration defines
+  # the target of an installation, since it depends on the consumer compiler.
+  add_library (ng-log_experimental INTERFACE)
+  target_compile_features (ng-log_experimental INTERFACE cxx_std_20)
+  target_link_libraries (ng-log_experimental INTERFACE ng-log)
+
+  add_library (ng-log::experimental ALIAS ng-log_experimental)
+endif (HAVE_EXPERIMENTAL_LOGGING)
 
 set (ng-log_libraries_options_for_static_linking)
 set (ng-log_pkgconfig_compile_options)
@@ -733,9 +799,19 @@ target_compile_definitions (ng-log_internal PUBLIC
   $<TARGET_PROPERTY:ng-log,COMPILE_DEFINITIONS>
   PRIVATE ng_log_EXPORTS)
 
+# The build tree exposes the experimental headers even if the library lacks
+# the experimental logging functions, which the headers then reject.
+if (HAVE_EXPERIMENTAL_LOGGING)
+  set (_ng-log_EXPORT_CONTENT)
+else (HAVE_EXPERIMENTAL_LOGGING)
+  set (_ng-log_EXPORT_CONTENT
+    "#define NGLOG_INTERNAL_EXPERIMENTAL_LOGGING_UNAVAILABLE")
+endif (HAVE_EXPERIMENTAL_LOGGING)
+
 generate_export_header (ng-log
   BASE_NAME NGLOG
-  EXPORT_FILE_NAME ${ng-log_BINARY_DIR}/ng-log/export.h)
+  EXPORT_FILE_NAME ${ng-log_BINARY_DIR}/ng-log/export.h
+  CUSTOM_CONTENT_FROM_VARIABLE _ng-log_EXPORT_CONTENT)
 
 string (STRIP "${ng-log_libraries_options_for_static_linking}" ng-log_libraries_options_for_static_linking)
 
@@ -800,8 +876,8 @@ if (BUILD_TESTING AND GTest_FOUND)
   # Configures and builds a target of a separate project against the ng-log
   # build tree. The test optionally runs a command of that project afterwards.
   function (nglog_add_build_test _NAME)
-    cmake_parse_arguments (PARSE_ARGV 1 _ARGS "" "SOURCE_DIR;TARGET;CONFIG"
-      "TEST_COMMAND")
+    cmake_parse_arguments (PARSE_ARGV 1 _ARGS ""
+      "SOURCE_DIR;TARGET;CONFIG;EXPECT_FAILURE" "TEST_COMMAND;OPTIONS")
 
     if (DEFINED _ARGS_UNPARSED_ARGUMENTS OR NOT DEFINED _ARGS_SOURCE_DIR OR
         NOT DEFINED _ARGS_TARGET)
@@ -814,7 +890,7 @@ if (BUILD_TESTING AND GTest_FOUND)
       set (_ARGS_CONFIG $<CONFIG>)
     endif (NOT DEFINED _ARGS_CONFIG)
 
-    set (_OPTIONS)
+    set (_OPTIONS ${_ARGS_OPTIONS})
 
     # Cross compiling needs the same toolchain in the nested build.
     if (DEFINED CMAKE_TOOLCHAIN_FILE)
@@ -835,14 +911,27 @@ if (BUILD_TESTING AND GTest_FOUND)
       set (_TEST_COMMAND --test-command ${_ARGS_TEST_COMMAND})
     endif (DEFINED _ARGS_TEST_COMMAND)
 
-    add_test (NAME ${_NAME} COMMAND ${CMAKE_CTEST_COMMAND}
+    # Empty values are omitted, since the driver of builds that must fail
+    # passes the command on as a list, which drops empty elements.
+    set (_GENERATOR_OPTIONS)
+
+    if (CMAKE_GENERATOR_PLATFORM)
+      list (APPEND _GENERATOR_OPTIONS
+        --build-generator-platform ${CMAKE_GENERATOR_PLATFORM})
+    endif (CMAKE_GENERATOR_PLATFORM)
+
+    if (CMAKE_GENERATOR_TOOLSET)
+      list (APPEND _GENERATOR_OPTIONS
+        --build-generator-toolset ${CMAKE_GENERATOR_TOOLSET})
+    endif (CMAKE_GENERATOR_TOOLSET)
+
+    set (_COMMAND ${CMAKE_CTEST_COMMAND}
       --build-config ${_ARGS_CONFIG}
       --build-and-test
       "${ng-log_SOURCE_DIR}/${_ARGS_SOURCE_DIR}"
       "${ng-log_BINARY_DIR}/Tests/${_NAME}"
       --build-generator ${CMAKE_GENERATOR}
-      --build-generator-platform "${CMAKE_GENERATOR_PLATFORM}"
-      --build-generator-toolset "${CMAKE_GENERATOR_TOOLSET}"
+      ${_GENERATOR_OPTIONS}
       --build-makeprogram ${CMAKE_MAKE_PROGRAM}
       --build-target ${_ARGS_TARGET}
       --build-options
@@ -853,6 +942,18 @@ if (BUILD_TESTING AND GTest_FOUND)
       ${_OPTIONS}
       ${_TEST_COMMAND}
     )
+
+    # A build that must fail is required to fail with matching output, since
+    # CTest ignores the exit status of a test it matches against an
+    # expression.
+    if (DEFINED _ARGS_EXPECT_FAILURE)
+      add_test (NAME ${_NAME} COMMAND ${CMAKE_COMMAND}
+        "-DEXPECTED=${_ARGS_EXPECT_FAILURE}"
+        -P "${ng-log_SOURCE_DIR}/cmake/RunFailingBuildTest.cmake" --
+        ${_COMMAND})
+    else (DEFINED _ARGS_EXPECT_FAILURE)
+      add_test (NAME ${_NAME} COMMAND ${_COMMAND})
+    endif (DEFINED _ARGS_EXPECT_FAILURE)
   endfunction (nglog_add_build_test)
 
   add_library (ng-log_testing_utilities OBJECT
@@ -1095,6 +1196,87 @@ logging libraries\"\n#endif\n")
     TEST_PREFIX logtostdout.
     DISCOVERY_TIMEOUT 30
   )
+
+  if (HAVE_EXPERIMENTAL_LOGGING)
+    nglog_add_header_test (experimental_headers_unittest
+      ${NGLOG_EXPERIMENTAL_PUBLIC_H})
+    target_compile_features (experimental_headers_unittest PRIVATE
+      cxx_std_20)
+
+    foreach (_ng-log_TEST IN ITEMS attributes ensure log signal_safe_log)
+      set (_ng-log_TARGET experimental_${_ng-log_TEST}_unittest)
+
+      add_executable (${_ng-log_TARGET}
+        src/experimental/${_ng-log_TEST}_unittest.cc
+        src/experimental/testing.cc
+        src/experimental/testing.h
+      )
+
+      target_compile_features (${_ng-log_TARGET} PRIVATE cxx_std_20)
+      target_link_libraries (${_ng-log_TARGET} PRIVATE
+        $<TARGET_OBJECTS:ng-log_experimental_objects> ng-log_test)
+
+      gtest_discover_tests (${_ng-log_TARGET}
+        TEST_PREFIX experimental_${_ng-log_TEST}.
+        DISCOVERY_TIMEOUT 30
+      )
+    endforeach (_ng-log_TEST)
+
+    # C++26 rejects comparing arrays, which the comparisons of That() must
+    # therefore avoid, and provides extended floating-point types, which
+    # RawLog() must reject.
+    if (cxx_std_26 IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+      foreach (_ng-log_TEST IN ITEMS ensure signal_safe_log)
+        set (_ng-log_TARGET experimental_${_ng-log_TEST}_cxx26_unittest)
+
+        add_executable (${_ng-log_TARGET}
+          src/experimental/${_ng-log_TEST}_unittest.cc
+          src/experimental/testing.cc
+          src/experimental/testing.h
+        )
+
+        target_compile_features (${_ng-log_TARGET} PRIVATE cxx_std_26)
+        target_link_libraries (${_ng-log_TARGET} PRIVATE
+          $<TARGET_OBJECTS:ng-log_experimental_objects> ng-log_test)
+
+        gtest_discover_tests (${_ng-log_TARGET}
+          TEST_PREFIX experimental_${_ng-log_TEST}_cxx26.
+          DISCOVERY_TIMEOUT 30
+        )
+      endforeach (_ng-log_TEST)
+    endif (cxx_std_26 IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+
+    foreach (_ng-log_STRIP_LOG IN ITEMS 0 2 10)
+      set (_ng-log_TARGET experimental_striplog${_ng-log_STRIP_LOG}_unittest)
+
+      add_executable (${_ng-log_TARGET}
+        src/experimental/striplog_unittest.cc
+      )
+
+      target_compile_features (${_ng-log_TARGET} PRIVATE cxx_std_20)
+
+      target_compile_definitions (${_ng-log_TARGET} PRIVATE
+        NGLOG_STRIP_LOG=${_ng-log_STRIP_LOG})
+
+      if (_ng-log_STRIP_LOG EQUAL 10)
+        # Like the strip test of the macros, this also covers release mode and
+        # a conflicting ERROR macro.
+        target_compile_definitions (${_ng-log_TARGET} PRIVATE
+          ERROR=0
+          NDEBUG
+          NGLOG_NO_ABBREVIATED_SEVERITIES
+        )
+      endif (_ng-log_STRIP_LOG EQUAL 10)
+
+      target_link_libraries (${_ng-log_TARGET} PRIVATE
+        $<TARGET_OBJECTS:ng-log_experimental_objects> ng-log_test)
+
+      gtest_discover_tests (${_ng-log_TARGET}
+        TEST_PREFIX experimental_striplog${_ng-log_STRIP_LOG}.
+        DISCOVERY_TIMEOUT 30
+      )
+    endforeach (_ng-log_STRIP_LOG)
+  endif (HAVE_EXPERIMENTAL_LOGGING)
 
   add_executable (stl_logging_unittest
     src/stl_logging_unittest.cc
@@ -1366,6 +1548,108 @@ logging libraries\"\n#endif\n")
     TARGET ng-log_package_config
   )
 
+  if (HAVE_EXPERIMENTAL_LOGGING)
+    set (_ng-log_EXPECT_EXPERIMENTAL TRUE)
+  else (HAVE_EXPERIMENTAL_LOGGING)
+    set (_ng-log_EXPECT_EXPERIMENTAL FALSE)
+  endif (HAVE_EXPERIMENTAL_LOGGING)
+
+  # Requiring the experimental component fails with a reason unless the
+  # library was built with the experimental logging functions.
+  if (HAVE_EXPERIMENTAL_LOGGING)
+    nglog_add_build_test (cmake_package_config_experimental
+      SOURCE_DIR src/package_config_unittest/components
+      TARGET ng-log_package_components
+      OPTIONS
+        -DNGLOG_REQUIRED_COMPONENTS=experimental
+        -DNGLOG_EXPECT_EXPERIMENTAL=TRUE
+    )
+
+    # C++98 orders after C++20 numerically, which must not keep the check of
+    # the consumer compiler from selecting C++20.
+    nglog_add_build_test (cmake_package_config_experimental_cxx98
+      SOURCE_DIR src/package_config_unittest/components
+      TARGET ng-log_package_components
+      OPTIONS
+        -DCMAKE_CXX_STANDARD=98
+        -DNGLOG_OPTIONAL_COMPONENTS=experimental
+        -DNGLOG_EXPECT_EXPERIMENTAL=TRUE
+    )
+
+    # A consumer whose compiler lacks the requirements cannot use the
+    # experimental component even though the library provides it. Marking the
+    # functions unavailable to the compiler of the consumer makes its check
+    # fail like such a compiler does.
+    # The flags are added to those of the environment, such as coverage flags,
+    # instead of replacing them.
+    set (_ng-log_UNSUPPORTED_COMPILER
+      -DCMAKE_CXX_FLAGS_INIT=-DNGLOG_INTERNAL_EXPERIMENTAL_LOGGING_UNAVAILABLE)
+
+    nglog_add_build_test (cmake_package_config_experimental_unsupported
+      SOURCE_DIR src/package_config_unittest/components
+      TARGET ng-log_package_components
+      OPTIONS
+        -DNGLOG_REQUIRED_COMPONENTS=experimental
+        ${_ng-log_UNSUPPORTED_COMPILER}
+      EXPECT_FAILURE
+        "required component experimental.*C\\+\\+ compiler.*does not support"
+    )
+
+    nglog_add_build_test (cmake_package_config_optional_experimental_unsupported
+      SOURCE_DIR src/package_config_unittest/components
+      TARGET ng-log_package_components
+      OPTIONS
+        -DNGLOG_OPTIONAL_COMPONENTS=experimental
+        -DNGLOG_EXPECT_EXPERIMENTAL=FALSE
+        ${_ng-log_UNSUPPORTED_COMPILER}
+    )
+  else (HAVE_EXPERIMENTAL_LOGGING)
+    if (WITH_EXPERIMENTAL)
+      set (_ng-log_EXPERIMENTAL_REASON "does not support")
+    else (WITH_EXPERIMENTAL)
+      set (_ng-log_EXPERIMENTAL_REASON "WITH_EXPERIMENTAL=OFF")
+    endif (WITH_EXPERIMENTAL)
+
+    nglog_add_build_test (cmake_package_config_experimental
+      SOURCE_DIR src/package_config_unittest/components
+      TARGET ng-log_package_components
+      OPTIONS -DNGLOG_REQUIRED_COMPONENTS=experimental
+      EXPECT_FAILURE
+        "required component experimental.*${_ng-log_EXPERIMENTAL_REASON}"
+    )
+
+    # The build tree exposes the experimental headers, which must then reject
+    # their use instead of failing to link.
+    nglog_add_build_test (experimental_unavailable
+      SOURCE_DIR src/experimental_requirements_unittest
+      TARGET log_requires_header
+      EXPECT_FAILURE
+        "ng-log was built without the experimental logging functions"
+    )
+  endif (HAVE_EXPERIMENTAL_LOGGING)
+
+  nglog_add_build_test (cmake_package_config_optional_experimental
+    SOURCE_DIR src/package_config_unittest/components
+    TARGET ng-log_package_components
+    OPTIONS
+      -DNGLOG_OPTIONAL_COMPONENTS=experimental
+      -DNGLOG_EXPECT_EXPERIMENTAL=${_ng-log_EXPECT_EXPERIMENTAL}
+  )
+
+  # Without components, the experimental component is reported as well.
+  nglog_add_build_test (cmake_package_config_no_components
+    SOURCE_DIR src/package_config_unittest/components
+    TARGET ng-log_package_components
+    OPTIONS -DNGLOG_EXPECT_EXPERIMENTAL=${_ng-log_EXPECT_EXPERIMENTAL}
+  )
+
+  nglog_add_build_test (cmake_package_config_unknown_component
+    SOURCE_DIR src/package_config_unittest/components
+    TARGET ng-log_package_components
+    OPTIONS -DNGLOG_REQUIRED_COMPONENTS=unknown
+    EXPECT_FAILURE "ng-log provides no component unknown"
+  )
+
   add_executable (cleanup_immediately_unittest
     src/cleanup_immediately_unittest.cc)
 
@@ -1547,6 +1831,115 @@ logging libraries\"\n#endif\n")
     set_tests_properties (log_severity_qualified PROPERTIES DISABLED ON)
   endif (CMAKE_CXX_COMPILER_ID STREQUAL GNU)
 
+  if (HAVE_EXPERIMENTAL_LOGGING)
+    # Each case of src/experimental_requirements_unittest at <group>/<name>.cc
+    # must fail to compile with a diagnostic that matches its expression and
+    # names what is wrong. The headers reject unsupported language and library
+    # levels by naming the missing requirement, misuse of the functions by
+    # naming the rule.
+    set (_ng-log_REJECTED_CASES
+      requires/cxx20
+      requires/format
+      requires/source_location
+      signal_safe/locale
+      signal_safe/alternate
+      signal_safe/dynamic
+      signal_safe/precision
+      signal_safe/long_double_fixed
+      signal_safe/fill_brace
+      signal_safe/fill_non_ascii
+      signal_safe/missing_precision
+      signal_safe/leading_zero_width
+      signal_safe/width
+      signal_safe/type
+      compare/no_comparison
+      compare/comma
+      compare/comma_message
+      compare/nodiscard
+      that/no_comparison
+      that/cstring_ordering
+      that/cstring_range
+      that/wide_cstring
+      that/ignore_case_non_cstring
+      that/index_non_integer
+      that/bound_non_integer
+      that/byte_cstring
+      that/nodiscard
+      rate_limit/every_floating
+      rate_limit/every_bool
+      rate_limit/first_floating
+      rate_limit/first_duration
+      log/requires_header
+      log/two_stage_nodiscard
+      log/repeated_severity
+      log/conflicting_destinations
+      log/skip_log_file_alone
+      log/misdeclared_hook
+      log/severity_out_of_range
+      ensure/nodiscard
+      ensure/constexpr
+      ensure/constexpr_comparison
+      ensure/constexpr_that
+      ensure/constexpr_not_null
+    )
+    set (_ng-log_REJECTED_REASONS
+      "requires C\\+\\+20"
+      "requires std::format with compile-time checked format strings \\(__cpp_lib_format >= 202106L\\)"
+      "requires std::source_location \\(__cpp_lib_source_location >= 201907L\\)"
+      LocaleSpecificFormattingIsNotSignalSafe
+      SignalSafeFloatAlternateFormIsNotSupported
+      SignalSafeFloatDynamicFieldIsNotSupported
+      SignalSafeFloatPrecisionExceedsLimit
+      SignalSafeLongDoubleFixedNotationIsNotSupported
+      SignalSafeFloatFillIsInvalid
+      SignalSafeFloatFillIsNotAscii
+      SignalSafeFloatPrecisionIsMissing
+      SignalSafeFloatWidthIsInvalid
+      SignalSafeFloatWidthExceedsLimit
+      SignalSafeFloatTypeIsNotSupported
+      "NGLOG_COMPARE\\(\\) expects a comparison such as a == b"
+      "operator ?,"
+      "operator ?,"
+      "Compare the operand and pass the comparison to Ensure"
+      "That\\(\\) expects a comparison such as That\\(a\\) == b"
+      "That\\(\\) cannot order C strings"
+      "That\\(\\) cannot order C strings"
+      "That\\(\\) compares C strings of char only"
+      "Cstring"
+      "IntegerOperand"
+      "IntegerOperand"
+      "That\\(\\) compares C strings of char only"
+      "Compare the operand and pass the comparison to Ensure"
+      "Every expects a count of occurrences"
+      "Every expects a count of occurrences"
+      "First expects a count of occurrences"
+      "First expects a count of occurrences"
+      "requires including ng-log/experimental/log.h"
+      "call the logger with the format string and arguments"
+      "(satisfaction of |')[^ ]*SingleAttributesAreUnique<"
+      "(satisfaction of |')[^ ]*CategoriesAreDistinct<"
+      "SkipLogFile requires a ToSink destination"
+      "Admit\\(\\) of an attribute must be const"
+      SeverityIsOutOfRange
+      "Pass the comparison to Ensure"
+      EnsureFailedDuringConstantEvaluation
+      EnsureFailedDuringConstantEvaluation
+      EnsureFailedDuringConstantEvaluation
+      EnsureFailedDuringConstantEvaluation
+    )
+
+    foreach (_ng-log_CASE _ng-log_REASON IN ZIP_LISTS _ng-log_REJECTED_CASES
+        _ng-log_REJECTED_REASONS)
+      string (REPLACE "/" "_" _ng-log_TARGET ${_ng-log_CASE})
+      string (REPLACE "/" "." _ng-log_TEST ${_ng-log_CASE})
+      nglog_add_build_test (experimental_${_ng-log_TEST}
+        SOURCE_DIR src/experimental_requirements_unittest
+        TARGET ${_ng-log_TARGET}
+        EXPECT_FAILURE "${_ng-log_REASON}"
+      )
+    endforeach (_ng-log_CASE _ng-log_REASON)
+  endif (HAVE_EXPERIMENTAL_LOGGING)
+
   nglog_add_build_test (includes_logging
     SOURCE_DIR src/includes_unittest
     TARGET ng-log_includes_logging
@@ -1638,6 +2031,20 @@ if (WITH_PKGCONFIG)
 endif (WITH_PKGCONFIG)
 
 set (ng-log_CMake_VERSION ${CMAKE_MINIMUM_REQUIRED_VERSION})
+
+# The package config reports why the experimental component is missing.
+if (HAVE_EXPERIMENTAL_LOGGING)
+  set (_ng-log_EXPERIMENTAL_FOUND TRUE)
+  set (_ng-log_EXPERIMENTAL_MISSING_REASON)
+elseif (WITH_EXPERIMENTAL)
+  set (_ng-log_EXPERIMENTAL_FOUND FALSE)
+  set (_ng-log_EXPERIMENTAL_MISSING_REASON "the compiler used to build ng-log \
+does not support the experimental logging functions")
+else (HAVE_EXPERIMENTAL_LOGGING)
+  set (_ng-log_EXPERIMENTAL_FOUND FALSE)
+  set (_ng-log_EXPERIMENTAL_MISSING_REASON "ng-log was built with \
+WITH_EXPERIMENTAL=OFF")
+endif (HAVE_EXPERIMENTAL_LOGGING)
 
 configure_package_config_file (cmake/ng-log-config.cmake.in
   ${ng-log_BINARY_DIR}/ng-log-config.cmake

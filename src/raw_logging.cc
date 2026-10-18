@@ -26,6 +26,7 @@
 #elif defined(HAVE_SYSCALL_H)
 #  include <syscall.h>  // for SYS_write
 #endif
+#include "internal/raw_log.h"
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "ng-log/platform.h"
@@ -75,22 +76,53 @@ static bool DoRawLog(char** buf, size_t* size, const char* format, ...) {
 }
 
 // Helper for RawLog below.
-inline static bool VADoRawLog(char** buf, size_t* size, const char* format,
-                              va_list ap) {
-#if defined(__GNUC__)
-#  pragma GCC diagnostic push
-#  pragma GCC diagnostic ignored "-Wformat-nonliteral"
-#endif
-  int n = std::vsnprintf(*buf, *size, format, ap);
-#if defined(__GNUC__)
-#  pragma GCC diagnostic pop
-#endif
+static bool FormatRawMessage(char** buf, size_t* size,
+                             internal::RawMessageFormatter format,
+                             void* context) {
+  int n = format(context, *buf, *size);
   // The terminating null character must fit as well.
   if (n < 0 || static_cast<size_t>(n) >= *size) return false;
   *size -= static_cast<size_t>(n);
   *buf += n;
   return true;
 }
+
+namespace {
+
+//! Arguments of a printf-style raw message.
+struct PrintfMessage {
+  const char* format;
+  va_list* args;
+};
+
+int FormatPrintfMessage(void* context, char* buffer, std::size_t size) {
+  auto* const message = static_cast<PrintfMessage*>(context);
+#if defined(__GNUC__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wformat-nonliteral"
+#endif
+  return std::vsnprintf(buffer, size, message->format, *message->args);
+#if defined(__GNUC__)
+#  pragma GCC diagnostic pop
+#endif
+}
+
+// Ends a variable argument list on scope exit, also if a failure function
+// throws after a fatal message. va_start() cannot be called here, since it must
+// be invoked by the variadic function itself.
+class ScopedVaList {
+ public:
+  explicit ScopedVaList(va_list& args) noexcept : args_{&args} {}
+  ~ScopedVaList() { va_end(*args_); }
+
+  ScopedVaList(const ScopedVaList&) = delete;
+  ScopedVaList& operator=(const ScopedVaList&) = delete;
+
+ private:
+  va_list* args_;
+};
+
+}  // namespace
 
 static const int kLogBufSize = 3000;
 static std::once_flag crashed;
@@ -154,6 +186,17 @@ constexpr std::size_t kThreadIdBufferSize = 24;
 NGLOG_ATTRIBUTE_FORMAT(printf, 4, 5)
 void RawLog(LogSeverity severity, const char* file, int line,
             const char* format, ...) {
+  va_list ap;
+  va_start(ap, format);
+  const ScopedVaList scoped_ap{ap};
+  PrintfMessage message{format, &ap};
+  internal::RawLog(severity, file, line, &FormatPrintfMessage, &message);
+}
+
+namespace internal {
+
+void RawLog(LogSeverity severity, const char* file, int line,
+            RawMessageFormatter format, void* context) {
   if (!(nglog::GetFlag(FLAGS_logtostdout) ||
         nglog::GetFlag(FLAGS_logtostderr) ||
         severity >= nglog::GetFlag(FLAGS_stderrthreshold) ||
@@ -181,10 +224,7 @@ void RawLog(LogSeverity severity, const char* file, int line,
   // Reserves room for the newline that ends the message.
   constexpr size_t kNewlineSize = 1;
   size_t message_size = size - kNewlineSize;
-  va_list ap;
-  va_start(ap, format);
-  const bool no_chop = VADoRawLog(&buf, &message_size, format, ap);
-  va_end(ap);
+  const bool no_chop = FormatRawMessage(&buf, &message_size, format, context);
   size = message_size + kNewlineSize;
   if (no_chop) {
     DoRawLog(&buf, &size, "\n");
@@ -218,5 +258,7 @@ void RawLog(LogSeverity severity, const char* file, int line,
     LogMessage::Fail();  // abort()
   }
 }
+
+}  // namespace internal
 
 }  // namespace nglog

@@ -294,6 +294,7 @@ class NGLOG_EXPORT LogStreamBuf : public std::streambuf {
 
 namespace internal {
 struct NGLOG_NO_EXPORT LogMessageData;
+struct LogMessageAccess;
 class StyleRecorder;
 }  // namespace internal
 
@@ -496,6 +497,7 @@ class NGLOG_EXPORT LogMessage {
   LogMessageTime time_;
 
   friend class LogDestination;
+  friend struct internal::LogMessageAccess;
 };
 
 inline std::ostream& operator<<(std::ostream& os,

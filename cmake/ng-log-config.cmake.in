@@ -15,13 +15,17 @@ endif (CMAKE_VERSION VERSION_LESS @ng-log_CMake_VERSION@)
 @PACKAGE_INIT@
 
 foreach (_ng-log_COMPONENT IN LISTS ng-log_FIND_COMPONENTS)
-  if (ng-log_FIND_REQUIRED_${_ng-log_COMPONENT})
-    set (ng-log_FOUND FALSE)
-    set (ng-log_NOT_FOUND_MESSAGE "ng-log provides no components but the \
-required component ${_ng-log_COMPONENT} was requested.")
-    unset (_ng-log_COMPONENT)
-    return ()
-  endif (ng-log_FIND_REQUIRED_${_ng-log_COMPONENT})
+  if (NOT _ng-log_COMPONENT STREQUAL experimental)
+    set (ng-log_${_ng-log_COMPONENT}_FOUND FALSE)
+
+    if (ng-log_FIND_REQUIRED_${_ng-log_COMPONENT})
+      set (ng-log_FOUND FALSE)
+      set (ng-log_NOT_FOUND_MESSAGE "ng-log provides no component \
+${_ng-log_COMPONENT} but it was requested as required.")
+      unset (_ng-log_COMPONENT)
+      return ()
+    endif (ng-log_FIND_REQUIRED_${_ng-log_COMPONENT})
+  endif (NOT _ng-log_COMPONENT STREQUAL experimental)
 endforeach (_ng-log_COMPONENT)
 
 unset (_ng-log_COMPONENT)
@@ -42,3 +46,54 @@ block (SCOPE_FOR VARIABLES PROPAGATE ng-log_FOUND ng-log_NOT_FOUND_MESSAGE)
 endblock ()
 
 include (${CMAKE_CURRENT_LIST_DIR}/ng-log-targets.cmake)
+
+# The experimental component provides ng-log::experimental if the library was
+# built with the experimental logging functions and the compiler of the
+# consumer supports them as well.
+set (ng-log_experimental_FOUND @_ng-log_EXPERIMENTAL_FOUND@)
+set (_ng-log_EXPERIMENTAL_MISSING_REASON
+  "@_ng-log_EXPERIMENTAL_MISSING_REASON@")
+
+if (ng-log_experimental_FOUND AND NOT TARGET ng-log::experimental)
+  if (NOT CMAKE_CXX_COMPILER_LOADED)
+    set (ng-log_experimental_FOUND FALSE)
+    set (_ng-log_EXPERIMENTAL_MISSING_REASON "C++ is not enabled")
+  else (NOT CMAKE_CXX_COMPILER_LOADED)
+    include (${CMAKE_CURRENT_LIST_DIR}/modules/CheckExperimentalLogging.cmake)
+
+    get_target_property (_ng-log_INCLUDE_DIRECTORIES ng-log::ng-log
+      INTERFACE_INCLUDE_DIRECTORIES)
+
+    if (ng-log_FIND_QUIETLY)
+      set (_ng-log_QUIET QUIET)
+    else (ng-log_FIND_QUIETLY)
+      set (_ng-log_QUIET)
+    endif (ng-log_FIND_QUIETLY)
+
+    nglog_check_experimental_logging (_ng-log_EXPERIMENTAL_LOGGING_COMPILES
+      ${_ng-log_QUIET} INCLUDES ${_ng-log_INCLUDE_DIRECTORIES})
+
+    unset (_ng-log_INCLUDE_DIRECTORIES)
+    unset (_ng-log_QUIET)
+
+    if (_ng-log_EXPERIMENTAL_LOGGING_COMPILES)
+      add_library (ng-log::experimental INTERFACE IMPORTED)
+      set_target_properties (ng-log::experimental PROPERTIES
+        INTERFACE_COMPILE_FEATURES cxx_std_20
+        INTERFACE_LINK_LIBRARIES ng-log::ng-log)
+    else (_ng-log_EXPERIMENTAL_LOGGING_COMPILES)
+      set (ng-log_experimental_FOUND FALSE)
+      set (_ng-log_EXPERIMENTAL_MISSING_REASON "the C++ compiler \
+${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} does not support the \
+experimental logging functions")
+    endif (_ng-log_EXPERIMENTAL_LOGGING_COMPILES)
+  endif (NOT CMAKE_CXX_COMPILER_LOADED)
+endif (ng-log_experimental_FOUND AND NOT TARGET ng-log::experimental)
+
+if (NOT ng-log_experimental_FOUND AND ng-log_FIND_REQUIRED_experimental)
+  set (ng-log_FOUND FALSE)
+  set (ng-log_NOT_FOUND_MESSAGE "The required component experimental is \
+unavailable since ${_ng-log_EXPERIMENTAL_MISSING_REASON}.")
+endif (NOT ng-log_experimental_FOUND AND ng-log_FIND_REQUIRED_experimental)
+
+unset (_ng-log_EXPERIMENTAL_MISSING_REASON)

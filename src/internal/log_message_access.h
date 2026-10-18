@@ -13,6 +13,18 @@
 namespace nglog {
 namespace internal {
 
+//! Grants library internals access to message state the public API hides.
+struct LogMessageAccess {
+  /**
+   * Sets the tag that platform loggers, such as the Android log, attribute the
+   * message to. A null tag selects the short name of the program.
+   *
+   * The tag must outlive the message.
+   */
+  NGLOG_NO_EXPORT static void SetTag(LogMessage& message,
+                                     const char* tag) noexcept;
+};
+
 //! Appends ": strerror(errno) [errno]" for the errno preserved by the message.
 NGLOG_NO_EXPORT void AppendErrnoDescription(LogMessage& message);
 

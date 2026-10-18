@@ -219,6 +219,7 @@ struct LogMessageData {
   size_t num_chars_to_syslog_;  // # of chars of msg to send to syslog
   const char* basename_;        // basename of file that called LOG
   const char* fullname_;        // fullname of file that called LOG
+  const char* tag_;             // tag for platform loggers, or nullptr
   bool has_been_flushed_;       // false => data has not been flushed
   bool first_fatal_;            // true => this was first fatal msg
   std::thread::id thread_id_;
@@ -246,6 +247,15 @@ struct LogMessageData {
   LogMessageData& operator=(const LogMessageData&) = delete;
 };
 }  // namespace internal
+
+namespace {
+
+// Returns the tag that platform loggers attribute the message to.
+const char* MessageTag(const internal::LogMessageData& data) noexcept {
+  return data.tag_ != nullptr ? data.tag_ : tools::ProgramInvocationShortName();
+}
+
+}  // namespace
 
 // A mutex that allows only one thread to log at a time, to keep things from
 // getting jumbled.  Some other very uncommon logging operations (like
@@ -1271,7 +1281,7 @@ inline void LogDestination::MaybeLogToStderr(
   if ((data.severity_ >= nglog::GetFlag(FLAGS_stderrthreshold)) ||
       nglog::GetFlag(FLAGS_alsologtostderr)) {
     ColoredWriteToStderrWithFields(data);
-    AlsoErrorWrite(data.severity_, tools::ProgramInvocationShortName(),
+    AlsoErrorWrite(data.severity_, MessageTag(data),
                    data.message_text_ + data.num_prefix_chars_,
                    data.num_chars_to_log_ - data.num_prefix_chars_);
   }
@@ -2142,6 +2152,7 @@ void LogMessage::Init(const char* file, int line, LogSeverity severity,
   data_->stream_.SetStyleRecorder(&data_->styles_);
   data_->basename_ = const_basename(file);
   data_->fullname_ = file;
+  data_->tag_ = nullptr;
   data_->has_been_flushed_ = false;
   data_->thread_id_ = std::this_thread::get_id();
 
@@ -2196,6 +2207,7 @@ LogMessage::~LogMessage() noexcept(false) {
   Flush();
   const bool fail = data_->severity_ == NGLOG_FATAL &&
                     exit_on_dfatal.load(std::memory_order_relaxed);
+  const char* const tag = MessageTag(*data_);
   if (data_ == static_cast<void*>(&thread_msg_data)) {
     data_->~LogMessageData();
     thread_data_available = true;
@@ -2213,8 +2225,7 @@ LogMessage::~LogMessage() noexcept(false) {
       // Ignore errors.
     }
 #endif
-    AlsoErrorWrite(NGLOG_FATAL, tools::ProgramInvocationShortName(), message,
-                   std::strlen(message));
+    AlsoErrorWrite(NGLOG_FATAL, tag, message, std::strlen(message));
 #if defined(__cpp_lib_uncaught_exceptions) && \
     (__cpp_lib_uncaught_exceptions >= 201411L)
     if (std::uncaught_exceptions() == 0)
@@ -2618,6 +2629,10 @@ void AppendErrnoDescription(LogMessage& message) {
                    << StrError(message.preserved_errno()) << PopStyle()
                    << PushStyle(theme.Get(Role::kErrnoCode)) << " ["
                    << message.preserved_errno() << "]" << PopStyle();
+}
+
+void LogMessageAccess::SetTag(LogMessage& message, const char* tag) noexcept {
+  message.data_->tag_ = tag;
 }
 
 }  // namespace internal

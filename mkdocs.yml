@@ -26,7 +26,11 @@ markdown_extensions:
       base_path:
         - '.'
       check_paths: true
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - tables
   - toc:
       permalink: true
@@ -116,7 +120,9 @@ nav:
       - Installation using Package Managers: packages.md
       - Migration from glog: migration-from-glog.md
   - User Guide:
-      - Logging: logging.md
+      - Logging:
+          - logging/index.md
+          - Experimental API: logging/experimental.md
       - Adjusting Output: flags.md
       - Custom Sinks: sinks.md
       - Failure Handler: failures.md

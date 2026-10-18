@@ -378,7 +378,7 @@ The following flags are most commonly used:
 :   Show `#!cpp VLOG(m)` messages when `m` is at most this value. The applicable
     `#!bash --vmodule` entry overrides this value. Refer
     to [verbose
-    logging](logging.md#verbose-logging) for more detail.
+    logging](logging/index.md#verbose-logging) for more detail.
 
 `vmodule` (`string[,string,...]`, default="")
 
@@ -388,7 +388,7 @@ The following flags are most commonly used:
     matched against the source filename base. The base is the part before the
     first period, with a trailing `-inl` suffix removed. `<log level>`
     overrides any value given by `--v`. See also [verbose
-    logging](logging.md#verbose-logging) for more details.
+    logging](logging/index.md#verbose-logging) for more details.
 
 Additional flags are defined in
 [flags.cc](https://github.com/ng-log/ng-log/blob/master/src/flags.cc). Please see

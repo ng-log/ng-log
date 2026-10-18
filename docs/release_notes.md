@@ -16,6 +16,10 @@ SPDX-License-Identifier: BSD-3-Clause
 - [Colorize](flags.md#colorizing-output) log output and crash stack traces on
   a terminal by default, with hyperlinked `file:line` references
 - Remove the glog compatibility layer
+- Add opt-in [experimental logging functions](logging/experimental.md) based on
+  `std::format` and `std::source_location` with output identical to the
+  macros. User-extensible attributes select severity, Android log tag,
+  verbosity, rate limit and destination. Requires C++20
 - Replace the optional gflags dependency with a built-in typed
   [flag registry](flags.md#public-flags-api). `FLAGS_name` is now a
   synchronized flag object that is read with `nglog::GetFlag` and updated with
@@ -63,9 +67,10 @@ SPDX-License-Identifier: BSD-3-Clause
   `(More stack frames follow...)` instead of omitting the outer frames
   silently
 - Breaking change: `DFATAL_LEVEL` and `IF_DEBUG_MODE` are defined by
-  `ng-log/logging.h` instead of `ng-log/log_severity.h`. Code that uses them
-  must include `ng-log/logging.h` or use `NGLOG_DFATAL_LEVEL` and
-  `NGLOG_IF_DEBUG_MODE` of `ng-log/log_severity.h` instead
+  `ng-log/logging.h` instead of `ng-log/log_severity.h`, which also removes
+  them from `ng-log/raw_logging.h`. Code that uses them must include
+  `ng-log/logging.h` or use `NGLOG_DFATAL_LEVEL` and `NGLOG_IF_DEBUG_MODE` of
+  `ng-log/log_severity.h` instead
 - Prevent `RAW_LOG` from acquiring a lock while writing the thread identifier
   if a global locale other than the classic one is installed, which could
   deadlock in signal handlers
@@ -78,6 +83,12 @@ SPDX-License-Identifier: BSD-3-Clause
 !!! warning "Compatibility"
     If your application depends on glog compatibility, use the 0.8.x series.
     It will receive updates until 0.10.0 is released.
+
+!!! info "Planned deprecation of the logging macros"
+    The [experimental logging functions](logging/experimental.md) are planned
+    to supersede the macros in 0.10.0, after which the macros would be
+    deprecated and eventually removed. Nothing is deprecated yet and the plan
+    may change.
 
 ### 0.8.4 <small>August 15, 2026</small> { id="0.8.4" }
 
