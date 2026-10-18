@@ -413,9 +413,11 @@ struct NGLOG_EXPORT LogMessageTime {
 #  define NGLOG_LOG_SEVERITY_0 NGLOG_ERROR
 #endif
 #define NGLOG_LOG_SEVERITY(severity) NGLOG_LOG_SEVERITY_##severity
+// Comparing with NGLOG_FATAL in the macro lets compilers see that LOG(FATAL)
+// does not return without inlining the function.
 #define NGLOG_LOG_SEVERITY_ENABLED(severity)      \
   (NGLOG_LOG_SEVERITY(severity) == NGLOG_FATAL || \
-   nglog::GetFlag(FLAGS_minloglevel) <= NGLOG_LOG_SEVERITY(severity))
+   nglog::internal::IsLogSeverityEnabled(NGLOG_LOG_SEVERITY(severity)))
 
 #define NGLOG_LOG_IF(severity, condition) \
   static_cast<void>(0),                   \
@@ -524,6 +526,12 @@ class LogSink;  // defined below
       << "Check failed: " #condition " "
 
 namespace internal {
+
+//! Determines whether messages of the given severity are logged at all.
+inline bool IsLogSeverityEnabled(LogSeverity severity) {
+  return severity == NGLOG_FATAL ||
+         nglog::GetFlag(FLAGS_minloglevel) <= severity;
+}
 
 // A container for a string pointer which can be evaluated to a bool -
 // true iff the pointer is nullptr.

@@ -570,6 +570,7 @@ set (NGLOG_SRCS
   src/internal/lock_metrics.h
   src/internal/log_cleaner.cc
   src/internal/log_cleaner.h
+  src/internal/log_message_access.h
   src/internal/path.cc
   src/internal/path.h
   src/internal/process_flag_registry.cc

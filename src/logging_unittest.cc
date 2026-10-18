@@ -3078,6 +3078,16 @@ TEST(Logging, FatalIgnoresMinimumLogLevel) {
   EXPECT_THROW(fatal_check(), std::logic_error);
 }
 
+// LOG(FATAL) does not return, so it may end a [[noreturn]] function. Clang
+// rejects the function with -Winvalid-noreturn otherwise.
+[[noreturn]] void LogFatal() { LOG(FATAL) << "fatal log"; }
+
+TEST(Logging, FatalEndsNoreturnFunction) {
+  const ScopedThrowOnFatal throw_on_fatal;
+
+  EXPECT_THROW(LogFatal(), std::logic_error);
+}
+
 TEST(Logging, DefaultPrefixFormatting) {
   nglog::ScopedFlags<> save;
   RouteLogMessagesTo(StandardStream::kStderr);

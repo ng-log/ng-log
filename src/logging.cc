@@ -44,6 +44,7 @@
 #include "internal/attributes.h"
 #include "internal/lock_metrics.h"
 #include "internal/log_cleaner.h"
+#include "internal/log_message_access.h"
 #include "internal/path.h"
 #include "internal/source_location.h"
 #include "internal/style_recorder.h"
@@ -2604,15 +2605,22 @@ ErrnoLogMessage::ErrnoLogMessage(const char* file, int line,
                                  void (LogMessage::*send_method)())
     : LogMessage(file, line, severity, ctr, send_method) {}
 
-ErrnoLogMessage::~ErrnoLogMessage() {
+ErrnoLogMessage::~ErrnoLogMessage() { internal::AppendErrnoDescription(*this); }
+
+namespace internal {
+
+void AppendErrnoDescription(LogMessage& message) {
+  using nglog::operator<<;
   // Don't access errno directly because it may have been altered
   // while streaming the message.
   const Theme& theme = DefaultTheme();
-  stream() << PushStyle(theme.Get(Role::kErrnoMessage)) << ": "
-           << StrError(preserved_errno()) << PopStyle()
-           << PushStyle(theme.Get(Role::kErrnoCode)) << " ["
-           << preserved_errno() << "]" << PopStyle();
+  message.stream() << PushStyle(theme.Get(Role::kErrnoMessage)) << ": "
+                   << StrError(message.preserved_errno()) << PopStyle()
+                   << PushStyle(theme.Get(Role::kErrnoCode)) << " ["
+                   << message.preserved_errno() << "]" << PopStyle();
 }
+
+}  // namespace internal
 
 void FlushLogFiles(LogSeverity min_severity) {
   LogDestination::FlushLogFiles(min_severity);

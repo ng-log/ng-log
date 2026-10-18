@@ -51,21 +51,10 @@
 // it's either FLAGS_v or an appropriate internal variable
 // matching the current source file that represents results of
 // parsing of --vmodule flag and/or SetVLOGLevel calls.
-#  define VLOG_IS_ON(verboselevel)                                       \
-    __extension__({                                                      \
-      static nglog::SiteFlag vlocal__;                                   \
-      nglog::int32 verbose_level__ = (verboselevel);                     \
-      ({                                                                 \
-        std::atomic<nglog::int32>* level =                               \
-            vlocal__.level.load(std::memory_order_acquire);              \
-        level == nullptr                                                 \
-            ? (vlocal__.initialized.load(std::memory_order_acquire)      \
-                   ? nglog::GetFlag(*vlocal__.default_level) >=          \
-                         verbose_level__                                 \
-                   : nglog::InitializeVLOG3(vlocal__, FLAGS_v, __FILE__, \
-                                            verbose_level__))            \
-            : level->load(std::memory_order_relaxed) >= verbose_level__; \
-      });                                                                \
+#  define VLOG_IS_ON(verboselevel)                                   \
+    __extension__({                                                  \
+      static nglog::SiteFlag vlocal__;                               \
+      nglog::internal::IsVLogOn(vlocal__, (verboselevel), __FILE__); \
     })
 #else
 // GNU extensions not available, so we do not support --vmodule.
@@ -108,6 +97,27 @@ extern NGLOG_EXPORT bool InitializeVLOG3(SiteFlag& site_flag,
                                          const Flag<std::int32_t>& site_default,
                                          const char* fname,
                                          int32 verbose_level);
+
+namespace internal {
+
+/**
+ * Determines whether a VLOG site of the given verbosity logs. The site flag
+ * caches whether --v or a --vmodule pattern controls the site.
+ */
+inline bool IsVLogOn(SiteFlag& site_flag, int32 verbose_level,
+                     const char* fname) {
+  std::atomic<int32>* const level =
+      site_flag.level.load(std::memory_order_acquire);
+  if (level != nullptr) {
+    return level->load(std::memory_order_relaxed) >= verbose_level;
+  }
+  if (site_flag.initialized.load(std::memory_order_acquire)) {
+    return GetFlag(*site_flag.default_level) >= verbose_level;
+  }
+  return InitializeVLOG3(site_flag, FLAGS_v, fname, verbose_level);
+}
+
+}  // namespace internal
 }  // namespace nglog
 
 #endif  // NGLOG_VLOG_IS_ON_H
