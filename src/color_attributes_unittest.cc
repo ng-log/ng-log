@@ -176,6 +176,9 @@ TEST(ColorAttributes, ActiveStyleLimitFallsBackToPlainText) {
   for (std::size_t index = 0; index <= StyleRecorder::kMaxSpans; ++index) {
     recorder.Push(0, attributes);
   }
+  // Closing the innermost style records a span unless the overflow disabled
+  // the recorder.
+  recorder.Pop(1);
 
   EXPECT_THAT(RecordedSpans(recorder), IsEmpty());
 }
