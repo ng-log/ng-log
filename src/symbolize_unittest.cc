@@ -183,6 +183,18 @@ using ProgramHeader = ElfW(Phdr);
 using Dynamic = ElfW(Dyn);
 using Symbol = ElfW(Sym);
 
+int g_open_object_file_calls = 0;
+
+// Counts its invocations and finds no object file.
+int CountOpenObjectFileCalls(std::uint64_t /*pc*/,
+                             std::uint64_t& /*start_address*/,
+                             std::uint64_t& /*base_address*/,
+                             char* /*out_file_name*/,
+                             std::size_t /*out_file_name_size*/) {
+  ++g_open_object_file_calls;
+  return -1;
+}
+
 int OpenSyntheticElf(std::uint64_t /*pc*/, std::uint64_t& start_address,
                      std::uint64_t& base_address, char* out_file_name,
                      std::size_t out_file_name_size) {
@@ -575,15 +587,17 @@ TEST_F(SyntheticElfSymbolize, UsesLoadBiasWithExtendedProgramHeaders) {
   unlink(g_synthetic_elf_path);
 }
 
+// A buffer that cannot hold the object file name after the opening
+// parenthesis is rejected before the object file is looked up, which would
+// otherwise read past the end of the buffer.
 TEST_F(SyntheticElfSymbolize, RejectsOneByteOutputBuffer) {
-  g_synthetic_elf_file = CreateSyntheticElf();
-  ASSERT_NE(g_synthetic_elf_file, -1);
-  InstallSymbolizeOpenObjectFileCallback(OpenSyntheticElf);
+  g_open_object_file_calls = 0;
+  InstallSymbolizeOpenObjectFileCallback(CountOpenObjectFileCalls);
 
-  char symbol[2] = {'\0', 'x'};
-  EXPECT_FALSE(Symbolize(SyntheticProgramCounter(), symbol, 1,
+  char symbol[1];
+  EXPECT_FALSE(Symbolize(SyntheticProgramCounter(), symbol, sizeof(symbol),
                          nglog::SymbolizeOptions::kNoLineNumbers));
-  EXPECT_EQ(symbol[1], 'x');
+  EXPECT_EQ(0, g_open_object_file_calls);
 }
 
 TEST_F(SyntheticElfSymbolize, RejectsUnsupportedElfByteOrder) {
@@ -977,7 +991,11 @@ static const char* TestWithReturnAddress() {
   return TrySymbolize(return_address, nglog::SymbolizeOptions::kNoLineNumbers);
 }
 
-TEST(Symbolize, ReturnAddress) { EXPECT_NE(TestWithReturnAddress(), nullptr); }
+// The return address lies within the test body that calls the function.
+TEST(Symbolize, ReturnAddress) {
+  EXPECT_THAT(TestWithReturnAddress(),
+              HasSubstr("Symbolize_ReturnAddress_Test"));
+}
 
 #  elif defined(NGLOG_OS_WINDOWS) || defined(NGLOG_OS_CYGWIN)
 
@@ -1038,11 +1056,13 @@ const char* TestWithReturnAddress() {
   return TrySymbolize(return_address, nglog::SymbolizeOptions::kNoLineNumbers);
 }
 
+// The return address lies within the test body that calls the function.
 TEST(Symbolize, ReturnAddress) {
   const char* symbol = TestWithReturnAddress();
   if (symbol == nullptr) {
     GTEST_SKIP() << "the Windows symbolization runtime is unavailable";
   }
+  EXPECT_THAT(symbol, HasSubstr("Symbolize_ReturnAddress_Test"));
 }
 #  endif
 #endif  // HAVE_STACKTRACE
