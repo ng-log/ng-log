@@ -471,6 +471,29 @@ bool WaitForLogFileUnlock(const std::string& path) {
 }
 #endif
 
+#ifndef NGLOG_OS_EMSCRIPTEN
+// Sends an email through the test mailer and returns the arguments the mailer
+// was invoked with, one element per argument.
+std::vector<std::string> SendEmailArguments(const char* dest) {
+  const std::string arguments_path = TestTmpDir() + "/mailer-arguments";
+  std::remove(arguments_path.c_str());
+  {
+    const ScopedEnvironmentVariable arguments{"NGLOG_TEST_MAILER_ARGUMENTS",
+                                              arguments_path.c_str()};
+    EXPECT_TRUE(SendEmail(dest, "Example subject", "Example body"));
+  }
+
+  std::vector<std::string> result;
+  std::ifstream recorded{arguments_path};
+  for (std::string line; std::getline(recorded, line);) {
+    result.push_back(line);
+  }
+  recorded.close();
+  std::remove(arguments_path.c_str());
+  return result;
+}
+#endif  // !NGLOG_OS_EMSCRIPTEN
+
 #ifdef HAVE_SUBPROCESS
 bool MailerMarkerExists(const std::string& marker_path) {
   std::ifstream marker{marker_path};
@@ -482,7 +505,11 @@ int RunSlowMailerScenario(const char* program, const char* marker_path,
   using namespace std::chrono_literals;
   constexpr auto kPollInterval = 10ms;
 
-  if (!SetEnvironmentValue("NGLOG_TEST_MAILER_MARKER", marker_path)) {
+  // The mailer stays alive until this file exists.
+  const std::string release_path = std::string{marker_path} + ".release";
+  std::remove(release_path.c_str());
+  if (!SetEnvironmentValue("NGLOG_TEST_MAILER_MARKER", marker_path) ||
+      !SetEnvironmentValue("NGLOG_TEST_MAILER_RELEASE", release_path.c_str())) {
     return EXIT_FAILURE;
   }
   nglog::SetFlag(FLAGS_logtostderr, false);
@@ -499,26 +526,17 @@ int RunSlowMailerScenario(const char* program, const char* marker_path,
     std::this_thread::sleep_for(kPollInterval);
   }
 
-  std::mutex other_log_mutex;
-  std::condition_variable other_log_condition;
-  bool other_log_finished = false;
-  std::thread other_logger{
-      [&other_log_finished, &other_log_mutex, &other_log_condition] {
-        LOG(INFO) << "second log";
-        {
-          std::lock_guard<std::mutex> lock{other_log_mutex};
-          other_log_finished = true;
-        }
-        other_log_condition.notify_one();
-      }};
-  {
-    std::unique_lock<std::mutex> lock{other_log_mutex};
-    other_log_condition.wait(
-        lock, [&other_log_finished] { return other_log_finished; });
-  }
-
+  // The mailer is released only after the second message has been logged.
+  // Joining therefore hangs until the CTest timeout if logging waits for the
+  // mailer.
+  std::thread other_logger{[] { LOG(INFO) << "second log"; }};
   other_logger.join();
+
+  if (!std::ofstream{release_path}.good()) {
+    return EXIT_FAILURE;
+  }
   mail_logger.join();
+  std::remove(release_path.c_str());
   std::fputs("passed\n", stdout);
   std::fflush(stdout);
   return EXIT_SUCCESS;
@@ -1207,6 +1225,8 @@ TEST(Logging, RegisteredSinkCanRemoveItself) {
         _exit(EXIT_SUCCESS);
       },
       testing::ExitedWithCode(EXIT_SUCCESS), "");
+#else
+  GTEST_SKIP() << "Requires POSIX death tests";
 #endif
 }
 
@@ -1227,6 +1247,8 @@ TEST(Logging, CustomLoggerCanLogDuringWrite) {
         _exit(EXIT_SUCCESS);
       },
       testing::ExitedWithCode(EXIT_SUCCESS), "");
+#else
+  GTEST_SKIP() << "Requires POSIX death tests";
 #endif
 }
 
@@ -1364,14 +1386,21 @@ TEST(Logging, ReprintFatalMessageDoesNotColorStderr) {
   const ScopedExitOnDFatal exit_on_dfatal{true};
   const ScopedThrowOnFatal throw_on_fatal;
 
+  // Only the first fatal message of a process is kept for the replay.
+  if (LogMessage::num_messages(NGLOG_FATAL) != 0) {
+    GTEST_SKIP() << "an earlier fatal message would be replayed";
+  }
+
   constexpr char kColorEscape[] = "\033[";
+  constexpr char kFatalMessage[] = "fatal message for replay";
   ScopedStreamCapture fatal_capture{StandardStream::kStderr};
-  EXPECT_THROW({ LOG(FATAL) << "fatal message for replay"; }, std::logic_error);
+  EXPECT_THROW({ LOG(FATAL) << kFatalMessage; }, std::logic_error);
   ASSERT_THAT(fatal_capture.Stop(), HasSubstr(kColorEscape));
 
   ScopedStreamCapture reprint_capture{StandardStream::kStderr};
   ReprintFatalMessage();
-  EXPECT_THAT(reprint_capture.Stop(), Not(HasSubstr(kColorEscape)));
+  EXPECT_THAT(reprint_capture.Stop(),
+              AllOf(HasSubstr(kFatalMessage), Not(HasSubstr(kColorEscape))));
 }
 #endif
 
@@ -1547,11 +1576,13 @@ TEST(Logging, DeleteFilesAcceptsNoMatches) {
   DeleteFiles(TestTmpDir() + "/nglog-file-that-does-not-exist-*");
 }
 
-#ifndef NGLOG_OS_WINDOWS
 // Other processes create and delete files in the system temporary directory
 // at any time. Emscripten ends a directory listing early when one of its
 // entries vanishes, so test files must not be listed in a shared directory.
+// Other platforms keep listing the remaining entries, so the test cannot fail
+// there.
 TEST(Logging, ListingIsUnaffectedBySharedTemporaryDirectory) {
+#ifdef NGLOG_OS_EMSCRIPTEN
   constexpr int kFillerCount = 128;
   constexpr int kAttempts = 1000;
 
@@ -1602,8 +1633,10 @@ TEST(Logging, ListingIsUnaffectedBySharedTemporaryDirectory) {
   }
 
   EXPECT_EQ(missed, 0) << "out of " << kAttempts << " listings";
-}
+#else
+  GTEST_SKIP() << "Requires Emscripten";
 #endif
+}
 
 TEST(ScopedFlags, MoveTransfersRestoration) {
   const bool original = nglog::GetFlag(FLAGS_logtostderr);
@@ -1799,6 +1832,20 @@ TEST(PosixPathOperations, LongRelativePath) {
 }
 #endif
 
+#ifndef NGLOG_OS_WINDOWS
+// Sets the file mode creation mask for the lifetime of the object.
+class ScopedUmask {
+ public:
+  explicit ScopedUmask(mode_t mask) : previous_{umask(mask)} {}
+  ~ScopedUmask() { umask(previous_); }
+  ScopedUmask(const ScopedUmask&) = delete;
+  ScopedUmask& operator=(const ScopedUmask&) = delete;
+
+ private:
+  mode_t previous_;
+};
+#endif
+
 TEST(Logging, LogfileMode) {
   nglog::ScopedFlags<> save;
   nglog::SetFlag(FLAGS_logtostderr, false);
@@ -1807,6 +1854,9 @@ TEST(Logging, LogfileMode) {
   constexpr std::uint32_t kLogfileMode = _S_IREAD | _S_IWRITE;
 #else
   constexpr std::uint32_t kLogfileMode = S_IRUSR | S_IWUSR;
+  constexpr mode_t kPermissionBits = S_IRWXU | S_IRWXG | S_IRWXO;
+  // An empty mask leaves the requested permissions as they are.
+  const ScopedUmask no_mask{0};
 #endif
   nglog::SetFlag(FLAGS_logfile_mode, nglog::FileMode{kLogfileMode});
   nglog::SetFlag(FLAGS_timestamp_in_logfile_name, false);
@@ -1820,6 +1870,15 @@ TEST(Logging, LogfileMode) {
 
   EXPECT_THAT(ReadLogFile(dest),
               HasSubstr("message with configured logfile mode"));
+#ifndef NGLOG_OS_WINDOWS
+  const vector<string> files = GetFiles(dest + "*");
+  EXPECT_THAT(files, SizeIs(1));
+  if (files.size() == 1) {
+    struct stat statbuf;
+    EXPECT_EQ(stat(files.front().c_str(), &statbuf), 0) << strerror(errno);
+    EXPECT_EQ(statbuf.st_mode & kPermissionBits, kLogfileMode);
+  }
+#endif
 
   LogToStderr();
   DeleteFiles(dest + "*");
@@ -1996,6 +2055,8 @@ TEST(Logging, FileLockIsHeldAcrossProcesses) {
   file_handle.reset();
   LogToStderr();
   DeleteFiles(dest + "*");
+#else
+  GTEST_SKIP() << "Requires Windows";
 #endif
 }
 
@@ -2039,6 +2100,8 @@ TEST(Logging, LockedOversizedFileIsNotTruncated) {
 
   LogToStderr();
   DeleteFiles(dest + "*");
+#else
+  GTEST_SKIP() << "Requires Windows";
 #endif
 }
 
@@ -2082,6 +2145,8 @@ TEST(Logging, LogFileIsNotInheritedByChildProcesses) {
 
   LogToStderr();
   DeleteFiles(dest + "*");
+#else
+  GTEST_SKIP() << "Requires Windows and subprocess support";
 #endif
 }
 
@@ -2122,6 +2187,8 @@ TEST(Logging, FileLockFailureReportsWindowsError) {
 
   LogToStderr();
   DeleteFiles(dest + "*");
+#else
+  GTEST_SKIP() << "Requires Windows";
 #endif
 }
 
@@ -2467,15 +2534,35 @@ TEST(Logging, Wrapper) {
   EXPECT_TRUE(custom_logger_deleted);
 }
 
+// Changes errno the way a failing system call made while logging would.
+class ErrnoClobberingSink : public LogSink {
+ public:
+  void send(LogSeverity /* severity */, const char* /* full_filename */,
+            const char* /* base_filename */, int /* line */,
+            const LogMessageTime& /* time */, const char* /* message */,
+            size_t /* message_len */) override {
+    ++calls;
+    errno = EBADF;
+  }
+
+  int calls{0};
+};
+
 TEST(Logging, Errno) {
   // Plain LOG(), not the shared TestLogging(): that helper's LOG_EVERY_N
   // counters never reset, so sharing it would couple this test's run order
   // to TestLogging(true)'s expected counts elsewhere.
   fprintf(stderr, "==== Test errno preservation\n");
 
+  ErrnoClobberingSink sink;
+  AddLogSink(&sink);
   errno = ENOENT;
   LOG(INFO) << "foo";
-  EXPECT_EQ(errno, ENOENT);
+  const int logged_errno = errno;
+  RemoveLogSink(&sink);
+
+  EXPECT_EQ(sink.calls, 1);
+  EXPECT_EQ(logged_errno, ENOENT);
 }
 
 // Repeats `pattern` until the result is `length` characters long.
@@ -2518,8 +2605,11 @@ static void TestOneTruncate(const char* path, uint64 limit, uint64 keep,
   EXPECT_EQ(truncated, contents.substr(contents.size() - expect));
 }
 
+// Only Windows translates line endings in text mode, so elsewhere the test
+// cannot fail.
 TEST(Logging, TruncateKeepsTrailingLinesByteForByte) {
-#if defined(HAVE_UNISTD_H) || defined(HAVE__CHSIZE_S)
+#if defined(NGLOG_OS_WINDOWS) && \
+    (defined(HAVE_UNISTD_H) || defined(HAVE__CHSIZE_S))
   const string path = TestTmpDir() + "/truncate_lines";
   constexpr char kDiscarded[] = "discarded line\n";
   constexpr char kKept[] = "kept line\n";
@@ -2535,7 +2625,7 @@ TEST(Logging, TruncateKeepsTrailingLinesByteForByte) {
   EXPECT_EQ(ReadFileContents(path), kKept);
   DeleteFiles(path);
 #else
-  GTEST_SKIP() << "Log truncation is not supported";
+  GTEST_SKIP() << "Requires Windows log truncation";
 #endif
 }
 
@@ -2613,64 +2703,118 @@ TEST(Logging, TruncateStdoutStderr) {
 }
 #endif
 
-TEST(Logging, DropLogMemoryConcurrentWriters) {
 #if defined(NGLOG_OS_LINUX) && defined(HAVE_POSIX_FADVISE)
+namespace {
+
+// Lets a test hold posix_fadvise() inside the call to observe whether other
+// writers are serialized behind it.
+class FadviseStall {
+ public:
+  void Arm() {
+    std::lock_guard<std::mutex> lock{mutex_};
+    armed_ = true;
+    entered_ = false;
+    released_ = false;
+  }
+
+  void Stall() {
+    std::unique_lock<std::mutex> lock{mutex_};
+    if (!armed_) {
+      return;
+    }
+    armed_ = false;
+    entered_ = true;
+    condition_.notify_all();
+    condition_.wait(lock, [this] { return released_; });
+  }
+
+  void WaitUntilEntered() {
+    std::unique_lock<std::mutex> lock{mutex_};
+    condition_.wait(lock, [this] { return entered_; });
+  }
+
+  void Release() {
+    {
+      std::lock_guard<std::mutex> lock{mutex_};
+      released_ = true;
+    }
+    condition_.notify_all();
+  }
+
+ private:
+  std::mutex mutex_;
+  std::condition_variable condition_;
+  bool armed_{false};
+  bool entered_{false};
+  bool released_{false};
+};
+
+FadviseStall g_fadvise_stall;
+
+}  // namespace
+
+// Replaces the C library function for the whole test binary. The advice has
+// no observable effect on the tests, so it is not forwarded.
+extern "C" int posix_fadvise(int /* fd */, off_t /* offset */,
+                             off_t /* length */, int /* advice */) {
+  g_fadvise_stall.Stall();
+  return 0;
+}
+
+TEST(Logging, DropLogMemoryDoesNotBlockConcurrentWriters) {
   nglog::ScopedFlags<> save;
   nglog::SetFlag(FLAGS_logtostderr, false);
+  nglog::SetFlag(FLAGS_logtostdout, false);
+  nglog::SetFlag(FLAGS_drop_log_memory, true);
 
-  fprintf(stderr,
-          "==== Test concurrent writers while drop_log_memory triggers "
-          "posix_fadvise\n");
   const std::string dest = TestTmpDir() + "/logging_test_drop_log_memory";
   DeleteFiles(dest + "*");
-
-  // Force every write to flush and re-evaluate the drop_log_memory
-  // threshold, so that posix_fadvise() is exercised multiple times while
-  // other threads are concurrently appending to the same log file.
-  nglog::SetFlag(FLAGS_drop_log_memory, true);
-  nglog::SetFlag(FLAGS_logbufsecs, 0);
-
   SetLogDestination(NGLOG_INFO, dest.c_str());
 
-  constexpr int kThreads = 8;
-  constexpr int kMessagesPerThread = 400;
-  const std::string filler(3000, 'x');
+  // Writing through the logger directly, as wrapping loggers installed with
+  // SetLogger() do, takes the per-file lock inside the default file logger.
+  base::Logger* const logger = base::GetLogger(NGLOG_INFO);
 
-  std::vector<std::thread> threads;
-  threads.reserve(kThreads);
-  for (int t = 0; t < kThreads; ++t) {
-    threads.emplace_back([&filler] {
-      for (int i = 0; i < kMessagesPerThread; ++i) {
-        LOG(INFO) << filler;
-      }
-    });
-  }
-  // The writers repeatedly exercise the path that releases the per-file
-  // mutex around posix_fadvise(). Joining verifies that this does not
-  // deadlock. The checks below verify that no messages were lost or torn.
-  for (auto& thread : threads) {
-    thread.join();
-  }
+  // A flushed file of 3 MiB is the smallest one whose memory gets dropped.
+  constexpr std::size_t kDropThreshold = 3U << 20U;
+  std::string large(kDropThreshold, 'x');
+  large.back() = '\n';
+  constexpr char kConcurrent[] = "concurrent writer\n";
 
-  FlushLogFiles(NGLOG_INFO);
+  g_fadvise_stall.Arm();
+  std::thread dropping_thread{[logger, &large] {
+    logger->Write(true, std::chrono::system_clock::now(), large.data(),
+                  large.size());
+  }};
+  g_fadvise_stall.WaitUntilEntered();
 
-  // None of the concurrently written messages should have been lost or
-  // corrupted by unlocking mutex_ around posix_fadvise().
-  std::istringstream contents{ReadLogFile(dest)};
-  int line_count = 0;
-  for (std::string line; std::getline(contents, line);) {
-    if (line.find(filler) != std::string::npos) {
-      ++line_count;
-    }
-  }
-  EXPECT_EQ(line_count, kThreads * kMessagesPerThread);
+  // Hangs until the CTest timeout if the per-file lock is held while
+  // posix_fadvise() runs.
+  std::thread concurrent_thread{[logger, &kConcurrent] {
+    logger->Write(true, std::chrono::system_clock::now(), kConcurrent,
+                  sizeof(kConcurrent) - 1);
+  }};
+  concurrent_thread.join();
+
+  g_fadvise_stall.Release();
+  dropping_thread.join();
+  logger->Flush();
+
+  // Compare positions instead of contents to avoid printing megabytes on
+  // failure. Both messages follow the file header in the order written.
+  const std::string contents = ReadLogFile(dest);
+  const std::size_t concurrent_length = sizeof(kConcurrent) - 1;
+  ASSERT_GE(contents.size(), large.size() + concurrent_length);
+  const std::size_t concurrent_offset = contents.size() - concurrent_length;
+  EXPECT_EQ(contents.find(large), concurrent_offset - large.size());
+  EXPECT_EQ(contents.substr(concurrent_offset), kConcurrent);
 
   // Release file handle for the destination file to unlock the file in
   // Windows.
   LogToStderr();
   DeleteFiles(dest + "*");
-#endif
 }
+#endif  // defined(NGLOG_OS_LINUX) && defined(HAVE_POSIX_FADVISE)
 
 TEST(Logging, MessageCountDoesNotWaitForLogger) {
   nglog::ScopedFlags<> save;
@@ -2694,6 +2838,7 @@ TEST(Logging, MessageCountDoesNotWaitForLogger) {
 }
 
 TEST(Logging, DefaultFileDispatchDoesNotRelockFile) {
+#ifdef NGLOG_ENABLE_LOCK_METRICS
   nglog::ScopedFlags<> save;
   nglog::SetFlag(FLAGS_logtostderr, false);
   nglog::SetFlag(FLAGS_logtostdout, false);
@@ -2704,19 +2849,18 @@ TEST(Logging, DefaultFileDispatchDoesNotRelockFile) {
   DeleteFiles(destination + "*");
   SetLogDestination(NGLOG_INFO, destination.c_str());
 
-#ifdef NGLOG_ENABLE_LOCK_METRICS
   internal::ResetLockMetrics();
-#endif
   LOG(INFO) << "default file dispatch";
 
-#ifdef NGLOG_ENABLE_LOCK_METRICS
   const internal::LockMetrics metrics =
       internal::GetLockMetrics(internal::LockKind::kFile);
   EXPECT_EQ(metrics.acquisitions, 0U);
-#endif
 
   LogToStderr();
   DeleteFiles(destination + "*");
+#else
+  GTEST_SKIP() << "Requires lock metrics";
+#endif
 }
 
 struct RecordDeletionLogger : public base::Logger {
@@ -3426,25 +3570,8 @@ TEST(UserDefinedClass, logging) {
   CHECK_EQ(u, u);
 }
 
-TEST(LogMsgTime, gmtoff) {
-  /*
-   * Unit test for GMT offset API
-   * TODO: To properly test this API, we need a platform independent way to set
-   * time-zone.
-   * */
-  nglog::LogMessage log_obj(__FILE__, __LINE__);
-
-  std::chrono::seconds gmtoff = log_obj.time().gmtoffset();
-  // GMT offset ranges from UTC-12:00 to UTC+14:00
-  using namespace std::chrono_literals;
-  constexpr std::chrono::hours utc_min_offset = -12h;
-  constexpr std::chrono::hours utc_max_offset = +14h;
-  EXPECT_GE(gmtoff, utc_min_offset);
-  EXPECT_LE(gmtoff, utc_max_offset);
-}
-
 // Emscripten derives the time zone from the JavaScript host and ignores TZ.
-#if !defined(NGLOG_OS_WINDOWS) && !defined(NGLOG_OS_EMSCRIPTEN)
+#ifndef NGLOG_OS_EMSCRIPTEN
 TEST(LogMsgTime, gmtoffSubHour) {
   // The gmtoffset() API is documented to return seconds, so time zones whose
   // offset is not a whole number of hours (e.g. India at UTC+05:30) must be
@@ -3462,7 +3589,7 @@ TEST(LogMsgTime, gmtoffSubHour) {
 
   EXPECT_EQ(gmtoff, 5h + 30min);
 }
-#endif  // !defined(NGLOG_OS_WINDOWS) && !defined(NGLOG_OS_EMSCRIPTEN)
+#endif  // !NGLOG_OS_EMSCRIPTEN
 
 // Emscripten cannot run a mailer.
 #ifndef NGLOG_OS_EMSCRIPTEN
@@ -3470,16 +3597,18 @@ TEST(EmailLogging, ValidAddress) {
   nglog::ScopedFlags<> save;
   nglog::SetFlag(FLAGS_logmailer, EMAIL_TEST_HELPER_PATH);
 
-  EXPECT_TRUE(
-      SendEmail("example@example.com", "Example subject", "Example body"));
+  EXPECT_THAT(SendEmailArguments("example@example.com"),
+              ElementsAre("-sExample subject", "example@example.com"));
 }
 
 TEST(EmailLogging, MultipleAddresses) {
   nglog::ScopedFlags<> save;
   nglog::SetFlag(FLAGS_logmailer, EMAIL_TEST_HELPER_PATH);
 
-  EXPECT_TRUE(SendEmail("example@example.com,foo@bar.com", "Example subject",
-                        "Example body"));
+  // Whitespace around the addresses is dropped.
+  EXPECT_THAT(
+      SendEmailArguments(" example@example.com , foo@bar.com"),
+      ElementsAre("-sExample subject", "example@example.com,foo@bar.com"));
 }
 #endif  // !NGLOG_OS_EMSCRIPTEN
 
@@ -3545,11 +3674,6 @@ TEST(EmailLogging, SlowMailerDoesNotBlockOtherLoggingThreads) {
   DeleteFiles(log_path + "*");
 }
 #endif  // HAVE_SUBPROCESS
-
-TEST(Logging, FatalThrow) {
-  const ScopedThrowOnFatal throw_on_fatal;
-  EXPECT_THROW({ LOG(FATAL) << "must throw to fail"; }, std::logic_error);
-}
 
 TEST(LoggingBeforeInitialization, WritesAllMessagesToStderr) {
   const std::vector<LineMatcher> expected{
@@ -3882,15 +4006,20 @@ TEST_P(LoggingToStream, SinkWaitsUntilMessagesAreSent) {
   }
 }
 
-TEST_P(LoggingToStream, ChecksThatHoldWriteNothing) {
-  const RoutedOutput output = Capture([] {
-    TestCHECK();
-    TestDCHECK();
-    TestSTREQ();
-  });
+TEST(Logging, ChecksThatHoldWriteNothing) {
+  nglog::ScopedFlags<> save;
+  RouteLogMessagesTo(StandardStream::kStderr);
+  ScopedStreamCapture stdout_capture{StandardStream::kStdout};
+  ScopedStreamCapture stderr_capture{StandardStream::kStderr};
+  TestCHECK();
+  TestDCHECK();
+  TestSTREQ();
 
-  EXPECT_THAT(output.routed, IsEmpty());
-  EXPECT_THAT(output.other, IsEmpty());
+  const std::string stderr_output = stderr_capture.Stop();
+  const std::string stdout_output = stdout_capture.Stop();
+
+  EXPECT_THAT(stderr_output, IsEmpty());
+  EXPECT_THAT(stdout_output, IsEmpty());
 }
 
 //! Flags that LogWithLevels() logs with and the lines it is expected to write.
