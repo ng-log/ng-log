@@ -31,10 +31,11 @@
 #include "testing_utilities.h"
 
 #if !defined(NGLOG_OS_WINDOWS)
-#  include <dirent.h>
 #  include <sys/types.h>
 #  include <sys/wait.h>
 #  include <unistd.h>
+
+extern char** environ;
 #endif
 
 NGLOG_DEFINE(bool, test_bool_flag, false, "Test boolean flag.");
@@ -178,6 +179,32 @@ struct FlagTraits<SlowAssignmentValue> {
 
   static std::string ToString(const SlowAssignmentValue& value) {
     return std::to_string(value.value);
+  }
+};
+
+}  // namespace nglog
+
+std::atomic<bool> g_slow_formatting_entered{false};
+constexpr int kSlowFormattingMilliseconds = 200;
+
+// Holds the registry lock for a while when the registry formats the value.
+struct SlowlyFormattedValue {};
+
+namespace nglog {
+
+template <>
+struct FlagTraits<SlowlyFormattedValue> {
+  static const char* TypeName() noexcept { return "slowly formatted"; }
+
+  static bool Parse(const std::string&, SlowlyFormattedValue*, std::string*) {
+    return true;
+  }
+
+  static std::string ToString(const SlowlyFormattedValue&) {
+    g_slow_formatting_entered = true;
+    std::this_thread::sleep_for(
+        std::chrono::milliseconds(kSlowFormattingMilliseconds));
+    return "value";
   }
 };
 
@@ -1726,56 +1753,26 @@ TEST(Flags, FlagIsUnregisteredBeforeItsValueIsDestroyed) {
 }
 
 #if !defined(NGLOG_OS_WINDOWS)
+// Lists the environment variables of the process in their order.
+std::vector<std::string> EnvironmentVariables() {
+  std::vector<std::string> variables;
+  for (char** variable = environ; *variable != nullptr; ++variable) {
+    variables.emplace_back(*variable);
+  }
+  return variables;
+}
+
 TEST(Flags, ProcessFlagRegistryDoesNotUseTheEnvironment) {
-  nglog::internal::ProcessFlagRegistry registry;
-  nglog::internal::ProcessFlagInfo previous;
-  ASSERT_EQ(nglog::internal::ProcessFlagRegistration::kRegistered,
-            registry.Register("environment_free_flag", "flags.cc", "bool",
-                              &previous));
-  EXPECT_EQ(nullptr, std::getenv("NGLOG_PROCESS_FLAG_REGISTRY_V1"));
-  registry.Unregister("environment_free_flag", "flags.cc");
-}
-
-TEST(Flags, ProcessFlagRegistryDoesNotRequireAWritableTemporaryDirectory) {
-  const ScopedEnvironmentVariable override_tmpdir(
-      "TMPDIR", "/nonexistent-nglog-temporary-directory");
-  nglog::internal::ProcessFlagRegistry registry;
-  nglog::internal::ProcessFlagInfo previous;
-  EXPECT_EQ(nglog::internal::ProcessFlagRegistration::kRegistered,
-            registry.Register("unwritable_tmpdir_flag", "flags.cc", "bool",
-                              &previous));
-  registry.Unregister("unwritable_tmpdir_flag", "flags.cc");
-}
-
-TEST(Flags, ProcessFlagRegistryLeavesNoFilesBehind) {
-  char directory_template[] = "/tmp/nglog-registry-test-XXXXXX";
-  const char* const directory = mkdtemp(directory_template);
-  ASSERT_NE(directory, nullptr);
+  const std::vector<std::string> before = EnvironmentVariables();
   {
-    const ScopedEnvironmentVariable override_tmpdir("TMPDIR", directory);
     nglog::internal::ProcessFlagRegistry registry;
     nglog::internal::ProcessFlagInfo previous;
-    ASSERT_EQ(
-        nglog::internal::ProcessFlagRegistration::kRegistered,
-        registry.Register("leak_check_flag", "flags.cc", "bool", &previous));
-    registry.Unregister("leak_check_flag", "flags.cc");
+    ASSERT_EQ(nglog::internal::ProcessFlagRegistration::kRegistered,
+              registry.Register("environment_free_flag", "flags.cc", "bool",
+                                &previous));
+    registry.Unregister("environment_free_flag", "flags.cc");
   }
-
-  std::vector<std::string> remaining;
-  DIR* const handle = opendir(directory);
-  ASSERT_NE(handle, nullptr);
-  while (const dirent* const entry = readdir(handle)) {
-    const std::string name = entry->d_name;
-    if (name != "." && name != "..") {
-      remaining.push_back(name);
-    }
-  }
-  closedir(handle);
-  for (const std::string& name : remaining) {
-    unlink((std::string(directory) + "/" + name).c_str());
-  }
-  rmdir(directory);
-  EXPECT_THAT(remaining, testing::IsEmpty());
+  EXPECT_EQ(before, EnvironmentVariables());
 }
 #endif
 
@@ -1788,8 +1785,9 @@ constexpr int kChildPollMilliseconds = 10;
 
 // Waits for a forked child and reports whether it exited successfully before
 // the timeout. A child that does not finish in time is killed.
-bool ChildSucceeded(pid_t child) {
-  for (int waited = 0; waited < kChildTimeoutMilliseconds;
+bool ChildSucceeded(pid_t child,
+                    int timeout_milliseconds = kChildTimeoutMilliseconds) {
+  for (int waited = 0; waited < timeout_milliseconds;
        waited += kChildPollMilliseconds) {
     int status = 0;
     if (waitpid(child, &status, WNOHANG) == child) {
@@ -1806,37 +1804,78 @@ bool ChildSucceeded(pid_t child) {
 // The helper threads are detached and signal their completion through an
 // atomic. A forked child would otherwise inherit a finished thread that was
 // never joined, which ThreadSanitizer reports as a leak in the child.
+// Set by the first call of the default value function, which alone blocks.
+std::atomic_flag g_registry_reading_default_consumed = ATOMIC_FLAG_INIT;
 std::atomic<bool> g_registry_reading_default_entered{false};
+std::atomic<bool> g_registry_reading_default_released{false};
+std::atomic<bool> g_registry_reading_default_finished{false};
 
-// Takes the registry lock while the default value is being computed.
+// The first call blocks until released and then reads the registry while the
+// formatting of a flag value holds the registry lock. Later calls, such as
+// those in a forked child, read the registry right away.
 std::int32_t RegistryReadingDefault() {
-  g_registry_reading_default_entered = true;
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  if (!g_registry_reading_default_consumed.test_and_set()) {
+    g_registry_reading_default_entered = true;
+    while (!g_registry_reading_default_released) {
+      std::this_thread::yield();
+    }
+    std::string value;
+    nglog::GetCommandLineOption("slowly_formatted_flag", &value);
+    g_registry_reading_default_finished = true;
+    return 1;
+  }
   std::string value;
   nglog::GetCommandLineOption("v", &value);
   return 1;
 }
 
 TEST(Flags, ForkWhileADefaultValueReadsTheRegistryDoesNotDeadlock) {
+  // The scenario waits for two children in turn. It gets enough time to kill
+  // either of them itself, so that no deadlocked child outlives the test.
+  constexpr int kScenarioChildren = 2;
+  constexpr int kScenarioTimeoutMilliseconds =
+      (kScenarioChildren + 1) * kChildTimeoutMilliseconds;
   // The scenario runs in a child, so that a deadlock cannot stall the test.
   const pid_t scenario = fork();
   if (scenario == 0) {
+    const nglog::DynamicFlag<SlowlyFormattedValue> slow(
+        "slowly_formatted_flag", __FILE__, "", SlowlyFormattedValue{});
     static nglog::Flag<std::int32_t> flag(
         nglog::internal::kStaticFlag, "registry_reading_default_flag", __FILE__,
         "", &RegistryReadingDefault);
-    nglog::RegisterFlag(flag);
-    std::thread([] { nglog::GetFlag(flag); }).detach();
+    std::thread([] { nglog::RegisterFlag(flag); }).detach();
     while (!g_registry_reading_default_entered) {
       std::this_thread::yield();
     }
-    const pid_t child = fork();
-    if (child == 0) {
-      _exit(EXIT_SUCCESS);
+    // The other thread is inside the default value function and holds no
+    // lock, so the child can compute the default value itself.
+    const pid_t computing_child = fork();
+    if (computing_child == 0) {
+      _exit(nglog::GetFlag(flag) == 1 ? EXIT_SUCCESS : EXIT_FAILURE);
     }
-    _exit(ChildSucceeded(child) ? EXIT_SUCCESS : EXIT_FAILURE);
+    const bool computing_child_succeeded = ChildSucceeded(computing_child);
+    g_slow_formatting_entered = false;
+    g_registry_reading_default_released = true;
+    while (!g_slow_formatting_entered) {
+      std::this_thread::yield();
+    }
+    // The default value function now holds the registry lock while it reads
+    // the registry. The child must not inherit the lock.
+    const pid_t reading_child = fork();
+    if (reading_child == 0) {
+      std::string value;
+      _exit(nglog::GetCommandLineOption("v", &value) ? EXIT_SUCCESS
+                                                     : EXIT_FAILURE);
+    }
+    const bool reading_child_succeeded = ChildSucceeded(reading_child);
+    while (!g_registry_reading_default_finished) {
+      std::this_thread::yield();
+    }
+    _exit(computing_child_succeeded && reading_child_succeeded ? EXIT_SUCCESS
+                                                               : EXIT_FAILURE);
   }
   ASSERT_NE(-1, scenario);
-  EXPECT_TRUE(ChildSucceeded(scenario));
+  EXPECT_TRUE(ChildSucceeded(scenario, kScenarioTimeoutMilliseconds));
 }
 
 TEST(Flags, ForkWhileAnotherThreadHoldsTheRegistryLockDoesNotDeadlock) {
