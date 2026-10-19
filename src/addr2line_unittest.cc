@@ -37,6 +37,7 @@
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "ng-log/types.h"
+#include "subprocess.h"
 #include "symbolize.h"
 #include "testing_utilities.h"
 
@@ -297,11 +298,15 @@ INSTANTIATE_TEST_SUITE_P(
 namespace {
 
 constexpr std::size_t kSymbolBufferSize = 4096;
+constexpr bool kHasDebugInfo = NGLOG_TEST_HAS_DEBUG_INFO != 0;
 constexpr char kSourceLocation[] = "addr2line_unittest.cc:";
 constexpr char kFunctionName[] = "FunctionSymbolizedForAddr2LineTest";
 constexpr char kResolverUnavailable[] =
     "no name resolver available without addr2line";
 
+// The line on which the definition below starts, which the debug info
+// reports for the entry address of the function.
+constexpr int kSymbolizedFunctionLine = __LINE__ + 2;
 NGLOG_ATTRIBUTE_NOINLINE
 void FunctionSymbolizedForAddr2LineTest() {
   volatile int a = 0;
@@ -319,6 +324,24 @@ const char* TrySymbolize(void* pc) {
 const char* TrySymbolizeTestFunction() {
   return TrySymbolize(
       reinterpret_cast<void*>(&FunctionSymbolizedForAddr2LineTest));
+}
+
+// Runs "addr2line --version" from PATH, which succeeds whenever the callback
+// can run addr2line as well.
+bool IsAddr2LineAvailable() {
+  constexpr std::chrono::seconds kTimeout{10};
+  char program[] = "addr2line";
+  char version_flag[] = "--version";
+  char* argv[] = {program, version_flag, nullptr};
+  char* envp[] = {nullptr};
+  Subprocess<> process;
+  if (!process.Spawn(argv, envp)) {
+    return false;
+  }
+  process.CloseStdin();
+  const SubprocessWaitResult result = process.Wait(kTimeout);
+  return result.status == SubprocessWaitResult::kExited &&
+         result.exit_code == 0;
 }
 
 // Resolves an address within a module that does not exist, so that only the
@@ -421,16 +444,32 @@ class Addr2LineSymbolizeCallback : public ::testing::Test {
 // rather than a hard failure.
 
 TEST_F(Addr2LineSymbolizeCallback, ResolvesFileAndLine) {
+  if (!kHasDebugInfo) {
+    GTEST_SKIP() << "built without debug info";
+  }
+  if (!IsAddr2LineAvailable()) {
+    GTEST_SKIP() << "addr2line not available";
+  }
+
   DisableAddr2LineTimeout();
   nglog::SetFlag(FLAGS_symbolize_line_info, true);
   EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
 
   const char* symbol = TrySymbolizeTestFunction();
 
-  if (symbol == nullptr || std::strstr(symbol, kSourceLocation) == nullptr) {
-    GTEST_SKIP() << "addr2line not available or not resolving";
+#ifdef NGLOG_OS_WINDOWS
+  // The test function lives in the same translation unit as main(), which a
+  // known MinGW/binutils linker quirk (see symbolize.cc) can leave
+  // unresolvable via addr2line.
+  if (symbol == nullptr) {
+    GTEST_SKIP() << "addr2line could not resolve " << kFunctionName;
   }
-  EXPECT_THAT(symbol, ::testing::HasSubstr(kFunctionName));
+#endif
+  ASSERT_NE(symbol, nullptr);
+  const std::string location =
+      kSourceLocation + std::to_string(kSymbolizedFunctionLine) + " ";
+  EXPECT_THAT(symbol, ::testing::AllOf(::testing::HasSubstr(location),
+                                       ::testing::HasSubstr(kFunctionName)));
 }
 
 #ifdef NGLOG_OS_WINDOWS
