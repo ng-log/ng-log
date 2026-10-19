@@ -60,9 +60,11 @@ TEST(ScopedStreamCapture, LeavingTheScopeRestoresTheStream) {
 }
 
 TEST(ScopedStreamCapture, StoppingTwiceReturnsTheSameOutput) {
+  constexpr char kOutput[] = "once";
   ScopedStreamCapture capture{StandardStream::kStderr};
-  std::fputs("once", stderr);
+  std::fputs(kOutput, stderr);
   const std::string output = capture.Stop();
+  EXPECT_EQ(output, kOutput);
   EXPECT_EQ(capture.Stop(), output);
 }
 
