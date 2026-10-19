@@ -54,13 +54,6 @@ enum LogSeverity : int {
 NGLOG_INLINE_VARIABLE
 constexpr int NUM_SEVERITIES = 4;
 
-// DFATAL is FATAL in debug mode, ERROR in normal mode
-#ifdef NDEBUG
-#  define DFATAL_LEVEL NGLOG_ERROR
-#else
-#  define DFATAL_LEVEL NGLOG_FATAL
-#endif
-
 // NDEBUG usage helpers related to (RAW_)DCHECK:
 //
 // DEBUG_MODE is for small !NDEBUG uses like
@@ -70,21 +63,26 @@ constexpr int NUM_SEVERITIES = 4;
 //     foo.CheckThatFoo();
 //   #endif
 //
-// IF_DEBUG_MODE is for small !NDEBUG uses like
-//   IF_DEBUG_MODE( string error; )
-//   DCHECK(Foo(&error)) << error;
-// instead of substantially more verbose
-//   #ifndef NDEBUG
-//     string error;
-//     DCHECK(Foo(&error)) << error;
-//   #endif
-//
 #ifdef NDEBUG
 enum { DEBUG_MODE = 0 };
-#  define IF_DEBUG_MODE(x)
 #else
 enum { DEBUG_MODE = 1 };
-#  define IF_DEBUG_MODE(x) x
+#endif
+
+// The severity of DFATAL messages: FATAL in debug mode, ERROR otherwise.
+// ng-log/logging.h defines DFATAL_LEVEL as it.
+#ifdef NDEBUG
+#  define NGLOG_DFATAL_LEVEL NGLOG_ERROR
+#else
+#  define NGLOG_DFATAL_LEVEL NGLOG_FATAL
+#endif
+
+// Expands to its argument in debug mode only. ng-log/logging.h defines
+// IF_DEBUG_MODE as it.
+#ifdef NDEBUG
+#  define NGLOG_IF_DEBUG_MODE(x)
+#else
+#  define NGLOG_IF_DEBUG_MODE(x) x
 #endif
 
 }  // namespace nglog

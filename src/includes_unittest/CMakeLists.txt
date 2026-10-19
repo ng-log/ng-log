@@ -11,6 +11,9 @@ find_package (ng-log REQUIRED NO_MODULE)
 add_executable (ng-log_includes_logging ng-log_includes_logging.cc)
 target_link_libraries (ng-log_includes_logging PRIVATE ng-log::ng-log)
 
+add_executable (ng-log_includes_log_severity ng-log_includes_log_severity.cc)
+target_link_libraries (ng-log_includes_log_severity PRIVATE ng-log::ng-log)
+
 add_executable (ng-log_includes_vlog_is_on ng-log_includes_vlog_is_on.cc)
 target_link_libraries (ng-log_includes_vlog_is_on PRIVATE ng-log::ng-log)
 

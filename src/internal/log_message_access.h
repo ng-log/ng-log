@@ -8,7 +8,7 @@
 #define NGLOG_INTERNAL_LOG_MESSAGE_ACCESS_H
 
 #include "ng-log/export.h"
-#include "ng-log/logging.h"
+#include "ng-log/log_message.h"
 
 namespace nglog {
 namespace internal {

@@ -540,7 +540,10 @@ set (NGLOG_PUBLIC_H
   src/ng-log/internal/styled_value.h
   src/ng-log/internal/text_attributes.h
   src/ng-log/internal/text_style.h
+  src/ng-log/log_message.h
+  src/ng-log/log_setup.h
   src/ng-log/log_severity.h
+  src/ng-log/log_sink.h
   src/ng-log/logging.h
   src/ng-log/platform.h
   src/ng-log/raw_logging.h
@@ -877,6 +880,65 @@ if (BUILD_TESTING AND GTest_FOUND)
   target_compile_features (ng-log_test INTERFACE
     $<TARGET_PROPERTY:ng-log,COMPILE_FEATURES>)
   target_include_directories (ng-log_test INTERFACE $<TARGET_PROPERTY:ng-log,INCLUDE_DIRECTORIES>)
+
+  # Collects the unprefixed macros of the public headers. Lines are not read
+  # individually, since a list element that ends with the backslash of a
+  # continuation line escapes the list separator.
+  set (NGLOG_UNPREFIXED_MACROS)
+
+  foreach (_ng-log_HEADER IN LISTS NGLOG_PUBLIC_H)
+    file (READ ${_ng-log_HEADER} _ng-log_CONTENT)
+    string (REGEX MATCHALL "\n#[ \t]*define[ \t]+[A-Za-z0-9_]+"
+      _ng-log_DEFINES "${_ng-log_CONTENT}")
+
+    foreach (_ng-log_DEFINE IN LISTS _ng-log_DEFINES)
+      string (REGEX REPLACE "^\n#[ \t]*define[ \t]+" "" _ng-log_MACRO
+        "${_ng-log_DEFINE}")
+      if (NOT _ng-log_MACRO MATCHES "^(NGLOG_|_)")
+        list (APPEND NGLOG_UNPREFIXED_MACROS ${_ng-log_MACRO})
+      endif (NOT _ng-log_MACRO MATCHES "^(NGLOG_|_)")
+    endforeach (_ng-log_DEFINE)
+  endforeach (_ng-log_HEADER)
+
+  list (REMOVE_DUPLICATES NGLOG_UNPREFIXED_MACROS)
+  # Rescans the headers once they change.
+  set_property (DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    ${NGLOG_PUBLIC_H})
+
+  # Verifies that each header compiles without other includes and leaves the
+  # unprefixed macros undefined. Such headers can be combined with libraries
+  # that define the same names, such as the LOG and CHECK macros of Abseil.
+  function (nglog_add_header_test _TARGET)
+    set (_SOURCES)
+
+    foreach (_HEADER IN LISTS ARGN)
+      file (RELATIVE_PATH _INCLUDE ${ng-log_SOURCE_DIR}/src
+        ${ng-log_SOURCE_DIR}/${_HEADER})
+      string (MAKE_C_IDENTIFIER ${_INCLUDE} _NAME)
+      set (_SOURCE ${ng-log_BINARY_DIR}/${_TARGET}/${_NAME}.cc)
+      set (_CHECKS)
+
+      foreach (_MACRO IN LISTS NGLOG_UNPREFIXED_MACROS)
+        string (APPEND _CHECKS "#ifdef ${_MACRO}\n\
+#  error \"${_INCLUDE} defines ${_MACRO}, which conflicts with other \
+logging libraries\"\n#endif\n")
+      endforeach (_MACRO)
+
+      file (CONFIGURE OUTPUT ${_SOURCE} CONTENT
+        "#include <${_INCLUDE}>  // IWYU pragma: keep\n\n${_CHECKS}" @ONLY)
+      list (APPEND _SOURCES ${_SOURCE})
+    endforeach (_HEADER)
+
+    add_library (${_TARGET} OBJECT ${_SOURCES})
+    target_link_libraries (${_TARGET} PRIVATE ng-log_test)
+  endfunction (nglog_add_header_test)
+
+  nglog_add_header_test (macro_free_headers_unittest
+    src/ng-log/log_message.h
+    src/ng-log/log_setup.h
+    src/ng-log/log_severity.h
+    src/ng-log/log_sink.h
+  )
 
   add_executable (email_test_helper
     src/email_test_helper.cc
@@ -1488,6 +1550,13 @@ if (BUILD_TESTING AND GTest_FOUND)
   nglog_add_build_test (includes_logging
     SOURCE_DIR src/includes_unittest
     TARGET ng-log_includes_logging
+  )
+
+  # The program checks the value of NGLOG_DFATAL_LEVEL.
+  nglog_add_build_test (includes_log_severity
+    SOURCE_DIR src/includes_unittest
+    TARGET ng-log_includes_log_severity
+    TEST_COMMAND ng-log_includes_log_severity
   )
 
   nglog_add_build_test (includes_vlog_is_on

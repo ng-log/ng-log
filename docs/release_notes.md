@@ -62,6 +62,10 @@ SPDX-License-Identifier: BSD-3-Clause
 - End failure stack dumps cut off at 32 frames with
   `(More stack frames follow...)` instead of omitting the outer frames
   silently
+- Breaking change: `DFATAL_LEVEL` and `IF_DEBUG_MODE` are defined by
+  `ng-log/logging.h` instead of `ng-log/log_severity.h`. Code that uses them
+  must include `ng-log/logging.h` or use `NGLOG_DFATAL_LEVEL` and
+  `NGLOG_IF_DEBUG_MODE` of `ng-log/log_severity.h` instead
 - Prevent `RAW_LOG` from acquiring a lock while writing the thread identifier
   if a global locale other than the classic one is installed, which could
   deadlock in signal handlers
