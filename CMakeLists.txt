@@ -1777,6 +1777,7 @@ logging libraries\"\n#endif\n")
   nglog_add_build_test (flags_declaration
     SOURCE_DIR src/flags_declaration_unittest
     TARGET ng-log_flags_declaration
+    TEST_COMMAND ng-log_flags_declaration
   )
 
   nglog_add_build_test (flags_builtin_redeclaration
@@ -1794,6 +1795,11 @@ logging libraries\"\n#endif\n")
   )
   set_tests_properties (log_severity_constants PROPERTIES
     PASS_REGULAR_EXPRESSION "NGLOG_COMPACT_LOG_[1-3]"
+  )
+
+  nglog_add_build_test (log_severity_values
+    SOURCE_DIR src/log_severity_unittest
+    TARGET ng-log_log_severity_values
   )
 
   nglog_add_build_test (log_severity_conversion
@@ -1989,8 +1995,10 @@ logging libraries\"\n#endif\n")
   )
   set_tests_properties (dcheck_on PROPERTIES
     DISABLED $<NOT:$<CONFIG:Debug,RelWithDebInfo>>
-    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:ng-log>"
-    PASS_REGULAR_EXPRESSION "Assert failed: false"
+    # Every debug-only statement must produce its output in order. The build
+    # output is part of the test output, so match the log lines themselves.
+    PASS_REGULAR_EXPRESSION
+      "\nI[^\n]*\] no output\r?\nW[^\n]*\] no output\r?\nE[^\n]*\] no output\r?\nF[^\n]*\] Assert failed: false"
   )
 
   nglog_add_build_test (dcheck_off
@@ -2003,7 +2011,6 @@ logging libraries\"\n#endif\n")
   # is part of the test output, so match the messages themselves.
   set_tests_properties (dcheck_off PROPERTIES
     DISABLED $<NOT:$<CONFIG:Release,MinSizeRel>>
-    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:ng-log>"
     FAIL_REGULAR_EXPRESSION "no output;Assert failed"
   )
 endif (BUILD_TESTING AND GTest_FOUND)

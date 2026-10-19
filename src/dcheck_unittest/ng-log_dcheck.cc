@@ -5,9 +5,15 @@
 //
 // Author: Sergiu Deitsch
 
+#include <ng-log/flags.h>
 #include <ng-log/logging.h>
 
 int main(int /*argc*/, char** argv) {
+  // The test inspects the plain output of every severity on stderr. Colors
+  // would interleave escape sequences with the matched text where the output
+  // counts as a terminal, such as under Node.js.
+  nglog::SetFlag(FLAGS_logtostderr, true);
+  nglog::SetFlag(FLAGS_colorlogtostderr, false);
   nglog::InitializeLogging(argv[0]);
   nglog::InstallFailureSignalHandler();
 

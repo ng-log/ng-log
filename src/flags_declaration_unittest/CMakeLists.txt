@@ -25,3 +25,12 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options (ng-log_flags_declaration PRIVATE
     -Wall -Wextra -Wpedantic -Werror)
 endif (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+
+# Windows looks up the ng-log DLL next to the executable, which also works under
+# Wine where the search path of the build machine does not apply.
+if (WIN32)
+  add_custom_command (TARGET ng-log_flags_declaration POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy -t $<TARGET_FILE_DIR:ng-log_flags_declaration>
+      $<TARGET_RUNTIME_DLLS:ng-log_flags_declaration>
+    COMMAND_EXPAND_LISTS)
+endif (WIN32)
