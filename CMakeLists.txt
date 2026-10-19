@@ -2135,6 +2135,19 @@ logging libraries\"\n#endif\n")
     endforeach (_ng-log_CASE _ng-log_REASON)
   endif (HAVE_EXPERIMENTAL_LOGGING)
 
+  # Only GCC and Clang check printf-style formats. The expression matches the
+  # diagnostic of GCC or of Clang.
+  if (CMAKE_CXX_COMPILER_ID STREQUAL GNU OR
+      CMAKE_CXX_COMPILER_ID MATCHES Clang)
+    nglog_add_build_test (attribute_format
+      SOURCE_DIR src/attributes_unittest
+      TARGET ng-log_attribute_format
+      EXPECT_FAILURE
+        "format (‘|')%d(’|') expects argument of type (‘|')int(’|')|format specifies type 'int'"
+    )
+  endif (CMAKE_CXX_COMPILER_ID STREQUAL GNU OR
+    CMAKE_CXX_COMPILER_ID MATCHES Clang)
+
   nglog_add_build_test (includes_logging
     SOURCE_DIR src/includes_unittest
     TARGET ng-log_includes_logging
