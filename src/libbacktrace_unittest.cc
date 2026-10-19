@@ -8,11 +8,14 @@
 
 #include "libbacktrace.h"
 
+#include <backtrace.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
 #include <string>
 
 #include "config.h"
@@ -29,6 +32,9 @@ using testing::Not;
 namespace {
 
 constexpr int kLine = 42;
+// Fills output buffers before a call so that a test can tell whether the call
+// wrote to them.
+constexpr char kSentinel = 'X';
 
 }  // namespace
 
@@ -54,15 +60,10 @@ TEST(FormatLibbacktraceLocation, RejectsEmptyFilename) {
 }
 
 TEST(FormatLibbacktraceLocation, RejectsZeroSizedOutputBuffer) {
-  char out[64];
+  char out[] = {kSentinel};
   EXPECT_EQ(0U,
             FormatLibbacktraceLocation("src/libbacktrace.cc", kLine, out, 0));
-}
-
-TEST(FormatLibbacktraceLocation, RejectsWhenOutputDoesNotFit) {
-  char out[8];  // Too small for "src/libbacktrace.cc:42 " + '\0'.
-  EXPECT_EQ(0U, FormatLibbacktraceLocation("src/libbacktrace.cc", kLine, out,
-                                           sizeof(out)));
+  EXPECT_EQ(kSentinel, out[0]);
 }
 
 TEST(FormatLibbacktraceLocation, SucceedsWhenOutputExactlyFits) {
@@ -73,14 +74,20 @@ TEST(FormatLibbacktraceLocation, SucceedsWhenOutputExactlyFits) {
   EXPECT_STREQ(kExpected, out);
 }
 
+// A result that does not fit is not returned partially written.
 TEST(FormatLibbacktraceLocation, RejectsWhenOutputIsOneByteTooSmall) {
   constexpr char kExpected[] = "a.cc:1 ";
   char out[sizeof(kExpected) - 1];
+  std::fill(std::begin(out), std::end(out), kSentinel);
   EXPECT_EQ(0U, FormatLibbacktraceLocation("a.cc", 1, out, sizeof(out)));
+  EXPECT_EQ('\0', out[0]);
 }
 
 namespace {
 
+// The line on which the definition below starts, which the debug info
+// reports for the entry address of the function.
+constexpr int kSymbolizedFunctionLine = __LINE__ + 2;
 NGLOG_ATTRIBUTE_NOINLINE
 void FunctionSymbolizedForLibbacktraceTest() {
   volatile int a = 0;
@@ -91,11 +98,31 @@ void* SymbolizedFunctionAddress() {
   return reinterpret_cast<void*>(&FunctionSymbolizedForLibbacktraceTest);
 }
 
+// Defined so that its address can stand in for a program counter without a
+// source location.
+int g_data_without_location = 0;
+
+// Asks libbacktrace itself, bypassing the code under test, whether the debug
+// info of this binary names the source file of |pc|. It does not when the
+// binary was built without debug info.
+bool HasDebugInfo(void* pc) {
+  bool found = false;
+  backtrace_pcinfo(
+      GetBacktraceState(), reinterpret_cast<std::uintptr_t>(pc),
+      [](void* data, std::uintptr_t /*pc*/, const char* filename,
+         int /*lineno*/, const char* /*function*/) {
+        *static_cast<bool*>(data) = filename != nullptr;
+        return 1;
+      },
+      [](void* /*data*/, const char* /*msg*/, int /*errnum*/) {}, &found);
+  return found;
+}
+
 }  // namespace
 
-// Exercises LibbacktraceSymbolizeCallback through Symbolize(). Every test
-// installs the callback itself, so the fixture only restores the defaults
-// that main() establishes.
+// Exercises LibbacktraceSymbolizeCallback, mostly through Symbolize(). Every
+// test that needs the callback installs it itself, so the fixture only
+// restores the defaults that main() establishes.
 class LibbacktraceSymbolizeCallback : public testing::Test {
  protected:
   static bool InstallCallback(bool line_info) {
@@ -113,13 +140,18 @@ class LibbacktraceSymbolizeCallback : public testing::Test {
 };
 
 TEST_F(LibbacktraceSymbolizeCallback, ResolvesFileAndLine) {
-  EXPECT_TRUE(InstallCallback(true));
-  ASSERT_TRUE(Symbolize(SymbolizedFunctionAddress(), symbol_, sizeof(symbol_)));
-
-  if (!testing::Value(symbol_, HasSubstr("libbacktrace_unittest.cc:"))) {
+  if (!HasDebugInfo(SymbolizedFunctionAddress())) {
     GTEST_SKIP() << "libbacktrace has no debug info for this binary";
   }
-  EXPECT_THAT(symbol_, HasSubstr("FunctionSymbolizedForLibbacktraceTest"));
+
+  EXPECT_TRUE(InstallCallback(true));
+  ASSERT_TRUE(Symbolize(SymbolizedFunctionAddress(), symbol_, sizeof(symbol_)));
+  const std::string location =
+      "libbacktrace_unittest.cc:" + std::to_string(kSymbolizedFunctionLine) +
+      " ";
+  EXPECT_THAT(std::string{symbol_},
+              AllOf(HasSubstr(location),
+                    HasSubstr("FunctionSymbolizedForLibbacktraceTest")));
 }
 
 TEST_F(LibbacktraceSymbolizeCallback, DisabledByFlag) {
@@ -131,22 +163,32 @@ TEST_F(LibbacktraceSymbolizeCallback, DisabledByFlag) {
 }
 
 TEST_F(LibbacktraceSymbolizeCallback, NoDebugInfoForAddress) {
-  EXPECT_TRUE(InstallCallback(true));
-  // An address this low can never fall inside a loaded module, so
-  // backtrace_pcinfo() reports no location for it. Exercises the "not
-  // found" path in LibbacktraceSymbolizeCallback() the way a stack frame
-  // in a module without debug info would.
-  constexpr std::uintptr_t kUnmappedAddress = 0x1;
-  EXPECT_FALSE(Symbolize(reinterpret_cast<void*>(kUnmappedAddress), symbol_,
-                         sizeof(symbol_)));
+  nglog::SetFlag(FLAGS_symbolize_line_info, true);
+  // The address of data rather than code lies within this binary, but no line
+  // table of its debug info covers it, so backtrace_pcinfo() reports no
+  // location for it. Exercises the "not found" path in
+  // LibbacktraceSymbolizeCallback() the way a stack frame in a module without
+  // debug info would. An address below every loaded module does not do so
+  // reliably: with MinGW, libbacktrace attributes some of them to unrelated
+  // source lines.
+  void* const address = &g_data_without_location;
+  // The callback ignores both of these.
+  constexpr int kNoObjectFile = -1;
+  constexpr std::uint64_t kNoRelocation = 0;
+  std::fill(std::begin(symbol_), std::end(symbol_), kSentinel);
+  EXPECT_EQ(
+      0, nglog::LibbacktraceSymbolizeCallback(kNoObjectFile, address, symbol_,
+                                              sizeof(symbol_), kNoRelocation));
+  EXPECT_EQ(kSentinel, symbol_[0]);
 }
 
 // Tests for the SymbolizeAndDemangle() branch itself, exercised through
 // Symbolize() directly.
 
 TEST(Symbolize, RejectsZeroSizedOutputBuffer) {
-  char out[1];
+  char out[] = {kSentinel};
   EXPECT_FALSE(Symbolize(SymbolizedFunctionAddress(), out, 0));
+  EXPECT_EQ(kSentinel, out[0]);
 }
 
 TEST_F(LibbacktraceSymbolizeCallback, RejectsTruncatedSymbolName) {
