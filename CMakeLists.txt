@@ -1355,7 +1355,10 @@ logging libraries\"\n#endif\n")
       ADDR2LINE_FAKE_EMPTY_PATH="$<TARGET_FILE:addr2line_fake_empty>"
       ADDR2LINE_FAKE_FAIL_PATH="$<TARGET_FILE:addr2line_fake_fail>"
       ADDR2LINE_FAKE_SLOW_PATH="$<TARGET_FILE:addr2line_fake_slow>"
-      ADDR2LINE_FAKE_STREAM_PATH="$<TARGET_FILE:addr2line_fake_stream>")
+      ADDR2LINE_FAKE_STREAM_PATH="$<TARGET_FILE:addr2line_fake_stream>"
+      # Configurations whose default flags ask for debug info, which a test
+      # needs to expect file names and line numbers.
+      NGLOG_TEST_HAS_DEBUG_INFO=$<BOOL:$<CONFIG:Debug,RelWithDebInfo>>)
 
     if (WIN32)
       # Statically linked so the runtime DLLs of whichever toolchain
