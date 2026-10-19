@@ -61,6 +61,27 @@ TEST(StripLog, LogsExpectedSeverities) {
 #endif
 }
 
+#if !DCHECK_IS_ON()
+namespace {
+constexpr char kDebugMessage[] = "strip debug";
+}  // namespace
+
+// Compiled out debug logging must produce no output, even with verbose logging
+// enabled, and must compile when ERROR is defined as a macro.
+TEST(StripLog, DebugLoggingIsCompiledOut) {
+  const auto verbosity = GetFlag(FLAGS_v);
+  SetFlag(FLAGS_v, 1);
+  ScopedStreamCapture capture{StandardStream::kStderr};
+  DLOG(INFO) << kDebugMessage;
+  DLOG_IF(WARNING, true) << kDebugMessage;
+  DVLOG(1) << kDebugMessage;
+  const std::string output = capture.Stop();
+  SetFlag(FLAGS_v, verbosity);
+
+  EXPECT_THAT(output, Not(HasSubstr(kDebugMessage)));
+}
+#endif
+
 #ifdef GTEST_HAS_DEATH_TEST
 TEST(StripLog, FatalIsNotStripped) {
 #  if NGLOG_STRIP_LOG <= 3
@@ -82,10 +103,5 @@ int main(int argc, char* argv[]) {
   nglog::SetFlag(FLAGS_logtostderr, true);
   InitializeLogging(argv[0]);
   testing::InitGoogleTest(&argc, argv);
-#if !DCHECK_IS_ON()
-  DLOG(INFO) << "no debug output";
-  DLOG_IF(WARNING, true) << "no conditional debug output";
-  DVLOG(1) << "no verbose debug output";
-#endif
   return RUN_ALL_TESTS();
 }

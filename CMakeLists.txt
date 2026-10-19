@@ -1740,7 +1740,11 @@ logging libraries\"\n#endif\n")
   add_executable (striplog0_unittest
     src/striplog_unittest.cc
   )
-  target_compile_definitions (striplog0_unittest PRIVATE NGLOG_STRIP_LOG=0)
+  # Without stripping, only compiling out debug logging hides its output.
+  target_compile_definitions (striplog0_unittest PRIVATE
+    NDEBUG
+    NGLOG_STRIP_LOG=0
+  )
   target_link_libraries (striplog0_unittest PRIVATE ng-log_test)
 
   gtest_discover_tests (striplog0_unittest
