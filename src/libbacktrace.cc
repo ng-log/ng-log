@@ -97,6 +97,8 @@ int PcInfoCallback(void* data, uintptr_t /*pc*/, const char* filename,
   return 1;
 }
 
+}  // namespace
+
 // Resolves file name and line number for "pc" via backtrace_pcinfo() and
 // writes "<file>:<line> " to "out". "fd" and "relocation" are unused:
 // unlike Addr2LineSymbolizeCallback(), which needs the object file's path
@@ -125,8 +127,6 @@ int LibbacktraceSymbolizeCallback(int /*fd*/, void* pc, char* out,
                    &ErrorCallback, &ctx);
   return static_cast<int>(ctx.written);
 }
-
-}  // namespace
 
 bool InstallLibbacktraceSymbolizeCallback() {
   InstallSymbolizeCallback(&LibbacktraceSymbolizeCallback);

@@ -26,6 +26,7 @@
 #ifdef HAVE_LIBBACKTRACE
 
 #  include <cstddef>
+#  include <cstdint>
 
 #  include "ng-log/export.h"
 
@@ -40,12 +41,23 @@ NGLOG_NO_EXPORT
 backtrace_state* GetBacktraceState();
 
 // Formats "|filename|:|lineno| " into |out|. Returns the number of bytes
-// written, not including the terminating NUL. Returns 0 (and leaves |out|
-// untouched) if |filename| is null or empty, or if the formatted result
-// does not fit within |out_size|.
+// written, not including the terminating NUL. Returns 0 and leaves |out|
+// untouched if |filename| is null or empty or |out_size| is zero. Returns 0
+// and leaves an empty string in |out| if the formatted result does not fit
+// within |out_size|.
 NGLOG_NO_EXPORT
 std::size_t FormatLibbacktraceLocation(const char* filename, int lineno,
                                        char* out, std::size_t out_size);
+
+// The SymbolizeCallback (see symbolize.h) that
+// InstallLibbacktraceSymbolizeCallback() installs. Writes "<file>:<line> "
+// for |pc| to |out| and returns the number of bytes written. Returns 0 if
+// FLAGS_symbolize_line_info is disabled, libbacktrace reports no location
+// for |pc|, or the location does not fit within |out_size|.
+NGLOG_NO_EXPORT
+int LibbacktraceSymbolizeCallback(int fd, void* pc, char* out,
+                                  std::size_t out_size,
+                                  std::uint64_t relocation);
 
 // Installs a SymbolizeCallback (see symbolize.h) that resolves file names
 // and line numbers via libbacktrace. Returns true once the callback has
