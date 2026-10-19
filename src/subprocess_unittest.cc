@@ -10,11 +10,16 @@
 
 #include "subprocess.h"
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cstddef>
+#include <cstdlib>
+#include <memory>
+#include <ostream>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -23,7 +28,6 @@
 #include "ng-log/platform.h"
 
 #ifdef NGLOG_OS_WINDOWS
-#  include <gmock/gmock.h>
 #  include <process.h>
 #  include <windows.h>
 
@@ -33,13 +37,15 @@
 
 #  include "internal/utf8.h"
 #  include "long_path_test.h"
+#else
+#  include <sys/wait.h>
+#  include <unistd.h>
+
+#  include <csignal>
 #endif
 
 #if !defined(NGLOG_OS_WINDOWS) && defined(HAVE__FORK) && defined(HAVE_EXECV)
 #  include <pthread.h>
-#  include <unistd.h>
-
-#  include <csignal>
 #endif  // POSIX signal-safe subprocess support
 
 using namespace nglog;
@@ -56,8 +62,14 @@ constexpr std::chrono::milliseconds kTimeout = 60s;
 // termination ends.
 constexpr std::chrono::milliseconds kUnresponsiveTimeout = 100ms;
 
+// Bounds operations that must return right away instead of waiting for
+// their timeout, with room for a loaded machine.
+constexpr std::chrono::milliseconds kImmediateReturnBound = kTimeout / 6;
+
 // Large enough to hold the echoed message with room to spare.
 constexpr std::size_t kOutputBufferSize = 64;
+
+constexpr int kDecimalBase = 10;
 
 #if !defined(NGLOG_OS_WINDOWS)
 static_assert(noexcept(std::declval<Subprocess<>&>().Spawn(nullptr, nullptr)),
@@ -79,6 +91,7 @@ static_assert(std::is_nothrow_destructible<Subprocess<>>::value,
 char helper_path[] = SUBPROCESS_HELPER_PATH;
 char hang_flag[] = "--hang";
 char fail_flag[] = "--fail";
+char print_pid_and_hang_flag[] = "--print-pid-and-hang";
 
 template <SubprocessMode mode>
 struct SubprocessTestMode {
@@ -149,6 +162,110 @@ std::string ReadStdoutToEnd(Process& process) {
   return std::string(out, total_read);
 }
 
+#ifdef NGLOG_OS_WINDOWS
+using ProcessId = DWORD;
+#else
+using ProcessId = pid_t;
+#endif
+
+// Tracks a helper process independently of the Subprocess that spawned it and
+// terminates the helper on destruction if the Subprocess left it running.
+class ObservedProcess final {
+ public:
+#ifdef NGLOG_OS_WINDOWS
+  explicit ObservedProcess(ProcessId id)
+      : id_{id},
+        handle_{OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE, FALSE, id)} {}
+#else
+  explicit ObservedProcess(ProcessId id) : id_{id} {}
+#endif
+
+  ObservedProcess(const ObservedProcess&) = delete;
+  ObservedProcess& operator=(const ObservedProcess&) = delete;
+
+  ~ObservedProcess() {
+#ifdef NGLOG_OS_WINDOWS
+    if (handle_ != nullptr && !HasEnded()) {
+      TerminateProcess(handle_.get(), EXIT_FAILURE);
+      WaitForSingleObject(handle_.get(), INFINITE);
+    }
+#else
+    if (!HasEnded() && !collected_) {
+      kill(id_, SIGKILL);
+      int status = 0;
+      while (waitpid(id_, &status, 0) < 0 && errno == EINTR) {
+      }
+    }
+#endif
+  }
+
+  ProcessId id() const noexcept { return id_; }
+
+  // On Windows, true once the process has terminated. On POSIX, true once the
+  // process has terminated and its parent collected its exit status.
+  bool HasEnded() const {
+#ifdef NGLOG_OS_WINDOWS
+    return handle_ != nullptr &&
+           WaitForSingleObject(handle_.get(), 0) == WAIT_OBJECT_0;
+#else
+    if (collected_) {
+      return false;
+    }
+    int status = 0;
+    pid_t result;
+    while ((result = waitpid(id_, &status, WNOHANG)) < 0 && errno == EINTR) {
+    }
+    if (result == id_) {
+      // The process had terminated without its parent collecting it.
+      collected_ = true;
+      return false;
+    }
+    return result < 0 && errno == ECHILD;
+#endif
+  }
+
+ private:
+  ProcessId id_;
+#ifdef NGLOG_OS_WINDOWS
+  UniqueHandle handle_;
+#else
+  // Set once this observer rather than the Subprocess collected the process.
+  mutable bool collected_ = false;
+#endif
+};
+
+void PrintTo(const ObservedProcess& process, std::ostream* os) {
+  *os << "process " << process.id();
+}
+
+MATCHER(HasEnded, "has ended") { return arg.HasEnded(); }
+
+// Reads the process identifier that the helper started with
+// |print_pid_and_hang_flag| reports on its first line of output.
+template <typename Process>
+::testing::AssertionResult ReadHelperProcessId(Process& process,
+                                               ProcessId* id) {
+  std::string line;
+  char character = '\0';
+  while (process.ReadStdout(&character, 1, kTimeout) == 1) {
+    if (character == '\n') {
+      char* end = nullptr;
+      const unsigned long value =
+          std::strtoul(line.c_str(), &end, kDecimalBase);
+      if (end == line.c_str()) {
+        return ::testing::AssertionFailure()
+               << "expected a process identifier but got \"" << line << '"';
+      }
+      *id = static_cast<ProcessId>(value);
+      return ::testing::AssertionSuccess();
+    }
+    line += character;
+  }
+  return ::testing::AssertionFailure()
+         << "expected a line with a process identifier but got \"" << line
+         << "\" before the output ended";
+}
+
 #if !defined(NGLOG_OS_WINDOWS) && defined(HAVE__FORK) && defined(HAVE_EXECV)
 volatile sig_atomic_t atfork_prepare_called = 0;
 
@@ -197,18 +314,23 @@ TYPED_TEST(SubprocessTest, EchoesStdinToStdout) {
 
 TYPED_TEST(SubprocessTest, WaitTerminatesAnUnresponsiveProcess) {
   typename TestFixture::Process process;
-  char* argv[] = {helper_path, hang_flag, nullptr};
+  char* argv[] = {helper_path, print_pid_and_hang_flag, nullptr};
   char* envp[] = {nullptr};
 
   ASSERT_TRUE(process.Spawn(argv, envp));
 
   process.CloseStdin();
 
+  ProcessId id = 0;
+  ASSERT_TRUE(ReadHelperProcessId(process, &id));
+  const ObservedProcess helper{id};
+
   // The helper never exits on its own with --hang. This must return
   // promptly, having forcibly terminated it, rather than hanging the
   // test itself.
   const auto result = process.Wait(kUnresponsiveTimeout);
   EXPECT_EQ(nglog::SubprocessWaitResult::kTimedOut, result.status);
+  EXPECT_THAT(helper, HasEnded());
 }
 
 TYPED_TEST(SubprocessTest, WaitReportsUnsuccessfulExit) {
@@ -449,11 +571,16 @@ TYPED_TEST(SubprocessTest, OperatorBoolReflectsSpawnState) {
 TYPED_TEST(SubprocessTest, OperationsOnAnUnspawnedInstanceAreNoOps) {
   typename TestFixture::Process process;
   char out[kOutputBufferSize];
+  const auto start = std::chrono::steady_clock::now();
   EXPECT_EQ(0U, process.ReadStdout(out, sizeof(out), kTimeout));
   EXPECT_EQ(0U, process.WriteStdin("x", 1, kTimeout));
   process.CloseStdin();
   const auto result = process.Wait(kTimeout);
+  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - start);
   EXPECT_EQ(nglog::SubprocessWaitResult::kFailed, result.status);
+  // None of the operations has a process to wait for.
+  EXPECT_LT(elapsed.count(), kImmediateReturnBound.count());
 }
 
 TYPED_TEST(SubprocessTest, WriteStdinReturnsZeroOnceAfterCloseStdin) {
@@ -510,13 +637,18 @@ TYPED_TEST(SubprocessTest, MoveAssignmentReplacesAndReapsThePreviousProcess) {
   using Process = typename TestFixture::Process;
 
   char* argv[] = {helper_path, hang_flag, nullptr};
+  char* observed_argv[] = {helper_path, print_pid_and_hang_flag, nullptr};
   char* envp[] = {nullptr};
 
   Process first;
   ASSERT_TRUE(first.Spawn(argv, envp));
 
   Process second;
-  ASSERT_TRUE(second.Spawn(argv, envp));
+  ASSERT_TRUE(second.Spawn(observed_argv, envp));
+
+  ProcessId id = 0;
+  ASSERT_TRUE(ReadHelperProcessId(second, &id));
+  const ObservedProcess replaced{id};
 
   // Overwriting |second| while it still owns a running (hung) process
   // must terminate that process rather than leaking it, and take over
@@ -524,20 +656,30 @@ TYPED_TEST(SubprocessTest, MoveAssignmentReplacesAndReapsThePreviousProcess) {
   second = std::move(first);
   EXPECT_FALSE(first);
   EXPECT_TRUE(second);
+  EXPECT_THAT(replaced, HasEnded());
 
   second.CloseStdin();
   second.Wait(kUnresponsiveTimeout);
 }
 
 TYPED_TEST(SubprocessTest, DestructorReapsAStillRunningProcess) {
-  typename TestFixture::Process process;
-  char* argv[] = {helper_path, hang_flag, nullptr};
+  char* argv[] = {helper_path, print_pid_and_hang_flag, nullptr};
   char* envp[] = {nullptr};
+  // Outlives the Subprocess and starts observing while the helper still runs.
+  std::unique_ptr<ObservedProcess> helper;
 
-  // Never explicitly Wait()ed on. The destructor must terminate and
-  // reap the child rather than leaking it or hanging.
-  ASSERT_TRUE(process.Spawn(argv, envp));
-  process.CloseStdin();
+  {
+    // Never explicitly Wait()ed on. The destructor must terminate and
+    // reap the child rather than leaking it or hanging.
+    typename TestFixture::Process process;
+    ASSERT_TRUE(process.Spawn(argv, envp));
+    process.CloseStdin();
+    ProcessId id = 0;
+    ASSERT_TRUE(ReadHelperProcessId(process, &id));
+    helper = std::make_unique<ObservedProcess>(id);
+  }
+
+  EXPECT_THAT(*helper, HasEnded());
 }
 
 TYPED_TEST(SubprocessTest, WriteStdinTimesOutOnceThePipeFillsUp) {
