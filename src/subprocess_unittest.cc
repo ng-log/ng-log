@@ -29,6 +29,7 @@
 
 #  include <array>
 #  include <cstring>
+#  include <thread>
 #  include <vector>
 
 #  include "internal/utf8.h"
@@ -297,7 +298,61 @@ std::vector<char> MutableCString(const std::string& text) {
   return ::testing::AssertionSuccess();
 }
 
+// Deletes an executable whose process has exited. Waiting for the exit does
+// not guarantee that Windows has unmapped its image already. The image stays
+// in use for as long as any process, such as a console host or a virus
+// scanner, still holds a handle to the exited process or to the file itself.
+::testing::AssertionResult DeleteExecutable(const std::wstring& path) {
+  constexpr std::chrono::milliseconds kRetryInterval = 10ms;
+  const auto deadline = std::chrono::steady_clock::now() + kTimeout;
+  for (;;) {
+    if (DeleteFileW(path.c_str())) {
+      return ::testing::AssertionSuccess();
+    }
+    const DWORD error = GetLastError();
+    if ((error != ERROR_ACCESS_DENIED && error != ERROR_SHARING_VIOLATION) ||
+        std::chrono::steady_clock::now() >= deadline) {
+      return ::testing::AssertionFailure() << "DeleteFileW error " << error;
+    }
+    std::this_thread::sleep_for(kRetryInterval);
+  }
+}
+
 }  // namespace
+
+TEST(Subprocess, DeletesExecutableOnceItsImageIsReleased) {
+  const std::string helper_path = SUBPROCESS_HELPER_PATH;
+  std::wstring source_path;
+  ASSERT_TRUE(nglog::internal::Utf8ToWide(helper_path.data(),
+                                          helper_path.size(), &source_path));
+  std::array<wchar_t, MAX_PATH> temporary_directory = {};
+  ASSERT_NE(GetTempPathW(static_cast<DWORD>(temporary_directory.size()),
+                         temporary_directory.data()),
+            0U);
+  std::wstring copied_path;
+  const std::string copied_name = nglog::testing_internal::UniqueTemporaryName(
+      "nglog_subprocess_released_");
+  ASSERT_TRUE(nglog::internal::Utf8ToWide(copied_name.data(),
+                                          copied_name.size(), &copied_path));
+  copied_path = temporary_directory.data() + copied_path + L".exe";
+  ASSERT_TRUE(CopyFileW(source_path.c_str(), copied_path.c_str(), FALSE));
+
+  std::string executable_path;
+  ASSERT_TRUE(nglog::internal::WideToUtf8(
+      copied_path.data(), copied_path.size(), &executable_path));
+  std::vector<char> executable = MutableCString(executable_path);
+  char* argv[] = {executable.data(), hang_flag, nullptr};
+  char* envp[] = {nullptr};
+  Subprocess<> process;
+  ASSERT_TRUE(process.Spawn(argv, envp));
+
+  // Windows keeps the image of an exited process mapped for as long as any
+  // handle to that process remains open, possibly in another process. The
+  // forced termination releases the image only after the deletion started.
+  std::thread releaser{[&process] { process.Wait(kUnresponsiveTimeout); }};
+  EXPECT_TRUE(DeleteExecutable(copied_path));
+  releaser.join();
+}
 
 TEST(Subprocess, SpawnsFromUtf8ExecutablePath) {
   std::string temporary_path;
@@ -324,7 +379,7 @@ TEST(Subprocess, SpawnsFromUtf8ExecutablePath) {
   char* argv[] = {executable.data(), nullptr};
   char* envp[] = {nullptr};
   EXPECT_TRUE(SpawnAndReap(argv, envp));
-  EXPECT_TRUE(DeleteFileW(copied_path.c_str()));
+  EXPECT_TRUE(DeleteExecutable(copied_path));
   EXPECT_TRUE(RemoveDirectoryW(wide_directory.c_str()));
 }
 
@@ -408,7 +463,7 @@ TEST(Subprocess, ResolvesExecutableBeyondMaxPath) {
   const ::testing::AssertionResult spawned =
       SpawnAndReap(argv, envp, &spawn_error);
   if (!spawned) {
-    EXPECT_TRUE(DeleteFileW(copied_helper.c_str()));
+    EXPECT_TRUE(DeleteExecutable(copied_helper));
     if (spawn_error == ERROR_INVALID_NAME &&
         nglog::testing_internal::IsWine()) {
       GTEST_SKIP() << "Wine does not launch executables through extended paths";
@@ -424,7 +479,7 @@ TEST(Subprocess, ResolvesExecutableBeyondMaxPath) {
   DWORD explicit_spawn_error = ERROR_SUCCESS;
   const ::testing::AssertionResult explicit_spawned =
       SpawnAndReap(explicit_argv, envp, &explicit_spawn_error);
-  EXPECT_TRUE(DeleteFileW(copied_helper.c_str()));
+  EXPECT_TRUE(DeleteExecutable(copied_helper));
   if (!explicit_spawned && explicit_spawn_error == ERROR_INVALID_NAME &&
       nglog::testing_internal::IsWine()) {
     GTEST_SKIP() << "Wine does not launch executables through extended paths";
