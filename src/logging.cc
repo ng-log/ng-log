@@ -2738,12 +2738,41 @@ static const char kDontNeedShellEscapeChars[] =
     "abcdefghijklmnopqrstuvwxyz"
     "0123456789+-_.=/:,@";
 
+#  ifdef NGLOG_OS_WINDOWS
+// Quotes an argument so that the C runtime of the started program parses it
+// back unchanged. The command interpreter does not recognize single quotes.
+static std::string QuoteWindowsArgument(const std::string& src) {
+  std::string result{"\""};
+  std::size_t backslashes = 0;
+  for (const char ch : src) {
+    if (ch == '\\') {
+      ++backslashes;
+      continue;
+    }
+    result.append(backslashes, '\\');
+    backslashes = 0;
+    if (ch == '\"') {
+      result += '\\';
+    }
+    result += ch;
+  }
+  result.append(backslashes * 2, '\\');
+  result += '\"';
+  return result;
+}
+#  endif
+
 static string ShellEscape(const string& src) {
   string result;
   if (!src.empty() &&  // empty string needs quotes
       src.find_first_not_of(kDontNeedShellEscapeChars) == string::npos) {
     // only contains chars that don't need quotes; it's fine
     result.assign(src);
+#  ifdef NGLOG_OS_WINDOWS
+  } else {
+    result = QuoteWindowsArgument(src);
+  }
+#  else
   } else if (src.find_first_of('\'') == string::npos) {
     // no single quotes; just wrap it in single quotes
     result.assign("'");
@@ -2764,28 +2793,13 @@ static string ShellEscape(const string& src) {
     }
     result.append("\"");
   }
+#  endif
   return result;
 }
 
 static std::string ShellEscapeExecutable(const std::string& src) {
 #  ifdef NGLOG_OS_WINDOWS
-  std::string result{"\""};
-  std::size_t backslashes = 0;
-  for (const char ch : src) {
-    if (ch == '\\') {
-      ++backslashes;
-      continue;
-    }
-    result.append(backslashes, '\\');
-    backslashes = 0;
-    if (ch == '\"') {
-      result += '\\';
-    }
-    result += ch;
-  }
-  result.append(backslashes * 2, '\\');
-  result += '\"';
-  return result;
+  return QuoteWindowsArgument(src);
 #  else
   return ShellEscape(src);
 #  endif
@@ -2873,6 +2887,12 @@ static bool SendEmailInternal(const char* dest, const char* subject,
 
     std::string cmd =
         logmailer + " -s" + ShellEscape(subject) + " " + ShellEscape(dest);
+#  ifdef NGLOG_OS_WINDOWS
+    // The command interpreter removes the first and the last quote of a
+    // command with more than two quotes. Enclose the command in another pair
+    // to keep the quotes of the executable and its arguments.
+    cmd = "\"" + cmd + "\"";
+#  endif
     if (use_logging) {
       VLOG(4) << "Mailing command: " << cmd;
     }
