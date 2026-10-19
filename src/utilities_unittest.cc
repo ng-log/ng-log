@@ -119,6 +119,7 @@ using namespace nglog;
 using testing::AllOf;
 using testing::Contains;
 using testing::ElementsAreArray;
+using testing::HasSubstr;
 using testing::IsEmpty;
 using testing::Not;
 using testing::StartsWith;
@@ -327,13 +328,39 @@ TEST(utilities, NonAsciiUserEnvironmentIsUtf8) {
 
 #ifdef GTEST_HAS_DEATH_TEST
 TEST(utilities, InitializeLoggingDeathTest) {
-  ASSERT_DEATH(InitializeLogging("foobar"), "");
+  ASSERT_DEATH(InitializeLogging("foobar"),
+               HasSubstr("You called InitializeLogging() twice!"));
 }
+
+namespace {
+
+// Reports the test directory of the calling process between delimiters.
+[[noreturn]] void ReportTestTmpDirAndExit() {
+  std::fprintf(stderr, "test directory [%s]\n", TestTmpDir().c_str());
+  std::exit(EXIT_SUCCESS);
+}
+
+}  // namespace
 #endif
 
 TEST(TestTmpDir, IsPrivateToTheProcess) {
   EXPECT_NE(TestTmpDir(), SystemTmpDir());
   EXPECT_THAT(TestTmpDir(), StartsWith(SystemTmpDir()));
+
+#ifdef GTEST_HAS_DEATH_TEST
+  // Forking would inherit the directory of this process, whereas the
+  // threadsafe style runs the death test in a newly started process.
+#  ifdef GTEST_FLAG_SET
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+#  else
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+#  endif
+  const std::string own_directory = TestTmpDir();
+  EXPECT_EXIT(ReportTestTmpDirAndExit(),
+              ::testing::ExitedWithCode(EXIT_SUCCESS),
+              AllOf(HasSubstr("test directory [" + SystemTmpDir()),
+                    Not(HasSubstr("test directory [" + own_directory + "]"))));
+#endif
 }
 
 TEST(utilities, MakeLogFilename) {
@@ -403,6 +430,11 @@ TEST(utilities, TrimTrailingCharacters) {
             "message");
   EXPECT_EQ(nglog::TrimTrailingCharacters("message", " \t"), "message");
   EXPECT_EQ(nglog::TrimTrailingCharacters(" \t", delimiters), "");
+
+  // The terminating NUL of a string literal is not one of the characters.
+  const std::string message_with_nul("message\0", sizeof("message"));
+  EXPECT_EQ(nglog::TrimTrailingCharacters(message_with_nul, " \t"),
+            message_with_nul);
 }
 
 #if defined(NGLOG_OS_WINDOWS) && defined(HAVE_GET_THREAD_DESCRIPTION)
