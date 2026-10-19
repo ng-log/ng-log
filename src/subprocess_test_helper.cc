@@ -7,11 +7,12 @@
 // A tiny, dependency-free companion program for subprocess_unittest.cc. With no
 // arguments, copies stdin to stdout until EOF. With "--hang", never exits on
 // its own, to exercise Subprocess::Wait()'s forced termination. With
-// "--echo-arg", writes the following argument to stdout. With "--fail", exits
-// unsuccessfully. Kept
-// independent of ng-log/the platform port so it builds identically, without
-// relying on a shell or OS-shipped utility being present, on every platform
-// Subprocess itself supports.
+// "--print-pid-and-hang", first writes its process identifier on a line of its
+// own to stdout and then never exits on its own, so tests can verify that it
+// was terminated. With "--echo-arg", writes the following argument to stdout.
+// With "--fail", exits unsuccessfully. Kept independent of ng-log/the platform
+// port so it builds identically, without relying on a shell or OS-shipped
+// utility being present, on every platform Subprocess itself supports.
 
 #include <chrono>
 #include <cstdio>
@@ -24,17 +25,38 @@
 #  include <string>
 #  include <utility>
 #  include <vector>
+#else
+#  include <unistd.h>
 #endif
 
 namespace {
 constexpr std::size_t kBufferSize = 4096;
+
+[[noreturn]] void Hang() {
+  for (;;) {
+    std::this_thread::sleep_for(std::chrono::hours{1});
+  }
+}
+
+unsigned long CurrentProcessId() {
+#ifdef _WIN32
+  return GetCurrentProcessId();
+#else
+  return static_cast<unsigned long>(getpid());
+#endif
+}
+
 }  // namespace
 
 int Run(int argc, const char* const* argv) {
   if (argc > 1 && std::strcmp(argv[1], "--hang") == 0) {
-    for (;;) {
-      std::this_thread::sleep_for(std::chrono::hours{1});
-    }
+    Hang();
+  }
+
+  if (argc > 1 && std::strcmp(argv[1], "--print-pid-and-hang") == 0) {
+    std::printf("%lu\n", CurrentProcessId());
+    std::fflush(stdout);
+    Hang();
   }
 
   if (argc == 3 && std::strcmp(argv[1], "--echo-arg") == 0) {
