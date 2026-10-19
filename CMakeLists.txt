@@ -1103,7 +1103,7 @@ logging libraries\"\n#endif\n")
   add_test (NAME flags.environment COMMAND flags_environment_unittest)
   set_tests_properties (flags.environment PROPERTIES
     ENVIRONMENT
-      "NGLOG_logtostderr=1;NGLOG_log_prefix=FaLsE;NGLOG_log_year_in_prefix=not-a-boolean;NGLOG_v=0x10;NGLOG_logfile_mode=0600"
+      "NGLOG_logtostderr=1;NGLOG_log_prefix=FaLsE;NGLOG_log_year_in_prefix=not-a-boolean;NGLOG_alsologtostderr=bogus;NGLOG_v=0x10;NGLOG_logfile_mode=0600;NGLOG_symbolize_file_base_path=/opt/source tree"
   )
 
   # Separate copies of ng-log coordinate their flag names only where the
@@ -1165,6 +1165,17 @@ logging libraries\"\n#endif\n")
     TEST_PREFIX flags.
     DISCOVERY_TIMEOUT 30
   )
+
+  if (NOT WIN32)
+    # The temporary directory must be in place before static initialization.
+    add_test (NAME flags.temporary_directory COMMAND
+      ${CMAKE_COMMAND}
+      -DFLAGS_UNITTEST=$<TARGET_FILE:flags_unittest>
+      "-DEMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
+      -DFILTER=Flags.ProcessFlagRegistry*
+      -DTEST_DIR=${ng-log_BINARY_DIR}/flags_temporary_directory
+      -P ${ng-log_SOURCE_DIR}/cmake/RunFlagsTemporaryDirectoryTest.cmake)
+  endif (NOT WIN32)
 
   add_executable (flags_static_initialization_unittest
     src/flags_static_initialization_unittest.cc

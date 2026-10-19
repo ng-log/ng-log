@@ -265,9 +265,10 @@ TEST(FlagLibraryCopies, DetectionSurvivesClosedDescriptors) {
       "defined more than once");
 }
 
-// Maps a regular file whose path contains the name of the anchor and whose
-// content is an address that is not valid. Using the file as the anchor would
-// crash.
+// Maps a regular file whose path contains the name of the anchor. Its content
+// is the aligned address of an inaccessible page, which passes the validation
+// of an anchor on Linux. Using the file as the anchor would therefore read a
+// registry at that address and crash.
 void MapLookalikeFile() {
   char directory[] = "/tmp/nglog-lookalike-XXXXXX";
   if (mkdtemp(directory) == nullptr) {
@@ -282,13 +283,16 @@ void MapLookalikeFile() {
   void* const memory = mmap(nullptr, sizeof(std::uintptr_t),
                             PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
   close(fd);
-  if (memory != MAP_FAILED) {
-    constexpr std::uintptr_t kInvalidAddress = 1;
-    *static_cast<std::uintptr_t*>(memory) = kInvalidAddress;
+  const auto page_size = static_cast<std::size_t>(sysconf(_SC_PAGESIZE));
+  void* const inaccessible =
+      mmap(nullptr, page_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (memory != MAP_FAILED && inaccessible != MAP_FAILED) {
+    *static_cast<std::uintptr_t*>(memory) =
+        reinterpret_cast<std::uintptr_t>(inaccessible);
   }
   unlink(path.c_str());
   rmdir(directory);
-  if (memory == MAP_FAILED) {
+  if (memory == MAP_FAILED || inaccessible == MAP_FAILED) {
     std::exit(kLoadFailure);
   }
 }
