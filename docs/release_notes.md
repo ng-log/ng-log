@@ -11,84 +11,81 @@ SPDX-License-Identifier: BSD-3-Clause
 
 ### 0.9.0 <small>TBD</small> { id="0.9.0" }
 
-- Resolve source file names and line numbers in stack traces via
-  [`addr2line` or `libbacktrace`](failures.md#resolving-file-names-and-line-numbers)
-- [Colorize](flags.md#colorizing-output) log output and crash stack traces on
-  a terminal by default, with hyperlinked `file:line` references
-- Remove the glog compatibility layer
-- Add opt-in [experimental logging functions](logging/experimental.md) based on
-  `std::format` and `std::source_location` with output identical to the
-  macros. User-extensible attributes select severity, Android log tag,
-  verbosity, rate limit and destination. Requires C++20
-- Replace the optional gflags dependency with a built-in typed
-  [flag registry](flags.md#public-flags-api). `FLAGS_name` is now a
-  synchronized flag object that is read with `nglog::GetFlag` and updated with
-  `nglog::SetFlag`. Flags can be used before `main` and during program
-  termination. Options must start with two dashes, and `logfile_mode` is an
-  `nglog::FileMode` written in octal
-- Remove Bazel build support
-- Prevent concurrent log writers from blocking during memory-drop maintenance
-- Prevent concurrent logfile writes on Windows
-- Make log cleanup work with non-ASCII Windows directories
-- Breaking change: require UTF-8 encoding for all Windows file and directory
-  path arguments
-- Use UTF-8 log messages with Unicode Windows console and debugger output
-- Prevent `TruncateLogFile` from corrupting log files with line breaks on
-  Windows
-- Avoid UTF-16 conversion for ASCII Windows paths shorter than `MAX_PATH`
-  without namespace prefixes and for ASCII console output
-- Support Windows paths longer than `MAX_PATH` without requiring callers to
-  add extended-length path prefixes
-- Support POSIX log paths longer than `PATH_MAX` through descriptor-relative
-  filesystem operations
-- Breaking change: require Windows 8 or Windows Server 2012 or later
-- Breaking change: require CMake 3.28 or later to build and consume ng-log
-- Breaking change: the CMake package is only compatible with requests for the
-  same minor version
-- Omit the default header format when a custom prefix formatter is installed
-- Improve suppressed logging performance by avoiding message construction and
-  reduce overhead when formatting default prefixes
-- Improve logging throughput for applications that log from multiple threads
-- Allow sink callbacks to run concurrently and safely perform nested logging
-- Include the current thread name in failure signal reports when available
-- Use the signal-safe Itanium parser by default and expose complete system
-  demangling on demand
-- Create shell shortcuts named `<basename>.<severity>.lnk` that point to the
-  latest log files on Windows, also in the `log_link` directory
-- Support `TruncateStdoutStderr` on Windows when standard output or standard
-  error is redirected to a file
-- Use UTF-8 Windows user names in log file names
-- Look up the user name from the system when the `USER` or `USERNAME`
-  environment variable is empty
-- `IsFailureSignalHandlerInstalled` reports whether
-  `InstallFailureSignalHandler` was called, regardless of later changes to the
-  signal dispositions
-- End failure stack dumps cut off at 32 frames with
-  `(More stack frames follow...)` instead of omitting the outer frames
-  silently
-- Breaking change: `DFATAL_LEVEL` and `IF_DEBUG_MODE` are defined by
-  `ng-log/logging.h` instead of `ng-log/log_severity.h`, which also removes
-  them from `ng-log/raw_logging.h`. Code that uses them must include
-  `ng-log/logging.h` or use `NGLOG_DFATAL_LEVEL` and `NGLOG_IF_DEBUG_MODE` of
-  `ng-log/log_severity.h` instead
-- Prevent `RAW_LOG` from acquiring a lock while writing the thread identifier
-  if a global locale other than the classic one is installed, which could
-  deadlock in signal handlers
-- Prevent `RAW_LOG` from dropping the last character or the newline of a
-  message that exactly fills its buffer
-- Prevent `VLOG` call sites reached by several threads at once from
-  rewriting their cached verbosity while other threads read it, which was a
-  data race
-
 !!! warning "Compatibility"
-    If your application depends on glog compatibility, use the 0.8.x series.
-    It will receive updates until 0.10.0 is released.
+    Use the 0.8.x series for glog compatibility. It receives updates until
+    0.10.0.
 
 !!! info "Planned deprecation of the logging macros"
     The [experimental logging functions](logging/experimental.md) are planned
-    to supersede the macros in 0.10.0, after which the macros would be
-    deprecated and eventually removed. Nothing is deprecated yet and the plan
-    may change.
+    to supersede the macros in 0.10.0, which would then be deprecated and
+    eventually removed. Nothing is deprecated yet and the plan may change.
+
+#### Breaking changes
+
+- Remove the glog compatibility layer
+- Replace gflags with a built-in typed
+  [flag registry](flags.md#public-flags-api). Access `FLAGS_name` through
+  `nglog::GetFlag` and `nglog::SetFlag`. Options require two leading dashes.
+  `logfile_mode` takes an octal `nglog::FileMode`
+- Require CMake 3.28
+- Remove Bazel support
+- Require UTF-8 for Windows path arguments
+- Require Windows 8 or Windows Server 2012
+- Restrict CMake package compatibility to the same minor version
+- Move `DFATAL_LEVEL` and `IF_DEBUG_MODE` to `ng-log/logging.h`.
+  `ng-log/log_severity.h` provides `NGLOG_DFATAL_LEVEL` and
+  `NGLOG_IF_DEBUG_MODE`
+
+#### Features
+
+- Resolve file names and line numbers in stack traces via
+  [`addr2line` or `libbacktrace`](failures.md#resolving-file-names-and-line-numbers)
+- [Colorize](flags.md#colorizing-output) terminal output and crash stack traces
+  by default, with hyperlinked `file:line` references
+- Add opt-in C++20 [experimental logging functions](logging/experimental.md)
+  based on `std::format` and `std::source_location`. Extensible attributes
+  select severity, Android log tag, verbosity, rate limit and destination
+- Skip message construction for suppressed log statements and reduce lock
+  contention
+- Run sink callbacks concurrently and allow logging from them
+- Mark stack dumps truncated at 32 frames with `(More stack frames follow...)`
+  by [@devtejasx]
+- Report thread names in failure signal dumps
+- Default to the async-signal-safe Itanium demangler, with system demangling
+  on demand
+  and parser fixes by [@devtejasx]
+- Support paths beyond `MAX_PATH` on Windows and `PATH_MAX` on POSIX
+- Allow flag access before `main` and during termination
+- Write UTF-8 log messages to the Windows console and debugger
+- Create Windows log links as `<basename>.<severity>.lnk` shell shortcuts
+- Support `TruncateStdoutStderr` on Windows for output redirected to files
+- Route Emscripten output to console targets by severity
+- Install an SPDX SBOM with CMake versions that support it
+
+#### Bug fixes
+
+- Fix a `RAW_LOG` deadlock in signal handlers under a non-classic global
+  locale
+- Fix an out-of-bounds read when flushing an empty message
+- Reject malformed ELF symbol tables
+- Fix a data race between `EnableLogCleaner` and logging threads by [@devtejasx]
+- Fix a data race on concurrent initialization of `VLOG` call sites
+- Serialize log file creation across processes on Windows
+- Fix `TruncateLogFile` corrupting log files with line breaks on Windows
+- Fix `RAW_LOG` truncating messages that exactly fill its buffer
+- Deliver email outside the logging lock
+- Make Windows log file handles non-inheritable
+- Fix log cleanup in non-ASCII Windows directories by [@devtejasx]
+- Encode Windows user names in log file names as UTF-8
+- Fall back to the system user name if `USER` or `USERNAME` is empty
+- Omit the default format line from log file headers with a custom prefix
+  formatter by [@devtejasx]
+- Keep `IsFailureSignalHandlerInstalled` independent of later signal
+  disposition changes
+- Keep `BUILD_SHARED_LIBS` from changing the library type of embedding
+  projects
+
+[@devtejasx]: https://github.com/devtejasx
 
 ### 0.8.4 <small>August 15, 2026</small> { id="0.8.4" }
 
