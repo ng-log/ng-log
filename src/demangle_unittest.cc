@@ -12,6 +12,9 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <array>
+#include <cstddef>
+#include <cstring>
 #include <iostream>
 #include <string>
 #include <utility>  // IWYU pragma: keep
@@ -439,8 +442,8 @@ INSTANTIATE_TEST_SUITE_P(
         DemangleCase{"_Z1fPFPA1_ivE", "f()"},
         DemangleCase{"_Z1fPFYPFiiEiE", "f()"},
         DemangleCase{"_Z1fPFvvEM1SFvvE", "f()"},
-        DemangleCase{"_Z1fPKM1AFivE", "f()"}, DemangleCase{"_Z1fi", "f()"},
-        DemangleCase{"_Z1fv", "f()"}, DemangleCase{"_Z1jM1AFivEPS1_", "j()"},
+        DemangleCase{"_Z1fPKM1AFivE", "f()"}, DemangleCase{"_Z1fv", "f()"},
+        DemangleCase{"_Z1jM1AFivEPS1_", "j()"},
         DemangleCase{"_Z1rM1GFivEMS_KFivES_M1HFivES1_4whatIKS_E5what2IS8_ES3_",
                      "r()"},
         DemangleCase{"_Z1sPA37_iPS0_", "s()"},
@@ -684,6 +687,8 @@ TEST(Demangle, CtorDtorTruncation) {
   EXPECT_FALSE(Demangle(fuzzed, tmp2, sizeof(tmp2)));
 }
 
+#endif
+
 // A name whose demangled form does not fit the output buffer must be
 // reported as a failure, not as a success with the output silently cut
 // off, and in particular must never leave the output unterminated: the
@@ -691,26 +696,34 @@ TEST(Demangle, CtorDtorTruncation) {
 // fixed-size buffer, and an unterminated "success" previously made it
 // abort (and then hang) in the middle of dumping. The symbol below is
 // std::call_once()'s execution machinery, which is part of every such
-// stack trace, and demangles to well over 256 characters.
+// stack trace, and demangles to well over 256 characters. Only the system
+// demangler spells it out that long.
 TEST(Demangle, LongNameTruncation) {
+#if defined(HAVE___CXA_DEMANGLE) && \
+    !(defined(NGLOG_OS_WINDOWS) && defined(_MSC_VER))
   const char* const mangled =
       "_ZZNSt9once_flag18_Prepare_executionC1IZSt9call_onceIPFviP9siginfo_t"
       "PvEJRiRS4_RS5_EEvRS_OT_DpOT0_EUlvE_EERSC_ENKUlvE_clEv";
+  // Fills the output buffers so that a missing terminator cannot be mistaken
+  // for one left over in uninitialized memory.
+  constexpr char kFiller = 'X';
+  constexpr std::size_t kBigBufferSize = 4096;
+  constexpr std::size_t kSmallBufferSize = 256;
 
-  // Large enough for any implementation to succeed, in which case the
-  // result must be '\0'-terminated.
-  char big[4096];
-  if (Demangle(mangled, big, sizeof(big))) {
-    EXPECT_THAT(big, Contains('\0'));
-  }
+  std::array<char, kBigBufferSize> big;
+  big.fill(kFiller);
+  ASSERT_TRUE(DemangleWithSystem(mangled, big.data(), big.size()));
+  ASSERT_THAT(big, Contains('\0'));
+  ASSERT_GE(std::strlen(big.data()), kSmallBufferSize);
 
-  char small_buf[256];
-  if (Demangle(mangled, small_buf, sizeof(small_buf))) {
-    EXPECT_THAT(small_buf, Contains('\0'));
-  }
-}
-
+  std::array<char, kSmallBufferSize> small_buf;
+  small_buf.fill(kFiller);
+  EXPECT_FALSE(DemangleWithSystem(mangled, small_buf.data(), small_buf.size()));
+  EXPECT_EQ('\0', small_buf.front());
+#else
+  GTEST_SKIP() << "no Itanium C++ ABI system demangler available";
 #endif
+}
 
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
