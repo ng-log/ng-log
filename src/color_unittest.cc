@@ -7,13 +7,17 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
+#include <ostream>
 #include <string>
 #include <type_traits>
 
+#include "config.h"
 #include "internal/source_location.h"
 #include "internal/styled_output.h"
 #include "internal/terminal_capabilities.h"
@@ -44,7 +48,7 @@ using namespace nglog;
 using namespace nglog::internal;
 using testing::IsEmpty;
 using testing::IsNull;
-using testing::NotNull;
+using testing::Not;
 #ifdef NGLOG_OS_WINDOWS
 using testing::ElementsAre;
 using testing::StrEq;
@@ -52,7 +56,7 @@ using testing::StrEq;
 
 namespace {
 
-TEST(Flags, SymbolizeFileBasePathIgnoresEnvironment) {
+TEST(Flags, SymbolizeFileBasePathIsEmptyByDefault) {
   EXPECT_THAT(nglog::GetFlag(FLAGS_symbolize_file_base_path), IsEmpty());
 }
 
@@ -178,15 +182,6 @@ INSTANTIATE_TEST_SUITE_P(
                                    Color::kDefault},
                          "\033[2;3;4;39m"}),
     CaseName{});
-
-TEST(FormatAnsiSequence, NeverOverflowsAndAlwaysTerminates) {
-  constexpr std::size_t kTooSmallBufferSize = 6;
-  char buf[kTooSmallBufferSize];
-  ColorSpec{Color::kGreen, TextStyle::kBold, Color::kDefault}
-      .FormatAnsiSequence(buf, sizeof(buf));
-  // Whatever got written must be NUL-terminated within bounds.
-  EXPECT_THAT(std::memchr(buf, '\0', sizeof(buf)), NotNull());
-}
 
 TEST(FormatAnsiSequence, OmitsSequenceThatDoesNotFit) {
   // One byte short of "\033[1;32m" and its null character.
@@ -618,12 +613,14 @@ INSTANTIATE_TEST_SUITE_P(
 TEST(FormatDisplayPath, TruncatesToFitSmallBuffer) {
   constexpr std::size_t kTooSmallBufferSize = 8;
   char out[kTooSmallBufferSize];
+  std::fill(std::begin(out), std::end(out), 'x');
   const std::string path = kOutOfTreePath;
   FormatDisplayPath(path.c_str(), path.size(), /*cwd=*/nullptr,
                     /*prefix_components=*/2, /*suffix_components=*/2, out,
                     sizeof(out));
-  // Never overflows the destination buffer, and always NUL-terminates.
-  EXPECT_THAT(std::memchr(out, '\0', sizeof(out)), NotNull());
+  // The leading ellipsis and as much of the suffix as fits fill the buffer
+  // up to its terminating null character.
+  EXPECT_EQ(std::string(out, sizeof(out)), std::string(".../bit") + '\0');
 }
 
 TEST(FormatDisplayPath, LeavesZeroSizedOutputUntouched) {
@@ -660,11 +657,6 @@ TEST(FormatSymbolizedFrame, KeepsPosixFileLineBeforeFunction) {
                         kFileLineLength, "/home/project", out, sizeof(out));
 
   EXPECT_STREQ("src/logging.cc:2224 function()", out);
-}
-
-TEST(SourceLocation, CachesHostAndWorkingDirectory) {
-  EXPECT_EQ(&CachedHostname(), &CachedHostname());
-  EXPECT_EQ(&CachedCwd(), &CachedCwd());
 }
 
 #if !defined(NGLOG_OS_WINDOWS) && !defined(NGLOG_OS_EMSCRIPTEN) && \
@@ -707,11 +699,79 @@ TEST(SourceLocation, UsesUtf8ComputerName) {
   ASSERT_TRUE(GetComputerNameUtf8(&expected));
   EXPECT_EQ(CachedHostname(), expected);
 }
+#elif defined(HAVE_UNISTD_H)
+TEST(SourceLocation, UsesHostName) {
+  constexpr std::size_t kHostNameBufferSize = 256;
+  char expected[kHostNameBufferSize] = "";
+  ASSERT_EQ(gethostname(expected, sizeof(expected)), 0);
+  expected[sizeof(expected) - 1] = '\0';
+  EXPECT_EQ(CachedHostname(), expected);
+}
 #endif
 
+// Returns the current working directory in UTF-8, or an empty string.
+std::string CurrentDirectory() {
+#ifdef NGLOG_OS_WINDOWS
+  std::vector<wchar_t> buffer(GetCurrentDirectoryW(0, nullptr));
+  const DWORD length =
+      GetCurrentDirectoryW(static_cast<DWORD>(buffer.size()), buffer.data());
+  std::string directory;
+  if (length == 0 || length >= buffer.size() ||
+      !WideToUtf8(buffer.data(), length, &directory)) {
+    return std::string();
+  }
+  return directory;
+#else
+  constexpr std::size_t kDirectoryBufferSize = 4096;
+  char buffer[kDirectoryBufferSize];
+  if (getcwd(buffer, sizeof(buffer)) == nullptr) {
+    return std::string();
+  }
+  return buffer;
+#endif
+}
+
+// Changes the current working directory given in UTF-8.
+bool ChangeDirectory(const std::string& directory) {
+#ifdef NGLOG_OS_WINDOWS
+  std::wstring wide;
+  return Utf8ToWide(directory.data(), directory.size(), &wide) &&
+         SetCurrentDirectoryW(wide.c_str()) != 0;
+#else
+  return chdir(directory.c_str()) == 0;
+#endif
+}
+
+// Restores the current working directory on destruction.
+class ScopedCurrentDirectory final {
+ public:
+  ScopedCurrentDirectory() : previous_(CurrentDirectory()) {}
+  ScopedCurrentDirectory(const ScopedCurrentDirectory& other) = delete;
+  ScopedCurrentDirectory& operator=(const ScopedCurrentDirectory& other) =
+      delete;
+  ~ScopedCurrentDirectory() { ChangeDirectory(previous_); }
+
+  const std::string& previous() const noexcept { return previous_; }
+
+ private:
+  std::string previous_;
+};
+
+TEST(SourceLocation, CachesWorkingDirectory) {
+  const ScopedCurrentDirectory current_directory;
+  ASSERT_THAT(current_directory.previous(), Not(IsEmpty()));
+  EXPECT_EQ(CachedCwd(), current_directory.previous());
+
+  ASSERT_TRUE(ChangeDirectory(TestTmpDir()));
+  ASSERT_NE(CurrentDirectory(), current_directory.previous());
+  EXPECT_EQ(CachedCwd(), current_directory.previous());
+}
+
 TEST(StyledOutput, WritesRawText) {
-  WriteRawToStderr("");
-  SUCCEED();
+  constexpr char kText[] = "raw \033[1mtext";
+  ScopedStreamCapture capture{StandardStream::kStderr};
+  WriteRawToStderr(kText);
+  EXPECT_EQ(capture.Stop(), kText);
 }
 
 TEST(StyledOutput, ResetsAttributesBeforeLineEndings) {
@@ -728,18 +788,78 @@ TEST(StyledOutput, ResetsAttributesBeforeLineEndings) {
   EXPECT_EQ(output, "\033[1;36mfirst\033[0m\n\033[1;36msecond\033[0m");
 }
 
-// Exercises the real environment-backed code path (as opposed to the pure
-// ShouldColorize()/ShouldEnableHyperlinks() logic tested above) to make
-// sure it runs to completion. The result depends on whatever environment
-// happens to run the test (e.g. whether stdout/stderr are a real terminal),
-// so nothing is asserted about it beyond that repeated calls in the same
-// environment agree with each other.
-TEST(StreamSupportsColor, StableAcrossRepeatedCalls) {
-  EXPECT_EQ(StreamSupportsColor(stdout), StreamSupportsColor(stdout));
-  EXPECT_EQ(StreamSupportsColor(stderr), StreamSupportsColor(stderr));
-  EXPECT_EQ(StreamSupportsHyperlinks(stdout), StreamSupportsHyperlinks(stdout));
-  EXPECT_EQ(StreamSupportsHyperlinks(stderr), StreamSupportsHyperlinks(stderr));
+#ifndef NGLOG_OS_EMSCRIPTEN
+// Capabilities that a stream reports.
+struct StreamCapabilities {
+  bool color;
+  bool hyperlinks;
+};
+
+bool operator==(const StreamCapabilities& lhs, const StreamCapabilities& rhs) {
+  return lhs.color == rhs.color && lhs.hyperlinks == rhs.hyperlinks;
 }
+
+void PrintTo(const StreamCapabilities& capabilities, std::ostream* os) {
+  *os << "{color: " << std::boolalpha << capabilities.color
+      << ", hyperlinks: " << capabilities.hyperlinks << "}";
+}
+
+// Detects the capabilities of a standard stream redirected into a file, with
+// every environment variable the detection honors unset.
+//
+// Emscripten falls back to the environment of Node for unset variables, which
+// the fixture cannot control, so the tests do not run there.
+class StreamSupport : public testing::TestWithParam<StandardStream> {
+ protected:
+  StreamCapabilities Detect() const {
+    std::FILE* const stream =
+        GetParam() == StandardStream::kStdout ? stdout : stderr;
+    ScopedStreamCapture capture{GetParam()};
+    const StreamCapabilities capabilities{StreamSupportsColor(stream),
+                                          StreamSupportsHyperlinks(stream)};
+    capture.Stop();
+    return capabilities;
+  }
+
+ private:
+  ScopedEnvironmentVariable no_color_{"NO_COLOR", nullptr};
+  ScopedEnvironmentVariable clicolor_force_{"CLICOLOR_FORCE", nullptr};
+  ScopedEnvironmentVariable term_{"TERM", "xterm"};
+  ScopedEnvironmentVariable wt_session_{"WT_SESSION", nullptr};
+  ScopedEnvironmentVariable term_program_{"TERM_PROGRAM", nullptr};
+  ScopedEnvironmentVariable vte_version_{"VTE_VERSION", nullptr};
+  ScopedEnvironmentVariable konsole_version_{"KONSOLE_VERSION", nullptr};
+};
+
+TEST_P(StreamSupport, RedirectedStreamIsPlain) {
+  EXPECT_EQ(Detect(), (StreamCapabilities{false, false}));
+}
+
+TEST_P(StreamSupport, CliColorForceEnablesColor) {
+  const ScopedEnvironmentVariable clicolor_force{"CLICOLOR_FORCE", "1"};
+  EXPECT_EQ(Detect(), (StreamCapabilities{true, false}));
+}
+
+TEST_P(StreamSupport, NoColorOverridesCliColorForce) {
+  const ScopedEnvironmentVariable clicolor_force{"CLICOLOR_FORCE", "1"};
+  const ScopedEnvironmentVariable no_color{"NO_COLOR", "1"};
+  const ScopedEnvironmentVariable term_program{"TERM_PROGRAM", "WezTerm"};
+  EXPECT_EQ(Detect(), (StreamCapabilities{false, false}));
+}
+
+TEST_P(StreamSupport, TerminalProgramEnablesHyperlinksWithColor) {
+  const ScopedEnvironmentVariable clicolor_force{"CLICOLOR_FORCE", "1"};
+  const ScopedEnvironmentVariable term_program{"TERM_PROGRAM", "WezTerm"};
+  EXPECT_EQ(Detect(), (StreamCapabilities{true, true}));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Streams, StreamSupport,
+    testing::Values(StandardStream::kStdout, StandardStream::kStderr),
+    [](const testing::TestParamInfo<StandardStream>& info) {
+      return info.param == StandardStream::kStdout ? "Stdout" : "Stderr";
+    });
+#endif
 
 #ifdef NGLOG_OS_EMSCRIPTEN
 TEST(Emscripten, ReadsNodeEnvironment) {
