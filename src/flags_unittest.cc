@@ -879,6 +879,83 @@ TEST(Flags, SeparatorIsKeptForAnotherParser) {
                                    "--not_an_option"));
 }
 
+#ifdef GTEST_HAS_DEATH_TEST
+TEST(Flags, SingleDashOptionsAreRejected) {
+  CommandLine command_line({"-test_int32_flag=9"});
+  ASSERT_EXIT(command_line.Parse(), testing::ExitedWithCode(EXIT_FAILURE),
+              "unknown command-line option \033\\[0m"
+              "\033\\[39m-\033\\[0m"
+              "\033\\[1;36mtest_int32_flag\033\\[0m");
+}
+
+TEST(Flags, SingleDashOptionsSuggestTheLongOptionAsSpelled) {
+  CommandLine command_line({"-test-bool-flag"});
+  ASSERT_EXIT(command_line.Parse(), testing::ExitedWithCode(EXIT_FAILURE),
+              "Did you mean \033\\[0m"
+              "\033\\[39m--\033\\[0m"
+              "\033\\[1;36mtest-bool-flag\033\\[0m"
+              "\033\\[2;39m\\?");
+}
+
+TEST(Flags, SingleDashNegationsSuggestTheLongOption) {
+  CommandLine command_line({"-notest_bool_flag"});
+  ASSERT_EXIT(command_line.Parse(), testing::ExitedWithCode(EXIT_FAILURE),
+              "Did you mean \033\\[0m"
+              "\033\\[39m--\033\\[0m"
+              "\033\\[1;36mnotest_bool_flag\033\\[0m"
+              "\033\\[2;39m\\?");
+}
+
+TEST(Flags, SingleDashNegationsOfNonBooleanFlagsSuggestTheFlag) {
+  CommandLine command_line({"-notest_int32_flag"});
+  ASSERT_EXIT(command_line.Parse(), testing::ExitedWithCode(EXIT_FAILURE),
+              "Did you mean \033\\[0m"
+              "\033\\[39m--\033\\[0m"
+              "\033\\[1;36mtest_int32_flag\033\\[0m"
+              "\033\\[2;39m\\?");
+}
+
+TEST(Flags, SingleDashHelpSuggestsTheLongOption) {
+  CommandLine command_line({"-help"});
+  ASSERT_EXIT(command_line.Parse(), testing::ExitedWithCode(EXIT_FAILURE),
+              "Did you mean \033\\[0m"
+              "\033\\[39m--\033\\[0m"
+              "\033\\[1;36mhelp\033\\[0m"
+              "\033\\[2;39m\\?");
+}
+
+TEST(Flags, SingleDashOptionsAreRejectedWhenFlagsAreKept) {
+  CommandLine command_line({"-x"});
+  ASSERT_EXIT(command_line.Parse(nglog::FlagParsingMode::kKeepFlags),
+              testing::ExitedWithCode(EXIT_FAILURE),
+              "unknown command-line option \033\\[0m"
+              "\033\\[39m-\033\\[0m"
+              "\033\\[1;36mx\033\\[0m");
+}
+#endif
+
+TEST(Flags, SingleDashOptionsAreKeptForAnotherParser) {
+  nglog::ScopedFlags<> save;
+  CommandLine command_line({"-x", "-test_int32_flag=9"});
+  EXPECT_EQ(0U, command_line.Parse(nglog::FlagParsingMode::kRemoveFlags,
+                                   nglog::UnknownFlagMode::kIgnore));
+  EXPECT_THAT(command_line.Arguments(),
+              testing::ElementsAre("-x", "-test_int32_flag=9"));
+  EXPECT_EQ(7, nglog::GetFlag(FLAGS_test_int32_flag));
+}
+
+TEST(Flags, SingleDashIsAPositionalArgument) {
+  CommandLine command_line({"-"});
+  EXPECT_EQ(0U, command_line.Parse());
+  EXPECT_THAT(command_line.Arguments(), testing::ElementsAre("-"));
+}
+
+TEST(Flags, SingleDashArgumentsAfterTheSeparatorArePositional) {
+  CommandLine command_line({"--", "-x"});
+  EXPECT_EQ(0U, command_line.Parse());
+  EXPECT_THAT(command_line.Arguments(), testing::ElementsAre("-x"));
+}
+
 TEST(Flags, SeparatorIsKeptWhenFlagsAreKept) {
   nglog::ScopedFlags<> save;
   CommandLine command_line({"--", "file"});

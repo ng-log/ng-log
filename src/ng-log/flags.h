@@ -835,8 +835,9 @@ NGLOG_EXPORT std::string ProgramUsage();
 // Prints the usage text and all registered flags with terminal styling.
 NGLOG_EXPORT void PrintCommandLineFlags();
 // Parses long options and returns the number of recognized flags parsed.
-// Unknown options produce a styled error with a suggestion by default. Use
-// UnknownFlagMode::kIgnore when another parser owns the remaining options.
+// Unknown options, including those with a single dash, produce a styled error
+// with a suggestion by default. Use UnknownFlagMode::kIgnore when another
+// parser owns the remaining options.
 NGLOG_EXPORT std::uint32_t ParseCommandLineFlags(
     int* argc, char*** argv, FlagParsingMode mode,
     UnknownFlagMode unknown_mode = UnknownFlagMode::kError);

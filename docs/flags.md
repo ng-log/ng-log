@@ -183,10 +183,11 @@ nglog::ParseCommandLineFlags(
 `kRemoveFlags` removes recognized flags from `argv`. Use `kKeepFlags` to leave
 the argument vector unchanged. Boolean flags accept the values listed above. A
 boolean can also be disabled with `--noflag`. Options must start with two
-dashes. A single-dash argument such as `-v=1` is not an option and remains a
-positional argument. An argument `--` ends the options, and all arguments after
-it remain positional. `kRemoveFlags` removes the `--` along with the parsed
-flags.
+dashes. A single-dash argument such as `-v=1` is reported as an unknown option
+along with the suggested `--v` spelling. A lone `-` remains a positional
+argument. An argument `--` ends the options, and all arguments after it remain
+positional, including those starting with a dash. `kRemoveFlags` removes the
+`--` along with the parsed flags.
 
 Unknown options are errors by default. The diagnostic uses fuzzy matching to
 suggest a likely spelling when one is available, such as `Did you mean
@@ -199,8 +200,8 @@ nglog::ParseCommandLineFlags(
     nglog::UnknownFlagMode::kIgnore);
 ```
 
-In this mode, `--` remains in `argv`, so that the other parser also recognizes
-the end of the options.
+In this mode, single-dash arguments and `--` remain in `argv`, so that the other
+parser can handle them and also recognizes the end of the options.
 
 Applications can generate styled usage text with a `HelpWriter` callback:
 

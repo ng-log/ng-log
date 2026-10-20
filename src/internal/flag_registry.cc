@@ -389,7 +389,7 @@ void WriteSuggestedFlag(const std::string& misspelled,
   write_part(option_spec, suggestion.substr(suggestion.size() - common_suffix));
 }
 
-[[noreturn]] void FatalUnknownFlag(const std::string& name,
+[[noreturn]] void FatalUnknownFlag(const char* prefix, const std::string& name,
                                    const std::string& suggestion) {
   const internal::Theme& theme = internal::DefaultTheme();
   const internal::ColorSpec message_spec = theme.Get(internal::Role::kHelpText);
@@ -403,7 +403,7 @@ void WriteSuggestedFlag(const std::string& misspelled,
   const internal::ColorMode mode = internal::StreamColorMode(stderr);
   WriteErrorLabel(mode);
   WriteStyled(message_spec, mode, " unknown command-line option ");
-  WriteStyled(message_spec, mode, "--");
+  WriteStyled(message_spec, mode, prefix);
   WriteStyled(option_spec, mode, name);
   WriteStyled(message_spec, mode, ".\n");
   if (!suggestion.empty()) {
@@ -514,6 +514,32 @@ FlagBase* FindFlagLocked(const std::string& name) {
   }
   const auto underscored = registry.flags.find(normalized);
   return underscored == registry.flags.end() ? nullptr : underscored->second;
+}
+
+// Returns whether the name selects the help option, a flag or the negation of
+// a boolean flag.
+bool IsLongOptionLocked(const std::string& name) {
+  if (name == "help" || FindFlagLocked(name) != nullptr) {
+    return true;
+  }
+  if (name.compare(0, 2, "no") != 0) {
+    return false;
+  }
+  const FlagBase* const flag = FindFlagLocked(name.substr(2));
+  return flag != nullptr && std::strcmp(flag->type_name(), "bool") == 0;
+}
+
+// Returns the registered option closest to the name, or an empty string if
+// none is close enough.
+std::string FindClosestOptionLocked(const std::string& name) {
+  Registry& registry = GetRegistry();
+  std::vector<std::string> names;
+  names.reserve(registry.flags.size() + 1);
+  names.push_back("help");
+  for (const auto& entry : registry.flags) {
+    names.push_back(entry.first);
+  }
+  return internal::FindClosestMatch(name, names);
 }
 
 void WriteStyled(const internal::ColorSpec& spec, internal::ColorMode mode,
@@ -1898,6 +1924,18 @@ std::uint32_t ParseCommandLineFlags(int* argc, char*** argv,
       continue;
     }
     if (end_of_flags || std::strncmp(argument, "--", 2) != 0) {
+      // A single dash followed by a name is an option this parser does not
+      // accept, whereas a lone dash conventionally denotes standard input.
+      const bool single_dash = argument[0] == '-' && argument[1] != '\0';
+      if (!end_of_flags && single_dash &&
+          unknown_mode == UnknownFlagMode::kError) {
+        const std::string option(argument + 1);
+        const std::string name = option.substr(0, option.find('='));
+        const std::string suggestion =
+            IsLongOptionLocked(name) ? name : FindClosestOptionLocked(name);
+        lock.unlock();
+        FatalUnknownFlag("-", name, suggestion);
+      }
       if (mode == FlagParsingMode::kRemoveFlags) {
         (*argv)[output++] = argument;
       }
@@ -1944,15 +1982,9 @@ std::uint32_t ParseCommandLineFlags(int* argc, char*** argv,
         }
         continue;
       }
-      std::vector<std::string> names;
-      names.reserve(registry.flags.size() + 1);
-      names.push_back("help");
-      for (const auto& entry : registry.flags) {
-        names.push_back(entry.first);
-      }
-      const std::string suggestion = internal::FindClosestMatch(name, names);
+      const std::string suggestion = FindClosestOptionLocked(name);
       lock.unlock();
-      FatalUnknownFlag(name, suggestion);
+      FatalUnknownFlag("--", name, suggestion);
     }
 
     if (negated) {

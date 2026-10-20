@@ -18,5 +18,5 @@ To migrate from glog to ng-log, you'll need to adjust your code as follows:
 -   remove declarations of ng-log's own flags, such as `DECLARE_bool(logtostderr)`, because `ng-log/flags.h` already declares them
 -   replace `gflags::ParseCommandLineFlags(&argc, &argv, true)` with `nglog::ParseCommandLineFlags(&argc, &argv, nglog::FlagParsingMode::kRemoveFlags)`, and pass `nglog::UnknownFlagMode::kIgnore` if another parser handles the remaining options
 -   rename `GLOG_*` environment variables to `NGLOG_*`, e.g., `GLOG_v=1` to `NGLOG_v=1`
--   pass options with two dashes, since a single-dash argument such as `-v=1` is no longer parsed as an option
+-   pass options with two dashes, since a single-dash argument such as `-v=1` is rejected as an unknown option
 -   read `FLAGS_logfile_mode` as an `nglog::FileMode` and use `value()` to obtain the numeric mode, which is now written in octal on the command line and in the environment
