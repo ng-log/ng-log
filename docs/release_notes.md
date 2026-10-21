@@ -62,6 +62,11 @@ SPDX-License-Identifier: BSD-3-Clause
 - End failure stack dumps cut off at 32 frames with
   `(More stack frames follow...)` instead of omitting the outer frames
   silently
+- Prevent `RAW_LOG` from acquiring a lock while writing the thread identifier
+  if a global locale other than the classic one is installed, which could
+  deadlock in signal handlers
+- Prevent `RAW_LOG` from dropping the last character or the newline of a
+  message that exactly fills its buffer
 
 !!! warning "Compatibility"
     If your application depends on glog compatibility, use the 0.8.x series.

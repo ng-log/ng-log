@@ -21,6 +21,7 @@
 #include <functional>
 #include <iomanip>
 #include <iterator>
+#include <locale>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -3109,6 +3110,79 @@ TEST(RawLogging, PrefixFormatting) {
                   "E00000000 00:00:00\\.000000 +" + CurrentThreadId() + ' ' +
                   kSourceBasenamePattern + ':' + std::to_string(line) +
                   "\\] RAW: raw prefix formatting")));
+}
+
+// A message that fills the buffer exactly is either written in full and ends
+// its line or replaced by the error, instead of losing its last character or
+// the newline that separates it from the next one.
+TEST(RawLogging, MessageFillingBufferEndsLine) {
+  nglog::ScopedFlags<> save;
+  RouteLogMessagesTo(StandardStream::kStderr);
+  // Size of the buffer RAW_LOG formats a line into.
+  constexpr std::size_t kBufferSize = 3000;
+  constexpr std::size_t kMaxSlack = 4;
+  const auto log = [](const std::string& message) {
+    ScopedStreamCapture capture{StandardStream::kStderr};
+    RAW_LOG(ERROR, "%s", message.c_str());
+    return capture.Stop();
+  };
+  // The prefix is as long for every message logged at the same line.
+  const std::size_t prefix_size = log("").size() - 1;
+
+  // A message fits only if the newline and the terminating null character fit
+  // after it as well.
+  constexpr std::size_t kNewlineAndNull = 2;
+  for (std::size_t slack = 0; slack != kMaxSlack; ++slack) {
+    const std::string message(kBufferSize - prefix_size - slack, 'x');
+    if (slack < kNewlineAndNull) {
+      EXPECT_THAT(log(message),
+                  EndsWith("RAW_LOG ERROR: The Message was too long!\n"))
+          << "slack " << slack;
+    } else {
+      EXPECT_THAT(log(message), EndsWith(message + '\n')) << "slack " << slack;
+    }
+  }
+}
+
+//! Groups the digits of numbers in threes like many locales do.
+class GroupingPunctuation : public std::numpunct<char> {
+ protected:
+  char do_thousands_sep() const override { return ','; }
+  std::string do_grouping() const override { return "\3"; }
+};
+
+//! Installs a global locale that groups digits and restores the previous one.
+class ScopedGroupingLocale {
+ public:
+  ScopedGroupingLocale()
+      : previous_{std::locale::global(
+            std::locale{std::locale::classic(), new GroupingPunctuation})} {}
+  ~ScopedGroupingLocale() { std::locale::global(previous_); }
+
+  ScopedGroupingLocale(const ScopedGroupingLocale&) = delete;
+  ScopedGroupingLocale& operator=(const ScopedGroupingLocale&) = delete;
+
+ private:
+  std::locale previous_;
+};
+
+// RAW_LOG writes the thread identifier like the classic locale writes it,
+// whatever the global locale. A stream would use the global locale, whose
+// construction also acquires a lock if it is not the classic one.
+TEST(RawLogging, PrefixIgnoresGlobalLocale) {
+  nglog::ScopedFlags<> save;
+  RouteLogMessagesTo(StandardStream::kStderr);
+  const std::string thread_id = CurrentThreadId();
+
+  ScopedStreamCapture capture{StandardStream::kStderr};
+  {
+    const ScopedGroupingLocale locale;
+    RAW_LOG(ERROR, "raw prefix formatting");
+  }
+  const std::string output = capture.Stop();
+
+  EXPECT_THAT(SplitLines(output),
+              ElementsAre(HasSubstr(" " + thread_id + ' ')));
 }
 
 TEST(TestExitOnDFatal, ToBeOrNotToBe) {

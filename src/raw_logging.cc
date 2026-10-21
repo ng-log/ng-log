@@ -7,17 +7,14 @@
 //
 // logging_unittest.cc covers the functionality herein
 
+#include <cinttypes>
 #include <cstdarg>  // IWYU pragma: keep
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <initializer_list>
-#include <iomanip>
-#include <iterator>
 #include <mutex>
-#include <ostream>
-#include <streambuf>  // IWYU pragma: keep
 #include <thread>
+#include <type_traits>
 
 #include "config.h"
 
@@ -70,7 +67,8 @@ static bool DoRawLog(char** buf, size_t* size, const char* format, ...) {
   va_start(ap, format);
   int n = std::vsnprintf(*buf, *size, format, ap);
   va_end(ap);
-  if (n < 0 || static_cast<size_t>(n) > *size) return false;
+  // The terminating null character must fit as well.
+  if (n < 0 || static_cast<size_t>(n) >= *size) return false;
   *size -= static_cast<size_t>(n);
   *buf += n;
   return true;
@@ -87,7 +85,8 @@ inline static bool VADoRawLog(char** buf, size_t* size, const char* format,
 #if defined(__GNUC__)
 #  pragma GCC diagnostic pop
 #endif
-  if (n < 0 || static_cast<size_t>(n) > *size) return false;
+  // The terminating null character must fit as well.
+  if (n < 0 || static_cast<size_t>(n) >= *size) return false;
   *size -= static_cast<size_t>(n);
   *buf += n;
   return true;
@@ -99,23 +98,57 @@ static internal::CrashReason crash_reason;
 static char crash_buf[kLogBufSize + 1] = {0};  // Will end in '\0'
 
 namespace {
-template <std::size_t N>
-class StaticStringBuf : public std::streambuf {
- public:
-  StaticStringBuf() {
-    setp(std::begin(data_), std::end(data_));
-    setg(std::begin(data_), std::begin(data_), std::end(data_));
-  }
-  const char* data() noexcept {
-    if (pptr() != pbase() && pptr() != epptr() && *(pptr() - 1) != '\0') {
-      sputc('\0');
-    }
-    return data_;
-  }
 
- private:
-  char data_[N];
-};
+// Value that std::thread::id holds and prints. POSIX threads hold the native
+// handle, while the Microsoft standard library holds the numeric identifier.
+#if defined(_MSVC_STL_VERSION)
+using ThreadIdValue = unsigned int;
+#else
+using ThreadIdValue = std::thread::native_handle_type;
+#endif
+
+static_assert(sizeof(ThreadIdValue) == sizeof(std::thread::id),
+              "std::thread::id must hold the native thread identifier to be "
+              "written without a stream. Adapt ThreadIdValue to the standard "
+              "library in use.");
+static_assert(std::is_trivially_copyable<std::thread::id>::value,
+              "std::thread::id must be trivially copyable to be written "
+              "without a stream.");
+
+// Streams write pointers in hexadecimal with a base prefix.
+template <class T>
+int FormatThreadIdValue(char* buffer, std::size_t size, T* value) {
+  return std::snprintf(buffer, size, "0x%" PRIxPTR,
+                       reinterpret_cast<std::uintptr_t>(value));
+}
+
+template <class T>
+int FormatThreadIdValue(char* buffer, std::size_t size, T value) {
+  static_assert(std::is_integral<T>::value,
+                "The thread identifier must be a pointer or an integer.");
+  if (std::is_signed<T>::value) {
+    return std::snprintf(buffer, size, "%lld", static_cast<long long>(value));
+  }
+  return std::snprintf(buffer, size, "%llu",
+                       static_cast<unsigned long long>(value));
+}
+
+// Writes the identifier of the calling thread like streaming
+// std::this_thread::get_id() does in the classic locale. A stream cannot be
+// used, since constructing its locale acquires a lock unless the global locale
+// is the classic one, which is not async-signal-safe.
+void FormatThreadId(char* buffer, std::size_t size) {
+  const std::thread::id id = std::this_thread::get_id();
+  ThreadIdValue value;
+  std::memcpy(&value, &id, sizeof(value));
+  if (FormatThreadIdValue(buffer, size, value) < 0) {
+    buffer[0] = '\0';
+  }
+}
+
+// Large enough for a prefixed 64-bit hexadecimal or a signed decimal value.
+constexpr std::size_t kThreadIdBufferSize = 24;
+
 }  // namespace
 
 NGLOG_ATTRIBUTE_FORMAT(printf, 4, 5)
@@ -128,14 +161,8 @@ void RawLog(LogSeverity severity, const char* file, int line,
     return;  // this stderr log message is suppressed
   }
 
-  // We do not have any option other than string streams to obtain the
-  // thread identifier as the corresponding value is not convertible to an
-  // integer. Use a statically allocated buffer to avoid dynamic memory
-  // allocations.
-  StaticStringBuf<kLogBufSize> sbuf;
-  std::ostream oss(&sbuf);
-
-  oss << std::setw(5) << std::this_thread::get_id();
+  char thread_id[kThreadIdBufferSize];
+  FormatThreadId(thread_id, sizeof(thread_id));
 
   // can't call localtime_r here: it can allocate
   char buffer[kLogBufSize];
@@ -143,18 +170,22 @@ void RawLog(LogSeverity severity, const char* file, int line,
   size_t size = sizeof(buffer);
 
   // NOTE: this format should match the specification in base/logging.h
-  DoRawLog(&buf, &size, "%c00000000 00:00:00.000000 %s %s:%d] RAW: ",
-           GetLogSeverityName(severity)[0], sbuf.data(),
+  DoRawLog(&buf, &size, "%c00000000 00:00:00.000000 %5s %s:%d] RAW: ",
+           GetLogSeverityName(severity)[0], thread_id,
            const_basename(const_cast<char*>(file)), line);
 
   // Record the position and size of the buffer after the prefix
   const char* msg_start = buf;
   const size_t msg_size = size;
 
+  // Reserves room for the newline that ends the message.
+  constexpr size_t kNewlineSize = 1;
+  size_t message_size = size - kNewlineSize;
   va_list ap;
   va_start(ap, format);
-  bool no_chop = VADoRawLog(&buf, &size, format, ap);
+  const bool no_chop = VADoRawLog(&buf, &message_size, format, ap);
   va_end(ap);
+  size = message_size + kNewlineSize;
   if (no_chop) {
     DoRawLog(&buf, &size, "\n");
   } else {
