@@ -71,6 +71,7 @@
 #include "ng-log/platform.h"
 #include "ng-log/raw_logging.h"
 #include "ng-log/types.h"
+#include "stacktrace.h"
 #ifdef HAVE_SUBPROCESS
 #  include "subprocess.h"
 #endif
@@ -3211,6 +3212,74 @@ TEST(LogBacktraceAt, DoesBacktraceAtRightLineWhenEnabled) {
                     HasSubstr("Backtrace me")));
 }
 #  endif  // HAVE_SYMBOLIZE
+
+// Recurses `depth` frames before capturing the stack trace.
+NGLOG_ATTRIBUTE_NOINLINE static std::string StackTraceAtDepth(int depth) {
+  if (depth > 0) {
+    std::string trace = StackTraceAtDepth(depth - 1);
+    NGLOG_BLOCK_TAIL_CALL_OPTIMIZATION();
+    return trace;
+  }
+  return GetStackTrace();
+}
+
+TEST(GetStackTrace, SaysWhenMoreFramesFollow) {
+  if (!UnwinderWalksPastMaxStackDumpFrames()) {
+    GTEST_SKIP() << "the unwinder stops before kMaxStackDumpFrames";
+  }
+  const std::string trace = StackTraceAtDepth(kMaxStackDumpFrames + 8);
+  EXPECT_NE(trace.find("(More stack frames follow...)"), string::npos) << trace;
+}
+
+// Assumes the frames below the test body, gtest's and main's, stay under
+// kMaxStackDumpFrames.
+TEST(GetStackTrace, ShallowTraceIsNotMarkedAsCutOff) {
+  const std::string trace = StackTraceAtDepth(0);
+  EXPECT_EQ(trace.find("(More stack frames follow...)"), string::npos) << trace;
+}
+
+#  ifdef GTEST_HAS_DEATH_TEST
+// Recurses `depth` frames before the fatal LOG. A negative depth returns
+// without logging, which gives the compiler a path that does not recurse.
+NGLOG_ATTRIBUTE_NOINLINE static void FatalAtDepth(int depth) {
+  if (depth > 0) {
+    FatalAtDepth(depth - 1);
+    NGLOG_BLOCK_TAIL_CALL_OPTIMIZATION();
+    return;
+  }
+  LOG_IF(FATAL, depth == 0) << "fatal at depth";
+}
+
+TEST(LogFatalStackTrace, SaysWhenMoreFramesFollow) {
+  if (!UnwinderWalksPastMaxStackDumpFrames()) {
+    GTEST_SKIP() << "the unwinder stops before kMaxStackDumpFrames";
+  }
+  ASSERT_DEATH(FatalAtDepth(kMaxStackDumpFrames + 8),
+               "More stack frames follow");
+}
+
+#    ifdef HAVE_SYMBOLIZE
+// Tags what the failure writer receives, so that it can be told apart from
+// output written to stderr directly.
+static void WriteTaggedToStderr(const char* data, size_t size) {
+  std::fprintf(stderr, "writer>%.*s", static_cast<int>(size), data);
+}
+
+// With symbolization on, the frames go through the failure writer, so the
+// marker must as well.
+TEST(LogFatalStackTrace, MarkerReachesInstalledFailureWriter) {
+  if (!UnwinderWalksPastMaxStackDumpFrames()) {
+    GTEST_SKIP() << "the unwinder stops before kMaxStackDumpFrames";
+  }
+  ASSERT_DEATH(
+      {
+        InstallFailureWriter(&WriteTaggedToStderr);
+        FatalAtDepth(kMaxStackDumpFrames + 8);
+      },
+      "writer>    \\(More stack frames follow");
+}
+#    endif  // HAVE_SYMBOLIZE
+#  endif    // GTEST_HAS_DEATH_TEST
 
 #endif  // HAVE_STACKTRACE
 

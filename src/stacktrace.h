@@ -15,6 +15,14 @@
 namespace nglog {
 inline namespace tools {
 
+// The most frames a failure stack dump prints, and the most a CrashReason
+// records.
+constexpr int kMaxStackDumpFrames = 32;
+
+// The line that ends a stack dump cut off at kMaxStackDumpFrames, in GDB's
+// wording for a backtrace cut off at its limit.
+constexpr char kStackDumpCutOffMarker[] = "    (More stack frames follow...)\n";
+
 #if defined(HAVE_STACKTRACE)
 
 // This is similar to the GetStackFrames routine, except that it returns

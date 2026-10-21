@@ -20,6 +20,7 @@
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "ng-log/platform.h"
+#include "stacktrace.h"
 
 #ifdef HAVE_UNISTD_H
 #  include <unistd.h>
@@ -261,6 +262,24 @@ std::string ScopedStreamCapture::Peek() const {
 }
 
 void (*g_new_hook)() = nullptr;
+
+#if defined(HAVE_STACKTRACE)
+// Recurses `depth` frames, then returns how many frames the unwinder walks,
+// up to kMaxStackDumpFrames + 1.
+NGLOG_ATTRIBUTE_NOINLINE static int UnwoundDepthAt(int depth) {
+  if (depth > 0) {
+    const int result = UnwoundDepthAt(depth - 1);
+    NGLOG_BLOCK_TAIL_CALL_OPTIMIZATION();
+    return result;
+  }
+  void* stack[kMaxStackDumpFrames + 1];
+  return GetStackTrace(stack, ARRAYSIZE(stack), 0);
+}
+
+bool UnwinderWalksPastMaxStackDumpFrames() {
+  return UnwoundDepthAt(kMaxStackDumpFrames + 8) > kMaxStackDumpFrames;
+}
+#endif  // defined(HAVE_STACKTRACE)
 
 }  // namespace nglog
 

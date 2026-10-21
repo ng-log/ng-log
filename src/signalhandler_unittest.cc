@@ -30,6 +30,7 @@
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "ng-log/platform.h"
+#include "stacktrace.h"
 #include "testing_utilities.h"
 #include "utilities.h"
 
@@ -376,6 +377,26 @@ TEST(SignalHandler, SourceLocationPrecedesFunctionName) {
 }
 #  endif  // defined(NGLOG_OS_WINDOWS) && !defined(HAVE_ADDR2LINE)
 #endif    // defined(HAVE_STACKTRACE) && defined(HAVE_SYMBOLIZE)
+
+#if defined(HAVE_STACKTRACE)
+// Recurses `depth` frames before raising SIGSEGV.
+NGLOG_ATTRIBUTE_NOINLINE static void CrashAtDepth(int depth) {
+  if (depth > 0) {
+    CrashAtDepth(depth - 1);
+    NGLOG_BLOCK_TAIL_CALL_OPTIMIZATION();
+    return;
+  }
+  raise(SIGSEGV);
+}
+
+TEST(SignalHandler, SaysWhenMoreFramesFollow) {
+  if (!UnwinderWalksPastMaxStackDumpFrames()) {
+    GTEST_SKIP() << "the unwinder stops before kMaxStackDumpFrames";
+  }
+  ASSERT_DEATH(CrashAtDepth(kMaxStackDumpFrames + 8),
+               "More stack frames follow");
+}
+#endif  // defined(HAVE_STACKTRACE)
 
 #if defined(NGLOG_OS_LINUX)
 static const char* g_self_path = nullptr;
