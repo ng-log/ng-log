@@ -67,6 +67,9 @@ SPDX-License-Identifier: BSD-3-Clause
   deadlock in signal handlers
 - Prevent `RAW_LOG` from dropping the last character or the newline of a
   message that exactly fills its buffer
+- Prevent `VLOG` call sites reached by several threads at once from
+  rewriting their cached verbosity while other threads read it, which was a
+  data race
 
 !!! warning "Compatibility"
     If your application depends on glog compatibility, use the 0.8.x series.

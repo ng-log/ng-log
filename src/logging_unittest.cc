@@ -106,6 +106,7 @@ using testing::_;
 using testing::AllOf;
 using testing::AnyOf;
 using testing::Contains;
+using testing::Each;
 using testing::ElementsAre;
 using testing::ElementsAreArray;
 using testing::EndsWith;
@@ -4365,4 +4366,44 @@ static void UpdateVLogLevelWhileReading() {
 }
 
 TEST(VLOG, ConcurrentLevelUpdates) { UpdateVLogLevelWhileReading(); }
+
+// Threads that reach a VLOG site together initialize it once. Threads that
+// found the site uninitialized must not rewrite the cached level that others
+// already read, which ThreadSanitizer reports as a data race.
+TEST(VLOG, ConcurrentSiteInitialization) {
+  constexpr int kThreads = 8;
+  constexpr int kChecksPerThread = 100;
+  constexpr int kVlogTestLevel = 1;
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_v, 0);
+  std::mutex start_mutex;
+  std::condition_variable start_condition;
+  bool start = false;
+  std::vector<int> verbose_checks(kThreads, 0);
+  std::vector<std::thread> threads;
+  threads.reserve(kThreads);
+  for (int i = 0; i != kThreads; ++i) {
+    threads.emplace_back(
+        [&start_mutex, &start_condition, &start, &verbose_checks, i] {
+          {
+            std::unique_lock<std::mutex> lock(start_mutex);
+            start_condition.wait(lock, [&start] { return start; });
+          }
+          for (int check = 0; check != kChecksPerThread; ++check) {
+            if (VLOG_IS_ON(kVlogTestLevel)) {
+              ++verbose_checks[static_cast<std::size_t>(i)];
+            }
+          }
+        });
+  }
+  {
+    std::lock_guard<std::mutex> lock(start_mutex);
+    start = true;
+  }
+  start_condition.notify_all();
+  for (std::thread& thread : threads) {
+    thread.join();
+  }
+  EXPECT_THAT(verbose_checks, Each(0));
+}
 #endif

@@ -179,6 +179,19 @@ bool InitializeVLOG3(SiteFlag& site_flag,
                      const Flag<std::int32_t>& level_default, const char* fname,
                      int32 verbose_level) {
   std::lock_guard<std::mutex> l(vmodule_mutex);
+
+  // Another thread may have initialized the site while this one waited for the
+  // lock. Other threads read the cache without locking, so it must not be
+  // written again. The cache is only written under the lock, which makes
+  // relaxed loads sufficient.
+  if (site_flag.initialized.load(std::memory_order_relaxed)) {
+    std::atomic<int32>* const level =
+        site_flag.level.load(std::memory_order_relaxed);
+    return level == nullptr
+               ? GetFlag(*site_flag.default_level) >= verbose_level
+               : level->load(std::memory_order_relaxed) >= verbose_level;
+  }
+
   bool read_vmodule_flag = inited_vmodule;
   if (!read_vmodule_flag) {
     VLOG2Initializer();
