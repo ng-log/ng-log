@@ -1674,7 +1674,8 @@ NGLOG_EXPORT bool IsFailureSignalHandlerInstalled();
 NGLOG_EXPORT void InstallFailureWriter(void (*writer)(const char* data,
                                                       size_t size));
 
-// Dump stack trace as a string.
+// Dump stack trace as a string. It lists at most 32 frames and ends with the
+// line "(More stack frames follow...)" if the stack is deeper.
 NGLOG_EXPORT std::string GetStackTrace();
 
 }  // namespace nglog

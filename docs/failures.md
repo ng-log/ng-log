@@ -37,6 +37,10 @@ When writing to a terminal, this output is
 function name of each frame are colored separately, and `file:line`
 references become clickable hyperlinks back to the source.
 
+A stack dump lists at most 32 frames. A dump of a deeper stack ends with
+`(More stack frames follow...)`, the line GDB prints for a backtrace cut off
+at its limit.
+
 ## Signal-Safe C++ Demangling
 
 Stack symbolization always uses an independent recursive descent parser based

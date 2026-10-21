@@ -59,6 +59,9 @@ SPDX-License-Identifier: BSD-3-Clause
 - `IsFailureSignalHandlerInstalled` reports whether
   `InstallFailureSignalHandler` was called, regardless of later changes to the
   signal dispositions
+- End failure stack dumps cut off at 32 frames with
+  `(More stack frames follow...)` instead of omitting the outer frames
+  silently
 
 !!! warning "Compatibility"
     If your application depends on glog compatibility, use the 0.8.x series.
