@@ -263,6 +263,32 @@ std::string ScopedStreamCapture::Peek() const {
 
 void (*g_new_hook)() = nullptr;
 
+int CountFramesBeforeCutOffMarker(const std::string& output) {
+  // DumpStackFrameInfo() and DumpStackTrace() start each frame with it.
+  constexpr char kFramePrefix[] = "    @ ";
+  const std::string marker = TrimTrailingCRLF(kStackDumpCutOffMarker);
+  int frames = 0;
+  std::string::size_type begin = 0;
+  while (begin < output.size()) {
+    std::string::size_type end = output.find('\n', begin);
+    if (end == std::string::npos) {
+      end = output.size();
+    }
+    const std::string line =
+        TrimTrailingCRLF(output.substr(begin, end - begin));
+    if (line == marker) {
+      return frames;
+    }
+    if (line.compare(0, sizeof(kFramePrefix) - 1, kFramePrefix) == 0) {
+      ++frames;
+    } else {
+      frames = 0;
+    }
+    begin = end + 1;
+  }
+  return kNoCutOffMarker;
+}
+
 #if defined(HAVE_STACKTRACE)
 // Recurses `depth` frames, then returns how many frames the unwinder walks,
 // up to kMaxStackDumpFrames + 1.
@@ -277,7 +303,7 @@ NGLOG_ATTRIBUTE_NOINLINE static int UnwoundDepthAt(int depth) {
 }
 
 bool UnwinderWalksPastMaxStackDumpFrames() {
-  return UnwoundDepthAt(kMaxStackDumpFrames + 8) > kMaxStackDumpFrames;
+  return UnwoundDepthAt(kDepthPastStackDumpLimit) > kMaxStackDumpFrames;
 }
 #endif  // defined(HAVE_STACKTRACE)
 

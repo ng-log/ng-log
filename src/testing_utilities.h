@@ -9,6 +9,7 @@
 #ifndef NGLOG_SRC_TESTING_UTILITIES_H_
 #define NGLOG_SRC_TESTING_UTILITIES_H_
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <cstdio>
@@ -16,6 +17,7 @@
 
 #include "config.h"
 #include "ng-log/platform.h"
+#include "stacktrace.h"
 #include "utilities.h"
 
 #if defined(NGLOG_OS_WINDOWS)
@@ -116,6 +118,41 @@ class ScopedStreamCapture final {
 
 // Add hook for operator new to ensure there are no memory allocation.
 extern void (*g_new_hook)();
+
+/**
+ * Recursion depth of tests of a cut-off stack dump. It exceeds
+ * kMaxStackDumpFrames by a margin, so that the dump is cut off even if the
+ * unwinder misses a few of the recursive frames.
+ */
+constexpr int kDepthPastStackDumpLimit = kMaxStackDumpFrames + 8;
+
+//! Result of CountFramesBeforeCutOffMarker() for output without the marker.
+constexpr int kNoCutOffMarker = -1;
+
+/**
+ * Counts the frame lines that immediately precede the first line of `output`
+ * that is kStackDumpCutOffMarker, or returns kNoCutOffMarker if there is no
+ * such line.
+ */
+int CountFramesBeforeCutOffMarker(const std::string& output);
+
+/**
+ * Matches output with a stack dump that lists exactly `frames` frames and
+ * ends with kStackDumpCutOffMarker.
+ */
+MATCHER_P(HasCutOffStackDump, frames,
+          std::string{negation ? "has no" : "has a"} + " stack dump of " +
+              testing::PrintToString(frames) +
+              " frames that ends with the cut-off marker") {
+  const int actual = CountFramesBeforeCutOffMarker(arg);
+  if (actual == kNoCutOffMarker) {
+    *result_listener << "which has no cut-off marker";
+    return false;
+  }
+  *result_listener << "which has " << actual
+                   << " frames before the cut-off marker";
+  return actual == frames;
+}
 
 #if defined(HAVE_STACKTRACE)
 // Whether the unwinder can walk more than kMaxStackDumpFrames frames. Some

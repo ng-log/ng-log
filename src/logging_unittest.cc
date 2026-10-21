@@ -115,6 +115,7 @@ using testing::IsEmpty;
 using testing::Le;
 using testing::MatchesRegex;
 using testing::Not;
+using testing::ResultOf;
 using testing::SaveArg;
 using testing::SizeIs;
 using testing::StrEq;
@@ -3227,15 +3228,14 @@ TEST(GetStackTrace, SaysWhenMoreFramesFollow) {
   if (!UnwinderWalksPastMaxStackDumpFrames()) {
     GTEST_SKIP() << "the unwinder stops before kMaxStackDumpFrames";
   }
-  const std::string trace = StackTraceAtDepth(kMaxStackDumpFrames + 8);
-  EXPECT_NE(trace.find("(More stack frames follow...)"), string::npos) << trace;
+  EXPECT_THAT(StackTraceAtDepth(kDepthPastStackDumpLimit),
+              HasCutOffStackDump(kMaxStackDumpFrames));
 }
 
 // Assumes the frames below the test body, gtest's and main's, stay under
 // kMaxStackDumpFrames.
 TEST(GetStackTrace, ShallowTraceIsNotMarkedAsCutOff) {
-  const std::string trace = StackTraceAtDepth(0);
-  EXPECT_EQ(trace.find("(More stack frames follow...)"), string::npos) << trace;
+  EXPECT_THAT(StackTraceAtDepth(0), Not(HasSubstr(kStackDumpCutOffMarker)));
 }
 
 #  ifdef GTEST_HAS_DEATH_TEST
@@ -3254,15 +3254,39 @@ TEST(LogFatalStackTrace, SaysWhenMoreFramesFollow) {
   if (!UnwinderWalksPastMaxStackDumpFrames()) {
     GTEST_SKIP() << "the unwinder stops before kMaxStackDumpFrames";
   }
-  ASSERT_DEATH(FatalAtDepth(kMaxStackDumpFrames + 8),
-               "More stack frames follow");
+  ASSERT_DEATH(FatalAtDepth(kDepthPastStackDumpLimit),
+               HasCutOffStackDump(kMaxStackDumpFrames));
 }
 
 #    ifdef HAVE_SYMBOLIZE
+//! Precedes everything that WriteTaggedToStderr() receives.
+constexpr char kFailureWriterTag[] = "writer>";
+
 // Tags what the failure writer receives, so that it can be told apart from
 // output written to stderr directly.
 static void WriteTaggedToStderr(const char* data, size_t size) {
-  std::fprintf(stderr, "writer>%.*s", static_cast<int>(size), data);
+  std::fprintf(stderr, "%s%.*s", kFailureWriterTag, static_cast<int>(size),
+               data);
+}
+
+// Returns the lines of `output` that WriteTaggedToStderr() started, without
+// the tags.
+static std::string FailureWriterOutput(const std::string& output) {
+  constexpr std::size_t kTagLength = sizeof(kFailureWriterTag) - 1;
+  std::string written;
+  std::istringstream lines{output};
+  for (std::string line; std::getline(lines, line);) {
+    if (line.compare(0, kTagLength, kFailureWriterTag) != 0) {
+      continue;
+    }
+    for (std::string::size_type tag = line.find(kFailureWriterTag);
+         tag != std::string::npos; tag = line.find(kFailureWriterTag, tag)) {
+      line.erase(tag, kTagLength);
+    }
+    written += line;
+    written += '\n';
+  }
+  return written;
 }
 
 // With symbolization on, the frames go through the failure writer, so the
@@ -3274,9 +3298,24 @@ TEST(LogFatalStackTrace, MarkerReachesInstalledFailureWriter) {
   ASSERT_DEATH(
       {
         InstallFailureWriter(&WriteTaggedToStderr);
-        FatalAtDepth(kMaxStackDumpFrames + 8);
+        FatalAtDepth(kDepthPastStackDumpLimit);
       },
-      "writer>    \\(More stack frames follow");
+      ResultOf(&FailureWriterOutput, HasCutOffStackDump(kMaxStackDumpFrames)));
+}
+
+// With symbolization off, the frames bypass the failure writer, so the marker
+// must as well.
+TEST(LogFatalStackTrace, MarkerFollowsUnsymbolizedFramesToStderr) {
+  if (!UnwinderWalksPastMaxStackDumpFrames()) {
+    GTEST_SKIP() << "the unwinder stops before kMaxStackDumpFrames";
+  }
+  ASSERT_DEATH(
+      {
+        nglog::SetFlag(FLAGS_symbolize_stacktrace, false);
+        InstallFailureWriter(&WriteTaggedToStderr);
+        FatalAtDepth(kDepthPastStackDumpLimit);
+      },
+      HasCutOffStackDump(kMaxStackDumpFrames));
 }
 #    endif  // HAVE_SYMBOLIZE
 #  endif    // GTEST_HAS_DEATH_TEST

@@ -393,8 +393,8 @@ TEST(SignalHandler, SaysWhenMoreFramesFollow) {
   if (!UnwinderWalksPastMaxStackDumpFrames()) {
     GTEST_SKIP() << "the unwinder stops before kMaxStackDumpFrames";
   }
-  ASSERT_DEATH(CrashAtDepth(kMaxStackDumpFrames + 8),
-               "More stack frames follow");
+  ASSERT_DEATH(CrashAtDepth(kDepthPastStackDumpLimit),
+               HasCutOffStackDump(kMaxStackDumpFrames));
 }
 #endif  // defined(HAVE_STACKTRACE)
 
