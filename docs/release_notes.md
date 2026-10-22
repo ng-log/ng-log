@@ -70,6 +70,7 @@ SPDX-License-Identifier: BSD-3-Clause
 - Reject malformed ELF symbol tables
 - Fix a data race between `EnableLogCleaner` and logging threads by [@devtejasx]
 - Fix a data race on concurrent initialization of `VLOG` call sites
+- Let `SetVLOGLevel` take precedence over matching `--vmodule` patterns
 - Serialize log file creation across processes on Windows
 - Fix `TruncateLogFile` corrupting log files with line breaks on Windows
 - Fix `RAW_LOG` truncating messages that exactly fill its buffer
