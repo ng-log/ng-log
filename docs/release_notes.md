@@ -76,6 +76,7 @@ SPDX-License-Identifier: BSD-3-Clause
 - Fix a data race on concurrent initialization of `VLOG` call sites
 - Fix miscounting periodic and first-N log macros under concurrency
 - Log the first `LOG_EVERY_T` occurrence right after system start
+- Let `SetVLOGLevel` take precedence over matching `--vmodule` patterns
 - Serialize log file creation across processes on Windows
 - Fix `TruncateLogFile` corrupting log files with line breaks on Windows
 - Fix truncating oversized log files before locking them

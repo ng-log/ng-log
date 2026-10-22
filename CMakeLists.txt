@@ -1180,6 +1180,13 @@ logging libraries\"\n#endif\n")
 
   target_link_libraries (preinit_warning_unittest PRIVATE ng-log_test)
 
+  add_executable (vlog_is_on_unittest
+    src/vlog_is_on_unittest.cc
+    src/vlog_module_test_helper.cc
+  )
+
+  target_link_libraries (vlog_is_on_unittest PRIVATE ng-log_test)
+
   add_executable (color_attributes_unittest
     src/color_attributes_unittest.cc
   )
@@ -1462,6 +1469,11 @@ logging libraries\"\n#endif\n")
 
   gtest_discover_tests (preinit_warning_unittest
     TEST_PREFIX preinit_warning.
+    DISCOVERY_TIMEOUT 30
+  )
+
+  gtest_discover_tests (vlog_is_on_unittest
+    TEST_PREFIX vlog_is_on.
     DISCOVERY_TIMEOUT 30
   )
 

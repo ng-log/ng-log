@@ -126,9 +126,14 @@ int SetVLOGLevel(const char* module_pattern, int log_level) {
   int result = nglog::GetFlag(FLAGS_v);
   size_t const pattern_len = strlen(module_pattern);
   bool found = false;
+  bool found_exact = false;
   {
     std::lock_guard<std::mutex> l(
         vmodule_mutex);  // protect whole read-modify-write
+    // Parsing --vmodule later would put its entries in front of this one.
+    if (!inited_vmodule) {
+      VLOG2Initializer();
+    }
     for (const VModuleInfo* info = vmodule_list; info != nullptr;
          info = info->next) {
       if (info->module_pattern == module_pattern) {
@@ -136,6 +141,7 @@ int SetVLOGLevel(const char* module_pattern, int log_level) {
           result = info->vlog_level.load(std::memory_order_relaxed);
           found = true;
         }
+        found_exact = true;
         info->vlog_level.store(log_level, std::memory_order_relaxed);
       } else if (!found && SafeFNMatch_(info->module_pattern.c_str(),
                                         info->module_pattern.size(),
@@ -144,7 +150,10 @@ int SetVLOGLevel(const char* module_pattern, int log_level) {
         found = true;
       }
     }
-    if (!found) {
+    // A matching wildcard only provides the previous level. The new level
+    // needs an entry of its own, which precedes the wildcard for call sites
+    // that are initialized from now on.
+    if (!found_exact) {
       auto* info = new VModuleInfo;
       info->module_pattern = module_pattern;
       info->vlog_level.store(log_level, std::memory_order_relaxed);
