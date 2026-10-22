@@ -37,6 +37,8 @@ SPDX-License-Identifier: BSD-3-Clause
   `NGLOG_IF_DEBUG_MODE`
 - Refuse symbolic links as log files on POSIX, except `/dev/stdout` and
   `/dev/stderr`
+- Terminate on severities outside `NGLOG_INFO` through `NGLOG_FATAL`
+  instead of reading out of bounds
 
 #### Features
 
@@ -72,6 +74,8 @@ SPDX-License-Identifier: BSD-3-Clause
 - Reject malformed ELF symbol tables
 - Fix a data race between `EnableLogCleaner` and logging threads by [@devtejasx]
 - Fix a data race on concurrent initialization of `VLOG` call sites
+- Fix miscounting periodic and first-N log macros under concurrency
+- Log the first `LOG_EVERY_T` occurrence right after system start
 - Serialize log file creation across processes on Windows
 - Fix `TruncateLogFile` corrupting log files with line breaks on Windows
 - Fix truncating oversized log files before locking them
@@ -86,6 +90,7 @@ SPDX-License-Identifier: BSD-3-Clause
   formatter by [@devtejasx]
 - Keep `IsFailureSignalHandlerInstalled` independent of later signal
   disposition changes
+- Report a zero UTC offset with `log_utc_time`
 - Keep `BUILD_SHARED_LIBS` from changing the library type of embedding
   projects
 
