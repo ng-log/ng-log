@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <chrono>
@@ -47,11 +48,18 @@ void MakeLogDir() {
 TEST(CleanImmediatelyWithNonAsciiPrefix, logging) {
   using namespace std::chrono_literals;
   constexpr unsigned kMessageCount = 1000;
+  constexpr char kExtension[] = ".nonasciifoo";
+  constexpr char kPrefix[] = "test_cleanup_";
   ASSERT_NO_FATAL_FAILURE(MakeLogDir());
-  nglog::EnableLogCleaner(0h);
-  nglog::SetLogFilenameExtension(".nonasciifoo");
+  nglog::SetLogFilenameExtension(kExtension);
   nglog::SetLogDestination(NGLOG_INFO,
-                           (std::string(kLogDir) + "/test_cleanup_").c_str());
+                           (std::string(kLogDir) + '/' + kPrefix).c_str());
+  // Log files must exist in the log directory before they become overdue.
+  nglog::EnableLogCleaner(nglog::kCleanupTestRetention);
+  LOG(INFO) << nglog::kCleanupTestMessage;
+  EXPECT_THAT(nglog::ListOwnLogFiles(kLogDir, kExtension),
+              testing::ElementsAre(testing::StartsWith(kPrefix)));
+  nglog::EnableLogCleaner(0h);
 
   for (unsigned i = 0; i < kMessageCount; ++i) {
     LOG(INFO) << nglog::kCleanupTestMessage;

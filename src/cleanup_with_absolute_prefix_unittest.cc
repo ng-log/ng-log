@@ -18,12 +18,21 @@ TEST(CleanImmediatelyWithAbsolutePrefix, logging) {
   using namespace std::chrono_literals;
   constexpr unsigned kInfoMessageCount = 1000;
   constexpr unsigned kErrorMessageCount = 10;
-  nglog::EnableLogCleaner(0h);
-  nglog::SetLogFilenameExtension(".barfoo");
+  constexpr char kExtension[] = ".barfoo";
+  constexpr char kPrefix[] = "test_cleanup_";
   // The driver passes an absolute log directory with a trailing separator.
   const std::string log_dir = nglog::GetFlag(FLAGS_log_dir);
   ASSERT_THAT(log_dir, testing::Not(testing::IsEmpty()));
-  nglog::SetLogDestination(NGLOG_INFO, (log_dir + "test_cleanup_").c_str());
+  nglog::SetLogFilenameExtension(kExtension);
+  nglog::SetLogDestination(NGLOG_INFO, (log_dir + kPrefix).c_str());
+  // Log files must exist in the log directory before they become overdue.
+  nglog::EnableLogCleaner(nglog::kCleanupTestRetention);
+  LOG(ERROR) << nglog::kCleanupTestMessage;
+  EXPECT_THAT(nglog::ListOwnLogFiles(log_dir, kExtension),
+              testing::UnorderedElementsAre(testing::StartsWith(kPrefix),
+                                            testing::HasSubstr(".log.WARNING."),
+                                            testing::HasSubstr(".log.ERROR.")));
+  nglog::EnableLogCleaner(0h);
 
   for (unsigned i = 0; i < kInfoMessageCount; ++i) {
     LOG(INFO) << nglog::kCleanupTestMessage;
