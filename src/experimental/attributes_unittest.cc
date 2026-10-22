@@ -15,7 +15,6 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
-#include <compare>
 #include <cstdarg>
 // The C library headers define __GLIBC__ on glibc.
 // IWYU pragma: no_include <features.h>
@@ -338,8 +337,8 @@ TEST_F(ExperimentalLogging, FirstWithNegativeMatchesMacro) {
   }
 }
 
-// LOG_EVERY_T() logs once the steady clock exceeds the period since its epoch,
-// so a period longer than the uptime never logs.
+// LOG_EVERY_T() logs the first occurrence even if the period exceeds the time
+// since the epoch of the steady clock.
 TEST_F(ExperimentalLogging, EveryPeriodLongerThanUptimeMatchesMacro) {
   using namespace std::chrono_literals;
   constexpr auto kCentury = 3.2e9s;
@@ -362,17 +361,17 @@ TEST_F(ExperimentalLogging, EveryPeriodWithHugePeriodDoesNotOverflow) {
                                  ngx::Log(ngx::Every{kFloatBelowLimit},
                                           "float below limit {}", i);
                                }),
-              IsEmpty());
+              ElementsAre(0));
   EXPECT_THAT(LoggedIterations(
                   kRepetitions,
                   [](int i) { ngx::Log(ngx::Every{1e300s}, "literal {}", i); }),
-              IsEmpty());
+              ElementsAre(0));
   EXPECT_THAT(LoggedIterations(kRepetitions,
                                [](int i) {
                                  ngx::Log(ngx::Every{std::chrono::years{1000}},
                                           "years {}", i);
                                }),
-              IsEmpty());
+              ElementsAre(0));
   EXPECT_THAT(LoggedIterations(kRepetitions,
                                [](int i) {
                                  ngx::Log(
@@ -380,7 +379,7 @@ TEST_F(ExperimentalLogging, EveryPeriodWithHugePeriodDoesNotOverflow) {
                                          std::numeric_limits<double>::max()}},
                                      "double {}", i);
                                }),
-              IsEmpty());
+              ElementsAre(0));
   EXPECT_THAT(LoggedIterations(
                   kRepetitions,
                   [](int i) {
@@ -388,7 +387,7 @@ TEST_F(ExperimentalLogging, EveryPeriodWithHugePeriodDoesNotOverflow) {
                                  std::numeric_limits<double>::quiet_NaN()}},
                              "nan {}", i);
                   }),
-              IsEmpty());
+              ElementsAre(0));
   EXPECT_THAT(LoggedIterations(kRepetitions,
                                [](int i) {
                                  ngx::Log(ngx::Every{std::chrono::years{-1000}},
@@ -447,14 +446,9 @@ TEST(ExperimentalAttributes, PeriodBeyondRangeSaturates) {
   EXPECT_EQ(SaturatingNanoseconds(Ticks{-kTicks}), nanoseconds::min());
 }
 
-// LOG_EVERY_T() logs once the steady clock exceeds the period since its epoch,
-// so on a host that just started neither side logs.
 TEST_F(ExperimentalLogging, EveryPeriodMatchesMacro) {
   using namespace std::chrono_literals;
   constexpr auto kPeriod = 1min;
-  if (std::chrono::steady_clock::now().time_since_epoch() <= kPeriod) {
-    GTEST_SKIP() << "The steady clock has not exceeded the period yet";
-  }
   for (int i = 0; i != kRepetitions; ++i) {
     EXPECT_SAME_OUTPUT(
         LOG_EVERY_T(INFO, Seconds(kPeriod)) << "timed " << i,
@@ -462,11 +456,10 @@ TEST_F(ExperimentalLogging, EveryPeriodMatchesMacro) {
   }
 }
 
-// Half the current time since the epoch of the steady clock is exceeded
-// already, so the first message is logged on any host and the others are
-// suppressed.
+// The first message is logged even if the period exceeds the time since the
+// epoch of the steady clock, and the others are suppressed.
 TEST_F(ExperimentalLogging, EveryPeriodLogsFirstMessage) {
-  const auto period = std::chrono::steady_clock::now().time_since_epoch() / 2;
+  const auto period = std::chrono::steady_clock::now().time_since_epoch() * 2;
   EXPECT_THAT(LoggedIterations(kRepetitions,
                                [period](int i) {
                                  ngx::Log(ngx::Every{period}, "timed {}", i);

@@ -27,7 +27,6 @@
 #include "ng-log/log_severity.h"           // IWYU pragma: export
 #include "ng-log/log_sink.h"               // IWYU pragma: export
 #include "ng-log/platform.h"
-#include "ng-log/types.h"
 #include "ng-log/vlog_is_on.h"  // IWYU pragma: export
 
 // Make a bunch of macros for logging.  The way to log things is to stream
@@ -554,86 +553,183 @@ using _Check_string = std::string;
 #define LOG_EVERY_N_VARNAME(base, line) LOG_EVERY_N_VARNAME_CONCAT(base, line)
 #define LOG_EVERY_N_VARNAME_CONCAT(base, line) base##line
 
-#define LOG_OCCURRENCES LOG_EVERY_N_VARNAME(occurrences_, __LINE__)
+#define LOG_OCCURRENCE LOG_EVERY_N_VARNAME(occurrence_, __LINE__)
+// The number of the current occurrence, which the message of an occasional log
+// statement may include if it is written on the line of the macro.
+#define LOG_OCCURRENCES (LOG_OCCURRENCE.number)
+#define LOG_CALL_SITE_STATE_NAME LOG_EVERY_N_VARNAME(call_site_state_, __LINE__)
 #define LOG_OCCURRENCES_MOD_N LOG_EVERY_N_VARNAME(occurrences_mod_n_, __LINE__)
 
-#define LOG_TIME_PERIOD LOG_EVERY_N_VARNAME(timePeriod_, __LINE__)
-#define LOG_PREVIOUS_TIME_RAW LOG_EVERY_N_VARNAME(previousTimeRaw_, __LINE__)
-#define LOG_TIME_DELTA LOG_EVERY_N_VARNAME(deltaTime_, __LINE__)
-#define LOG_CURRENT_TIME LOG_EVERY_N_VARNAME(currentTime_, __LINE__)
-#define LOG_PREVIOUS_TIME LOG_EVERY_N_VARNAME(previousTime_, __LINE__)
-#define SOME_KIND_OF_LOG_EVERY_T(severity, seconds)                            \
-  constexpr std::chrono::nanoseconds LOG_TIME_PERIOD =                         \
-      std::chrono::duration_cast<std::chrono::nanoseconds>(                    \
-          std::chrono::duration<double>(seconds));                             \
-  static std::atomic<std::int64_t> LOG_PREVIOUS_TIME_RAW;                      \
-  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                        \
-      __FILE__, __LINE__, &LOG_TIME_PERIOD, sizeof(std::int64_t), ""));        \
-  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                        \
-      __FILE__, __LINE__, &LOG_PREVIOUS_TIME_RAW, sizeof(std::int64_t), ""));  \
-  const auto LOG_CURRENT_TIME =                                                \
-      std::chrono::duration_cast<std::chrono::nanoseconds>(                    \
-          std::chrono::steady_clock::now().time_since_epoch());                \
-  const auto LOG_PREVIOUS_TIME =                                               \
-      LOG_PREVIOUS_TIME_RAW.load(std::memory_order_relaxed);                   \
-  const auto LOG_TIME_DELTA =                                                  \
-      LOG_CURRENT_TIME - std::chrono::nanoseconds(LOG_PREVIOUS_TIME);          \
-  if (LOG_TIME_DELTA > LOG_TIME_PERIOD)                                        \
-    LOG_PREVIOUS_TIME_RAW.store(                                               \
-        std::chrono::duration_cast<std::chrono::nanoseconds>(LOG_CURRENT_TIME) \
-            .count(),                                                          \
-        std::memory_order_relaxed);                                            \
-  if (LOG_TIME_DELTA > LOG_TIME_PERIOD)                                        \
+namespace nglog {
+namespace internal {
+
+/**
+ * Advances the position of an occurrence within a period of @p n
+ * occurrences as a single atomic step.
+ *
+ * @return Whether the occurrence starts a new period.
+ */
+inline bool AdvanceEveryN(std::atomic<int>& position, int n) noexcept {
+  // A negative period never starts and a period of zero only starts once.
+  if (n < 0) {
+    return false;
+  }
+  if (n == 0) {
+    int expected = 0;
+    return position.compare_exchange_strong(expected, 1,
+                                            std::memory_order_relaxed);
+  }
+  int current = position.load(std::memory_order_relaxed);
+  int next;
+  do {
+    next = current >= n ? 1 : current + 1;
+  } while (!position.compare_exchange_weak(current, next,
+                                           std::memory_order_relaxed));
+  return next == 1;
+}
+
+/**
+ * Counts an occurrence until @p n occurrences have been counted.
+ *
+ * @return The number of the occurrence, which exceeds @p n once the limit
+ * has been reached.
+ */
+inline unsigned CountFirstN(std::atomic<unsigned>& occurrences,
+                            int n) noexcept {
+  // A limit below one logs nothing.
+  const unsigned limit = n > 0 ? static_cast<unsigned>(n) : 0U;
+  unsigned current = occurrences.load(std::memory_order_relaxed);
+  while (current <= limit &&
+         !occurrences.compare_exchange_weak(current, current + 1U,
+                                            std::memory_order_relaxed)) {
+  }
+  return current + 1U;
+}
+
+/**
+ * Counters of a single LOG_EVERY_N() call site.
+ *
+ * Occurrences only count up, so their counter is unsigned and wraps around
+ * instead of overflowing. The position stays within the period.
+ */
+struct EveryNCounters {
+  std::atomic<unsigned> occurrences{0};
+  std::atomic<int> position{0};
+};
+
+/**
+ * An occurrence of an occasional log statement.
+ *
+ * The macros run the log statement in a for statement that marks the
+ * occurrence as skipped after the first iteration. Unlike an if statement, it
+ * leaves no else that could bind to an if statement around the macro, and no
+ * declaration that a jump to a case or goto label could bypass.
+ */
+struct Occurrence {
+  unsigned number;
+  bool skipped;
+};
+
+inline Occurrence CountEveryN(EveryNCounters& counters, int n) noexcept {
+  const unsigned number =
+      counters.occurrences.fetch_add(1U, std::memory_order_relaxed) + 1U;
+  return {number, !AdvanceEveryN(counters.position, n)};
+}
+
+inline Occurrence CountIfEveryN(EveryNCounters& counters, bool condition,
+                                int n) noexcept {
+  const unsigned number =
+      counters.occurrences.fetch_add(1U, std::memory_order_relaxed) + 1U;
+  return {number, !(condition && AdvanceEveryN(counters.position, n))};
+}
+
+inline Occurrence CountFirstNOccurrence(std::atomic<unsigned>& occurrences,
+                                        int n) noexcept {
+  const unsigned number = CountFirstN(occurrences, n);
+  return {number, n <= 0 || number > static_cast<unsigned>(n)};
+}
+
+/**
+ * Claims the current period for logging if @p period has passed since the
+ * previously claimed one, or if no period has been claimed yet.
+ *
+ * A @p previous of zero means that no period has been claimed, since the
+ * epoch of the steady clock may be as recent as the start of the system.
+ *
+ * @return Whether the caller claimed the period.
+ */
+inline bool ClaimEveryT(std::atomic<std::int64_t>& previous,
+                        std::chrono::nanoseconds period) noexcept {
+  const std::int64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now().time_since_epoch())
+                        .count();
+  std::int64_t last = previous.load(std::memory_order_relaxed);
+  while (last == 0 || std::chrono::nanoseconds{now - last} > period) {
+    if (previous.compare_exchange_weak(last, now, std::memory_order_relaxed)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace internal
+}  // namespace nglog
+
+// Each counter is advanced in a single atomic step, so that concurrent
+// callers neither lose nor duplicate occurrences.
+#define SOME_KIND_OF_LOG_EVERY_T(severity, seconds)              \
+  for (bool LOG_OCCURRENCE = nglog::internal::ClaimEveryT(       \
+           LOG_CALL_SITE_STATE(std::atomic<std::int64_t>),       \
+           std::chrono::duration_cast<std::chrono::nanoseconds>( \
+               std::chrono::duration<double>(seconds)));         \
+       LOG_OCCURRENCE; LOG_OCCURRENCE = false)                   \
   nglog::LogMessage(__FILE__, __LINE__, NGLOG_##severity).stream()
 
+// Yields the call site state of the given type. The lambda keeps the state
+// out of the enclosing scope, so that the macros consist of a single statement.
+#define LOG_CALL_SITE_STATE(type)         \
+  ([]() -> type& {                        \
+    static type LOG_CALL_SITE_STATE_NAME; \
+    return LOG_CALL_SITE_STATE_NAME;      \
+  }())
+
 #define SOME_KIND_OF_LOG_EVERY_N(severity, n, what_to_do)                  \
-  static std::atomic<int> LOG_OCCURRENCES(0), LOG_OCCURRENCES_MOD_N(0);    \
-  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                    \
-      __FILE__, __LINE__, &LOG_OCCURRENCES, sizeof(int), ""));             \
-  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                    \
-      __FILE__, __LINE__, &LOG_OCCURRENCES_MOD_N, sizeof(int), ""));       \
-  ++LOG_OCCURRENCES;                                                       \
-  if (++LOG_OCCURRENCES_MOD_N > n) LOG_OCCURRENCES_MOD_N -= n;             \
-  if (LOG_OCCURRENCES_MOD_N == 1)                                          \
-  nglog::LogMessage(__FILE__, __LINE__, NGLOG_##severity, LOG_OCCURRENCES, \
-                    &what_to_do)                                           \
+  for (nglog::internal::Occurrence LOG_OCCURRENCE =                        \
+           nglog::internal::CountEveryN(                                   \
+               LOG_CALL_SITE_STATE(nglog::internal::EveryNCounters), (n)); \
+       !LOG_OCCURRENCE.skipped; LOG_OCCURRENCE.skipped = true)             \
+  nglog::LogMessage(__FILE__, __LINE__, NGLOG_##severity,                  \
+                    LOG_OCCURRENCE.number, &what_to_do)                    \
       .stream()
 
-#define SOME_KIND_OF_LOG_IF_EVERY_N(severity, condition, n, what_to_do)       \
-  static std::atomic<int> LOG_OCCURRENCES(0), LOG_OCCURRENCES_MOD_N(0);       \
-  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                       \
-      __FILE__, __LINE__, &LOG_OCCURRENCES, sizeof(int), ""));                \
-  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                       \
-      __FILE__, __LINE__, &LOG_OCCURRENCES_MOD_N, sizeof(int), ""));          \
-  ++LOG_OCCURRENCES;                                                          \
-  if ((condition) &&                                                          \
-      ((LOG_OCCURRENCES_MOD_N = (LOG_OCCURRENCES_MOD_N + 1) % n) == (1 % n))) \
-  nglog::LogMessage(__FILE__, __LINE__, NGLOG_##severity, LOG_OCCURRENCES,    \
-                    &what_to_do)                                              \
+#define SOME_KIND_OF_LOG_IF_EVERY_N(severity, condition, n, what_to_do) \
+  for (nglog::internal::Occurrence LOG_OCCURRENCE =                     \
+           nglog::internal::CountIfEveryN(                              \
+               LOG_CALL_SITE_STATE(nglog::internal::EveryNCounters),    \
+               (condition), (n));                                       \
+       !LOG_OCCURRENCE.skipped; LOG_OCCURRENCE.skipped = true)          \
+  nglog::LogMessage(__FILE__, __LINE__, NGLOG_##severity,               \
+                    LOG_OCCURRENCE.number, &what_to_do)                 \
       .stream()
 
-#define SOME_KIND_OF_PLOG_EVERY_N(severity, n, what_to_do)              \
-  static std::atomic<int> LOG_OCCURRENCES(0), LOG_OCCURRENCES_MOD_N(0); \
-  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                 \
-      __FILE__, __LINE__, &LOG_OCCURRENCES, sizeof(int), ""));          \
-  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                 \
-      __FILE__, __LINE__, &LOG_OCCURRENCES_MOD_N, sizeof(int), ""));    \
-  ++LOG_OCCURRENCES;                                                    \
-  if (++LOG_OCCURRENCES_MOD_N > n) LOG_OCCURRENCES_MOD_N -= n;          \
-  if (LOG_OCCURRENCES_MOD_N == 1)                                       \
-  nglog::ErrnoLogMessage(__FILE__, __LINE__, NGLOG_##severity,          \
-                         LOG_OCCURRENCES, &what_to_do)                  \
+#define SOME_KIND_OF_PLOG_EVERY_N(severity, n, what_to_do)                 \
+  for (nglog::internal::Occurrence LOG_OCCURRENCE =                        \
+           nglog::internal::CountEveryN(                                   \
+               LOG_CALL_SITE_STATE(nglog::internal::EveryNCounters), (n)); \
+       !LOG_OCCURRENCE.skipped; LOG_OCCURRENCE.skipped = true)             \
+  nglog::ErrnoLogMessage(__FILE__, __LINE__, NGLOG_##severity,             \
+                         LOG_OCCURRENCE.number, &what_to_do)               \
       .stream()
 
-#define SOME_KIND_OF_LOG_FIRST_N(severity, n, what_to_do)                  \
-  static std::atomic<int> LOG_OCCURRENCES(0);                              \
-  NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                    \
-      __FILE__, __LINE__, &LOG_OCCURRENCES, sizeof(int), ""));             \
-  if (LOG_OCCURRENCES <= n) ++LOG_OCCURRENCES;                             \
-  if (LOG_OCCURRENCES <= n)                                                \
-  nglog::LogMessage(__FILE__, __LINE__, NGLOG_##severity, LOG_OCCURRENCES, \
-                    &what_to_do)                                           \
+#define SOME_KIND_OF_LOG_FIRST_N(severity, n, what_to_do)        \
+  for (nglog::internal::Occurrence LOG_OCCURRENCE =              \
+           nglog::internal::CountFirstNOccurrence(               \
+               LOG_CALL_SITE_STATE(std::atomic<unsigned>), (n)); \
+       !LOG_OCCURRENCE.skipped; LOG_OCCURRENCE.skipped = true)   \
+  nglog::LogMessage(__FILE__, __LINE__, NGLOG_##severity,        \
+                    LOG_OCCURRENCE.number, &what_to_do)          \
       .stream()
+
 #define LOG_EVERY_N(severity, n) \
   SOME_KIND_OF_LOG_EVERY_N(severity, (n), nglog::LogMessage::SendToLog)
 

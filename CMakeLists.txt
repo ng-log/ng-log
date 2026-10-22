@@ -560,7 +560,6 @@ set (NGLOG_PUBLIC_H
   src/ng-log/platform.h
   src/ng-log/raw_logging.h
   src/ng-log/stl_logging.h
-  src/ng-log/types.h
   src/ng-log/vlog_is_on.h
 )
 

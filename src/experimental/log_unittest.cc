@@ -12,7 +12,6 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <atomic>
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>

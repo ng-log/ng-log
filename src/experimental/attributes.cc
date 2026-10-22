@@ -11,7 +11,6 @@
 
 #include <atomic>
 #include <chrono>
-#include <compare>
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
@@ -21,6 +20,7 @@
 
 #include "context.h"
 #include "internal/log_message_access.h"
+#include "ng-log/logging.h"
 #include "ng-log/raw_logging.h"
 
 namespace nglog::experimental {
@@ -212,18 +212,10 @@ template struct internal::FirstCount<unsigned long long>;
 
 bool internal::ThrottlePeriod(Context& context,
                               std::chrono::nanoseconds period) {
-  auto& state = context.site().state<PeriodState>();
-  // Mirrors the timing of LOG_EVERY_T().
-  const auto now = std::chrono::duration_cast<std::chrono::nanoseconds>(
-      std::chrono::steady_clock::now().time_since_epoch());
-  auto previous = state.previous.load(std::memory_order_relaxed);
-  if (now - std::chrono::nanoseconds{previous} <= period) {
-    return false;
-  }
-  // Only the thread that advances the time of the last message logs, so that
-  // threads arriving together log once per period.
-  return state.previous.compare_exchange_strong(previous, now.count(),
-                                                std::memory_order_relaxed);
+  // Shares the timing of LOG_EVERY_T(), which logs the first occurrence and
+  // then at most once per period.
+  return nglog::internal::ClaimEveryT(
+      context.site().state<PeriodState>().previous, period);
 }
 
 void SyslogDestination::Configure(Context& context) const {

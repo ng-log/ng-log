@@ -37,6 +37,11 @@ SPDX-License-Identifier: BSD-3-Clause
   `NGLOG_IF_DEBUG_MODE`
 - Remove the `nglog::int32`, `nglog::uint32`, `nglog::int64` and
   `nglog::uint64` aliases in favor of the `<cstdint>` types
+- Terminate on severities outside `NGLOG_INFO` through `NGLOG_FATAL`
+  instead of reading out of bounds
+- Remove `ng-log/types.h` with `NGLOG_IFDEF_THREAD_SANITIZER` and the
+  `AnnotateBenignRaceSized` declaration. Logging macros no longer exempt
+  their counters from ThreadSanitizer
 
 #### Features
 
@@ -80,6 +85,8 @@ SPDX-License-Identifier: BSD-3-Clause
 - Fix a data race between `EnableLogCleaner` and logging threads by [@devtejasx]
 - Fix a data race on concurrent initialization of `VLOG` call sites
 - Let `SetVLOGLevel` take precedence over matching `--vmodule` patterns
+- Fix miscounting periodic and first-N log macros under concurrency
+- Log the first `LOG_EVERY_T` occurrence right after system start
 - Serialize log file creation across processes on Windows
 - Fix `TruncateLogFile` corrupting log files with line breaks on Windows
 - Fix `RAW_LOG` truncating messages that exactly fill its buffer
@@ -92,6 +99,7 @@ SPDX-License-Identifier: BSD-3-Clause
   formatter by [@devtejasx]
 - Keep `IsFailureSignalHandlerInstalled` independent of later signal
   disposition changes
+- Report a zero UTC offset with `log_utc_time`
 - Keep `BUILD_SHARED_LIBS` from changing the library type of embedding
   projects
 
