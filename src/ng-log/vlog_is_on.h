@@ -78,11 +78,12 @@ namespace nglog {
 // Set VLOG(_IS_ON) level for module_pattern to log_level.
 // This lets us dynamically control what is normally set by the --vmodule flag.
 // Returns the level that previously applied to module_pattern.
-// NOTE: To change the log level for VLOG(_IS_ON) sites
-//	 that have already executed after/during InitializeLogging,
-//	 one needs to supply the exact --vmodule pattern that applied to them.
-//       (If no --vmodule pattern applied to them
-//       the value of FLAGS_v will continue to control them.)
+// NOTE: A VLOG(_IS_ON) site that has already executed after/during
+//       InitializeLogging stays bound to the --vmodule pattern that matched
+//       it at that time, so its level only changes when that exact pattern is
+//       supplied again. A site that no --vmodule pattern matched (and was
+//       therefore controlled by FLAGS_v) switches to the first new pattern
+//       that matches it.
 extern NGLOG_EXPORT int SetVLOGLevel(const char* module_pattern, int log_level);
 
 // Various declarations needed for VLOG_IS_ON above: =========================
