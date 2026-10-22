@@ -40,12 +40,12 @@ struct ThreadLockState {
 
 thread_local ThreadLockState thread_lock_state;
 
-void RecordAcquisition(LockKind kind,
+void RecordAcquisition(LockKind kind, bool contended,
                        std::chrono::steady_clock::duration wait) {
 #ifdef NGLOG_ENABLE_LOCK_METRICS
   const LockKindIndex index = static_cast<LockKindIndex>(kind);
   metrics.acquisitions[index].fetch_add(1, std::memory_order_relaxed);
-  if (wait > std::chrono::steady_clock::duration::zero()) {
+  if (contended) {
     metrics.contended_acquisitions[index].fetch_add(1,
                                                     std::memory_order_relaxed);
   }
@@ -55,8 +55,28 @@ void RecordAcquisition(LockKind kind,
       std::memory_order_relaxed);
 #else
   (void)kind;
+  (void)contended;
   (void)wait;
 #endif
+}
+
+// Acquires a lock and records whether the acquisition had to wait. Two clock
+// readings always differ, so only a failed attempt without waiting tells a
+// contended acquisition apart.
+template <class TryLock, class Lock>
+std::chrono::steady_clock::time_point AcquireAndRecord(LockKind kind,
+                                                       TryLock try_lock,
+                                                       Lock lock) {
+  if (try_lock()) {
+    const auto acquired = std::chrono::steady_clock::now();
+    RecordAcquisition(kind, false, std::chrono::steady_clock::duration::zero());
+    return acquired;
+  }
+  const auto start = std::chrono::steady_clock::now();
+  lock();
+  const auto acquired = std::chrono::steady_clock::now();
+  RecordAcquisition(kind, true, acquired - start);
+  return acquired;
 }
 
 }  // namespace
@@ -89,11 +109,9 @@ LockMetrics GetLockMetrics(LockKind kind) {
 
 template <LockKind Kind>
 void InstrumentedMutex<Kind>::lock() {
-  const auto start = std::chrono::steady_clock::now();
-  mutex_.lock();
-  const auto acquired = std::chrono::steady_clock::now();
+  const auto acquired = AcquireAndRecord(
+      Kind, [this] { return mutex_.try_lock(); }, [this] { mutex_.lock(); });
   const LockKindIndex index = static_cast<LockKindIndex>(Kind);
-  RecordAcquisition(Kind, acquired - start);
   thread_lock_state.acquired_at[index] = acquired;
   thread_lock_state.recursion_depth[index] = 1;
 }
@@ -121,7 +139,7 @@ bool InstrumentedMutex<Kind>::try_lock() {
     return false;
   }
   const auto acquired = std::chrono::steady_clock::now();
-  RecordAcquisition(Kind, std::chrono::steady_clock::duration::zero());
+  RecordAcquisition(Kind, false, std::chrono::steady_clock::duration::zero());
   const LockKindIndex index = static_cast<LockKindIndex>(Kind);
   thread_lock_state.acquired_at[index] = acquired;
   thread_lock_state.recursion_depth[index] = 1;
@@ -132,10 +150,8 @@ template <LockKind Kind>
 void InstrumentedRecursiveMutex<Kind>::lock() {
   const LockKindIndex index = static_cast<LockKindIndex>(Kind);
   const bool recursive = thread_lock_state.recursion_depth[index] != 0;
-  const auto start = std::chrono::steady_clock::now();
-  mutex_.lock();
-  const auto acquired = std::chrono::steady_clock::now();
-  RecordAcquisition(Kind, acquired - start);
+  const auto acquired = AcquireAndRecord(
+      Kind, [this] { return mutex_.try_lock(); }, [this] { mutex_.lock(); });
   if (!recursive) {
     thread_lock_state.acquired_at[index] = acquired;
   }
@@ -166,7 +182,7 @@ bool InstrumentedRecursiveMutex<Kind>::try_lock() {
   }
   const LockKindIndex index = static_cast<LockKindIndex>(Kind);
   const auto acquired = std::chrono::steady_clock::now();
-  RecordAcquisition(Kind, std::chrono::steady_clock::duration::zero());
+  RecordAcquisition(Kind, false, std::chrono::steady_clock::duration::zero());
   if (thread_lock_state.recursion_depth[index] == 0) {
     thread_lock_state.acquired_at[index] = acquired;
   }
@@ -176,11 +192,9 @@ bool InstrumentedRecursiveMutex<Kind>::try_lock() {
 
 template <LockKind Kind>
 void InstrumentedSharedMutex<Kind>::lock() {
-  const auto start = std::chrono::steady_clock::now();
-  mutex_.lock();
-  const auto acquired = std::chrono::steady_clock::now();
+  const auto acquired = AcquireAndRecord(
+      Kind, [this] { return mutex_.try_lock(); }, [this] { mutex_.lock(); });
   const LockKindIndex index = static_cast<LockKindIndex>(Kind);
-  RecordAcquisition(Kind, acquired - start);
   thread_lock_state.acquired_at[index] = acquired;
   thread_lock_state.recursion_depth[index] = 1;
 }
@@ -208,7 +222,7 @@ bool InstrumentedSharedMutex<Kind>::try_lock() {
     return false;
   }
   const auto acquired = std::chrono::steady_clock::now();
-  RecordAcquisition(Kind, std::chrono::steady_clock::duration::zero());
+  RecordAcquisition(Kind, false, std::chrono::steady_clock::duration::zero());
   const LockKindIndex index = static_cast<LockKindIndex>(Kind);
   thread_lock_state.acquired_at[index] = acquired;
   thread_lock_state.recursion_depth[index] = 1;
@@ -217,11 +231,10 @@ bool InstrumentedSharedMutex<Kind>::try_lock() {
 
 template <LockKind Kind>
 void InstrumentedSharedMutex<Kind>::lock_shared() {
-  const auto start = std::chrono::steady_clock::now();
-  mutex_.lock_shared();
-  const auto acquired = std::chrono::steady_clock::now();
+  const auto acquired = AcquireAndRecord(
+      Kind, [this] { return mutex_.try_lock_shared(); },
+      [this] { mutex_.lock_shared(); });
   const LockKindIndex index = static_cast<LockKindIndex>(Kind);
-  RecordAcquisition(Kind, acquired - start);
   thread_lock_state.acquired_at[index] = acquired;
   thread_lock_state.recursion_depth[index] = 1;
 }
@@ -249,7 +262,7 @@ bool InstrumentedSharedMutex<Kind>::try_lock_shared() {
     return false;
   }
   const auto acquired = std::chrono::steady_clock::now();
-  RecordAcquisition(Kind, std::chrono::steady_clock::duration::zero());
+  RecordAcquisition(Kind, false, std::chrono::steady_clock::duration::zero());
   const LockKindIndex index = static_cast<LockKindIndex>(Kind);
   thread_lock_state.acquired_at[index] = acquired;
   thread_lock_state.recursion_depth[index] = 1;

@@ -24,10 +24,12 @@
 #include <initializer_list>
 #include <iomanip>
 #include <iterator>
+#include <limits>
 #include <locale>
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <ratio>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -122,6 +124,7 @@ using testing::Not;
 using testing::ResultOf;
 using testing::SaveArg;
 using testing::SizeIs;
+using testing::StartsWith;
 using testing::StrEq;
 using testing::StrictMock;
 using testing::StrNe;
@@ -992,6 +995,68 @@ void LogWithLevels(int v, int severity, bool err, bool alsoerr) {
 }
 
 #ifdef GTEST_HAS_DEATH_TEST
+// Each death symbolizes a stack trace, which takes long with some backends,
+// so every function has a test of its own.
+namespace {
+
+const auto kPastLastSeverity = static_cast<LogSeverity>(NUM_SEVERITIES);
+constexpr char kPastLastMessage[] = "Check failed: .*NUM_SEVERITIES";
+
+}  // namespace
+
+TEST(DeathSeverityRange, SetLogDestinationRejectsSeveritiesOutOfRange) {
+  EXPECT_DEATH(SetLogDestination(kPastLastSeverity, "unused"),
+               kPastLastMessage);
+  EXPECT_DEATH(SetLogDestination(static_cast<LogSeverity>(-1), "unused"),
+               "Check failed: .*>= 0");
+}
+
+TEST(DeathSeverityRange, GetLoggerRejectsSeveritiesOutOfRange) {
+  EXPECT_DEATH(base::GetLogger(kPastLastSeverity), kPastLastMessage);
+}
+
+TEST(DeathSeverityRange, SetLoggerRejectsSeveritiesOutOfRange) {
+  EXPECT_DEATH(base::SetLogger(kPastLastSeverity, nullptr), kPastLastMessage);
+}
+
+TEST(DeathSeverityRange, GetLogSeverityNameRejectsSeveritiesOutOfRange) {
+  EXPECT_DEATH(GetLogSeverityName(kPastLastSeverity), kPastLastMessage);
+}
+
+TEST(DeathSeverityRange, NumMessagesRejectsSeveritiesOutOfRange) {
+  EXPECT_DEATH(LogMessage::num_messages(NUM_SEVERITIES), kPastLastMessage);
+}
+
+// The default prefix of messages to stderr formats the severity name before
+// any log file is selected, so the check must happen when the message is
+// created.
+TEST(DeathSeverityRange, LogMessageRejectsSeveritiesOutOfRange) {
+  EXPECT_DEATH(
+      {
+        nglog::SetFlag(FLAGS_logtostderr, true);
+        InstallPrefixFormatter(nullptr);
+        LogMessage(__FILE__, __LINE__, kPastLastSeverity).stream() << "unused";
+      },
+      kPastLastMessage);
+}
+
+TEST(DeathSeverityRange, LogSinkToStringRejectsSeveritiesOutOfRange) {
+  const LogMessageTime time;
+  EXPECT_DEATH(LogSink::ToString(kPastLastSeverity, __FILE__, __LINE__, time,
+                                 "unused", sizeof("unused") - 1),
+               kPastLastMessage);
+}
+
+TEST(DeathSeverityRange, LogAtLevelRejectsSeveritiesOutOfRange) {
+  EXPECT_DEATH(
+      {
+        nglog::SetFlag(FLAGS_logtostderr, true);
+        InstallPrefixFormatter(nullptr);
+        LogAtLevel(static_cast<LogSeverity>(-1), "unused");
+      },
+      "Check failed: .*>= 0");
+}
+
 TEST(DeathRawCHECK, logging) {
   ASSERT_DEATH(RAW_CHECK(false, "failure 1"),
                "RAW: Check false failed: failure 1");
@@ -1652,6 +1717,20 @@ TEST(Logging, DirectSinkWithoutRegisteredSinksDoesNotLockSinkRegistry) {
             0U);
 }
 
+TEST(LockMetrics, UncontendedAcquisitionsAreNotCountedAsContended) {
+  constexpr int kAcquisitions = 1000;
+  internal::ResetLockMetrics();
+  internal::FileMutex mutex;
+  for (int i = 0; i < kAcquisitions; ++i) {
+    std::lock_guard<internal::FileMutex> lock{mutex};
+  }
+
+  const internal::LockMetrics metrics =
+      internal::GetLockMetrics(internal::LockKind::kFile);
+  EXPECT_EQ(metrics.acquisitions, static_cast<std::uint64_t>(kAcquisitions));
+  EXPECT_EQ(metrics.contended_acquisitions, 0U);
+}
+
 TEST(Logging, RegisteredSinkDispatchUsesOneRegistrySnapshot) {
   nglog::ScopedFlags<> save;
   nglog::SetFlag(FLAGS_logtostderr, true);
@@ -1680,6 +1759,148 @@ class MessageCollectingSink : public LogSink {
   }
 };
 
+class CountingLogSink : public LogSink {
+ public:
+  void send(LogSeverity, const char*, const char*, int, const LogMessageTime&,
+            const char*, std::size_t) override {
+    count_.fetch_add(1, std::memory_order_relaxed);
+  }
+
+  int count() const { return count_.load(std::memory_order_relaxed); }
+
+ private:
+  std::atomic<int> count_{0};
+};
+
+constexpr int kCountingThreads = 8;
+constexpr int kCountingIterations = 20'000;
+
+/**
+ * Calls @p log from several threads at once and counts the messages that
+ * reach a registered sink. Log files are disabled to keep the test fast.
+ */
+template <class Log>
+int CountConcurrentMessages(Log log) {
+  auto save = nglog::MakeScopedFlags(
+      nglog::MakeScopedFlag(FLAGS_logtostderr, false),
+      nglog::MakeScopedFlag(FLAGS_logtostdout, false),
+      nglog::MakeScopedFlag(FLAGS_alsologtostderr, false));
+  SetLogDestination(NGLOG_INFO, "");
+  CountingLogSink sink;
+  AddLogSink(&sink);
+
+  std::atomic<int> waiting{kCountingThreads};
+  std::vector<std::thread> threads;
+  for (int i = 0; i < kCountingThreads; ++i) {
+    threads.emplace_back([&waiting, &log] {
+      waiting.fetch_sub(1, std::memory_order_acq_rel);
+      while (waiting.load(std::memory_order_acquire) > 0) {
+      }
+      for (int j = 0; j < kCountingIterations; ++j) {
+        log();
+      }
+    });
+  }
+  for (auto& thread : threads) {
+    thread.join();
+  }
+
+  RemoveLogSink(&sink);
+  LogToStderr();
+  return sink.count();
+}
+
+// The number of an occurrence wraps around to zero instead of overflowing
+// once a call site ran more often than its counter can count.
+TEST(LogMacros, OccasionalVariantsWrapAroundTheirCounter) {
+  constexpr unsigned kLargestCount = std::numeric_limits<unsigned>::max();
+  nglog::internal::EveryNCounters every_n;
+  every_n.occurrences.store(kLargestCount);
+  EXPECT_EQ(nglog::internal::CountEveryN(every_n, 1).number, 0U);
+  nglog::internal::EveryNCounters if_every_n;
+  if_every_n.occurrences.store(kLargestCount);
+  EXPECT_EQ(nglog::internal::CountIfEveryN(if_every_n, true, 1).number, 0U);
+}
+
+// The largest limit still stops counting once it has been reached.
+TEST(LogMacros, FirstNCountsUpToTheLargestLimit) {
+  constexpr int kLargestInt = std::numeric_limits<int>::max();
+  std::atomic<unsigned> occurrences{static_cast<unsigned>(kLargestInt)};
+  const auto occurrence =
+      nglog::internal::CountFirstNOccurrence(occurrences, kLargestInt);
+  EXPECT_TRUE(occurrence.skipped);
+  EXPECT_EQ(occurrence.number, static_cast<unsigned>(kLargestInt) + 1U);
+}
+
+// The steady clock may start at system boot, so the first occurrence logs
+// even if less time than the period has passed since then.
+TEST(LogMacros, EveryTLogsTheFirstOccurrence) {
+  std::atomic<std::int64_t> previous{0};
+  const auto since_epoch = std::chrono::steady_clock::now().time_since_epoch();
+  const auto longer_than_since_epoch =
+      std::chrono::duration_cast<std::chrono::nanoseconds>(since_epoch) +
+      std::chrono::hours{1};
+  EXPECT_TRUE(nglog::internal::ClaimEveryT(previous, longer_than_since_epoch));
+  EXPECT_FALSE(nglog::internal::ClaimEveryT(previous, longer_than_since_epoch));
+}
+
+// Every call logging would hide lost or duplicated occurrences.
+TEST(LogMacros, EveryNCountsConcurrentOccurrencesExactly) {
+  constexpr int kPeriod = 2;
+  EXPECT_EQ(CountConcurrentMessages(
+                [] { LOG_EVERY_N(INFO, kPeriod) << "every other occurrence"; }),
+            kCountingThreads * kCountingIterations / kPeriod);
+}
+
+TEST(LogMacros, IfEveryNCountsConcurrentOccurrencesExactly) {
+  constexpr int kPeriod = 2;
+  EXPECT_EQ(CountConcurrentMessages([] {
+              LOG_IF_EVERY_N(INFO, true, kPeriod) << "every other occurrence";
+            }),
+            kCountingThreads * kCountingIterations / kPeriod);
+}
+
+// Each instantiation has a call site of its own, so that threads race for the
+// first occurrence many times.
+template <std::size_t>
+struct FirstOccurrence {
+  static void Log() { LOG_FIRST_N(INFO, 1) << "first occurrence"; }
+};
+
+template <std::size_t>
+struct HourlyOccurrence {
+  static void Log() {
+    using namespace std::chrono_literals;
+    LOG_EVERY_T(INFO, std::chrono::duration<double>{1h}.count())
+        << "hourly occurrence";
+  }
+};
+
+constexpr std::size_t kCallSites = 256;
+
+template <template <std::size_t> class Site, std::size_t... Sites>
+void LogAtCallSites(std::index_sequence<Sites...> /*sites*/) {
+  const int expand[] = {(Site<Sites>::Log(), 0)...};
+  static_cast<void>(expand);
+}
+
+TEST(LogMacros, FirstNLogsExactlyNConcurrentOccurrences) {
+  EXPECT_EQ(CountConcurrentMessages([] {
+              LogAtCallSites<FirstOccurrence>(
+                  std::make_index_sequence<kCallSites>{});
+            }),
+            static_cast<int>(kCallSites));
+}
+
+// Occurrences arriving together within a period log once.
+TEST(LogMacros, EveryTLogsConcurrentOccurrencesOncePerPeriod) {
+  EXPECT_EQ(CountConcurrentMessages([] {
+              LogAtCallSites<HourlyOccurrence>(
+                  std::make_index_sequence<kCallSites>{});
+            }),
+            static_cast<int>(kCallSites));
+}
+
 TEST(Logging, EmptyMessageWithoutPrefixIsSentAsEmptyMessage) {
   MessageCollectingSink sink;
   {
@@ -1687,6 +1908,104 @@ TEST(Logging, EmptyMessageWithoutPrefixIsSentAsEmptyMessage) {
                        /*also_send_to_log=*/false);
   }
   EXPECT_THAT(sink.messages, ElementsAre(""));
+}
+
+TEST(LogMacros, OccasionalVariantsCanBeJumpedAcross) {
+  // LOG_FIRST_N() logs during the first run of the test only.
+  static bool first_run = true;
+  const bool first_n_logs = std::exchange(first_run, false);
+  nglog::ScopedFlags<> save;
+  RouteLogMessagesTo(StandardStream::kStderr);
+  constexpr int kCases = 2;
+  MessageCollectingSink sink;
+  AddLogSink(&sink);
+  {
+    ScopedStreamCapture capture{StandardStream::kStderr};
+    for (int selected = 0; selected < kCases; ++selected) {
+      switch (selected) {
+        case 0:
+          LOG_EVERY_N(INFO, 1) << "every n";
+          LOG_IF_EVERY_N(INFO, true, 1) << "if every n";
+          PLOG_EVERY_N(INFO, 1) << "plog every n";
+          LOG_FIRST_N(INFO, 1) << "first n";
+          break;
+        case 1:
+          LOG(INFO) << "jumped across";
+          break;
+      }
+    }
+    goto skipped;
+    LOG_EVERY_N(INFO, 1) << "skipped every n";
+    LOG_IF_EVERY_N(INFO, true, 1) << "skipped if every n";
+    PLOG_EVERY_N(INFO, 1) << "skipped plog every n";
+    LOG_FIRST_N(INFO, 1) << "skipped first n";
+  skipped:;
+  }
+  RemoveLogSink(&sink);
+
+  std::vector<LineMatcher> expected{"every n", "if every n",
+                                    StartsWith("plog every n: ")};
+  if (first_n_logs) {
+    expected.emplace_back("first n");
+  }
+  expected.emplace_back("jumped across");
+  EXPECT_THAT(sink.messages, ElementsAreArray(expected));
+}
+
+TEST(LogMacros, OccasionalVariantsLeaveTrailingElseToEnclosingIf) {
+  // LOG_FIRST_N() and LOG_EVERY_T() log during the first run of the test
+  // only.
+  static bool first_run = true;
+  const bool first_n_logs = std::exchange(first_run, false);
+  nglog::ScopedFlags<> save;
+  RouteLogMessagesTo(StandardStream::kStderr);
+  constexpr int kPeriod = 2;
+  constexpr double kLongIntervalSeconds = 3600;
+  constexpr int kOccurrences = 4;
+  const bool enabled = true;
+  int else_taken = 0;
+  MessageCollectingSink sink;
+  AddLogSink(&sink);
+  {
+    ScopedStreamCapture capture{StandardStream::kStderr};
+    for (int i = 0; i < kOccurrences; ++i) {
+      // The missing braces are the subject of this test.
+      // NOLINTBEGIN(google-readability-braces-around-statements,readability-braces-around-statements)
+      if (enabled)
+        LOG_EVERY_N(INFO, kPeriod) << "every n";
+      else
+        ++else_taken;
+      if (enabled)
+        LOG_IF_EVERY_N(INFO, true, kPeriod) << "if every n";
+      else
+        ++else_taken;
+      if (enabled)
+        PLOG_EVERY_N(INFO, kPeriod) << "plog every n";
+      else
+        ++else_taken;
+      if (enabled)
+        LOG_FIRST_N(INFO, 1) << "first n";
+      else
+        ++else_taken;
+      if (enabled)
+        LOG_EVERY_T(INFO, kLongIntervalSeconds) << "every t";
+      else
+        ++else_taken;
+      // NOLINTEND(google-readability-braces-around-statements,readability-braces-around-statements)
+    }
+  }
+  RemoveLogSink(&sink);
+
+  EXPECT_EQ(else_taken, 0);
+  std::vector<LineMatcher> expected{"every n", "if every n",
+                                    StartsWith("plog every n: ")};
+  if (first_n_logs) {
+    expected.emplace_back("first n");
+    expected.emplace_back("every t");
+  }
+  expected.insert(expected.end(),
+                  {"every n", "if every n", StartsWith("plog every n: ")});
+  EXPECT_THAT(sink.messages, ElementsAreArray(expected));
 }
 
 #if defined(NGLOG_OS_LINUX)
@@ -2461,6 +2780,41 @@ TEST(Logging, ForkedChildReopensEveryLogFile) {
 #else
   GTEST_SKIP() << "requires fork()";
 #endif
+}
+
+// A severity below the first one flushes the files of every severity.
+TEST(SeverityRange, FlushingBelowTheFirstSeverityFlushesAll) {
+  // LogToStderr() at the end also changes --stderrthreshold.
+  const nglog::ScopedFlags<> save_all;
+  constexpr std::int32_t kLongBufferSeconds = 3600;
+  auto save = nglog::MakeScopedFlags(
+      nglog::MakeScopedFlag(FLAGS_logtostderr, false),
+      nglog::MakeScopedFlag(FLAGS_logtostdout, false),
+      nglog::MakeScopedFlag(FLAGS_logbuflevel, 0),
+      nglog::MakeScopedFlag(FLAGS_logbufsecs, kLongBufferSeconds));
+  const auto below_first = static_cast<LogSeverity>(-1);
+  const std::string dest = TestTmpDir() + "/logging_test_flush_below_first.";
+  DeleteFiles(dest + "*");
+  SetLogDestination(NGLOG_INFO, dest.c_str());
+  const auto contents = [&dest] {
+    std::string text;
+    for (const std::string& file : GetFiles(dest + "*")) {
+      text += ReadFileContents(file);
+    }
+    return text;
+  };
+
+  // The first message creates the file, and the second one stays buffered.
+  LOG(INFO) << "creates the file";
+  LOG(INFO) << "flushed by FlushLogFiles";
+  FlushLogFiles(below_first);
+  EXPECT_THAT(contents(), HasSubstr("flushed by FlushLogFiles"));
+  LOG(INFO) << "flushed by FlushLogFilesUnsafe";
+  FlushLogFilesUnsafe(below_first);
+  EXPECT_THAT(contents(), HasSubstr("flushed by FlushLogFilesUnsafe"));
+
+  LogToStderr();
+  DeleteFiles(dest + "*");
 }
 
 // Flushing writes the buffered lines of a file inherited from the parent,
@@ -4281,6 +4635,25 @@ TEST(LogMsgTime, gmtoffSubHour) {
   EXPECT_EQ(gmtoff, 5h + 30min);
 }
 #endif  // !defined(NGLOG_OS_WINDOWS) && !defined(NGLOG_OS_EMSCRIPTEN)
+
+// Emscripten derives the time zone from the JavaScript host and ignores TZ.
+#ifndef NGLOG_OS_EMSCRIPTEN
+TEST(LogMsgTime, gmtoffIsZeroForUtcTime) {
+  using namespace std::chrono_literals;
+  auto save =
+      nglog::MakeScopedFlags(nglog::MakeScopedFlag(FLAGS_log_utc_time, true));
+  std::chrono::seconds gmtoff;
+  {
+    // A local time zone away from UTC must not leak into UTC timestamps.
+    const ScopedEnvironmentVariable tz{"TZ", "IST-5:30"};
+    tzset();
+    gmtoff = nglog::LogMessage(__FILE__, __LINE__).time().gmtoffset();
+  }
+  tzset();
+
+  EXPECT_EQ(gmtoff, 0s);
+}
+#endif  // !defined(NGLOG_OS_EMSCRIPTEN)
 
 // Emscripten cannot run a mailer.
 #ifndef NGLOG_OS_EMSCRIPTEN

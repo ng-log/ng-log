@@ -275,7 +275,19 @@ const char* const LogSeverityNames[] = {"INFO", "WARNING", "ERROR", "FATAL"};
 // Has the user called SetExitOnDFatal(true)?
 static std::atomic<bool> exit_on_dfatal{true};
 
+namespace {
+
+// Severities index fixed-size arrays, so the public entry points reject
+// values out of range instead of reading past them.
+void CheckSeverityInRange(int severity) {
+  CHECK_GE(severity, 0);
+  CHECK_LT(severity, NUM_SEVERITIES);
+}
+
+}  // namespace
+
 const char* GetLogSeverityName(LogSeverity severity) {
+  CheckSeverityInRange(severity);
   return LogSeverityNames[severity];
 }
 
@@ -769,23 +781,27 @@ void LogDestination::SetLoggerImpl(base::Logger* logger) {
 inline void LogDestination::FlushLogFilesUnsafe(int min_severity) {
   // assume we have the log_mutex or we simply don't care
   // about it
-  std::for_each(std::next(std::begin(log_destinations_), min_severity),
-                std::end(log_destinations_),
-                [now = std::chrono::system_clock::now()](
-                    std::unique_ptr<LogDestination>& log) {
-                  if (log != nullptr) {
-                    // Flush the base fileobject_ logger directly instead of
-                    // going through any wrappers to reduce chance of deadlock.
-                    log->fileobject_.FlushUnlocked(now);
-                  }
-                });
+  if (min_severity >= NUM_SEVERITIES) {
+    return;
+  }
+  std::for_each(
+      std::next(std::begin(log_destinations_), std::max(min_severity, 0)),
+      std::end(log_destinations_),
+      [now = std::chrono::system_clock::now()](
+          std::unique_ptr<LogDestination>& log) {
+        if (log != nullptr) {
+          // Flush the base fileobject_ logger directly instead of
+          // going through any wrappers to reduce chance of deadlock.
+          log->fileobject_.FlushUnlocked(now);
+        }
+      });
 }
 
 inline void LogDestination::FlushLogFiles(int min_severity) {
   // Prevent any subtle race conditions by wrapping a mutex lock around
   // all this stuff.
   std::lock_guard<::nglog::internal::LogMutex> l{log_mutex};
-  for (int i = min_severity; i < NUM_SEVERITIES; i++) {
+  for (int i = std::max(min_severity, 0); i < NUM_SEVERITIES; ++i) {
     LogDestination* log = log_destination(static_cast<LogSeverity>(i));
     if (log != nullptr) {
       log->logger_->Flush();
@@ -797,14 +813,14 @@ inline void LogDestination::SetLogDestination(LogSeverity severity,
                                               const char* base_filename) {
   // Prevent any subtle race conditions by wrapping a mutex lock around
   // all this stuff.
+  CheckSeverityInRange(severity);
   std::lock_guard<::nglog::internal::LogMutex> l{log_mutex};
   log_destination(severity)->fileobject_.SetBasename(base_filename);
 }
 
 inline void LogDestination::SetLogSymlink(LogSeverity severity,
                                           const char* symlink_basename) {
-  CHECK_GE(severity, 0);
-  CHECK_LT(severity, NUM_SEVERITIES);
+  CheckSeverityInRange(severity);
   std::lock_guard<::nglog::internal::LogMutex> l{log_mutex};
   log_destination(severity)->fileobject_.SetSymlinkBasename(symlink_basename);
 }
@@ -2239,6 +2255,7 @@ LogMessage::LogMessage(const char* file, int line, LogSeverity severity,
 
 void LogMessage::Init(const char* file, int line, LogSeverity severity,
                       void (LogMessage::*send_method)()) {
+  CheckSeverityInRange(severity);
   allocated_ = nullptr;
   if (severity != NGLOG_FATAL ||
       !exit_on_dfatal.load(std::memory_order_relaxed)) {
@@ -2725,17 +2742,20 @@ void LogMessage::SendToSyslogAndLog() {
 }
 
 base::Logger* base::GetLogger(LogSeverity severity) {
+  CheckSeverityInRange(severity);
   std::lock_guard<internal::LogMutex> l{log_mutex};
   return LogDestination::log_destination(severity)->GetLoggerImpl();
 }
 
 void base::SetLogger(LogSeverity severity, base::Logger* logger) {
+  CheckSeverityInRange(severity);
   std::lock_guard<internal::LogMutex> l{log_mutex};
   LogDestination::log_destination(severity)->SetLoggerImpl(logger);
 }
 
 // L < log_mutex.
 std::int64_t LogMessage::num_messages(int severity) {
+  CheckSeverityInRange(severity);
   return num_messages_[severity].load(std::memory_order_relaxed);
 }
 
@@ -2804,6 +2824,7 @@ void LogSink::WaitTillSent() {
 string LogSink::ToString(LogSeverity severity, const char* file, int line,
                          const LogMessageTime& time, const char* message,
                          std::size_t message_len) {
+  CheckSeverityInRange(severity);
   ostringstream stream;
   stream.fill('0');
 
@@ -3574,20 +3595,19 @@ struct BreakdownImpl {
   static std::tuple<std::tm, std::time_t, std::chrono::minutes> Get(
       const std::chrono::system_clock::time_point& now) {
     std::time_t timestamp = std::chrono::system_clock::to_time_t(now);
-    std::tm tm_local;
-    std::tm tm_utc;
-    int isdst = 0;
 
     if (nglog::GetFlag(FLAGS_log_utc_time)) {
-      gmtime_r(&timestamp, &tm_local);
-      localtime_r(&timestamp, &tm_utc);
-      isdst = tm_utc.tm_isdst;
-      tm_utc = tm_local;
-    } else {
-      localtime_r(&timestamp, &tm_local);
-      isdst = tm_local.tm_isdst;
+      // UTC time has no offset from UTC.
+      std::tm tm_utc;
       gmtime_r(&timestamp, &tm_utc);
+      return std::make_tuple(tm_utc, timestamp, std::chrono::minutes::zero());
     }
+
+    std::tm tm_local;
+    std::tm tm_utc;
+    localtime_r(&timestamp, &tm_local);
+    const int isdst = tm_local.tm_isdst;
+    gmtime_r(&timestamp, &tm_utc);
 
     std::time_t gmt_sec = std::mktime(&tm_utc);
 

@@ -606,8 +606,8 @@ ngx::Log(ngx::Every{0.5}, "msg");  // does not compile
 ```
 
 Durations beyond the range of [`std::chrono::nanoseconds`](https://en.cppreference.com/w/cpp/chrono/duration) saturate. Like
-`LOG_EVERY_T`, the first message is logged only once the [steady clock](https://en.cppreference.com/w/cpp/chrono/steady_clock) exceeds
-the duration since its epoch.
+`LOG_EVERY_T`, the first message is logged right away and the next only once
+the duration has passed on the [steady clock](https://en.cppreference.com/w/cpp/chrono/steady_clock).
 
 The `Occurrence` argument formats how often the call site occurred, like
 `LOG_OCCURRENCES` and `nglog::COUNTER`, in the counter type of `Every` or
