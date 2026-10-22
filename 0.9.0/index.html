@@ -1,4 +1,6 @@
 
+
+
 <!doctype html>
 <html lang="en" class="no-js">
   <head>
@@ -12,6 +14,7 @@
       
       
       
+      
         <link rel="next" href="./usage/">
       
       
@@ -19,23 +22,23 @@
       
       
       <link rel="icon" href="./assets/images/favicon.png">
-      <meta name="generator" content="zensical-0.0.54">
+      <meta name="generator" content="zensical-0.0.71">
     
     
       
-        <title>ng-log - ng-log</title>
+        <title>Overview - ng-log</title>
       
     
     
       
         
       
-      <link rel="stylesheet" href="./assets/stylesheets/modern/main.20815dad.min.css">
+      <link rel="stylesheet" href="./assets/stylesheets/modern/main.e442bf79.min.css">
       
         
           
         
-        <link rel="stylesheet" href="./assets/stylesheets/modern/palette.dfe2e883.min.css">
+        <link rel="stylesheet" href="./assets/stylesheets/modern/palette.b60ce83d.min.css">
       
       
 
@@ -81,14 +84,11 @@
     
     <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
     <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
-    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <label class="md-overlay" for="__drawer" aria-hidden="true"></label>
     <div data-md-component="skip">
-      
-        
-        <a href="#ng-log" class="md-skip">
-          Skip to content
-        </a>
-      
+      <a href="#__skip" class="md-skip">
+        Skip to content
+      </a>
     </div>
     <div data-md-component="announce">
       
@@ -137,7 +137,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              ng-log
+              Overview
             
           </span>
         </div>
@@ -319,20 +319,21 @@
             
           </div>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_1">
-            <span class="md-nav__icon md-icon"></span>
-            
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="true">
+            <label class="md-nav__title" for="__nav_1">
+              <span class="md-nav__icon md-icon"></span>
+              
   
   Getting Started
 
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-            
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
               
                 
+              
+                
+                  
   
   
   
@@ -356,10 +357,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -383,10 +384,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -410,10 +411,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -437,10 +438,11 @@
     </li>
   
 
+                
               
-            
-          </ul>
-        </nav>
+            </ul>
+          </nav>
+        
       
     </li>
   
@@ -484,6 +486,12 @@
   
   
   
+  
+    
+  
+  
+  
+  
     <a href="./logging/" class="md-nav__link">
       
   
@@ -502,6 +510,8 @@
         <span class="md-nav__icon md-icon"></span>
       
     </a>
+  
+
   
 
       
@@ -632,8 +642,10 @@
 
               
               <article class="md-content__inner md-typeset">
+                <a id="__skip" tabindex="-1"></a>
                 
                   
+
   
     <a href="https://github.com/ng-log/ng-log/edit/master/docs/index.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
       
@@ -643,10 +655,23 @@
   
 
 
+<!--
+SPDX-FileCopyrightText: 2024 Google Inc.
+SPDX-FileCopyrightText: 2026 The ng-log contributors
+
+SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <h1 id="ng-log">ng-log<a class="headerlink" href="#ng-log" title="Permanent link">&para;</a></h1>
 <p>ng-log (formerly Google Logging Library or glog) is a C++14 library
 that implements application-level logging. The library provides logging APIs
 based on C++-style streams and various helper macros.</p>
+<div class="admonition tip">
+<p class="admonition-title">Coming in 0.9</p>
+<p>A C++20 logging API without <code>LOG</code> and <code>CHECK</code> macros, with format strings
+checked at compile time. <a href="#experimental-logging-functions">Take a look</a>
+and help shape it before it becomes the default.</p>
+</div>
 <h1 id="how-to-use">How to Use<a class="headerlink" href="#how-to-use" title="Permanent link">&para;</a></h1>
 <p>You can log a message by simply streaming things to <code>LOG</code>(&lt;a particular
 <a href="logging/#severity-levels">severity level</a>&gt;), e.g.,</p>
@@ -654,13 +679,78 @@ based on C++-style streams and various helper macros.</p>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="kt">int</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">argc</span><span class="p">,</span><span class="w"> </span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="n">argv</span><span class="p">[])</span><span class="w"> </span><span class="p">{</span>
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="n">nglog</span><span class="o">::</span><span class="n">InitializeLogging</span><span class="p">(</span><span class="n">argv</span><span class="p">[</span><span class="mi">0</span><span class="p">]);</span><span class="w"> </span><span class="c1">// (1)!</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="n">LOG</span><span class="p">(</span><span class="n">INFO</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Found &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">num_cookies</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot; cookies&quot;</span><span class="p">;</span><span class="w"> </span><span class="c1">// (2)!</span>
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="p">}</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">num_cookies</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="n">LOG</span><span class="p">(</span><span class="n">INFO</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Found &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">num_cookies</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot; cookies&quot;</span><span class="p">;</span><span class="w"> </span><span class="c1">// (2)!</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">}</span>
 </span></code></pre></div>
 <ol>
 <li>Initialize library</li>
 <li>Log a message with informational severity</li>
 </ol>
+<p>The <a href="logging/">user guide</a> covers the macros in detail. C++20 code can
+use the <a href="#experimental-logging-functions">experimental logging functions</a>
+instead.</p>
+<h1 id="experimental-logging-functions">Experimental Logging Functions<a class="headerlink" href="#experimental-logging-functions" title="Permanent link">&para;</a></h1>
+<p>With C++20, the <a href="logging/experimental/">experimental logging functions</a> log
+the same message using <code>std::format</code> syntax:</p>
+<div class="language-cpp highlight"><span class="filename">main.cpp</span><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;ng-log/experimental/logging.h&gt;</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="k">namespace</span><span class="w"> </span><span class="nn">ngx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nn">nglog</span><span class="o">::</span><span class="nn">experimental</span><span class="p">;</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="kt">int</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">argc</span><span class="p">,</span><span class="w"> </span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="n">argv</span><span class="p">[])</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span><span class="n">nglog</span><span class="o">::</span><span class="n">InitializeLogging</span><span class="p">(</span><span class="n">argv</span><span class="p">[</span><span class="mi">0</span><span class="p">]);</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">num_cookies</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="n">ngx</span><span class="o">::</span><span class="n">Log</span><span class="p">(</span><span class="s">&quot;Found {} cookies&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">num_cookies</span><span class="p">);</span><span class="w"> </span><span class="c1">// (1)!</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="p">}</span>
+</span></code></pre></div>
+<ol>
+<li>Log a message with informational severity</li>
+</ol>
+<p>The macros and their counterparts side by side, assuming
+<code>using namespace std::chrono_literals;</code>:</p>
+<div class="grid">
+<div class="language-cpp highlight"><span class="filename">Macros</span><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">LOG</span><span class="p">(</span><span class="n">WARNING</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;x=&quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">x</span><span class="p">;</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">DLOG</span><span class="p">(</span><span class="n">INFO</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">x</span><span class="p">;</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">LOG_EVERY_N</span><span class="p">(</span><span class="n">ERROR</span><span class="p">,</span><span class="w"> </span><span class="mi">10</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">x</span><span class="p">;</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">LOG_EVERY_T</span><span class="p">(</span><span class="n">INFO</span><span class="p">,</span><span class="w"> </span><span class="mf">0.5</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">x</span><span class="p">;</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">VLOG</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">x</span><span class="p">;</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">CHECK_GT</span><span class="p">(</span><span class="n">n</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">RAW_LOG</span><span class="p">(</span><span class="n">ERROR</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;%d&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">x</span><span class="p">);</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="n">RAW_CHECK</span><span class="p">(</span><span class="n">fd</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;bad fd&quot;</span><span class="p">);</span>
+</span></code></pre></div>
+<div class="language-cpp highlight"><span class="filename">Functions</span><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">ngx</span><span class="o">::</span><span class="n">Log</span><span class="p">(</span><span class="n">ngx</span><span class="o">::</span><span class="n">Warning</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;x={}&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">x</span><span class="p">);</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">ngx</span><span class="o">::</span><span class="n">Log</span><span class="p">(</span><span class="n">ngx</span><span class="o">::</span><span class="n">Debug</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;{}&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">x</span><span class="p">);</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">ngx</span><span class="o">::</span><span class="n">Log</span><span class="p">(</span><span class="n">ngx</span><span class="o">::</span><span class="n">Error</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">ngx</span><span class="o">::</span><span class="n">Every</span><span class="p">{</span><span class="mi">10</span><span class="p">},</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">         </span><span class="s">&quot;{}&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">x</span><span class="p">);</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="n">ngx</span><span class="o">::</span><span class="n">Log</span><span class="p">(</span><span class="n">ngx</span><span class="o">::</span><span class="n">Every</span><span class="p">{</span><span class="mi">500</span><span class="n">ms</span><span class="p">},</span><span class="w"> </span><span class="s">&quot;{}&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">x</span><span class="p">);</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="n">ngx</span><span class="o">::</span><span class="n">Log</span><span class="p">(</span><span class="n">ngx</span><span class="o">::</span><span class="n">Verbose</span><span class="p">{</span><span class="mi">2</span><span class="p">},</span><span class="w"> </span><span class="s">&quot;{}&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">x</span><span class="p">);</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="n">ngx</span><span class="o">::</span><span class="n">Ensure</span><span class="p">(</span><span class="n">ngx</span><span class="o">::</span><span class="n">That</span><span class="p">(</span><span class="n">n</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="n">ngx</span><span class="o">::</span><span class="n">Log</span><span class="p">(</span><span class="n">ngx</span><span class="o">::</span><span class="n">SignalSafe</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">ngx</span><span class="o">::</span><span class="n">Error</span><span class="p">,</span>
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">         </span><span class="s">&quot;{}&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">x</span><span class="p">);</span>
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="n">ngx</span><span class="o">::</span><span class="n">Ensure</span><span class="p">(</span><span class="n">fd</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">ngx</span><span class="o">::</span><span class="n">SignalSafe</span><span class="p">,</span>
+</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">            </span><span class="s">&quot;bad fd&quot;</span><span class="p">);</span>
+</span></code></pre></div>
+</div>
+<ul>
+<li>Format strings are checked at compile time, and a message is formatted only
+  if it is logged.</li>
+<li>Attributes such as <code class="language-cpp highlight"><span class="n">ngx</span><span class="o">::</span><span class="n">Warning</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">ngx</span><span class="o">::</span><span class="n">Every</span><span class="p">{</span><span class="mi">10</span><span class="p">}</span></code> compose instead of
+  requiring a macro per variant, and can be
+  <a href="logging/experimental/#custom-attributes">user-defined</a>.</li>
+<li>No <code class="language-cpp highlight"><span class="n">LOG</span></code> or <code class="language-cpp highlight"><span class="n">CHECK</span></code> macros are defined, so the functions
+  coexist with Abseil's logging and other libraries.</li>
+<li>With <a href="logging/experimental/#signal-safe-logging"><code class="language-cpp highlight"><span class="n">ngx</span><span class="o">::</span><span class="n">SignalSafe</span></code></a>,
+  logging and checks neither allocate nor acquire locks, like <code>RAW_LOG</code> and
+  with the same caveats, for use in signal handlers.</li>
+</ul>
+<p>The functions share the implementation of the macros, so their output is
+identical and both can be mixed in one program. They are
+<a href="logging/experimental/#migrating-from-the-macros">planned</a> to supersede the
+macros in ng-log 0.10.0. Until then, the API may still change, and
+<a href="https://github.com/ng-log/ng-log/issues">feedback</a> is welcome.</p>
+<h1 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h1>
 <p>The library can be installed using various <a href="packages/">package managers</a> or
 compiled <a href="build/">from source</a>. For a detailed overview of ng-log features and
 their usage, please refer to the <a href="logging/">user guide</a>.</p>
@@ -722,11 +812,12 @@ own projects.</p>
 </footer>
       
     </div>
-    <div class="md-dialog" data-md-component="dialog">
+    <div class="md-dialog" data-md-component="dialog" role="status" aria-atomic="true">
       <div class="md-dialog__inner md-typeset"></div>
     </div>
     
-      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+      
+<div class="md-progress" data-md-component="progress" role="progressbar" aria-label="Loading"></div>
     
     
       <div class="md-consent" data-md-component="consent" id="__consent" hidden>
@@ -796,10 +887,14 @@ own projects.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate":null,"base":".","features":["content.action.edit","content.code.annotate","content.code.copy","content.code.select","header.autohide","navigation.expand","navigation.instant.preview","navigation.instant.progress","navigation.prune","navigation.indexes","toc.follow","navigation.top","navigation.path","navigation.tracking","search.highlight","search.share","search.suggest"],"search":"./assets/javascripts/workers/search.7d14d953.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"default":["dev","stable"],"provider":"mike"}}</script>
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":".","features":["content.action.edit","content.code.annotate","content.code.copy","content.code.select","header.autohide","navigation.expand","navigation.instant.preview","navigation.instant.progress","navigation.prune","navigation.indexes","toc.follow","navigation.top","navigation.path","navigation.tracking","search.highlight","search.share","search.suggest"],"redirect":null,"search":"./assets/javascripts/workers/search.c47bb847.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"default":["dev","stable"],"provider":"mike"}}</script>
     
     
-      <script src="./assets/javascripts/bundle.e886cdf1.min.js"></script>
+      <script src="./assets/javascripts/bundle.a2388154.min.js"></script>
       
     
   </body>

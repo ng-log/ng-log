@@ -1,4 +1,6 @@
 
+
+
 <!doctype html>
 <html lang="en" class="no-js">
   <head>
@@ -11,7 +13,8 @@
         <link rel="canonical" href="https://ng-log.github.io/ng-log/0.9.0/flags/">
       
       
-        <link rel="prev" href="../logging/">
+      
+        <link rel="prev" href="../logging/experimental/">
       
       
         <link rel="next" href="../sinks/">
@@ -21,7 +24,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="zensical-0.0.54">
+      <meta name="generator" content="zensical-0.0.71">
     
     
       
@@ -32,12 +35,12 @@
       
         
       
-      <link rel="stylesheet" href="../assets/stylesheets/modern/main.20815dad.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/modern/main.e442bf79.min.css">
       
         
           
         
-        <link rel="stylesheet" href="../assets/stylesheets/modern/palette.dfe2e883.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/modern/palette.b60ce83d.min.css">
       
       
 
@@ -83,14 +86,11 @@
     
     <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
     <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
-    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <label class="md-overlay" for="__drawer" aria-hidden="true"></label>
     <div data-md-component="skip">
-      
-        
-        <a href="#adjusting-output" class="md-skip">
-          Skip to content
-        </a>
-      
+      <a href="#__skip" class="md-skip">
+        Skip to content
+      </a>
     </div>
     <div data-md-component="announce">
       
@@ -297,6 +297,7 @@
   
   
   
+  
     <a href="./.." class="md-nav__link">
       
   
@@ -304,7 +305,7 @@
   <span class="md-ellipsis">
     
   
-  Overview
+  Getting Started
 
     
   </span>
@@ -377,25 +378,50 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_2">
-            <span class="md-nav__icon md-icon"></span>
-            
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+            <label class="md-nav__title" for="__nav_2">
+              <span class="md-nav__icon md-icon"></span>
+              
   
   User Guide
 
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
               
                 
+                  
   
   
   
   
-    <li class="md-nav__item">
-      <a href="../logging/" class="md-nav__link">
+    
+    
+      
         
+          
+        
+      
+        
+      
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    <li class="md-nav__item md-nav__item--pruned md-nav__item--nested">
+      
+        
+  
+  
+  
+  
+    <a href="../logging/" class="md-nav__link">
+      
   
   
   <span class="md-ellipsis">
@@ -408,14 +434,20 @@
   
   
 
-      </a>
+      
+        <span class="md-nav__icon md-icon"></span>
+      
+    </a>
+  
+
+      
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
     
@@ -491,6 +523,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Quick Start
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#public-flags-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Public Flags API
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#colorizing-output" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -519,10 +573,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -546,10 +600,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -573,10 +627,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -600,10 +654,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -627,10 +681,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -654,6 +708,7 @@
     <li class="md-nav__item md-nav__item--pruned md-nav__item--nested">
       
         
+  
   
   
   
@@ -681,10 +736,11 @@
     </li>
   
 
+                
               
-            
-          </ul>
-        </nav>
+            </ul>
+          </nav>
+        
       
     </li>
   
@@ -820,6 +876,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Quick Start
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#public-flags-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Public Flags API
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#colorizing-output" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -859,8 +937,10 @@
 
               
               <article class="md-content__inner md-typeset">
+                <a id="__skip" tabindex="-1"></a>
                 
                   
+
   
     <a href="https://github.com/ng-log/ng-log/edit/master/docs/flags.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
       
@@ -870,13 +950,20 @@
   
 
 
+<!--
+SPDX-FileCopyrightText: 2024 Google Inc.
+SPDX-FileCopyrightText: 2026 The ng-log contributors
+
+SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <h1 id="adjusting-output">Adjusting Output<a class="headerlink" href="#adjusting-output" title="Permanent link">&para;</a></h1>
 <p>Several flags influence ng-log's output behavior.</p>
 <h2 id="using-command-line-parameters-and-environment-variables">Using Command-line Parameters and Environment Variables<a class="headerlink" href="#using-command-line-parameters-and-environment-variables" title="Permanent link">&para;</a></h2>
-<p>If the <a href="https://github.com/gflags/gflags">Google gflags
-library</a> is installed on your machine,
-the build system will automatically detect and use it, allowing you to
-pass flags on the command line.</p>
+<p>ng-log provides its own typed flag registry and command-line parser. No
+external flag library is required. Command-line options take effect once the
+application passes its arguments to <code>nglog::ParseCommandLineFlags</code>, as shown in
+the <a href="#quick-start">quick start</a>.</p>
 <div class="admonition example">
 <p class="admonition-title">Activate <code>--logtostderr</code> in an application from the command line</p>
 <p>A binary <code>your_application</code> that uses ng-log can be started using
@@ -886,53 +973,310 @@ to log to <code>stderr</code> instead of writing the output to a log file.</p>
 </div>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
-<p>You can set boolean flags to <code>true</code> by specifying <code>1</code>, <code>true</code>, or <code>yes</code>. To
-set boolean flags to <code>false</code>, specify <code>0</code>, <code>false</code>, or <code>no</code>. In either case
-the spelling is case-insensitive.</p>
+<p>You can set boolean flags to <code>true</code> by specifying <code>1</code>, <code>true</code>, <code>t</code>, <code>yes</code>,
+or <code>y</code>. To set boolean flags to <code>false</code>, specify <code>0</code>, <code>false</code>, <code>f</code>, <code>no</code>,
+or <code>n</code>. In either case the spelling is case-insensitive.</p>
 </div>
-<p>If the Google gflags library isn't installed, you set flags via
-environment variables, prefixing the flag name with <code>NGLOG_</code>, e.g.,</p>
+<p>Environment variables can provide defaults by prefixing the flag name with
+<code>NGLOG_</code>, e.g.,</p>
 <div class="admonition example">
-<p class="admonition-title">Activate <code>logtostderr</code> without gflags</p>
+<p class="admonition-title">Activate <code>logtostderr</code> from the environment</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">NGLOG_logtostderr</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>./your_application
 </span></code></pre></div>
 </div>
+<p>An environment value uses the same syntax as the corresponding command-line
+option. A value that cannot be parsed is ignored and the flag keeps its
+declared default.</p>
+<h2 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
+<p>Define a flag in one source file, parse the command line at the beginning of
+<code>main</code>, and read the value with <code>nglog::GetFlag</code>:</p>
+<div class="language-cpp highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;cstdint&gt;</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;ng-log/flags.h&gt;</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;ng-log/logging.h&gt;</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">NGLOG_DEFINE</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="kt">int32_t</span><span class="p">,</span><span class="w"> </span><span class="n">retries</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;Retry failed requests this many times.&quot;</span><span class="p">);</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="kt">int</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">argc</span><span class="p">,</span><span class="w"> </span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="n">argv</span><span class="p">[])</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">  </span><span class="n">nglog</span><span class="o">::</span><span class="n">ParseCommandLineFlags</span><span class="p">(</span><span class="o">&amp;</span><span class="n">argc</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">argv</span><span class="p">,</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">                               </span><span class="n">nglog</span><span class="o">::</span><span class="n">FlagParsingMode</span><span class="o">::</span><span class="n">kRemoveFlags</span><span class="p">);</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">  </span><span class="n">nglog</span><span class="o">::</span><span class="n">InitializeLogging</span><span class="p">(</span><span class="n">argv</span><span class="p">[</span><span class="mi">0</span><span class="p">]);</span>
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">  </span><span class="n">LOG</span><span class="p">(</span><span class="n">INFO</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Retrying up to &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">nglog</span><span class="o">::</span><span class="n">GetFlag</span><span class="p">(</span><span class="n">FLAGS_retries</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot; times&quot;</span><span class="p">;</span>
+</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="p">}</span>
+</span></code></pre></div>
+<p>The application now accepts its own options and those of ng-log:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>./your_application<span class="w"> </span>--retries<span class="o">=</span><span class="m">5</span><span class="w"> </span>--logtostderr
+</span></code></pre></div>
+<p>Parse the command line before <code>nglog::InitializeLogging</code> so that options such
+as <code>--log_dir</code> apply to the first log file. <code>--help</code> lists all options with
+their types, defaults, and descriptions, and a misspelled option is reported
+with a suggestion. Use <code>NGLOG_DECLARE(std::int32_t, retries)</code> in a header to
+access the flag from other source files. Application flags receive environment
+defaults once they are added to a <a href="#public-flags-api">module</a> with an
+environment-variable prefix.</p>
+<h2 id="public-flags-api">Public Flags API<a class="headerlink" href="#public-flags-api" title="Permanent link">&para;</a></h2>
+<p>Flags are declared and defined with one typed macro form. The type is part of
+the declaration and definition, which allows the compiler and the registry to
+detect misuse.</p>
+<div class="language-cpp highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">NGLOG_DECLARE</span><span class="p">(</span><span class="kt">bool</span><span class="p">,</span><span class="w"> </span><span class="n">dry_run</span><span class="p">);</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">NGLOG_DEFINE</span><span class="p">(</span><span class="kt">bool</span><span class="p">,</span><span class="w"> </span><span class="n">dry_run</span><span class="p">,</span><span class="w"> </span><span class="nb">false</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;Print the actions instead of running them.&quot;</span><span class="p">);</span>
+</span></code></pre></div>
+<p>A flag name starts with a letter or an underscore and contains only letters,
+digits, and underscores. Because <code>--noname</code> disables the boolean flag <code>name</code>,
+a flag named <code>noname</code> cannot coexist with a boolean flag named <code>name</code>. Both
+mistakes terminate the program at startup with a diagnostic.</p>
+<p>The built-in trait specializations support <code>bool</code>, <code>std::int32_t</code>,
+<code>std::uint32_t</code>, <code>std::string</code>, and <code>nglog::FileMode</code>. Integers are decimal
+unless they start with <code>0x</code>, and leading zeros do not select octal. A
+<code>nglog::FileMode</code> is always written in octal, e.g., <code>0640</code>. Applications can add
+copyable flag types by specializing <code>nglog::FlagTraits</code> with <code>TypeName</code>,
+<code>Parse</code>, and <code>ToString</code>. Definitions normally belong in one source file and
+declarations belong in a header. <code>FLAGS_name</code> is a synchronized typed flag
+object rather than a raw value. Read it with <code>nglog::GetFlag</code> and update it with
+<code>nglog::SetFlag</code>:</p>
+<div class="language-cpp highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">NGLOG_DECLARE</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="kt">int32_t</span><span class="p">,</span><span class="w"> </span><span class="n">retry_count</span><span class="p">);</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="k">const</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kt">int32_t</span><span class="w"> </span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">nglog</span><span class="o">::</span><span class="n">GetFlag</span><span class="p">(</span><span class="n">FLAGS_retry_count</span><span class="p">);</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">nglog</span><span class="o">::</span><span class="n">SetFlag</span><span class="p">(</span><span class="n">FLAGS_retry_count</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">);</span>
+</span></code></pre></div>
+<p>Declarations record their type. A declaration whose type differs from the
+definition, such as <code>NGLOG_DECLARE(bool, retry_count)</code> for the definition above,
+terminates the program at startup with a diagnostic that names both locations,
+because code using that declaration would access the flag through the wrong
+type. The built-in flags are already declared by <code>ng-log/flags.h</code> with the
+linkage of the ng-log library. Declaring one of them again, for example with
+<code>NGLOG_DECLARE(bool, logtostderr)</code>, is a compile error.</p>
+<p>Flags defined with <code>NGLOG_DEFINE</code> are initialized by the compiler and never
+destroyed. They can be read and updated from the static initializer or
+destructor of any translation unit, that is, before <code>main</code> and during program
+termination. This applies to the flags only. Logging itself is supported only
+while <code>main</code> runs. Before the flag is registered, it holds its declared default.
+The default is determined when the flag is first used or registered, whichever
+comes first, and does not change afterward. The default value expression may be
+evaluated more than once when threads use the flag concurrently for the first
+time, so it should not have side effects. The environment and the command line
+apply once the flag is registered and the arguments are parsed. An environment
+default does not replace a value that was set explicitly before. Restoring a
+saved value with <code>ScopedFlag</code> or <code>ScopedFlags</code> also restores whether the value
+counts as set explicitly.</p>
+<p>A flag whose lifetime is bounded by a scope, for example one created by a test,
+is an <code>nglog::DynamicFlag</code>. It is registered on construction and unregistered on
+destruction:</p>
+<div class="language-cpp highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">nglog</span><span class="o">::</span><span class="n">DynamicFlag</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="kt">int32_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">attempts</span><span class="p">(</span><span class="s">&quot;attempts&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">__FILE__</span><span class="p">,</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">                                          </span><span class="s">&quot;Attempts in this test.&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">);</span>
+</span></code></pre></div>
+<p><code>GetFlag</code> and <code>SetFlag</code> are safe to call concurrently for the same flag.
+<code>GetFlag</code> returns a value copy, so a string result remains valid independently
+of later flag updates. <code>SetFlag</code> accepts a value that is constructible or
+assignable as the flag type, so a string literal can be assigned directly to a
+<code>std::string</code> flag. Use an application mutex when several flags must be read or
+updated as one consistent configuration.</p>
+<p>Use <code>nglog::ScopedFlags&lt;&gt; save</code> to save and restore every registered flag for
+the lifetime of <code>save</code>. To limit the saved set, use <code>MakeScopedFlags</code> with
+typed flag and value pairs:</p>
+<div class="language-cpp highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">auto</span><span class="w"> </span><span class="n">save</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">nglog</span><span class="o">::</span><span class="n">MakeScopedFlags</span><span class="p">(</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">    </span><span class="n">nglog</span><span class="o">::</span><span class="n">MakeScopedFlag</span><span class="p">(</span><span class="n">FLAGS_logtostderr</span><span class="p">,</span><span class="w"> </span><span class="nb">true</span><span class="p">),</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="n">nglog</span><span class="o">::</span><span class="n">MakeScopedFlag</span><span class="p">(</span><span class="n">FLAGS_v</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">));</span>
+</span></code></pre></div>
+<p>If the same flag appears more than once, the last value in argument order takes
+effect and the value from before the first save is restored.</p>
+<p>A class derived directly from <code>nglog::FlagBase</code> registers itself with
+<code>nglog::RegisterFlag</code> and must call <code>nglog::UnregisterFlag</code> at the beginning of
+its destructor, before it destroys the state that its value accessors use.
+<code>nglog::DynamicFlag</code> and <code>NGLOG_DEFINE</code> do this automatically.</p>
+<p>The public flag macros do not apply ng-log's shared-library visibility to
+application-owned flags. This allows an application linked to a shared ng-log
+library to define its own flags. If an application flag must cross one of the
+application's DLL boundaries, its owning project must provide the corresponding
+import and export declarations.</p>
+<p>Applications parse arguments with <code>nglog::ParseCommandLineFlags</code>. The parsing
+mode is explicit:</p>
+<div class="language-cpp highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">nglog</span><span class="o">::</span><span class="n">ParseCommandLineFlags</span><span class="p">(</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">    </span><span class="o">&amp;</span><span class="n">argc</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">argv</span><span class="p">,</span><span class="w"> </span><span class="n">nglog</span><span class="o">::</span><span class="n">FlagParsingMode</span><span class="o">::</span><span class="n">kRemoveFlags</span><span class="p">);</span>
+</span></code></pre></div>
+<p><code>kRemoveFlags</code> removes recognized flags from <code>argv</code>. Use <code>kKeepFlags</code> to leave
+the argument vector unchanged. Boolean flags accept the values listed above. A
+boolean can also be disabled with <code>--noflag</code>. Options must start with two
+dashes. A single-dash argument such as <code>-v=1</code> is reported as an unknown option
+along with the suggested <code>--v</code> spelling. A lone <code>-</code> remains a positional
+argument. An argument <code>--</code> ends the options, and all arguments after it remain
+positional, including those starting with a dash. <code>kRemoveFlags</code> removes the
+<code>--</code> along with the parsed flags.</p>
+<p>Unknown options are errors by default. The diagnostic uses fuzzy matching to
+suggest a likely spelling when one is available, such as <code>Did you mean
+--logtostderr?</code>. Applications that intentionally share argument parsing with
+another library can explicitly preserve unknown options:</p>
+<div class="language-cpp highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">nglog</span><span class="o">::</span><span class="n">ParseCommandLineFlags</span><span class="p">(</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">    </span><span class="o">&amp;</span><span class="n">argc</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">argv</span><span class="p">,</span><span class="w"> </span><span class="n">nglog</span><span class="o">::</span><span class="n">FlagParsingMode</span><span class="o">::</span><span class="n">kRemoveFlags</span><span class="p">,</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="n">nglog</span><span class="o">::</span><span class="n">UnknownFlagMode</span><span class="o">::</span><span class="n">kIgnore</span><span class="p">);</span>
+</span></code></pre></div>
+<p>In this mode, single-dash arguments and <code>--</code> remain in <code>argv</code>, so that the other
+parser can handle them and also recognizes the end of the options.</p>
+<p>Applications can generate styled usage text with a <code>HelpWriter</code> callback:</p>
+<div class="language-cpp highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kt">void</span><span class="w"> </span><span class="nf">WriteUsage</span><span class="p">(</span><span class="n">nglog</span><span class="o">::</span><span class="n">HelpWriter</span><span class="o">&amp;</span><span class="w"> </span><span class="n">help</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="n">help</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="n">nglog</span><span class="o">::</span><span class="n">HelpTextStyle</span><span class="o">::</span><span class="n">kHeading</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;Usage:&quot;</span><span class="p">);</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span><span class="n">help</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="s">&quot; &quot;</span><span class="p">);</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">  </span><span class="n">help</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="n">nglog</span><span class="o">::</span><span class="n">HelpTextStyle</span><span class="o">::</span><span class="n">kExecutable</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;your_application&quot;</span><span class="p">);</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">  </span><span class="n">help</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="s">&quot; &quot;</span><span class="p">);</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="w">  </span><span class="n">help</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="n">nglog</span><span class="o">::</span><span class="n">HelpTextStyle</span><span class="o">::</span><span class="n">kUsageOptions</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;[options]&quot;</span><span class="p">);</span>
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="w">  </span><span class="n">help</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="s">&quot;</span><span class="se">\n\n</span><span class="s">Use &quot;</span><span class="p">);</span>
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="w">  </span><span class="n">help</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="n">nglog</span><span class="o">::</span><span class="n">HelpTextStyle</span><span class="o">::</span><span class="n">kOptionPrefix</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;--&quot;</span><span class="p">);</span>
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="w">  </span><span class="n">help</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="n">nglog</span><span class="o">::</span><span class="n">HelpTextStyle</span><span class="o">::</span><span class="n">kOption</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;logtostderr&quot;</span><span class="p">);</span>
+</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="w">  </span><span class="n">help</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="s">&quot;=&quot;</span><span class="p">);</span>
+</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="w">  </span><span class="n">help</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="n">nglog</span><span class="o">::</span><span class="n">HelpTextStyle</span><span class="o">::</span><span class="n">kConstant</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;true&quot;</span><span class="p">);</span>
+</span><span id="__span-10-12"><a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="w">  </span><span class="n">help</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="s">&quot; to write log messages to &quot;</span><span class="p">);</span>
+</span><span id="__span-10-13"><a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="w">  </span><span class="n">help</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="n">nglog</span><span class="o">::</span><span class="n">HelpTextStyle</span><span class="o">::</span><span class="n">kStream</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;stderr&quot;</span><span class="p">);</span>
+</span><span id="__span-10-14"><a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="w">  </span><span class="n">help</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="s">&quot;.</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">);</span>
+</span><span id="__span-10-15"><a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="p">}</span>
+</span><span id="__span-10-16"><a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a>
+</span><span id="__span-10-17"><a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a><span class="n">nglog</span><span class="o">::</span><span class="n">SetUsageMessage</span><span class="p">(</span><span class="n">WriteUsage</span><span class="p">);</span>
+</span></code></pre></div>
+<p>The semantic styles highlight headings, options, executable names, code
+stream references such as <code>stdout</code> and <code>stderr</code>, metadata such as <code>file:line</code>,
+flag types and values, boolean or other constants such as <code>true</code> and <code>false</code>,
+and environment variable names. Styling is disabled automatically when the help
+output is not a suitable terminal. Styled flag descriptions are wrapped to the
+current terminal width while preserving each explicitly styled span.
+<code>ProgramUsage()</code> returns generated usage text without styling.</p>
+<p>Flag descriptions can use the same callback form when a description contains
+semantic references. This keeps styling explicit instead of inferring meaning
+from ordinary prose:</p>
+<div class="language-cpp highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kt">void</span><span class="w"> </span><span class="nf">WriteReportHelp</span><span class="p">(</span><span class="n">nglog</span><span class="o">::</span><span class="n">HelpWriter</span><span class="o">&amp;</span><span class="w"> </span><span class="n">help</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span><span class="n">help</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="s">&quot;Write the report to &quot;</span><span class="p">);</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">  </span><span class="n">help</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="n">nglog</span><span class="o">::</span><span class="n">HelpTextStyle</span><span class="o">::</span><span class="n">kStream</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;stdout&quot;</span><span class="p">);</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">  </span><span class="n">help</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="s">&quot; instead of a file.&quot;</span><span class="p">);</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="p">}</span>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="n">NGLOG_DEFINE</span><span class="p">(</span><span class="kt">bool</span><span class="p">,</span><span class="w"> </span><span class="n">report_to_stdout</span><span class="p">,</span><span class="w"> </span><span class="nb">false</span><span class="p">,</span><span class="w"> </span><span class="n">WriteReportHelp</span><span class="p">);</span>
+</span></code></pre></div>
+<p>The callback is a plain function, so that the flag can be constant initialized.</p>
+<p>An ordinary string description is always written literally. A flag help
+callback writes only the description line and does not include the flag name,
+type, default value, or indentation. The callback's plain text is available in
+<code>FlagInfo::help</code>, while <code>FlagInfo::help_function</code> retains its styling.</p>
+<p>Options are assigned to a mandatory named group through their owning module
+without changing the typed definition. The association is hierarchical: a
+module owns groups and each group owns its flags. A module has a name, a
+human-readable header prefix, and an optional environment-variable prefix:</p>
+<div class="language-cpp highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="k">const</span><span class="w"> </span><span class="n">nglog</span><span class="o">::</span><span class="n">FlagModule</span><span class="w"> </span><span class="k">module</span><span class="p">(</span><span class="s">&quot;myapp&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;Options provided by&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;MYAPP_&quot;</span><span class="p">);</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="k">const</span><span class="w"> </span><span class="k">auto</span><span class="w"> </span><span class="n">retries</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">module</span><span class="p">.</span><span class="n">AddGroup</span><span class="p">(</span><span class="s">&quot;Retries&quot;</span><span class="p">);</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="n">retries</span><span class="p">.</span><span class="n">AddFlag</span><span class="p">(</span><span class="n">FLAGS_retry_count</span><span class="p">);</span>
+</span></code></pre></div>
+<p>The built-in flags already belong to the <code>ng-log</code> module, so they cannot be
+added to an application module.</p>
+<p>The module object can be kept private to the library or application that owns
+its flags. The module name must be unique among the modules that exist at the
+same time. Constructing another module with the same name while the first one
+exists is a fatal configuration error. Destroying a module releases its name
+and detaches its flags from their groups, which keeps the flags registered and
+allows a reloaded library to construct its module again.</p>
+<p>The generated help prints each named module with a header such as <code>Options
+provided by myapp:</code> followed by an empty line. The header prefix and colon are
+white, while the module name is highlighted in bold white. The header is
+followed by that module's flag groups and options. Groups are printed in
+alphabetical order and each group is separated by an empty line. A flag can be
+added to only one group. <code>FlagGroup::AddFlag</code> returns <code>false</code> for an unknown or
+already associated flag, or for a group owned by another module. The matching
+environment variable is applied as the flag default when <code>AddFlag</code> runs. The
+implicit <code>--help</code> option is always listed first and applies to all modules. The
+name <code>help</code> is reserved for this built-in option.</p>
+<p>The environment-variable section combines the prefixes of all modules, for
+example <code>NGLOG_&lt;flag&gt;=&lt;value&gt;</code> followed by <code>MYAPP_&lt;flag&gt;=&lt;value&gt;</code>. Each entry
+identifies the module whose flag default it sets. The prefix should include its
+separator, such as the trailing underscore.</p>
+<p>The representation of an individual flag can be replaced when its type or
+default value needs a more useful presentation:</p>
+<div class="language-cpp highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="kt">void</span><span class="w"> </span><span class="nf">WriteRetryCountHelp</span><span class="p">(</span><span class="n">nglog</span><span class="o">::</span><span class="n">HelpWriter</span><span class="o">&amp;</span><span class="w"> </span><span class="n">help</span><span class="p">,</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">                         </span><span class="k">const</span><span class="w"> </span><span class="n">nglog</span><span class="o">::</span><span class="n">FlagInfo</span><span class="o">&amp;</span><span class="w"> </span><span class="n">flag</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span><span class="n">help</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="s">&quot;  --&quot;</span><span class="p">);</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">  </span><span class="n">help</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="n">nglog</span><span class="o">::</span><span class="n">HelpTextStyle</span><span class="o">::</span><span class="n">kOption</span><span class="p">,</span><span class="w"> </span><span class="n">flag</span><span class="p">.</span><span class="n">name</span><span class="p">);</span>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">  </span><span class="n">help</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="s">&quot;=&quot;</span><span class="p">);</span>
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="w">  </span><span class="n">help</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="n">nglog</span><span class="o">::</span><span class="n">HelpTextStyle</span><span class="o">::</span><span class="n">kType</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;count&quot;</span><span class="p">);</span>
+</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="w">  </span><span class="n">help</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="s">&quot; (default=&quot;</span><span class="p">);</span>
+</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="w">  </span><span class="n">help</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="n">nglog</span><span class="o">::</span><span class="n">HelpTextStyle</span><span class="o">::</span><span class="n">kValue</span><span class="p">,</span><span class="w"> </span><span class="n">flag</span><span class="p">.</span><span class="n">default_value</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">&quot; attempts&quot;</span><span class="p">);</span>
+</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="w">  </span><span class="n">help</span><span class="p">.</span><span class="n">Write</span><span class="p">(</span><span class="s">&quot;)</span><span class="se">\n</span><span class="s">      Retry failed requests this many times.</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">);</span>
+</span><span id="__span-13-10"><a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="p">}</span>
+</span><span id="__span-13-11"><a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>
+</span><span id="__span-13-12"><a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="n">nglog</span><span class="o">::</span><span class="n">SetFlagHelpFormatter</span><span class="p">(</span><span class="s">&quot;retry_count&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">WriteRetryCountHelp</span><span class="p">);</span>
+</span></code></pre></div>
+<p>The callback receives a copy of the flag metadata and replaces the complete
+generated entry, including its line breaks. Pass an empty callback to restore
+the generated entry. For the built-in flags, the generated help uses a list-shaped
+type such as <code>string[,string,...]</code> for <code>vmodule</code>, displays binary sizes with
+binary units such as <code>MiB</code>, and displays time units such as <code>s</code> and <code>ms</code>.</p>
+<p>Duplicate flag names are fatal. The diagnostic reports both source file names
+and registered types, the likely cause, and how to resolve it. On Linux and
+Windows, separate ng-log library instances in one process share their flag names
+through memory owned by the process, so duplicates are also detected when
+components privately link static or shared copies of the library. The instances
+find that memory through an operating-system object: a private mapping of an
+anonymous memory file on Linux and a named file mapping in the session namespace
+on Windows. Neither the environment nor open file descriptors are involved, and
+an instance that is unloaded releases its flags. Because another process in the
+same session could create the Windows object first, an object that does not
+refer to a registry in the memory of this process is ignored, which keeps the
+flags working without the detection across library instances. A child created
+with <code>fork</code> starts with a copy of the registry, while a program started by the
+process starts with an empty one. On other platforms, duplicates are detected
+within each library instance. Separate processes have independent registries.
+The registry and the flag values remain usable in a forked child even if other
+threads of the parent were using them at the time of the fork.</p>
 <p>The following flags are most commonly used:</p>
 <dl>
 <dt><code>logtostderr</code> (<code>bool</code>, default=<code>false</code>)</dt>
 <dd>
-<p>Log messages to <code>stderr</code> instead of logfiles.</p>
+<p>Use <code>stderr</code> as the primary destination instead of logfiles. Setting this
+flag to <code>false</code> does not suppress <code>stderr</code> output. The
+<code>stderrthreshold</code> flag still copies messages at or
+above its configured severity to <code>stderr</code> in addition to their normal
+destination. During crash handling, the fatal message is written directly
+to <code>stderr</code> so it remains visible as the last message in crash output.
+When <code>logtostderr</code> is <code>false</code>, the fatal message is also replayed through
+the configured logfile or <code>stdout</code> destination.</p>
 </dd>
-<dt><code>stderrthreshold</code> (<code>int</code>, default=2, which is <code>ERROR</code>)</dt>
+<dt><code>stderrthreshold</code> (<code>int32</code>, default=2, which is <code>ERROR</code>)</dt>
 <dd>
-<p>Copy log messages at or above this level to <code>stderr</code> in addition to
-logfiles. The numbers of severity levels <code>INFO</code>, <code>WARNING</code>, <code>ERROR</code>,
+<p>Copy log messages at or above this severity level to <code>stderr</code> in addition
+to log files. The numbers of severity levels <code>INFO</code>, <code>WARNING</code>, <code>ERROR</code>,
 and <code>FATAL</code> are 0, 1, 2, and 3, respectively.</p>
 </dd>
-<dt><code>minloglevel</code> (<code>int</code>, default=0, which is <code>INFO</code>)</dt>
+<dt><code>minloglevel</code> (<code>int32</code>, default=0, which is <code>INFO</code>)</dt>
 <dd>
-<p>Log messages at or above this level. Again, the numbers of severity
-levels <code>INFO</code>, <code>WARNING</code>, <code>ERROR</code>, and <code>FATAL</code> are 0, 1, 2, and 3,
+<p>Discard messages below this severity level. The numbers of severity levels
+<code>INFO</code>, <code>WARNING</code>, <code>ERROR</code>, and <code>FATAL</code> are 0, 1, 2, and 3,
 respectively.</p>
 </dd>
 <dt><code>log_dir</code> (<code>string</code>, default="")</dt>
 <dd>
-<p>If specified, logfiles are written into this directory instead of
-the default logging directory.</p>
+<p>Write log files to this directory instead of the default logging directory.</p>
 </dd>
-<dt><code>v</code> (<code>int</code>, default=0)</dt>
+<dt><code>logfile_mode</code> (<code>mode</code>, default=<code>0664</code>)</dt>
 <dd>
-<p>Show all <code class="language-cpp highlight"><span class="n">VLOG</span><span class="p">(</span><span class="n">m</span><span class="p">)</span></code> messages for <code>m</code> less or equal the value of this
-flag. Overridable by <code class="language-bash highlight">--vmodule</code>. Refer to <a href="../logging/#verbose-logging">verbose
+<p>Set the permissions for newly created log files. The value is written in
+octal, with or without a leading zero, and ranges from <code>0000</code> through
+<code>07777</code>.</p>
+</dd>
+<dt><code>max_log_size</code> (<code>uint32</code>, default=<code>1800 MiB</code>)</dt>
+<dd>
+<p>Limit each log file to approximately this size in MiB. A value of 0 is
+treated as 1 and values above 4095 are capped at 4095.</p>
+</dd>
+<dt><code>v</code> (<code>int32</code>, default=0)</dt>
+<dd>
+<p>Show <code class="language-cpp highlight"><span class="n">VLOG</span><span class="p">(</span><span class="n">m</span><span class="p">)</span></code> messages when <code>m</code> is at most this value. The applicable
+<code class="language-bash highlight">--vmodule</code> entry overrides this value. Refer
+to <a href="../logging/#verbose-logging">verbose
 logging</a> for more detail.</p>
 </dd>
-<dt><code>vmodule</code> (<code>string</code>, default="")</dt>
+<dt><code>vmodule</code> (<code>string[,string,...]</code>, default="")</dt>
 <dd>
-<p>Per-module verbose level. The argument has to contain a
+<p>Set per-module verbose levels. The argument has to contain a
 comma-separated list of <code>&lt;module name&gt;=&lt;log level&gt;</code>. <code>&lt;module name&gt;</code> is a
 glob pattern (e.g., <code>gfs*</code> for all modules whose name starts with "gfs"),
-matched against the filename base (that is, name ignoring .cc/.h./-inl.h).
-<code>&lt;log level&gt;</code> overrides any value given by <code>--v</code>. See also <a href="../logging/#verbose-logging">verbose
+matched against the source filename base. The base is the part before the
+first period, with a trailing <code>-inl</code> suffix removed. <code>&lt;log level&gt;</code>
+overrides any value given by <code>--v</code>. See also <a href="../logging/#verbose-logging">verbose
 logging</a> for more details.</p>
 </dd>
 </dl>
@@ -947,7 +1291,10 @@ unsatisfied <code>CHECK</code>/<code>LOG(FATAL)</code>. Colorizing is opt-out, n
 defaults to on, and is automatically disabled unless it is actually safe
 to colorize, namely the destination must be a real terminal (not a pipe
 or a redirected file), and the terminal must not have opted out via a
-<a href="https://no-color.org"><code>NO_COLOR</code></a> environment variable or <code>TERM=dumb</code>.</p>
+nonempty <a href="https://no-color.org"><code>NO_COLOR</code></a> environment variable or
+<code>TERM=dumb</code>. A <code>CLICOLOR_FORCE</code> environment variable with a value other
+than empty or <code>0</code> enables colors for pipes and files as well, unless
+<code>NO_COLOR</code> disables them.</p>
 <p>Each field of a log line's prefix, severity character, timestamp,
 thread id, and <code>file:line</code> reference, is colorized separately, and the
 message body is colorized by severity. A crash's stack trace applies
@@ -960,12 +1307,13 @@ as well as a colorized, hyperlinked crash trace.</p>
 <dl>
 <dt><code>colorlogtostderr</code> (<code>bool</code>, default=<code>true</code>)</dt>
 <dd>
-<p>Color messages logged to <code>stderr</code>, including crash stack traces.
-Set to <code>false</code> to disable color unconditionally.</p>
+<p>Color log messages written to <code>stderr</code>, including crash stack traces.
+Set to <code>false</code> to disable coloring.</p>
 </dd>
 <dt><code>colorlogtostdout</code> (<code>bool</code>, default=<code>true</code>)</dt>
 <dd>
-<p>Same as <code>colorlogtostderr</code>, but for <code>stdout</code>.</p>
+<p>Color log messages written to <code>stdout</code>, including crash stack traces.
+Set to <code>false</code> to disable coloring.</p>
 </dd>
 <dt><code>symbolize_hyperlinks</code> (<code>bool</code>, default=<code>true</code>)</dt>
 <dd>
@@ -1016,21 +1364,21 @@ through an older, more limited fallback, just not the full experience
 ANSI/VT escape sequences enable elsewhere.</p>
 </div>
 <h2 id="modifying-flags-programmatically">Modifying Flags Programmatically<a class="headerlink" href="#modifying-flags-programmatically" title="Permanent link">&para;</a></h2>
-<p>You can also modify flag values in your program by modifying global variables
-<code>FLAGS_*</code>. Most settings start working immediately after you update <code>FLAGS_*</code>.
-The exceptions are the flags related to destination files. For instance, you
-might want to set <code>FLAGS_log_dir</code> before calling <code>nglog::InitializeLogging</code>.</p>
+<p>You can also modify flag values in your program with <code>nglog::SetFlag</code>. Most
+settings start working immediately after you update them. The exceptions are
+the flags related to destination files. For instance, you might want to set
+<code>FLAGS_log_dir</code> before calling <code>nglog::InitializeLogging</code>.</p>
 <div class="admonition example">
 <p class="admonition-title">Setting <code>log_dir</code> at runtime</p>
-<div class="language-cpp highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">LOG</span><span class="p">(</span><span class="n">INFO</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;file&quot;</span><span class="p">;</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1">// Most flags work immediately after updating values.</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">FLAGS_logtostderr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">LOG</span><span class="p">(</span><span class="n">INFO</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;stderr&quot;</span><span class="p">;</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">FLAGS_logtostderr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1">// This won’t change the log destination. If you want to set this</span>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c1">// value, you should do this before nglog::InitializeLogging .</span>
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">FLAGS_log_dir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;/some/log/directory&quot;</span><span class="p">;</span>
-</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="n">LOG</span><span class="p">(</span><span class="n">INFO</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;the same file&quot;</span><span class="p">;</span>
+<div class="language-cpp highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">LOG</span><span class="p">(</span><span class="n">INFO</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;file&quot;</span><span class="p">;</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="c1">// Most flags work immediately after updating values.</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="n">nglog</span><span class="o">::</span><span class="n">SetFlag</span><span class="p">(</span><span class="n">FLAGS_logtostderr</span><span class="p">,</span><span class="w"> </span><span class="nb">true</span><span class="p">);</span>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="n">LOG</span><span class="p">(</span><span class="n">INFO</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;stderr&quot;</span><span class="p">;</span>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="n">nglog</span><span class="o">::</span><span class="n">SetFlag</span><span class="p">(</span><span class="n">FLAGS_logtostderr</span><span class="p">,</span><span class="w"> </span><span class="nb">false</span><span class="p">);</span>
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="c1">// This won’t change the log destination. If you want to set this</span>
+</span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="c1">// value, you should do this before nglog::InitializeLogging .</span>
+</span><span id="__span-14-8"><a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="n">nglog</span><span class="o">::</span><span class="n">SetFlag</span><span class="p">(</span><span class="n">FLAGS_log_dir</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;/some/log/directory&quot;</span><span class="p">);</span>
+</span><span id="__span-14-9"><a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="n">LOG</span><span class="p">(</span><span class="n">INFO</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;the same file&quot;</span><span class="p">;</span>
 </span></code></pre></div>
 </div>
 
@@ -1086,11 +1434,12 @@ might want to set <code>FLAGS_log_dir</code> before calling <code>nglog::Initial
 </footer>
       
     </div>
-    <div class="md-dialog" data-md-component="dialog">
+    <div class="md-dialog" data-md-component="dialog" role="status" aria-atomic="true">
       <div class="md-dialog__inner md-typeset"></div>
     </div>
     
-      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+      
+<div class="md-progress" data-md-component="progress" role="progressbar" aria-label="Loading"></div>
     
     
       <div class="md-consent" data-md-component="consent" id="__consent" hidden>
@@ -1160,10 +1509,14 @@ might want to set <code>FLAGS_log_dir</code> before calling <code>nglog::Initial
     
       
       
-      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["content.action.edit","content.code.annotate","content.code.copy","content.code.select","header.autohide","navigation.expand","navigation.instant.preview","navigation.instant.progress","navigation.prune","navigation.indexes","toc.follow","navigation.top","navigation.path","navigation.tracking","search.highlight","search.share","search.suggest"],"search":"../assets/javascripts/workers/search.7d14d953.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"default":["dev","stable"],"provider":"mike"}}</script>
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["content.action.edit","content.code.annotate","content.code.copy","content.code.select","header.autohide","navigation.expand","navigation.instant.preview","navigation.instant.progress","navigation.prune","navigation.indexes","toc.follow","navigation.top","navigation.path","navigation.tracking","search.highlight","search.share","search.suggest"],"redirect":null,"search":"../assets/javascripts/workers/search.c47bb847.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"default":["dev","stable"],"provider":"mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.e886cdf1.min.js"></script>
+      <script src="../assets/javascripts/bundle.a2388154.min.js"></script>
       
     
   </body>

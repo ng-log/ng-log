@@ -1,4 +1,6 @@
 
+
+
 <!doctype html>
 <html lang="en" class="no-js">
   <head>
@@ -11,6 +13,7 @@
         <link rel="canonical" href="https://ng-log.github.io/ng-log/0.9.0/migration-from-glog/">
       
       
+      
         <link rel="prev" href="../packages/">
       
       
@@ -21,23 +24,23 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="zensical-0.0.54">
+      <meta name="generator" content="zensical-0.0.71">
     
     
       
-        <title>Migrating from glog - ng-log</title>
+        <title>Migration from glog - ng-log</title>
       
     
     
       
         
       
-      <link rel="stylesheet" href="../assets/stylesheets/modern/main.20815dad.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/modern/main.e442bf79.min.css">
       
         
           
         
-        <link rel="stylesheet" href="../assets/stylesheets/modern/palette.dfe2e883.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/modern/palette.b60ce83d.min.css">
       
       
 
@@ -83,14 +86,11 @@
     
     <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
     <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
-    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <label class="md-overlay" for="__drawer" aria-hidden="true"></label>
     <div data-md-component="skip">
-      
-        
-        <a href="#migrating-from-glog" class="md-skip">
-          Skip to content
-        </a>
-      
+      <a href="#__skip" class="md-skip">
+        Skip to content
+      </a>
     </div>
     <div data-md-component="announce">
       
@@ -139,7 +139,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Migrating from glog
+              Migration from glog
             
           </span>
         </div>
@@ -321,20 +321,21 @@
             
           </div>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_1">
-            <span class="md-nav__icon md-icon"></span>
-            
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="true">
+            <label class="md-nav__title" for="__nav_1">
+              <span class="md-nav__icon md-icon"></span>
+              
   
   Getting Started
 
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-            
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
               
                 
+              
+                
+                  
   
   
   
@@ -358,10 +359,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -385,10 +386,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -412,10 +413,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
     
@@ -449,10 +450,11 @@
     </li>
   
 
+                
               
-            
-          </ul>
-        </nav>
+            </ul>
+          </nav>
+        
       
     </li>
   
@@ -496,6 +498,12 @@
   
   
   
+  
+    
+  
+  
+  
+  
     <a href="../logging/" class="md-nav__link">
       
   
@@ -514,6 +522,8 @@
         <span class="md-nav__icon md-icon"></span>
       
     </a>
+  
+
   
 
       
@@ -644,8 +654,10 @@
 
               
               <article class="md-content__inner md-typeset">
+                <a id="__skip" tabindex="-1"></a>
                 
                   
+
   
     <a href="https://github.com/ng-log/ng-log/edit/master/docs/migration-from-glog.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
       
@@ -655,6 +667,12 @@
   
 
 
+<!--
+SPDX-FileCopyrightText: 2026 The ng-log contributors
+
+SPDX-License-Identifier: BSD-3-Clause
+-->
+
 <h1 id="migrating-from-glog">Migrating from glog<a class="headerlink" href="#migrating-from-glog" title="Permanent link">&para;</a></h1>
 <p>To migrate from glog to ng-log, you'll need to adjust your code as follows:</p>
 <ul>
@@ -663,6 +681,13 @@
 <li>replace <code>InitGoogleLogging</code> with <code>InitializeLogging</code></li>
 <li>replace <code>IsGoogleLoggingInitialized</code> with <code>IsLoggingInitialized</code></li>
 <li>replace <code>ShutdownGoogleLogging</code> with <code>ShutdownLogging</code></li>
+<li>replace direct flag access such as <code>FLAGS_v = 2</code> with <code>nglog::SetFlag(FLAGS_v, 2)</code> and reads such as <code>FLAGS_v</code> with <code>nglog::GetFlag(FLAGS_v)</code></li>
+<li>replace gflags definitions such as <code>DEFINE_int32(name, value, help)</code> with <code>NGLOG_DEFINE(std::int32_t, name, value, help)</code> and declarations such as <code>DECLARE_int32(name)</code> with <code>NGLOG_DECLARE(std::int32_t, name)</code>, and use <code>nglog::DynamicFlag</code> for flags that are created and destroyed at run time</li>
+<li>remove declarations of ng-log's own flags, such as <code>DECLARE_bool(logtostderr)</code>, because <code>ng-log/flags.h</code> already declares them</li>
+<li>replace <code>gflags::ParseCommandLineFlags(&amp;argc, &amp;argv, true)</code> with <code>nglog::ParseCommandLineFlags(&amp;argc, &amp;argv, nglog::FlagParsingMode::kRemoveFlags)</code>, and pass <code>nglog::UnknownFlagMode::kIgnore</code> if another parser handles the remaining options</li>
+<li>rename <code>GLOG_*</code> environment variables to <code>NGLOG_*</code>, e.g., <code>GLOG_v=1</code> to <code>NGLOG_v=1</code></li>
+<li>pass options with two dashes, since a single-dash argument such as <code>-v=1</code> is rejected as an unknown option</li>
+<li>read <code>FLAGS_logfile_mode</code> as an <code>nglog::FileMode</code> and use <code>value()</code> to obtain the numeric mode, which is now written in octal on the command line and in the environment</li>
 </ul>
 
 
@@ -717,11 +742,12 @@
 </footer>
       
     </div>
-    <div class="md-dialog" data-md-component="dialog">
+    <div class="md-dialog" data-md-component="dialog" role="status" aria-atomic="true">
       <div class="md-dialog__inner md-typeset"></div>
     </div>
     
-      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+      
+<div class="md-progress" data-md-component="progress" role="progressbar" aria-label="Loading"></div>
     
     
       <div class="md-consent" data-md-component="consent" id="__consent" hidden>
@@ -791,10 +817,14 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["content.action.edit","content.code.annotate","content.code.copy","content.code.select","header.autohide","navigation.expand","navigation.instant.preview","navigation.instant.progress","navigation.prune","navigation.indexes","toc.follow","navigation.top","navigation.path","navigation.tracking","search.highlight","search.share","search.suggest"],"search":"../assets/javascripts/workers/search.7d14d953.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"default":["dev","stable"],"provider":"mike"}}</script>
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["content.action.edit","content.code.annotate","content.code.copy","content.code.select","header.autohide","navigation.expand","navigation.instant.preview","navigation.instant.progress","navigation.prune","navigation.indexes","toc.follow","navigation.top","navigation.path","navigation.tracking","search.highlight","search.share","search.suggest"],"redirect":null,"search":"../assets/javascripts/workers/search.c47bb847.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"default":["dev","stable"],"provider":"mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.e886cdf1.min.js"></script>
+      <script src="../assets/javascripts/bundle.a2388154.min.js"></script>
       
     
   </body>

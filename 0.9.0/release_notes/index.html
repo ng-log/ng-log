@@ -1,4 +1,6 @@
 
+
+
 <!doctype html>
 <html lang="en" class="no-js">
   <head>
@@ -11,6 +13,7 @@
         <link rel="canonical" href="https://ng-log.github.io/ng-log/0.9.0/release_notes/">
       
       
+      
         <link rel="prev" href="../unwinder/">
       
       
@@ -21,7 +24,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="zensical-0.0.54">
+      <meta name="generator" content="zensical-0.0.71">
     
     
       
@@ -32,12 +35,12 @@
       
         
       
-      <link rel="stylesheet" href="../assets/stylesheets/modern/main.20815dad.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/modern/main.e442bf79.min.css">
       
         
           
         
-        <link rel="stylesheet" href="../assets/stylesheets/modern/palette.dfe2e883.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/modern/palette.b60ce83d.min.css">
       
       
 
@@ -83,14 +86,11 @@
     
     <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
     <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
-    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <label class="md-overlay" for="__drawer" aria-hidden="true"></label>
     <div data-md-component="skip">
-      
-        
-        <a href="#release-notes" class="md-skip">
-          Skip to content
-        </a>
-      
+      <a href="#__skip" class="md-skip">
+        Skip to content
+      </a>
     </div>
     <div data-md-component="announce">
       
@@ -297,6 +297,7 @@
   
   
   
+  
     <a href="./.." class="md-nav__link">
       
   
@@ -304,7 +305,7 @@
   <span class="md-ellipsis">
     
   
-  Overview
+  Getting Started
 
     
   </span>
@@ -360,6 +361,12 @@
   
   
   
+  
+    
+  
+  
+  
+  
     <a href="../logging/" class="md-nav__link">
       
   
@@ -378,6 +385,8 @@
         <span class="md-nav__icon md-icon"></span>
       
     </a>
+  
+
   
 
       
@@ -1120,8 +1129,10 @@
 
               
               <article class="md-content__inner md-typeset">
+                <a id="__skip" tabindex="-1"></a>
                 
                   
+
   
     <a href="https://github.com/ng-log/ng-log/edit/master/docs/release_notes.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
       
@@ -1130,6 +1141,13 @@
   
   
 
+
+<!--
+SPDX-FileCopyrightText: 2008-2024 Google Inc.
+SPDX-FileCopyrightText: 2026 The ng-log contributors
+
+SPDX-License-Identifier: BSD-3-Clause
+-->
 
 <h1 id="release-notes">Release Notes<a class="headerlink" href="#release-notes" title="Permanent link">&para;</a></h1>
 <h2 id="ng-log">ng-log<a class="headerlink" href="#ng-log" title="Permanent link">&para;</a></h2>
@@ -1140,20 +1158,81 @@
 <li><a href="../flags/#colorizing-output">Colorize</a> log output and crash stack traces on
   a terminal by default, with hyperlinked <code>file:line</code> references</li>
 <li>Remove the glog compatibility layer</li>
+<li>Add opt-in <a href="../logging/experimental/">experimental logging functions</a> based on
+  <code>std::format</code> and <code>std::source_location</code> with output identical to the
+  macros. User-extensible attributes select severity, Android log tag,
+  verbosity, rate limit and destination. Requires C++20</li>
+<li>Replace the optional gflags dependency with a built-in typed
+  <a href="../flags/#public-flags-api">flag registry</a>. <code>FLAGS_name</code> is now a
+  synchronized flag object that is read with <code>nglog::GetFlag</code> and updated with
+  <code>nglog::SetFlag</code>. Flags can be used before <code>main</code> and during program
+  termination. Options must start with two dashes, and <code>logfile_mode</code> is an
+  <code>nglog::FileMode</code> written in octal</li>
 <li>Remove Bazel build support</li>
 <li>Prevent concurrent log writers from blocking during memory-drop maintenance</li>
+<li>Prevent concurrent logfile writes on Windows</li>
 <li>Make log cleanup work with non-ASCII Windows directories</li>
+<li>Breaking change: require UTF-8 encoding for all Windows file and directory
+  path arguments</li>
+<li>Use UTF-8 log messages with Unicode Windows console and debugger output</li>
+<li>Prevent <code>TruncateLogFile</code> from corrupting log files with line breaks on
+  Windows</li>
+<li>Avoid UTF-16 conversion for ASCII Windows paths shorter than <code>MAX_PATH</code>
+  without namespace prefixes and for ASCII console output</li>
+<li>Support Windows paths longer than <code>MAX_PATH</code> without requiring callers to
+  add extended-length path prefixes</li>
+<li>Support POSIX log paths longer than <code>PATH_MAX</code> through descriptor-relative
+  filesystem operations</li>
+<li>Breaking change: require Windows 8 or Windows Server 2012 or later</li>
+<li>Breaking change: require CMake 3.28 or later to build and consume ng-log</li>
+<li>Breaking change: the CMake package is only compatible with requests for the
+  same minor version</li>
 <li>Omit the default header format when a custom prefix formatter is installed</li>
 <li>Improve suppressed logging performance by avoiding message construction and
   reduce overhead when formatting default prefixes</li>
 <li>Improve logging throughput for applications that log from multiple threads</li>
 <li>Allow sink callbacks to run concurrently and safely perform nested logging</li>
 <li>Include the current thread name in failure signal reports when available</li>
+<li>Use the signal-safe Itanium parser by default and expose complete system
+  demangling on demand</li>
+<li>Create shell shortcuts named <code>&lt;basename&gt;.&lt;severity&gt;.lnk</code> that point to the
+  latest log files on Windows, also in the <code>log_link</code> directory</li>
+<li>Support <code>TruncateStdoutStderr</code> on Windows when standard output or standard
+  error is redirected to a file</li>
+<li>Use UTF-8 Windows user names in log file names</li>
+<li>Look up the user name from the system when the <code>USER</code> or <code>USERNAME</code>
+  environment variable is empty</li>
+<li><code>IsFailureSignalHandlerInstalled</code> reports whether
+  <code>InstallFailureSignalHandler</code> was called, regardless of later changes to the
+  signal dispositions</li>
+<li>End failure stack dumps cut off at 32 frames with
+  <code>(More stack frames follow...)</code> instead of omitting the outer frames
+  silently</li>
+<li>Breaking change: <code>DFATAL_LEVEL</code> and <code>IF_DEBUG_MODE</code> are defined by
+  <code>ng-log/logging.h</code> instead of <code>ng-log/log_severity.h</code>, which also removes
+  them from <code>ng-log/raw_logging.h</code>. Code that uses them must include
+  <code>ng-log/logging.h</code> or use <code>NGLOG_DFATAL_LEVEL</code> and <code>NGLOG_IF_DEBUG_MODE</code> of
+  <code>ng-log/log_severity.h</code> instead</li>
+<li>Prevent <code>RAW_LOG</code> from acquiring a lock while writing the thread identifier
+  if a global locale other than the classic one is installed, which could
+  deadlock in signal handlers</li>
+<li>Prevent <code>RAW_LOG</code> from dropping the last character or the newline of a
+  message that exactly fills its buffer</li>
+<li>Prevent <code>VLOG</code> call sites reached by several threads at once from
+  rewriting their cached verbosity while other threads read it, which was a
+  data race</li>
 </ul>
 <div class="admonition warning">
 <p class="admonition-title">Compatibility</p>
 <p>If your application depends on glog compatibility, use the 0.8.x series.
 It will receive updates until 0.10.0 is released.</p>
+</div>
+<div class="admonition info">
+<p class="admonition-title">Planned deprecation of the logging macros</p>
+<p>The <a href="../logging/experimental/">experimental logging functions</a> are planned
+to supersede the macros in 0.10.0, after which the macros would be
+deprecated and eventually removed. Nothing is deprecated yet and the plan
+may change.</p>
 </div>
 <h3 id="0.8.4">0.8.4 <small>August 15, 2026</small><a class="headerlink" href="#0.8.4" title="Permanent link">&para;</a></h3>
 <ul>
@@ -1428,11 +1507,12 @@ logging APIs based on C++-style streams and various helper macros.</p>
 </footer>
       
     </div>
-    <div class="md-dialog" data-md-component="dialog">
+    <div class="md-dialog" data-md-component="dialog" role="status" aria-atomic="true">
       <div class="md-dialog__inner md-typeset"></div>
     </div>
     
-      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+      
+<div class="md-progress" data-md-component="progress" role="progressbar" aria-label="Loading"></div>
     
     
       <div class="md-consent" data-md-component="consent" id="__consent" hidden>
@@ -1502,10 +1582,14 @@ logging APIs based on C++-style streams and various helper macros.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["content.action.edit","content.code.annotate","content.code.copy","content.code.select","header.autohide","navigation.expand","navigation.instant.preview","navigation.instant.progress","navigation.prune","navigation.indexes","toc.follow","navigation.top","navigation.path","navigation.tracking","search.highlight","search.share","search.suggest"],"search":"../assets/javascripts/workers/search.7d14d953.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"default":["dev","stable"],"provider":"mike"}}</script>
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["content.action.edit","content.code.annotate","content.code.copy","content.code.select","header.autohide","navigation.expand","navigation.instant.preview","navigation.instant.progress","navigation.prune","navigation.indexes","toc.follow","navigation.top","navigation.path","navigation.tracking","search.highlight","search.share","search.suggest"],"redirect":null,"search":"../assets/javascripts/workers/search.c47bb847.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"default":["dev","stable"],"provider":"mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.e886cdf1.min.js"></script>
+      <script src="../assets/javascripts/bundle.a2388154.min.js"></script>
       
     
   </body>

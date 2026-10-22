@@ -1,8 +1,14 @@
+<!--
+SPDX-FileCopyrightText: 2008-2024 Google Inc.
+SPDX-FileCopyrightText: 2026 The ng-log contributors
+
+SPDX-License-Identifier: BSD-3-Clause
+-->
+
 # Release Notes
 
 ## ng-log
 
-<<<<<<< HEAD
 ### 0.9.0 <small>TBD</small> { id="0.9.0" }
 
 - Resolve source file names and line numbers in stack traces via
@@ -10,26 +16,74 @@
 - [Colorize](flags.md#colorizing-output) log output and crash stack traces on
   a terminal by default, with hyperlinked `file:line` references
 - Remove the glog compatibility layer
+- Replace the optional gflags dependency with a built-in typed
+  [flag registry](flags.md#public-flags-api). `FLAGS_name` is now a
+  synchronized flag object that is read with `nglog::GetFlag` and updated with
+  `nglog::SetFlag`. Flags can be used before `main` and during program
+  termination. Options must start with two dashes, and `logfile_mode` is an
+  `nglog::FileMode` written in octal
 - Remove Bazel build support
 - Prevent concurrent log writers from blocking during memory-drop maintenance
+- Prevent concurrent logfile writes on Windows
 - Make log cleanup work with non-ASCII Windows directories
+- Breaking change: require UTF-8 encoding for all Windows file and directory
+  path arguments
+- Use UTF-8 log messages with Unicode Windows console and debugger output
+- Prevent `TruncateLogFile` from corrupting log files with line breaks on
+  Windows
+- Avoid UTF-16 conversion for ASCII Windows paths shorter than `MAX_PATH`
+  without namespace prefixes and for ASCII console output
+- Support Windows paths longer than `MAX_PATH` without requiring callers to
+  add extended-length path prefixes
+- Support POSIX log paths longer than `PATH_MAX` through descriptor-relative
+  filesystem operations
+- Breaking change: require Windows 8 or Windows Server 2012 or later
+- Breaking change: require CMake 3.28 or later to build and consume ng-log
+- Breaking change: the CMake package is only compatible with requests for the
+  same minor version
 - Omit the default header format when a custom prefix formatter is installed
 - Improve suppressed logging performance by avoiding message construction and
   reduce overhead when formatting default prefixes
 - Improve logging throughput for applications that log from multiple threads
 - Allow sink callbacks to run concurrently and safely perform nested logging
 - Include the current thread name in failure signal reports when available
+- Use the signal-safe Itanium parser by default and expose complete system
+  demangling on demand
+- Create shell shortcuts named `<basename>.<severity>.lnk` that point to the
+  latest log files on Windows, also in the `log_link` directory
+- Support `TruncateStdoutStderr` on Windows when standard output or standard
+  error is redirected to a file
+- Use UTF-8 Windows user names in log file names
+- Look up the user name from the system when the `USER` or `USERNAME`
+  environment variable is empty
+- `IsFailureSignalHandlerInstalled` reports whether
+  `InstallFailureSignalHandler` was called, regardless of later changes to the
+  signal dispositions
+<<<<<<< HEAD
+- End failure stack dumps cut off at 32 frames with
+  `(More stack frames follow...)` instead of omitting the outer frames
+  silently
+||||||| parent of 123a617a (refactor(logging): split declarations off macros)
+=======
+- Breaking change: `DFATAL_LEVEL` and `IF_DEBUG_MODE` are defined by
+  `ng-log/logging.h` instead of `ng-log/log_severity.h`. Code that uses them
+  must include `ng-log/logging.h` or use `NGLOG_DFATAL_LEVEL` and
+  `NGLOG_IF_DEBUG_MODE` of `ng-log/log_severity.h` instead
+>>>>>>> 123a617a (refactor(logging): split declarations off macros)
+- Prevent `RAW_LOG` from acquiring a lock while writing the thread identifier
+  if a global locale other than the classic one is installed, which could
+  deadlock in signal handlers
+- Prevent `RAW_LOG` from dropping the last character or the newline of a
+  message that exactly fills its buffer
+- Prevent `VLOG` call sites reached by several threads at once from
+  rewriting their cached verbosity while other threads read it, which was a
+  data race
 
 !!! warning "Compatibility"
     If your application depends on glog compatibility, use the 0.8.x series.
     It will receive updates until 0.10.0 is released.
 
-### 0.8.4 <small>TBD</small> { id="0.8.4" }
-||||||| 638e496
-### 0.8.4 <small>TBD</small> { id="0.8.4" }
-=======
 ### 0.8.4 <small>August 15, 2026</small> { id="0.8.4" }
->>>>>>> 0.8.x
 
 - Prevent `drop_log_memory` from blocking concurrent log writers
 - Prevent failure-signal handling from deadlocking when reentered

@@ -1,4 +1,6 @@
 
+
+
 <!doctype html>
 <html lang="en" class="no-js">
   <head>
@@ -11,6 +13,7 @@
         <link rel="canonical" href="https://ng-log.github.io/ng-log/0.9.0/failures/">
       
       
+      
         <link rel="prev" href="../sinks/">
       
       
@@ -21,23 +24,23 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="zensical-0.0.54">
+      <meta name="generator" content="zensical-0.0.71">
     
     
       
-        <title>Failure Signal Handler - ng-log</title>
+        <title>Failure Handler - ng-log</title>
       
     
     
       
         
       
-      <link rel="stylesheet" href="../assets/stylesheets/modern/main.20815dad.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/modern/main.e442bf79.min.css">
       
         
           
         
-        <link rel="stylesheet" href="../assets/stylesheets/modern/palette.dfe2e883.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/modern/palette.b60ce83d.min.css">
       
       
 
@@ -83,14 +86,11 @@
     
     <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
     <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
-    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <label class="md-overlay" for="__drawer" aria-hidden="true"></label>
     <div data-md-component="skip">
-      
-        
-        <a href="#failure-signal-handler" class="md-skip">
-          Skip to content
-        </a>
-      
+      <a href="#__skip" class="md-skip">
+        Skip to content
+      </a>
     </div>
     <div data-md-component="announce">
       
@@ -139,7 +139,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Failure Signal Handler
+              Failure Handler
             
           </span>
         </div>
@@ -297,6 +297,7 @@
   
   
   
+  
     <a href="./.." class="md-nav__link">
       
   
@@ -304,7 +305,7 @@
   <span class="md-ellipsis">
     
   
-  Overview
+  Getting Started
 
     
   </span>
@@ -377,25 +378,50 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_2">
-            <span class="md-nav__icon md-icon"></span>
-            
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+            <label class="md-nav__title" for="__nav_2">
+              <span class="md-nav__icon md-icon"></span>
+              
   
   User Guide
 
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
               
                 
+                  
   
   
   
   
-    <li class="md-nav__item">
-      <a href="../logging/" class="md-nav__link">
+    
+    
+      
         
+          
+        
+      
+        
+      
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    <li class="md-nav__item md-nav__item--pruned md-nav__item--nested">
+      
+        
+  
+  
+  
+  
+    <a href="../logging/" class="md-nav__link">
+      
   
   
   <span class="md-ellipsis">
@@ -408,14 +434,20 @@
   
   
 
-      </a>
+      
+        <span class="md-nav__icon md-icon"></span>
+      
+    </a>
+  
+
+      
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -439,10 +471,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -466,10 +498,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
     
@@ -545,6 +577,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#signal-safe-c-demangling" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Signal-Safe C++ Demangling
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#customizing-handler-output" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -584,10 +627,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -611,10 +654,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -638,10 +681,10 @@
     </li>
   
 
-              
-            
+                
               
                 
+                  
   
   
   
@@ -665,6 +708,7 @@
     <li class="md-nav__item md-nav__item--pruned md-nav__item--nested">
       
         
+  
   
   
   
@@ -692,10 +736,11 @@
     </li>
   
 
+                
               
-            
-          </ul>
-        </nav>
+            </ul>
+          </nav>
+        
       
     </li>
   
@@ -831,6 +876,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#signal-safe-c-demangling" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Signal-Safe C++ Demangling
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#customizing-handler-output" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -881,8 +937,10 @@
 
               
               <article class="md-content__inner md-typeset">
+                <a id="__skip" tabindex="-1"></a>
                 
                   
+
   
     <a href="https://github.com/ng-log/ng-log/edit/master/docs/failures.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
       
@@ -891,6 +949,13 @@
   
   
 
+
+<!--
+SPDX-FileCopyrightText: 2024 Google Inc.
+SPDX-FileCopyrightText: 2026 The ng-log contributors
+
+SPDX-License-Identifier: BSD-3-Clause
+-->
 
 <h1 id="failure-signal-handler">Failure Signal Handler<a class="headerlink" href="#failure-signal-handler" title="Permanent link">&para;</a></h1>
 <h2 id="stacktrace-as-default-failure-handler">Stacktrace as Default Failure Handler<a class="headerlink" href="#stacktrace-as-default-failure-handler" title="Permanent link">&para;</a></h2>
@@ -901,6 +966,8 @@ signal handler can be installed by <code class="language-cpp highlight"><span cl
 The transcript below was captured from a terminal and converted to HTML with
 ansi2html using these commands:
 
+cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug -DWITH_LINE_INFO=auto
+cmake --build build-debug --target color_stacktrace_example
 env -u NO_COLOR TERM=xterm-256color script -q -c 'build-debug/color_stacktrace_example' /tmp/ng-log-color-stacktrace.typescript
 perl -0pe 's/\r//g; s/\AScript started.*?\n//s; s/\nScript done.*\z//s; s/\e\]8;;[^\e]*\e\\//g; s/\A.*?(?=\*\*\* Aborted)//s' /tmp/ng-log-color-stacktrace.typescript | ansi2html -i -W -s xterm | perl -pe 's{<span style="color: #00cdcd">((src|examples)/([^:<]+):([0-9]+))</span>}{<a href="https://github.com/ng-log/ng-log/blob/master/$2/$3#L$4" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">$1</span></a>}g' > docs/failure-stacktrace.html
 -->
@@ -909,27 +976,27 @@ perl -0pe 's/\r//g; s/\AScript started.*?\n//s; s/\nScript done.*\z//s; s/\e\]8;
 time, addresses, process identifiers, thread identifiers, and source lines
 vary between runs.</p>
 <pre style="overflow-x: auto">
-*** Aborted at <span style="color: #0000ee">1785404553</span> (unix time) try "<span style="color: #0000ee">date -d @1785404553</span>" if you are using GNU date ***
-*** <span style="font-weight: bold; color: #cd0000">SIGABRT</span> (@<span style="color: #7f7f7f">0x3e800000003</span>) received by PID <span style="color: #cd00cd">3</span> (TID <span style="color: #cd00cd">0x7f206db1c700</span> LWP <span style="color: #cd00cd">3</span> thread "<span style="color: #00cdcd">color_stacktrac</span>") from PID <span style="color: #cd00cd">3</span>; stack trace: ***
-PC: @ <span style="color: #7f7f7f">    0x7f206d49a01c</span> <span style="font-style: italic; color: #7f7f7f">(unknown)</span>
-    @ <span style="color: #7f7f7f">    0x7f206dc47a4b</span> <a href="https://github.com/ng-log/ng-log/blob/master/src/signalhandler.cc#L790" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">src/signalhandler.cc:790</span></a> <span style="color: #00cd00">nglog::(anonymous namespace)::FailureSignalHandler(int, siginfo_t*, void*)</span>
-    @ <span style="color: #7f7f7f">    0x7f206d43e6f0</span> <span style="font-style: italic; color: #7f7f7f">(unknown)</span>
-    @ <span style="color: #7f7f7f">    0x7f206d49a01c</span> <span style="font-style: italic; color: #7f7f7f">(unknown)</span>
-    @ <span style="color: #7f7f7f">    0x7f206d43e5d0</span> <span style="color: #00cd00">gsignal</span>
-    @ <span style="color: #7f7f7f">    0x7f206d425685</span> <span style="color: #00cd00">abort</span>
-    @ <span style="color: #7f7f7f">    0x7f206dc0a045</span> <a href="https://github.com/ng-log/ng-log/blob/master/src/logging.cc#L2182" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">src/logging.cc:2182</span></a> <span style="color: #00cd00">nglog::LogMessage::Fail()</span>
-    @ <span style="color: #7f7f7f">    0x7f206dc0dc06</span> <a href="https://github.com/ng-log/ng-log/blob/master/src/logging.cc#L2846" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">src/logging.cc:2846</span></a> <span style="color: #00cd00">nglog::LogMessageFatal::~LogMessageFatal()</span>
-    @ <span style="color: #7f7f7f">    0x5568e96c13cf</span> <a href="https://github.com/ng-log/ng-log/blob/master/examples/color_stacktrace.cc#L54" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">examples/color_stacktrace.cc:54</span></a> <span style="color: #00cd00">(anonymous namespace)::CrashThroughFewFrames(int)</span>
-    @ <span style="color: #7f7f7f">    0x5568e96c132d</span> <a href="https://github.com/ng-log/ng-log/blob/master/examples/color_stacktrace.cc#L42" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">examples/color_stacktrace.cc:42</span></a> <span style="color: #00cd00">(anonymous namespace)::CrashThroughFewFramesIndirectly(int)</span>
-    @ <span style="color: #7f7f7f">    0x5568e96c135d</span> <a href="https://github.com/ng-log/ng-log/blob/master/examples/color_stacktrace.cc#L47" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">examples/color_stacktrace.cc:47</span></a> <span style="color: #00cd00">(anonymous namespace)::CrashThroughFewFrames(int)</span>
-    @ <span style="color: #7f7f7f">    0x5568e96c132d</span> <a href="https://github.com/ng-log/ng-log/blob/master/examples/color_stacktrace.cc#L42" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">examples/color_stacktrace.cc:42</span></a> <span style="color: #00cd00">(anonymous namespace)::CrashThroughFewFramesIndirectly(int)</span>
-    @ <span style="color: #7f7f7f">    0x5568e96c135d</span> <a href="https://github.com/ng-log/ng-log/blob/master/examples/color_stacktrace.cc#L47" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">examples/color_stacktrace.cc:47</span></a> <span style="color: #00cd00">(anonymous namespace)::CrashThroughFewFrames(int)</span>
-    @ <span style="color: #7f7f7f">    0x5568e96c132d</span> <a href="https://github.com/ng-log/ng-log/blob/master/examples/color_stacktrace.cc#L42" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">examples/color_stacktrace.cc:42</span></a> <span style="color: #00cd00">(anonymous namespace)::CrashThroughFewFramesIndirectly(int)</span>
-    @ <span style="color: #7f7f7f">    0x5568e96c135d</span> <a href="https://github.com/ng-log/ng-log/blob/master/examples/color_stacktrace.cc#L47" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">examples/color_stacktrace.cc:47</span></a> <span style="color: #00cd00">(anonymous namespace)::CrashThroughFewFrames(int)</span>
-    @ <span style="color: #7f7f7f">    0x5568e96c17f2</span> <a href="https://github.com/ng-log/ng-log/blob/master/examples/color_stacktrace.cc#L107" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">examples/color_stacktrace.cc:107</span></a> <span style="color: #00cd00">main</span>
-    @ <span style="color: #7f7f7f">    0x7f206d427781</span> <span style="font-style: italic; color: #7f7f7f">(unknown)</span>
-    @ <span style="color: #7f7f7f">    0x7f206d4278b9</span> <span style="color: #00cd00">__libc_start_main</span>
-    @ <span style="color: #7f7f7f">    0x5568e96c11f5</span> <span style="color: #00cd00">_start</span>
+*** Aborted at <span style="color: #0000ee">1786891332</span> (unix time) try "<span style="color: #0000ee">date -d @1786891332</span>" if you are using GNU date ***
+*** <span style="font-weight: bold; color: #cd0000">SIGABRT</span> received by PID <span style="color: #cd00cd">4</span> (TID <span style="color: #cd00cd">0x7feb3e4ac680</span> LWP <span style="color: #cd00cd">4</span> thread "<span style="color: #00cdcd">color_stacktrac</span>") from PID <span style="color: #cd00cd">4</span>; stack trace: ***
+PC: @ <span style="color: #7f7f7f">    0x7feb3e29a17c</span> <span style="font-style: italic; color: #7f7f7f">(unknown)</span>
+    @ <span style="color: #7f7f7f">    0x7feb3e982a22</span> <a href="https://github.com/ng-log/ng-log/blob/master/src/signalhandler.cc#L791" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">src/signalhandler.cc:791</span></a> <span style="color: #00cd00">nglog::(anonymous namespace)::FailureSignalHandler()</span>
+    @ <span style="color: #7f7f7f">    0x7feb3e23e6f0</span> <span style="font-style: italic; color: #7f7f7f">(unknown)</span>
+    @ <span style="color: #7f7f7f">    0x7feb3e29a17c</span> <span style="font-style: italic; color: #7f7f7f">(unknown)</span>
+    @ <span style="color: #7f7f7f">    0x7feb3e23e5d0</span> <span style="color: #00cd00">gsignal</span>
+    @ <span style="color: #7f7f7f">    0x7feb3e225685</span> <span style="color: #00cd00">abort</span>
+    @ <span style="color: #7f7f7f">    0x7feb3e946509</span> <a href="https://github.com/ng-log/ng-log/blob/master/src/logging.cc#L2373" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">src/logging.cc:2373</span></a> <span style="color: #00cd00">nglog::LogMessage::Fail()</span>
+    @ <span style="color: #7f7f7f">    0x7feb3e94a95e</span> <a href="https://github.com/ng-log/ng-log/blob/master/src/logging.cc#L3044" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">src/logging.cc:3044</span></a> <span style="color: #00cd00">nglog::LogMessageFatal::~LogMessageFatal()</span>
+    @ <span style="color: #7f7f7f">    0x565177ac83ff</span> <a href="https://github.com/ng-log/ng-log/blob/master/examples/color_stacktrace.cc#L54" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">examples/color_stacktrace.cc:54</span></a> <span style="color: #00cd00">(anonymous namespace)::CrashThroughFewFrames()</span>
+    @ <span style="color: #7f7f7f">    0x565177ac835d</span> <a href="https://github.com/ng-log/ng-log/blob/master/examples/color_stacktrace.cc#L42" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">examples/color_stacktrace.cc:42</span></a> <span style="color: #00cd00">(anonymous namespace)::CrashThroughFewFramesIndirectly()</span>
+    @ <span style="color: #7f7f7f">    0x565177ac838d</span> <a href="https://github.com/ng-log/ng-log/blob/master/examples/color_stacktrace.cc#L47" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">examples/color_stacktrace.cc:47</span></a> <span style="color: #00cd00">(anonymous namespace)::CrashThroughFewFrames()</span>
+    @ <span style="color: #7f7f7f">    0x565177ac835d</span> <a href="https://github.com/ng-log/ng-log/blob/master/examples/color_stacktrace.cc#L42" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">examples/color_stacktrace.cc:42</span></a> <span style="color: #00cd00">(anonymous namespace)::CrashThroughFewFramesIndirectly()</span>
+    @ <span style="color: #7f7f7f">    0x565177ac838d</span> <a href="https://github.com/ng-log/ng-log/blob/master/examples/color_stacktrace.cc#L47" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">examples/color_stacktrace.cc:47</span></a> <span style="color: #00cd00">(anonymous namespace)::CrashThroughFewFrames()</span>
+    @ <span style="color: #7f7f7f">    0x565177ac835d</span> <a href="https://github.com/ng-log/ng-log/blob/master/examples/color_stacktrace.cc#L42" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">examples/color_stacktrace.cc:42</span></a> <span style="color: #00cd00">(anonymous namespace)::CrashThroughFewFramesIndirectly()</span>
+    @ <span style="color: #7f7f7f">    0x565177ac838d</span> <a href="https://github.com/ng-log/ng-log/blob/master/examples/color_stacktrace.cc#L47" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">examples/color_stacktrace.cc:47</span></a> <span style="color: #00cd00">(anonymous namespace)::CrashThroughFewFrames()</span>
+    @ <span style="color: #7f7f7f">    0x565177ac8bb7</span> <a href="https://github.com/ng-log/ng-log/blob/master/examples/color_stacktrace.cc#L107" style="color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px"><span style="color: #00cdcd">examples/color_stacktrace.cc:107</span></a> <span style="color: #00cd00">main</span>
+    @ <span style="color: #7f7f7f">    0x7feb3e227781</span> <span style="font-style: italic; color: #7f7f7f">(unknown)</span>
+    @ <span style="color: #7f7f7f">    0x7feb3e2278b9</span> <span style="color: #00cd00">__libc_start_main</span>
+    @ <span style="color: #7f7f7f">    0x565177ac8225</span> <span style="color: #00cd00">_start</span>
 
 </pre>
 
@@ -937,6 +1004,24 @@ PC: @ <span style="color: #7f7f7f">    0x7f206d49a01c</span> <span style="font-s
 <a href="../flags/#colorizing-output">colorized</a>: the address, <code>file:line</code>, and
 function name of each frame are colored separately, and <code>file:line</code>
 references become clickable hyperlinks back to the source.</p>
+<p>A stack dump lists at most 32 frames. A dump of a deeper stack ends with
+<code>(More stack frames follow...)</code>, the line GDB prints for a backtrace cut off
+at its limit.</p>
+<h2 id="signal-safe-c-demangling">Signal-Safe C++ Demangling<a class="headerlink" href="#signal-safe-c-demangling" title="Permanent link">&para;</a></h2>
+<p>Stack symbolization always uses an independent recursive descent parser based
+on the public <a href="https://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangling">Itanium C++ ABI name mangling
+grammar</a>. The
+parser writes directly into the caller-provided buffer without dynamic
+allocation, so the Itanium path is suitable for failure signal handlers.</p>
+<p>The parser recognizes the modern type, expression, constraint, local-entity,
+and special-name forms emitted by current C++ compilers. Its output is
+intentionally abbreviated for signal-handler use. Function parameter types and
+template argument types are validated and then omitted, while the enclosing
+class, function, constructor, destructor, and operator names are retained.
+Applications that need the platform's complete spelling can call
+<code>nglog::DemangleWithSystem()</code> on demand outside signal handlers. The system
+demangler may allocate memory, and it may use different spelling because it
+prints the omitted types and applies its own formatting rules.</p>
 <h2 id="customizing-handler-output">Customizing Handler Output<a class="headerlink" href="#customizing-handler-output" title="Permanent link">&para;</a></h2>
 <p>By default, the signal handler writes the failure dump to the standard error.
 However, it is possible to customize the destination by installing a callback
@@ -1002,10 +1087,9 @@ the symbol resolver entirely rather than supplementing it, since <code>dbghelp</
 cannot read the DWARF debug information a MinGW build emits by default. MSVC
 builds always use <code>dbghelp</code>, since neither backend understands MSVC's mangled
 names or debug information.</p>
-<p>Resolution can be disabled at runtime without recompiling by setting <code class="language-cpp highlight"><span class="n">FLAGS_symbolize_line_info</span></code> to <code>false</code>, or <code>--symbolize_line_info=false</code> on the
-command line. The <code class="language-cpp highlight"><span class="n">FLAGS_addr2line_timeout_ms</span></code> flag controls how long, in
-milliseconds, ng-log waits for <code>addr2line</code> to resolve a single address before
-giving up on it. It has no effect when <code>libbacktrace</code> is the active backend.</p>
+<p>Resolution can be disabled at runtime without recompiling by calling <code class="language-cpp highlight"><span class="n">nglog</span><span class="o">::</span><span class="n">SetFlag</span><span class="p">(</span><span class="n">FLAGS_symbolize_line_info</span><span class="p">,</span><span class="w"> </span><span class="nb">false</span><span class="p">)</span></code>, or by passing
+<code>--symbolize_line_info=false</code> on the command line. The <code class="language-cpp highlight"><span class="n">FLAGS_addr2line_timeout_ms</span></code> flag controls how long, in milliseconds, ng-log
+waits for <code>addr2line</code> to resolve a single address before giving up on it. It has no effect when <code>libbacktrace</code> is the active backend.</p>
 <div class="footnote">
 <hr />
 <ol>
@@ -1074,11 +1158,12 @@ giving up on it. It has no effect when <code>libbacktrace</code> is the active b
 </footer>
       
     </div>
-    <div class="md-dialog" data-md-component="dialog">
+    <div class="md-dialog" data-md-component="dialog" role="status" aria-atomic="true">
       <div class="md-dialog__inner md-typeset"></div>
     </div>
     
-      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+      
+<div class="md-progress" data-md-component="progress" role="progressbar" aria-label="Loading"></div>
     
     
       <div class="md-consent" data-md-component="consent" id="__consent" hidden>
@@ -1148,10 +1233,14 @@ giving up on it. It has no effect when <code>libbacktrace</code> is the active b
     
       
       
-      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["content.action.edit","content.code.annotate","content.code.copy","content.code.select","header.autohide","navigation.expand","navigation.instant.preview","navigation.instant.progress","navigation.prune","navigation.indexes","toc.follow","navigation.top","navigation.path","navigation.tracking","search.highlight","search.share","search.suggest"],"search":"../assets/javascripts/workers/search.7d14d953.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"default":["dev","stable"],"provider":"mike"}}</script>
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["content.action.edit","content.code.annotate","content.code.copy","content.code.select","header.autohide","navigation.expand","navigation.instant.preview","navigation.instant.progress","navigation.prune","navigation.indexes","toc.follow","navigation.top","navigation.path","navigation.tracking","search.highlight","search.share","search.suggest"],"redirect":null,"search":"../assets/javascripts/workers/search.c47bb847.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"default":["dev","stable"],"provider":"mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.e886cdf1.min.js"></script>
+      <script src="../assets/javascripts/bundle.a2388154.min.js"></script>
       
     
   </body>

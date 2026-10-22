@@ -4,28 +4,19 @@
         <loc>https://ng-log.github.io/ng-log/0.9.0/</loc>
       </url>
       <url>
-        <loc>https://ng-log.github.io/ng-log/0.9.0/usage/</loc>
-      </url>
-      <url>
         <loc>https://ng-log.github.io/ng-log/0.9.0/build/</loc>
       </url>
       <url>
-        <loc>https://ng-log.github.io/ng-log/0.9.0/packages/</loc>
+        <loc>https://ng-log.github.io/ng-log/0.9.0/contribute/</loc>
       </url>
       <url>
-        <loc>https://ng-log.github.io/ng-log/0.9.0/migration-from-glog/</loc>
-      </url>
-      <url>
-        <loc>https://ng-log.github.io/ng-log/0.9.0/logging/</loc>
+        <loc>https://ng-log.github.io/ng-log/0.9.0/failures/</loc>
       </url>
       <url>
         <loc>https://ng-log.github.io/ng-log/0.9.0/flags/</loc>
       </url>
       <url>
-        <loc>https://ng-log.github.io/ng-log/0.9.0/sinks/</loc>
-      </url>
-      <url>
-        <loc>https://ng-log.github.io/ng-log/0.9.0/failures/</loc>
+        <loc>https://ng-log.github.io/ng-log/0.9.0/license/</loc>
       </url>
       <url>
         <loc>https://ng-log.github.io/ng-log/0.9.0/log_cleaner/</loc>
@@ -34,18 +25,30 @@
         <loc>https://ng-log.github.io/ng-log/0.9.0/log_stripping/</loc>
       </url>
       <url>
-        <loc>https://ng-log.github.io/ng-log/0.9.0/windows/</loc>
+        <loc>https://ng-log.github.io/ng-log/0.9.0/logging/</loc>
       </url>
       <url>
-        <loc>https://ng-log.github.io/ng-log/0.9.0/unwinder/</loc>
+        <loc>https://ng-log.github.io/ng-log/0.9.0/logging/experimental/</loc>
+      </url>
+      <url>
+        <loc>https://ng-log.github.io/ng-log/0.9.0/migration-from-glog/</loc>
+      </url>
+      <url>
+        <loc>https://ng-log.github.io/ng-log/0.9.0/packages/</loc>
       </url>
       <url>
         <loc>https://ng-log.github.io/ng-log/0.9.0/release_notes/</loc>
       </url>
       <url>
-        <loc>https://ng-log.github.io/ng-log/0.9.0/contribute/</loc>
+        <loc>https://ng-log.github.io/ng-log/0.9.0/sinks/</loc>
       </url>
       <url>
-        <loc>https://ng-log.github.io/ng-log/0.9.0/license/</loc>
+        <loc>https://ng-log.github.io/ng-log/0.9.0/unwinder/</loc>
+      </url>
+      <url>
+        <loc>https://ng-log.github.io/ng-log/0.9.0/usage/</loc>
+      </url>
+      <url>
+        <loc>https://ng-log.github.io/ng-log/0.9.0/windows/</loc>
       </url>
 </urlset>

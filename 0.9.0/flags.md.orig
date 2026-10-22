@@ -1,0 +1,381 @@
+# Adjusting Output
+
+Several flags influence ng-log's output behavior.
+
+## Using Command-line Parameters and Environment Variables
+
+ng-log provides its own typed flag registry and command-line parser. No
+external flag library is required.
+
+!!! example "Activate `--logtostderr` in an application from the command line"
+    A binary `your_application` that uses ng-log can be started using
+    ``` bash
+    ./your_application --logtostderr=1
+    ```
+    to log to `stderr` instead of writing the output to a log file.
+
+!!! tip
+    You can set boolean flags to `true` by specifying `1`, `true`, or `yes`. To
+    set boolean flags to `false`, specify `0`, `false`, or `no`. In either case
+    the spelling is case-insensitive.
+
+
+Environment variables can provide defaults by prefixing the flag name with
+`NGLOG_`, e.g.,
+
+!!! example "Activate `logtostderr` from the environment"
+    ``` bash
+    NGLOG_logtostderr=1 ./your_application
+    ```
+
+## Public Flags API
+
+Flags are declared and defined with one typed macro form. The type is part of
+the declaration and definition, which allows the compiler and the registry to
+detect misuse.
+
+``` cpp
+NGLOG_DECLARE(bool, logtostderr);
+NGLOG_DEFINE(bool, logtostderr, false,
+             "Send log messages to stderr instead of log files.");
+```
+
+The built-in trait specializations support `bool`, `std::int32_t`,
+`std::uint32_t`, and `std::string`. Applications can add copyable flag types by
+specializing `nglog::FlagTraits` with `TypeName`, `Parse`, and `ToString`.
+Definitions normally belong in one source file and declarations belong in a
+header. `FLAGS_name` is a synchronized typed flag object rather than a raw
+value. Read it with `nglog::GetFlag` and update it with
+`nglog::SetFlag`:
+
+``` cpp
+NGLOG_DECLARE(std::int32_t, retry_count);
+
+const std::int32_t count = nglog::GetFlag(FLAGS_retry_count);
+nglog::SetFlag(&FLAGS_retry_count, 3);
+```
+
+`GetFlag` and `SetFlag` are safe to call concurrently for the same flag.
+`GetFlag` returns a value copy, so a string result remains valid independently
+of later flag updates. `SetFlag` accepts a value that is constructible or
+assignable as the flag type, so a string literal can be assigned directly to a
+`std::string` flag. Use an application mutex when several flags must be read or
+updated as one consistent configuration.
+
+Use `nglog::ScopedFlags<> save` to save and restore every registered flag for
+the lifetime of `save`. To limit the saved set, use `MakeScopedFlags` with
+typed flag and value pairs:
+
+``` cpp
+auto save = nglog::MakeScopedFlags(
+    nglog::MakeScopedFlag(FLAGS_logtostderr, true),
+    nglog::MakeScopedFlag(FLAGS_v, 1));
+```
+
+The public flag macros do not apply ng-log's shared-library visibility to
+application-owned flags. This allows an application linked to a shared ng-log
+library to define its own flags. If an application flag must cross one of the
+application's DLL boundaries, its owning project must provide the corresponding
+import and export declarations.
+
+Applications parse arguments with `nglog::ParseCommandLineFlags`. The parsing
+mode is explicit:
+
+``` cpp
+nglog::ParseCommandLineFlags(
+    &argc, &argv, nglog::FlagParsingMode::kRemoveFlags);
+```
+
+`kRemoveFlags` removes recognized flags from `argv`. Use `kKeepFlags` to leave
+the argument vector unchanged. Boolean flags accept `true`, `false`, `1`,
+`0`, `yes`, and `no`. A boolean can also be disabled with `--noflag`.
+
+Unknown options are errors by default. The diagnostic uses fuzzy matching to
+suggest a likely spelling when one is available, such as `Did you mean
+--logtostderr?`. Applications that intentionally share argument parsing with
+another library can explicitly preserve unknown options:
+
+``` cpp
+nglog::ParseCommandLineFlags(
+    &argc, &argv, nglog::FlagParsingMode::kRemoveFlags,
+    nglog::UnknownFlagMode::kIgnore);
+```
+
+Applications can generate styled usage text with a `HelpWriter` callback:
+
+``` cpp
+void WriteUsage(nglog::HelpWriter& help) {
+  help.Write(nglog::HelpTextStyle::kHeading, "Usage:");
+  help.Write(" ");
+  help.Write(nglog::HelpTextStyle::kExecutable, "your_application");
+  help.Write(" ");
+  help.Write(nglog::HelpTextStyle::kUsageOptions, "[options]");
+  help.Write("\n\nUse ");
+  help.Write(nglog::HelpTextStyle::kOptionPrefix, "--");
+  help.Write(nglog::HelpTextStyle::kOption, "logtostderr");
+  help.Write("=");
+  help.Write(nglog::HelpTextStyle::kConstant, "true");
+  help.Write(" to write log messages to ");
+  help.Write(nglog::HelpTextStyle::kStream, "stderr");
+  help.Write(".\n");
+}
+
+nglog::SetUsageMessage(WriteUsage);
+```
+
+The semantic styles highlight headings, options, executable names, code
+stream references such as `stdout` and `stderr`, metadata such as `file:line`,
+flag types and values, boolean or other constants such as `true` and `false`,
+and environment variable names. Styling is disabled automatically when the help
+output is not a suitable terminal. Styled flag descriptions are wrapped to the
+current terminal width while preserving each explicitly styled span.
+`ProgramUsage()` returns generated usage text without styling.
+
+Flag descriptions can use the same callback form when a description contains
+semantic references. This keeps styling explicit instead of inferring meaning
+from ordinary prose:
+
+``` cpp
+void WriteLogToStderrHelp(nglog::HelpWriter& help) {
+  help.Write("Send log messages to ");
+  help.Write(nglog::HelpTextStyle::kStream, "stderr");
+  help.Write(" instead of log files.");
+}
+
+NGLOG_DEFINE(bool, logtostderr, false,
+             nglog::HelpMessageFunction{WriteLogToStderrHelp});
+```
+
+An ordinary string description is always written literally. A flag help
+callback writes only the description line and does not include the flag name,
+type, default value, or indentation. The callback's plain text is available in
+`FlagInfo::help`, while `FlagInfo::help_function` retains its styling.
+
+Options are assigned to a mandatory named group through their owning module
+without changing the typed definition:
+
+``` cpp
+const nglog::FlagModule module("myapp", "Options provided by", "MYAPP_");
+const auto logging = module.AddGroup("Logging");
+logging.AddFlag(FLAGS_logtostderr);
+```
+
+The association is hierarchical: a module owns groups and each group owns its
+flags. A module has a name, a human-readable header prefix, and an optional
+environment-variable prefix:
+
+``` cpp
+const nglog::FlagModule module("myapp", "Options provided by", "MYAPP_");
+const auto retries = module.AddGroup("Retries");
+retries.AddFlag(FLAGS_retry_count);
+```
+
+The module object can be kept private to the library or application that owns
+its flags. Keep that object alive while assigning groups or adding flags. The
+module name must be unique within the process. Constructing another module with
+the same name is a fatal configuration error.
+generated help prints each named module with a header such as `Options
+provided by myapp:` followed by an empty line. The header prefix and colon are
+white, while the module name is highlighted in bold white. The header is
+followed by that module's flag groups and options. Groups are printed in
+alphabetical order and each group is separated by an empty line. A flag can be
+added to only one group. `FlagGroup::AddFlag` returns `false` for an unknown or
+already associated flag, or for a group owned by another module. The matching
+environment variable is applied as the flag default when `AddFlag` runs. The
+implicit `--help` option is always listed first and applies to all modules. The
+name `help` is reserved for this built-in option.
+
+The environment-variable section combines the prefixes of all modules, for
+example `NGLOG_<flag>=<value>` followed by `MYAPP_<flag>=<value>`. Each entry
+identifies the module whose flag default it sets. The prefix should include its
+separator, such as the trailing underscore.
+
+The representation of an individual flag can be replaced when its type or
+default value needs a more useful presentation:
+
+``` cpp
+void WriteLogFileModeHelp(nglog::HelpWriter& help,
+                          const nglog::FlagInfo& flag) {
+  help.Write("  --");
+  help.Write(nglog::HelpTextStyle::kOption, flag.name);
+  help.Write("=");
+  help.Write(nglog::HelpTextStyle::kType, flag.type);
+  help.Write(" (default=");
+  help.Write(nglog::HelpTextStyle::kValue, "0664");
+  help.Write(")\n      Log file permissions, written in octal.\n");
+}
+
+nglog::SetFlagHelpFormatter("logfile_mode", WriteLogFileModeHelp);
+```
+
+The callback receives a copy of the flag metadata and replaces the complete
+generated entry, including its line breaks. Pass an empty callback to restore
+the generated entry. The generated help uses a list-shaped type such as
+`string[,string,...]` for `vmodule`, displays binary sizes with binary units
+such as `MiB`, displays time units such as `s` and `ms`, and formats
+`logfile_mode` defaults as octal.
+
+Duplicate flag names are fatal. The diagnostic reports both source file names
+and registered types. Definitions that use separate ng-log library instances
+coordinate through a process-wide operating-system registry, so duplicates are
+also detected when components privately link static or shared copies of the
+library. A coordination failure is fatal because continuing would make
+duplicate detection unreliable. Separate processes have independent registries.
+
+The following flags are most commonly used:
+
+`logtostderr` (`bool`, default=`false`)
+
+<<<<<<< HEAD
+:   Use `stderr` as the primary destination instead of logfiles. Setting this
+    flag to `false` does not suppress `stderr` output. The
+    `stderrthreshold` flag still copies messages at or
+    above its configured severity to `stderr` in addition to their normal
+    destination. During crash handling, the fatal message is written directly
+    to `stderr` so it remains visible as the last message in crash output.
+    When `logtostderr` is `false`, the fatal message is also replayed through
+    the configured logfile or `stdout` destination.
+||||||| parent of a454ff9 (feat(flags): replace external dependency with typed ng-log flags)
+:   Log messages to `stderr` instead of logfiles.
+=======
+:   Send log messages to `stderr` instead of log files.
+>>>>>>> a454ff9 (feat(flags): replace external dependency with typed ng-log flags)
+
+`stderrthreshold` (`int32`, default=2, which is `ERROR`)
+
+:   Copy log messages at or above this severity level to `stderr` in addition
+    to log files. The numbers of severity levels `INFO`, `WARNING`, `ERROR`,
+    and `FATAL` are 0, 1, 2, and 3, respectively.
+
+`minloglevel` (`int32`, default=0, which is `INFO`)
+
+:   Discard messages below this severity level. The numbers of severity levels
+    `INFO`, `WARNING`, `ERROR`, and `FATAL` are 0, 1, 2, and 3,
+    respectively.
+
+`log_dir` (`string`, default="")
+
+:   Write log files to this directory instead of the default logging directory.
+
+`logfile_mode` (`int32`, default=`0664`)
+
+:   Set the permissions for newly created log files. The default is shown in
+    octal.
+
+`max_log_size` (`uint32`, default=`1800 MiB`)
+
+:   Limit each log file to approximately this size in MiB.
+
+`v` (`int32`, default=0)
+
+:   Show `#!cpp VLOG(m)` messages when `m` is at most this value. The applicable
+    `#!bash --vmodule` entry overrides this value. Refer
+    to [verbose
+    logging](logging.md#verbose-logging) for more detail.
+
+`vmodule` (`string[,string,...]`, default="")
+
+:   Set per-module verbose levels. The argument has to contain a
+    comma-separated list of `<module name>=<log level>`. `<module name>` is a
+    glob pattern (e.g., `gfs*` for all modules whose name starts with "gfs"),
+    matched against the source filename base. The base is the part before the
+    first period, with a trailing `-inl` suffix removed. `<log level>`
+    overrides any value given by `--v`. See also [verbose
+    logging](logging.md#verbose-logging) for more details.
+
+Additional flags are defined in
+[flags.cc](https://github.com/ng-log/ng-log/blob/master/src/flags.cc). Please see
+the source for their complete list.
+
+## Colorizing Output
+
+ng-log colorizes messages logged to a terminal, as well as crash stack
+traces produced by the [failure signal
+handler](failures.md#stacktrace-as-default-failure-handler) or an
+unsatisfied `CHECK`/`LOG(FATAL)`. Colorizing is opt-out, not opt-in: it
+defaults to on, and is automatically disabled unless it is actually safe
+to colorize, namely the destination must be a real terminal (not a pipe
+or a redirected file), and the terminal must not have opted out via a
+[`NO_COLOR`](https://no-color.org) environment variable or `TERM=dumb`.
+
+Each field of a log line's prefix, severity character, timestamp,
+thread id, and `file:line` reference, is colorized separately, and the
+message body is colorized by severity. A crash's stack trace applies
+the same per-field treatment to each frame's address, `file:line`, and
+function name, so both regular log output and a crash report share a
+consistent, readable color scheme. See
+[`examples/color_stacktrace.cc`](https://github.com/ng-log/ng-log/blob/master/examples/color_stacktrace.cc)
+for a runnable demonstration covering every severity and logging macro,
+as well as a colorized, hyperlinked crash trace.
+
+`colorlogtostderr` (`bool`, default=`true`)
+
+:   Color log messages written to `stderr`, including crash stack traces.
+    Set to `false` to disable coloring.
+
+`colorlogtostdout` (`bool`, default=`true`)
+
+:   Color log messages written to `stdout`, including crash stack traces.
+    Set to `false` to disable coloring.
+
+`symbolize_hyperlinks` (`bool`, default=`true`)
+
+:   Wrap `file:line` references in log output and crash stack traces with
+    [OSC 8](https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda)
+    terminal hyperlinks pointing at the source file. Automatically has no
+    effect unless the terminal is recognized as one of a known set of
+    OSC 8-capable terminal emulators (detected via environment variables
+    such as `WT_SESSION`, `VTE_VERSION`, `KONSOLE_VERSION`, or
+    `TERM_PROGRAM`). Set to `false` to disable unconditionally.
+
+!!! warning "Windows Terminal limitation"
+    Windows Terminal currently supports OSC 8 `file://` links only when the
+    hostname is empty or `localhost`. Links with another hostname do not open
+    there. ng-log includes the originating hostname as required by the OSC 8
+    specification. This is a Windows Terminal
+    [limitation](https://github.com/microsoft/terminal/issues/14116), not an
+    ng-log hyperlink-generation problem. ng-log does not rewrite or remove the
+    hostname because doing so could weaken the safety of file links.
+
+`symbolize_file_base_path` (`string`, default=`""`)
+
+:   Base path used to resolve relative source file paths recorded in debug
+    info (e.g. the build directory) when generating a hyperlink for log
+    output or a crash stack trace. Absolute paths recorded in debug info are
+    used as-is. Relative ones are only hyperlinked once this is set to an
+    absolute path they can be joined onto.
+
+!!! tip
+    Hyperlinks won't open if you're viewing the log on a different machine
+    than where it was generated, e.g. over SSH or from a copied log file:
+    the link embeds the originating hostname, and terminals (e.g. iTerm2,
+    VS Code) refuse to open it unless that matches their own, as a
+    safeguard against a log silently pointing at a path on another
+    machine.
+
+!!! tip
+    On some Windows consoles (pre-Windows 10, or VT support otherwise
+    disabled) you'll see colored text but no hyperlinks or finer styling,
+    even though the docs describe those features. Text still gets colored
+    through an older, more limited fallback, just not the full experience
+    ANSI/VT escape sequences enable elsewhere.
+
+## Modifying Flags Programmatically
+
+You can also modify flag values in your program with `nglog::SetFlag`. Most
+settings start working immediately after you update them. The exceptions are
+the flags related to destination files. For instance, you might want to set
+`FLAGS_log_dir` before calling `nglog::InitializeLogging`.
+
+!!! example "Setting `log_dir` at runtime"
+    ``` cpp
+    LOG(INFO) << "file";
+    // Most flags work immediately after updating values.
+    nglog::SetFlag(&FLAGS_logtostderr, true);
+    LOG(INFO) << "stderr";
+    nglog::SetFlag(&FLAGS_logtostderr, false);
+    // This won’t change the log destination. If you want to set this
+    // value, you should do this before nglog::InitializeLogging .
+    nglog::SetFlag(&FLAGS_log_dir, "/some/log/directory");
+    LOG(INFO) << "the same file";
+    ```
