@@ -1693,6 +1693,7 @@ logging libraries\"\n#endif\n")
     "-DEMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
     # NOTE The trailing slash is important
     -DTEST_DIR=${CLEANUP_LOG_DIR}/
+    -DTEST_ON_WINDOWS=${WIN32}
     -P ${ng-log_SOURCE_DIR}/cmake/RunCleanerTest1.cmake
     WORKING_DIRECTORY ${ng-log_BINARY_DIR})
   add_test (NAME cleanup_with_absolute_prefix COMMAND
@@ -1701,6 +1702,7 @@ logging libraries\"\n#endif\n")
     "-DEMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
     # NOTE The trailing slash is important
     -DTEST_DIR=${CLEANUP_LOG_DIR}/absolute_prefix/
+    -DTEST_ON_WINDOWS=${WIN32}
     -P ${ng-log_SOURCE_DIR}/cmake/RunCleanerTest2.cmake
     WORKING_DIRECTORY ${ng-log_BINARY_DIR})
   add_test (NAME cleanup_with_relative_prefix COMMAND
@@ -1709,6 +1711,7 @@ logging libraries\"\n#endif\n")
     "-DEMULATOR=${CMAKE_CROSSCOMPILING_EMULATOR}"
     -DTEST_DIR=${ng-log_BINARY_DIR}/
     -DTEST_SUBDIR=test_subdir/
+    -DTEST_ON_WINDOWS=${WIN32}
     -P ${ng-log_SOURCE_DIR}/cmake/RunCleanerTest3.cmake
     WORKING_DIRECTORY ${ng-log_BINARY_DIR})
   add_test (NAME cleanup_with_non_ascii_prefix COMMAND

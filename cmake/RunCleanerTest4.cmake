@@ -38,20 +38,23 @@ if (EXISTS ${STALE_LOG})
   message (SEND_ERROR "Expected stale log ${STALE_LOG} to be removed")
 endif (EXISTS ${STALE_LOG})
 
-file (GLOB LOG_FILES ${TEST_DIR}/cleanup_*_dir/test_cleanup_*.nonasciifoo)
+# The unit test verifies that its log file exists in the directory before it
+# becomes overdue. Every log file of every run must be removed afterwards.
+file (GLOB LOG_FILES ${TEST_DIR}/cleanup_*_dir/*.nonasciifoo)
 list (LENGTH LOG_FILES NUM_FILES)
 
 if (TEST_ON_WINDOWS)
   # On Windows open files cannot be removed and will result in a permission
-  # denied error while unlinking such file. Therefore, the last file will be
-  # retained.
+  # denied error while unlinking such file. Therefore, the log file of the
+  # last run will be retained.
   set (_expected 1)
- else (TEST_ON_WINDOWS)
+else (TEST_ON_WINDOWS)
   set (_expected 0)
 endif (TEST_ON_WINDOWS)
 
 if (NOT NUM_FILES EQUAL _expected)
-  message (SEND_ERROR "Expected ${_expected} log file in log directory but found ${NUM_FILES}")
+  message (SEND_ERROR "Expected ${_expected} log files in log directory "
+    "but found ${NUM_FILES}: ${LOG_FILES}")
 endif (NOT NUM_FILES EQUAL _expected)
 
 # Remove the directory created by the unit test.

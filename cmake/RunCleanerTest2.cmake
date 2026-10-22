@@ -31,18 +31,22 @@ if (EXISTS ${STALE_LOG})
   message (SEND_ERROR "Expected stale log ${STALE_LOG} to be removed")
 endif (EXISTS ${STALE_LOG})
 
-file (GLOB LOG_FILES ${TEST_DIR}/test_cleanup_*.barfoo)
+# The unit test verifies that the INFO log file with the absolute prefix as well
+# as the WARNING and ERROR log files exist in the log directory before they
+# become overdue. Every log file of every run must be removed afterwards.
+file (GLOB LOG_FILES ${TEST_DIR}/*.barfoo)
 list (LENGTH LOG_FILES NUM_FILES)
 
-if (WIN32)
+if (TEST_ON_WINDOWS)
   # On Windows open files cannot be removed and will result in a permission
-  # denied error while unlinking such file. Therefore, the last file will be
-  # retained.
-  set (_expected 1)
- else (WIN32)
+  # denied error while unlinking such file. Therefore, the INFO, WARNING and
+  # ERROR log files of the last run will be retained.
+  set (_expected 3)
+else (TEST_ON_WINDOWS)
   set (_expected 0)
-endif (WIN32)
+endif (TEST_ON_WINDOWS)
 
 if (NOT NUM_FILES EQUAL _expected)
-  message (SEND_ERROR "Expected ${_expected} log file in log directory but found ${NUM_FILES}")
+  message (SEND_ERROR "Expected ${_expected} log files in log directory "
+    "${TEST_DIR} but found ${NUM_FILES}: ${LOG_FILES}")
 endif (NOT NUM_FILES EQUAL _expected)

@@ -30,20 +30,23 @@ if (EXISTS ${STALE_LOG})
   message (SEND_ERROR "Expected stale log ${STALE_LOG} to be removed")
 endif (EXISTS ${STALE_LOG})
 
-file (GLOB LOG_FILES ${TEST_DIR}/${TEST_SUBDIR}/test_cleanup_*.relativefoo)
+# The unit test verifies that its log file exists in the subdirectory before it
+# becomes overdue. Every log file of every run must be removed afterwards.
+file (GLOB LOG_FILES ${TEST_DIR}/${TEST_SUBDIR}/*.relativefoo)
 list (LENGTH LOG_FILES NUM_FILES)
 
-if (WIN32)
+if (TEST_ON_WINDOWS)
   # On Windows open files cannot be removed and will result in a permission
-  # denied error while unlinking such file. Therefore, the last file will be
-  # retained.
+  # denied error while unlinking such file. Therefore, the log file of the
+  # last run will be retained.
   set (_expected 1)
- else (WIN32)
+else (TEST_ON_WINDOWS)
   set (_expected 0)
-endif (WIN32)
+endif (TEST_ON_WINDOWS)
 
 if (NOT NUM_FILES EQUAL _expected)
-  message (SEND_ERROR "Expected ${_expected} log file in build directory ${TEST_DIR}${TEST_SUBDIR} but found ${NUM_FILES}")
+  message (SEND_ERROR "Expected ${_expected} log files in directory "
+    "${TEST_DIR}${TEST_SUBDIR} but found ${NUM_FILES}: ${LOG_FILES}")
 endif (NOT NUM_FILES EQUAL _expected)
 
 # Remove the subdirectory required by this unit test.
