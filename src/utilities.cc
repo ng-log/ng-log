@@ -11,6 +11,7 @@
 
 #include <sys/types.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <csignal>
@@ -18,7 +19,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 #include <limits>
+#include <memory>
 #include <ostream>
 #include <string>
 #include <vector>
@@ -132,6 +135,14 @@ std::string EscapeRegexCharacters(const std::string& input) {
 namespace nglog {
 
 static const char* g_program_invocation_short_name = nullptr;
+
+// Owns the copy of the program name from InitializeLogging() until
+// ShutdownLogging(). The owner itself is never destroyed, since messages logged
+// during static destruction read the name.
+static std::unique_ptr<std::string>& ProgramShortName() {
+  static auto* const name = new std::unique_ptr<std::string>;
+  return *name;
+}
 
 bool IsLoggingInitialized() {
   return g_program_invocation_short_name != nullptr;
@@ -390,16 +401,23 @@ std::string TrimTrailingCRLF(std::string message) {
   return TrimTrailingCharacters(std::move(message), "\r\n");
 }
 
-const char* const_basename(const char* filepath) {
-  const char* base = std::strrchr(filepath, '/');
+std::size_t BasenameOffset(const char* filepath, std::size_t length) {
+  const auto is_separator = [](char character) {
 #ifdef NGLOG_OS_WINDOWS
-  // Windows accepts either separator, also mixed within one path.
-  const char* const backslash = std::strrchr(filepath, '\\');
-  if (backslash != nullptr && (base == nullptr || backslash > base)) {
-    base = backslash;
-  }
+    // Windows accepts either separator, also mixed within one path.
+    return character == '/' || character == '\\';
+#else
+    return character == '/';
 #endif
-  return base != nullptr ? base + 1 : filepath;
+  };
+  const std::reverse_iterator<const char*> last{filepath + length};
+  const std::reverse_iterator<const char*> first{filepath};
+  return static_cast<std::size_t>(
+      std::find_if(last, first, is_separator).base() - filepath);
+}
+
+const char* const_basename(const char* filepath) {
+  return filepath + BasenameOffset(filepath, std::strlen(filepath));
 }
 
 const char* ProgramInvocationShortName() {
@@ -562,9 +580,13 @@ void SetCrashReason(const internal::CrashReason* r) {
   g_reason.compare_exchange_strong(expected, r);
 }
 
-void InitializeLoggingUtilities(const char* argv0) {
+void InitializeLoggingUtilities(const char* argv0, std::size_t length) {
   CHECK(!IsLoggingInitialized()) << "You called InitializeLogging() twice!";
-  g_program_invocation_short_name = const_basename(argv0);
+  // Copies the name, since the argument need not outlive logging.
+  const std::size_t offset = BasenameOffset(argv0, length);
+  std::unique_ptr<std::string>& name = ProgramShortName();
+  name = std::make_unique<std::string>(argv0 + offset, length - offset);
+  g_program_invocation_short_name = name->c_str();
 
 #ifdef HAVE_STACKTRACE
   InstallFailureFunction(&DumpStackTraceAndExit);
@@ -588,6 +610,9 @@ void ShutdownLoggingUtilities() {
 #ifdef HAVE_SYSLOG_H
   closelog();
 #endif
+  // Released only after closing the system log, which identifies messages by
+  // the name.
+  ProgramShortName().reset();
 }
 
 }  // namespace tools

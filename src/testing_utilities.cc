@@ -263,6 +263,8 @@ std::string ScopedStreamCapture::Peek() const {
 
 void (*g_new_hook)() = nullptr;
 void (*g_new_size_hook)(std::size_t) = nullptr;
+void (*g_allocation_hook)(void* pointer, std::size_t size) = nullptr;
+void (*g_deallocation_hook)(void* pointer) = nullptr;
 
 int CountFramesBeforeCutOffMarker(const std::string& output) {
   // DumpStackFrameInfo() and DumpStackTrace() start each frame with it.
@@ -321,7 +323,11 @@ bool UnwinderWalksPastMaxStackDumpFrames() {
   if (nglog::g_new_size_hook) {
     nglog::g_new_size_hook(size);
   }
-  return malloc(size);
+  void* p = malloc(size);
+  if (p != nullptr && nglog::g_allocation_hook) {
+    nglog::g_allocation_hook(p, size);
+  }
+  return p;
 }
 
 [[gnu::noinline]] void* operator new(std::size_t size) {
@@ -334,6 +340,9 @@ bool UnwinderWalksPastMaxStackDumpFrames() {
   void* p = malloc(size);
   if (p == nullptr) {
     throw std::bad_alloc{};
+  }
+  if (nglog::g_allocation_hook) {
+    nglog::g_allocation_hook(p, size);
   }
   return p;
 }
@@ -349,17 +358,36 @@ bool UnwinderWalksPastMaxStackDumpFrames() {
   if (p == nullptr) {
     throw std::bad_alloc{};
   }
+  if (nglog::g_allocation_hook) {
+    nglog::g_allocation_hook(p, size);
+  }
   return p;
 }
 
-[[gnu::noinline]] void operator delete(void* p) noexcept { free(p); }
-
-[[gnu::noinline]] void operator delete(void* p, std::size_t) noexcept {
+[[gnu::noinline]] void operator delete(void* p) noexcept {
+  if (nglog::g_deallocation_hook) {
+    nglog::g_deallocation_hook(p);
+  }
   free(p);
 }
 
-[[gnu::noinline]] void operator delete[](void* p) noexcept { free(p); }
+[[gnu::noinline]] void operator delete(void* p, std::size_t) noexcept {
+  if (nglog::g_deallocation_hook) {
+    nglog::g_deallocation_hook(p);
+  }
+  free(p);
+}
+
+[[gnu::noinline]] void operator delete[](void* p) noexcept {
+  if (nglog::g_deallocation_hook) {
+    nglog::g_deallocation_hook(p);
+  }
+  free(p);
+}
 
 [[gnu::noinline]] void operator delete[](void* p, std::size_t) noexcept {
+  if (nglog::g_deallocation_hook) {
+    nglog::g_deallocation_hook(p);
+  }
   free(p);
 }

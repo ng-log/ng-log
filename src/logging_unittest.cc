@@ -68,6 +68,7 @@
 #  include "internal/lock_metrics.h"
 #endif
 #include "internal/log_message_access.h"
+#include "internal/log_setup.h"
 #include "internal/path.h"
 #include "internal/utf8.h"
 #include "mock-log.h"
@@ -2224,6 +2225,55 @@ TEST(Logging, Basename) {
   // Release file handle for the destination file to unlock the file in Windows.
   LogToStderr();
   DeleteFiles(dest + "*");
+}
+
+// Characters after the length are not part of the name.
+constexpr char kNameTail[] = "_not_part_of_the_name";
+
+TEST(Logging, BasenameEndsAtLength) {
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+
+  const string dest = TestTmpDir() + "/logging_test_basename_length";
+  const string text = dest + kNameTail;
+  DeleteFiles(dest + "*");
+
+  nglog::internal::SetLogDestination(NGLOG_INFO, text.data(), dest.size());
+  LOG(INFO) << "message to base of given length";
+  FlushLogFiles(NGLOG_INFO);
+
+  EXPECT_THAT(ReadLogFile(dest), HasSubstr("message to base of given length"));
+  EXPECT_THAT(GetFiles(dest + "*"), Each(Not(HasSubstr(kNameTail))));
+
+  // Release file handle for the destination file to unlock the file in Windows.
+  LogToStderr();
+  DeleteFiles(dest + "*");
+}
+
+TEST(Logging, SymlinkEndsAtLength) {
+  nglog::ScopedFlags<> save;
+  nglog::SetFlag(FLAGS_logtostderr, false);
+
+  const string dest = TestTmpDir() + "/logging_test_symlink_length";
+  const string link = TestTmpDir() + "/symlink_length";
+  const string text = string{"symlink_length"} + kNameTail;
+  DeleteFiles(dest + "*");
+  DeleteFiles(link + "*");
+
+  nglog::internal::SetLogSymlink(NGLOG_INFO, text.data(),
+                                 text.size() - (sizeof(kNameTail) - 1));
+  SetLogDestination(NGLOG_INFO, dest.c_str());
+  LOG(INFO) << "message through link of given length";
+  FlushLogFiles(NGLOG_INFO);
+  const vector<string> links = GetFiles(link + "*");
+
+  // Release file handle for the destination file to unlock the file in Windows.
+  LogToStderr();
+  SetLogSymlink(NGLOG_INFO, ProgramInvocationShortName());
+  DeleteFiles(dest + "*");
+  DeleteFiles(link + "*");
+  EXPECT_THAT(links, Not(IsEmpty()));
+  EXPECT_THAT(links, Each(Not(HasSubstr(kNameTail))));
 }
 
 #ifdef HAVE_POSIX_LONG_PATH_SUPPORT

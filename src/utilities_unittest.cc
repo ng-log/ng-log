@@ -10,6 +10,7 @@
 #include <gtest/gtest.h>
 #include <sys/types.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -17,6 +18,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
+#include <iterator>
 #include <limits>
 #include <regex>
 #include <string>
@@ -331,6 +333,68 @@ TEST(utilities, InitializeLoggingDeathTest) {
 }
 #endif
 
+// The program name outlives the argument it was initialized with.
+TEST(utilities, InitializeLoggingCopiesProgramName) {
+  static const std::string previous = ProgramInvocationShortName();
+  ShutdownLogging();
+  char program[] = "/usr/bin/program";
+  InitializeLogging(program);
+  std::fill(std::begin(program), std::prev(std::end(program)), 'x');
+  const std::string name = ProgramInvocationShortName();
+  ShutdownLogging();
+  InitializeLogging(previous.c_str());
+  EXPECT_EQ(name, "program");
+}
+
+// A name longer than the buffer of a small string is allocated on the heap.
+constexpr std::size_t kLongProgramNameLength = 1000;
+constexpr std::size_t kMaxRecordedAllocations = 16;
+
+// Allocations at least as large as the long program name that are still live.
+// They precede g_live_allocations_end.
+using LiveAllocations = std::array<void*, kMaxRecordedAllocations>;
+LiveAllocations g_live_allocations{};
+LiveAllocations::iterator g_live_allocations_end = g_live_allocations.begin();
+
+void RecordAllocation(void* pointer, std::size_t size) {
+  if (size > kLongProgramNameLength &&
+      g_live_allocations_end != g_live_allocations.end()) {
+    *g_live_allocations_end = pointer;
+    ++g_live_allocations_end;
+  }
+}
+
+void RecordDeallocation(void* pointer) {
+  const auto it =
+      std::find(g_live_allocations.begin(), g_live_allocations_end, pointer);
+  if (it != g_live_allocations_end) {
+    --g_live_allocations_end;
+    *it = *g_live_allocations_end;
+  }
+}
+
+std::ptrdiff_t LiveAllocationCount() {
+  return std::distance(g_live_allocations.begin(), g_live_allocations_end);
+}
+
+TEST(utilities, ShutdownLoggingReleasesProgramName) {
+  static const std::string previous = ProgramInvocationShortName();
+  ShutdownLogging();
+  const std::string program(kLongProgramNameLength, 'p');
+  g_live_allocations_end = g_live_allocations.begin();
+  g_allocation_hook = &RecordAllocation;
+  g_deallocation_hook = &RecordDeallocation;
+  InitializeLogging(program.c_str());
+  const std::ptrdiff_t allocated = LiveAllocationCount();
+  ShutdownLogging();
+  const std::ptrdiff_t live = LiveAllocationCount();
+  g_allocation_hook = nullptr;
+  g_deallocation_hook = nullptr;
+  InitializeLogging(previous.c_str());
+  EXPECT_GT(allocated, 0);
+  EXPECT_EQ(live, 0);
+}
+
 TEST(TestTmpDir, IsPrivateToTheProcess) {
   EXPECT_NE(TestTmpDir(), SystemTmpDir());
   EXPECT_THAT(TestTmpDir(), StartsWith(SystemTmpDir()));
@@ -381,9 +445,12 @@ TEST(EmscriptenConsole, MapsSeverityToConsoleLevel) {
 TEST(utilities, BasenameFollowsTheLastSeparator) {
   EXPECT_STREQ(nglog::tools::const_basename("dir/file.cc"), "file.cc");
   EXPECT_STREQ(nglog::tools::const_basename("file.cc"), "file.cc");
+  EXPECT_STREQ(nglog::tools::const_basename("dir/"), "");
 #ifdef NGLOG_OS_WINDOWS
   EXPECT_STREQ(nglog::tools::const_basename("C:\\src/sub\\file.cc"), "file.cc");
   EXPECT_STREQ(nglog::tools::const_basename("./build\\app.exe"), "app.exe");
+#else
+  EXPECT_STREQ(nglog::tools::const_basename("dir\\file.cc"), "dir\\file.cc");
 #endif
 }
 

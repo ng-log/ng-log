@@ -88,6 +88,8 @@ SPDX-License-Identifier: BSD-3-Clause
 - Fix log cleanup in non-ASCII Windows directories by [@devtejasx]
 - Encode Windows user names in log file names as UTF-8
 - Fall back to the system user name if `USER` or `USERNAME` is empty
+- Keep the program name of `InitializeLogging` valid after its argument goes
+  out of scope
 - Omit the default format line from log file headers with a custom prefix
   formatter by [@devtejasx]
 - Keep `IsFailureSignalHandlerInstalled` independent of later signal

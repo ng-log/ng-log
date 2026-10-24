@@ -151,13 +151,19 @@ bool PidHasChanged();
 
 const std::string& MyUserName();
 
+// Returns the offset of the part of the first length characters of filepath
+// after the last path separator.
+std::size_t BasenameOffset(const char* filepath, std::size_t length);
+
 // Get the part of filepath after the last path separator.
 // (Doesn't modify filepath, contrary to basename() in libgen.h.)
 const char* const_basename(const char* filepath);
 
 void SetCrashReason(const internal::CrashReason* r);
 
-void InitializeLoggingUtilities(const char* argv0);
+// Initializes logging with the first length characters of argv0, which need
+// not be null-terminated.
+void InitializeLoggingUtilities(const char* argv0, std::size_t length);
 void ShutdownLoggingUtilities();
 
 template <class Functor>

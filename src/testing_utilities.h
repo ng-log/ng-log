@@ -137,6 +137,10 @@ class ScopedStreamCapture final {
 extern void (*g_new_hook)();
 // Receives the size of every allocation through operator new.
 extern void (*g_new_size_hook)(std::size_t);
+// Receives the pointer and size of every allocation through operator new.
+extern void (*g_allocation_hook)(void* pointer, std::size_t size);
+// Receives the pointer of every deallocation through operator delete.
+extern void (*g_deallocation_hook)(void* pointer);
 
 /**
  * Recursion depth of tests of a cut-off stack dump. It exceeds
