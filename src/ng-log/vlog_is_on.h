@@ -39,6 +39,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 
 #include "ng-log/export.h"
 #include "ng-log/flags.h"
