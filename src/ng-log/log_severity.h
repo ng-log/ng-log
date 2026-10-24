@@ -87,12 +87,18 @@ enum { DEBUG_MODE = 1 };
 
 }  // namespace nglog
 
+// The severities are inline variables where available, whose external linkage
+// lets the experimental C++ module expose them.
+NGLOG_INLINE_VARIABLE
 constexpr nglog::LogSeverity NGLOG_INFO =
     static_cast<nglog::LogSeverity>(nglog::internal::kInfoSeverity);
+NGLOG_INLINE_VARIABLE
 constexpr nglog::LogSeverity NGLOG_WARNING =
     static_cast<nglog::LogSeverity>(nglog::internal::kWarningSeverity);
+NGLOG_INLINE_VARIABLE
 constexpr nglog::LogSeverity NGLOG_ERROR =
     static_cast<nglog::LogSeverity>(nglog::internal::kErrorSeverity);
+NGLOG_INLINE_VARIABLE
 constexpr nglog::LogSeverity NGLOG_FATAL =
     static_cast<nglog::LogSeverity>(nglog::internal::kFatalSeverity);
 
