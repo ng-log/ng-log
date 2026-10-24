@@ -18,7 +18,6 @@
 #include "ng-log/export.h"
 #include "ng-log/log_severity.h"
 #include "ng-log/platform.h"
-#include "ng-log/types.h"
 
 namespace nglog {
 
@@ -133,7 +132,8 @@ NGLOG_EXPORT void ReprintFatalMessage();
 // be racing with other writers, this approach has the potential to
 // lose very small amounts of data. For security, only follow symlinks
 // if the path is /proc/self/fd/*
-NGLOG_EXPORT void TruncateLogFile(const char* path, uint64 limit, uint64 keep);
+NGLOG_EXPORT void TruncateLogFile(const char* path, std::uint64_t limit,
+                                  std::uint64_t keep);
 
 // Truncate stdout and stderr if they are over the value specified by
 // --max_log_size. Keep the final 1 MiB. This function has the same
@@ -171,7 +171,7 @@ class NGLOG_EXPORT Logger {
   // file:linenumber header.
   virtual void Write(bool force_flush,
                      const std::chrono::system_clock::time_point& timestamp,
-                     const char* message, size_t message_len) = 0;
+                     const char* message, std::size_t message_len) = 0;
 
   // Flush any buffered messages
   virtual void Flush() = 0;
@@ -179,7 +179,7 @@ class NGLOG_EXPORT Logger {
   // Get the current LOG file size.
   // The returned value is approximate since some
   // logged data may not have been flushed to disk yet.
-  virtual uint32 LogSize() = 0;
+  virtual std::uint32_t LogSize() = 0;
 };
 
 // Get the logger for the specified severity level.  The logger
@@ -222,7 +222,7 @@ NGLOG_EXPORT bool IsFailureSignalHandlerInstalled();
 // is the size of the message.  You should not expect the data is
 // terminated with '\0'.
 NGLOG_EXPORT void InstallFailureWriter(void (*writer)(const char* data,
-                                                      size_t size));
+                                                      std::size_t size));
 
 // Dump stack trace as a string. It lists at most 32 frames and ends with the
 // line "(More stack frames follow...)" if the stack is deeper.

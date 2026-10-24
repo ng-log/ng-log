@@ -43,7 +43,6 @@
 
 #include "ng-log/export.h"
 #include "ng-log/flags.h"
-#include "ng-log/types.h"
 
 namespace nglog {
 
@@ -60,7 +59,7 @@ extern NGLOG_EXPORT int SetVLOGLevel(const char* module_pattern, int log_level);
 
 struct SiteFlag {
   // The pointer selects either the default or the module-specific level.
-  std::atomic<std::atomic<int32>*> level;
+  std::atomic<std::atomic<std::int32_t>*> level;
   const nglog::Flag<std::int32_t>* default_level;
   std::atomic<bool> initialized;
   const char* base_name;
@@ -78,7 +77,7 @@ struct SiteFlag {
 extern NGLOG_EXPORT bool InitializeVLOG3(SiteFlag& site_flag,
                                          const Flag<std::int32_t>& site_default,
                                          const char* fname,
-                                         int32 verbose_level);
+                                         std::int32_t verbose_level);
 
 namespace internal {
 
@@ -86,9 +85,9 @@ namespace internal {
  * Determines whether a VLOG site of the given verbosity logs. The site flag
  * caches whether --v or a --vmodule pattern controls the site.
  */
-inline bool IsVLogOn(SiteFlag& site_flag, int32 verbose_level,
+inline bool IsVLogOn(SiteFlag& site_flag, std::int32_t verbose_level,
                      const char* fname) {
-  std::atomic<int32>* const level =
+  std::atomic<std::int32_t>* const level =
       site_flag.level.load(std::memory_order_acquire);
   if (level != nullptr) {
     return level->load(std::memory_order_relaxed) >= verbose_level;

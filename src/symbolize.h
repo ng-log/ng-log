@@ -73,7 +73,7 @@ inline namespace tools {
 // Gets the section header for the given name, if it exists. Returns true on
 // success. Otherwise, returns false.
 NGLOG_NO_EXPORT
-bool GetSectionHeaderByName(int fd, const char* name, size_t name_len,
+bool GetSectionHeaderByName(int fd, const char* name, std::size_t name_len,
                             ElfW(Shdr) * out);
 
 }  // namespace tools
@@ -95,7 +95,8 @@ inline namespace tools {
 // counter "pc". The callback function should write output to "out"
 // and return the size of the output written. On error, the callback
 // function should return -1.
-using SymbolizeCallback = int (*)(int, void*, char*, size_t, uint64_t);
+using SymbolizeCallback = int (*)(int, void*, char*, std::size_t,
+                                  std::uint64_t);
 NGLOG_NO_EXPORT
 void InstallSymbolizeCallback(SymbolizeCallback callback);
 
@@ -109,8 +110,9 @@ void InstallSymbolizeCallback(SymbolizeCallback callback);
 // file is opened successfully, returns the file descriptor.  Otherwise,
 // returns -1.  |out_file_name_size| is the size of the file name buffer
 // (including the null-terminator).
-using SymbolizeOpenObjectFileCallback = int (*)(uint64_t, uint64_t&, uint64_t&,
-                                                char*, size_t);
+using SymbolizeOpenObjectFileCallback = int (*)(std::uint64_t, std::uint64_t&,
+                                                std::uint64_t&, char*,
+                                                std::size_t);
 NGLOG_NO_EXPORT
 void InstallSymbolizeOpenObjectFileCallback(
     SymbolizeOpenObjectFileCallback callback);
@@ -155,8 +157,8 @@ constexpr SymbolizeOptions operator|(SymbolizeOptions lhs,
 // function name. "length == 0" means no such span exists, e.g. because line
 // number resolution is unavailable or disabled.
 struct SymbolizedFrame {
-  size_t file_line_offset = 0;
-  size_t file_line_length = 0;
+  std::size_t file_line_offset = 0;
+  std::size_t file_line_length = 0;
 };
 
 // Symbolizes a program counter.  On success, returns true and write the
@@ -165,7 +167,7 @@ struct SymbolizedFrame {
 // returns false.  If "frame" is non-null, it is filled in with the
 // location of the "file:line" text within "out" (see SymbolizedFrame).
 NGLOG_NO_EXPORT bool Symbolize(
-    void* pc, char* out, size_t out_size,
+    void* pc, char* out, std::size_t out_size,
     SymbolizeOptions options = SymbolizeOptions::kNone,
     SymbolizedFrame* frame = nullptr);
 

@@ -33,6 +33,7 @@
 #  include <winsock.h> /* for gethostname */
 
 #  include <cstdarg> /* template_dictionary.cc uses va_copy */
+#  include <cstddef>
 #  include <cstdint>
 #  include <cstring> /* for _strnicmp(), strerror_s() */
 #  include <ctime>   /* for localtime_s() */
@@ -43,14 +44,14 @@
 
 #  ifdef _MSC_VER
 
-/* 4244: otherwise we get problems when substracting two size_t's to an int
+/* 4244: otherwise we get problems when substracting two std::size_t's to an int
  * 4251: it's complaining about a private struct I've chosen not to dllexport
  * 4355: we use this in a constructor, but we do it safely
  * 4715: for some reason VC++ stopped realizing you can't return after abort()
  * 4800: we know we're casting ints/char*'s to bools, and we're ok with that
  * 4996: Yes, we're ok using "unsafe" functions like fopen() and strerror()
- * 4312: Converting uint32_t to a pointer when testing %p
- * 4267: also subtracting two size_t to int
+ * 4312: Converting std::uint32_t to a pointer when testing %p
+ * 4267: also subtracting two std::size_t to int
  * 4722: Destructor never returns due to abort()
  */
 #    pragma warning(disable : 4244 4251 4355 4715 4800 4996 4267 4312 4722)

@@ -22,7 +22,7 @@ class LogSink {
   virtual void send(LogSeverity severity, const char* full_filename,
                     const char* base_filename, int line,
                     const LogMessageTime& time, const char* message,
-                    size_t message_len);
+                    std::size_t message_len);
 };
 ```
 

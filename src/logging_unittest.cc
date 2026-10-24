@@ -12,6 +12,7 @@
 #include <cerrno>
 #include <chrono>
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -72,7 +73,6 @@
 #include "ng-log/logging.h"
 #include "ng-log/platform.h"
 #include "ng-log/raw_logging.h"
-#include "ng-log/types.h"
 #include "stacktrace.h"
 #ifdef HAVE_SUBPROCESS
 #  include "subprocess.h"
@@ -764,9 +764,9 @@ int main(int argc, char** argv) {
 }
 
 void TestLogging(bool check_counts) {
-  int64 base_num_infos = LogMessage::num_messages(NGLOG_INFO);
-  int64 base_num_warning = LogMessage::num_messages(NGLOG_WARNING);
-  int64 base_num_errors = LogMessage::num_messages(NGLOG_ERROR);
+  std::int64_t base_num_infos = LogMessage::num_messages(NGLOG_INFO);
+  std::int64_t base_num_warning = LogMessage::num_messages(NGLOG_WARNING);
+  std::int64_t base_num_errors = LogMessage::num_messages(NGLOG_ERROR);
 
   LOG(INFO) << string("foo ") << "bar " << 10 << ' ' << 3.4;
   for (int i = 0; i < 10; ++i) {
@@ -1050,7 +1050,7 @@ class TestLogSinkImpl : public LogSink {
   void send(LogSeverity severity, const char* /* full_filename */,
             const char* base_filename, int line,
             const LogMessageTime& logmsgtime, const char* message,
-            size_t message_len) override {
+            std::size_t message_len) override {
     errors.push_back(ToString(severity, base_filename, line, logmsgtime,
                               message, message_len));
   }
@@ -1060,7 +1060,7 @@ class BlockingLogger : public base::Logger {
  public:
   void Write(bool /* force_flush */,
              const std::chrono::system_clock::time_point&,
-             const char* /* message */, size_t /* length */) override {
+             const char* /* message */, std::size_t /* length */) override {
     std::unique_lock<std::mutex> lock(mutex_);
     entered_ = true;
     condition_.notify_all();
@@ -1068,7 +1068,7 @@ class BlockingLogger : public base::Logger {
   }
 
   void Flush() override {}
-  uint32 LogSize() override { return 0; }
+  std::uint32_t LogSize() override { return 0; }
 
   void WaitUntilEntered() {
     std::unique_lock<std::mutex> lock(mutex_);
@@ -1112,7 +1112,7 @@ class ReentrantLogSink : public LogSink {
   void send(LogSeverity /* severity */, const char* /* full_filename */,
             const char* /* base_filename */, int /* line */,
             const LogMessageTime& /* time */, const char* /* message */,
-            size_t /* message_len */) override {
+            std::size_t /* message_len */) override {
     bool expected = false;
     if (!nested_started_.compare_exchange_strong(expected, true)) {
       return;
@@ -1132,7 +1132,7 @@ class ReentrantLogSink : public LogSink {
 class SelfRemovingLogSink : public LogSink {
  public:
   void send(LogSeverity, const char*, const char*, int, const LogMessageTime&,
-            const char*, size_t) override {
+            const char*, std::size_t) override {
     RemoveLogSink(this);
   }
 };
@@ -1164,7 +1164,7 @@ constexpr int kConcurrentSinkCallers = 2;
 class ConcurrentlySelfRemovingLogSink : public LogSink {
  public:
   void send(LogSeverity, const char*, const char*, int, const LogMessageTime&,
-            const char*, size_t) override {
+            const char*, std::size_t) override {
     barrier_.ArriveAndWait();
     RemoveLogSink(this);
   }
@@ -1178,7 +1178,7 @@ class OtherSinkRemovingLogSink : public LogSink {
   explicit OtherSinkRemovingLogSink(LogSink* other) : other_(other) {}
 
   void send(LogSeverity, const char*, const char*, int, const LogMessageTime&,
-            const char*, size_t) override {
+            const char*, std::size_t) override {
     barrier_.ArriveAndWait();
     RemoveLogSink(other_);
   }
@@ -1191,13 +1191,13 @@ class OtherSinkRemovingLogSink : public LogSink {
 class QuietLogSink : public LogSink {
  public:
   void send(LogSeverity, const char*, const char*, int, const LogMessageTime&,
-            const char*, size_t) override {}
+            const char*, std::size_t) override {}
 };
 
 class ThrowingLogSink : public LogSink {
  public:
   void send(LogSeverity, const char*, const char*, int, const LogMessageTime&,
-            const char*, size_t) override {
+            const char*, std::size_t) override {
     throw std::runtime_error("sink failure");
   }
 };
@@ -1220,7 +1220,7 @@ void LogFromConcurrentThreads() {
 class ReentrantLogger : public base::Logger {
  public:
   void Write(bool, const std::chrono::system_clock::time_point&, const char*,
-             size_t) override {
+             std::size_t) override {
     if (!nested_) {
       nested_ = true;
       LOG(INFO) << "Nested custom logger message.";
@@ -1228,7 +1228,7 @@ class ReentrantLogger : public base::Logger {
   }
 
   void Flush() override {}
-  uint32 LogSize() override { return 0; }
+  std::uint32_t LogSize() override { return 0; }
 
  private:
   bool nested_{false};
@@ -1296,7 +1296,7 @@ class TwiceRemovingSink : public LogSink {
   void send(LogSeverity /* severity */, const char* /* full_filename */,
             const char* /* base_filename */, int /* line */,
             const LogMessageTime& /* time */, const char* /* message */,
-            size_t /* message_len */) override {
+            std::size_t /* message_len */) override {
     // Gives the owner time to wait for the calls before the second removal
     // and lets the first callback outlast the removal.
     constexpr std::chrono::milliseconds kSecondRemovalDelay{100};
@@ -1360,7 +1360,7 @@ class BlockingLogSink : public LogSink {
   void send(LogSeverity /* severity */, const char* /* full_filename */,
             const char* /* base_filename */, int /* line */,
             const LogMessageTime& /* time */, const char* /* message */,
-            size_t /* message_len */) override {
+            std::size_t /* message_len */) override {
     std::unique_lock<std::mutex> lock{mutex_};
     entered_ = true;
     condition_.notify_all();
@@ -1393,7 +1393,7 @@ class RemovedCallCountingLogSink : public LogSink {
   void send(LogSeverity /* severity */, const char* /* full_filename */,
             const char* /* base_filename */, int /* line */,
             const LogMessageTime& /* time */, const char* /* message */,
-            size_t /* message_len */) override {
+            std::size_t /* message_len */) override {
     if (removed.load()) {
       calls_after_removal.fetch_add(1);
     }
@@ -1576,7 +1576,7 @@ class ForwardingLogger : public base::Logger {
 
   void Write(bool force_flush,
              const std::chrono::system_clock::time_point& timestamp,
-             const char* message, size_t message_len) override {
+             const char* message, std::size_t message_len) override {
     std::thread worker{[this, force_flush, &timestamp, message, message_len] {
       wrapped_->Write(force_flush, timestamp, message, message_len);
     }};
@@ -1588,7 +1588,7 @@ class ForwardingLogger : public base::Logger {
     worker.join();
   }
 
-  uint32 LogSize() override { return wrapped_->LogSize(); }
+  std::uint32_t LogSize() override { return wrapped_->LogSize(); }
 
  private:
   base::Logger* wrapped_;
@@ -1674,7 +1674,7 @@ class MessageCollectingSink : public LogSink {
   void send(LogSeverity /*severity*/, const char* /*full_filename*/,
             const char* /*base_filename*/, int /*line*/,
             const LogMessageTime& /*time*/, const char* message,
-            size_t message_len) override {
+            std::size_t message_len) override {
     messages.emplace_back(message, message_len);
   }
 };
@@ -1850,8 +1850,8 @@ void TestDCHECK() {
   DCHECK_GT(2, 1);
   DCHECK_LT(1, 2);
 
-  auto orig_ptr = std::make_unique<int64>();
-  int64* ptr = DCHECK_NOTNULL(orig_ptr.get());
+  auto orig_ptr = std::make_unique<std::int64_t>();
+  std::int64_t* ptr = DCHECK_NOTNULL(orig_ptr.get());
   EXPECT_EQ(ptr, orig_ptr.get());
 }
 
@@ -1881,14 +1881,14 @@ TEST(DeathSTREQ, logging) {
 #endif
 
 TEST(CheckNOTNULL, Simple) {
-  int64 t;
+  std::int64_t t;
   void* ptr = static_cast<void*>(&t);
   void* ref = CHECK_NOTNULL(ptr);
   EXPECT_EQ(ptr, ref);
   CHECK_NOTNULL(reinterpret_cast<char*>(ptr));
   CHECK_NOTNULL(reinterpret_cast<unsigned char*>(ptr));
   CHECK_NOTNULL(reinterpret_cast<int*>(ptr));
-  CHECK_NOTNULL(reinterpret_cast<int64*>(ptr));
+  CHECK_NOTNULL(reinterpret_cast<std::int64_t*>(ptr));
 }
 
 #ifdef GTEST_HAS_DEATH_TEST
@@ -1914,7 +1914,7 @@ static vector<string> GetFiles(const string& pattern) {
     ADD_FAILURE() << "cannot convert " << pattern << " to UTF-16";
     return files;
   }
-  const size_t index = pattern.find_last_of("\\/");
+  const std::size_t index = pattern.find_last_of("\\/");
   if (index == string::npos) {
     ADD_FAILURE() << "no directory separator in " << pattern;
     return files;
@@ -2878,13 +2878,15 @@ struct MyLogger : public base::Logger {
 
   void Write(bool /* should_flush */,
              const std::chrono::system_clock::time_point& /* timestamp */,
-             const char* message, size_t length) override {
+             const char* message, std::size_t length) override {
     data.append(message, length);
   }
 
   void Flush() override {}
 
-  uint32 LogSize() override { return static_cast<uint32>(data.length()); }
+  std::uint32_t LogSize() override {
+    return static_cast<std::uint32_t>(data.length());
+  }
 
  private:
   bool* set_on_destruction_;
@@ -2923,7 +2925,7 @@ TEST(Logging, Errno) {
 }
 
 // Repeats `pattern` until the result is `length` characters long.
-static string RepeatToLength(const string& pattern, size_t length) {
+static string RepeatToLength(const string& pattern, std::size_t length) {
   string result;
   result.reserve(length + pattern.size());
   while (result.size() < length) {
@@ -2933,8 +2935,9 @@ static string RepeatToLength(const string& pattern, size_t length) {
   return result;
 }
 
-static void TestOneTruncate(const char* path, uint64 limit, uint64 keep,
-                            size_t dsize, size_t ksize, size_t expect) {
+static void TestOneTruncate(const char* path, std::uint64_t limit,
+                            std::uint64_t keep, std::size_t dsize,
+                            std::size_t ksize, std::size_t expect) {
   SCOPED_TRACE(path);
   FileDescriptor fd{open(path, O_RDWR | O_CREAT | O_TRUNC, 0600)};
   ASSERT_TRUE(fd) << strerror(errno);
@@ -2951,7 +2954,7 @@ static void TestOneTruncate(const char* path, uint64 limit, uint64 keep,
   // File should now be shorter
   struct stat statbuf;
   ASSERT_EQ(fstat(fd.get(), &statbuf), 0) << strerror(errno);
-  ASSERT_EQ(static_cast<size_t>(statbuf.st_size), expect);
+  ASSERT_EQ(static_cast<std::size_t>(statbuf.st_size), expect);
   ASSERT_EQ(lseek(fd.get(), 0, SEEK_SET), 0) << strerror(errno);
 
   // File should contain the suffix of the original file
@@ -3203,11 +3206,11 @@ struct RecordDeletionLogger : public base::Logger {
   ~RecordDeletionLogger() override { *set_on_destruction_ = true; }
   void Write(bool force_flush,
              const std::chrono::system_clock::time_point& timestamp,
-             const char* message, size_t length) override {
+             const char* message, std::size_t length) override {
     wrapped_logger_->Write(force_flush, timestamp, message, length);
   }
   void Flush() override { wrapped_logger_->Flush(); }
-  uint32 LogSize() override { return wrapped_logger_->LogSize(); }
+  std::uint32_t LogSize() override { return wrapped_logger_->LogSize(); }
 
  private:
   bool* set_on_destruction_;
@@ -3288,8 +3291,8 @@ TEST(Logging, LogPeriodically) {
 namespace nglog {
 inline namespace tools {
 // in logging.cc
-extern bool SafeFNMatch_(const char* pattern, size_t patt_len, const char* str,
-                         size_t str_len);
+extern bool SafeFNMatch_(const char* pattern, std::size_t patt_len,
+                         const char* str, std::size_t str_len);
 }  // namespace tools
 }  // namespace nglog
 
@@ -3383,7 +3386,7 @@ class TestLogSinkWriter {
       // Normally this would be some more real/involved logging logic
       // where LOG() usage can't be eliminated,
       // e.g. pushing the message over with an RPC:
-      const size_t messages_left = messages_.size() - 1;
+      const std::size_t messages_left = messages_.size() - 1;
       lock.unlock();
       // May not use LOG while holding mutex_, because Buffer()
       // acquires mutex_, and Buffer is called from LOG(),
@@ -3430,7 +3433,7 @@ class TestWaitingLogSink : public LogSink {
   void send(LogSeverity severity, const char* /* full_filename */,
             const char* base_filename, int line,
             const LogMessageTime& logmsgtime, const char* message,
-            size_t message_len) override {
+            std::size_t message_len) override {
     // Push it to Writer thread if we are the original logging thread.
     // Note: Something like ThreadLocalLogSink is a better choice
     //       to do thread-specific LogSink logic for real.
@@ -3473,7 +3476,7 @@ static void TestLogSinkWaitTillSent() {
 TEST(Strerror, logging) {
   int errcode = EINTR;
   std::string msg = strerror(errcode);
-  const size_t buf_size = msg.size() + 1;
+  const std::size_t buf_size = msg.size() + 1;
   std::vector<char> buf(buf_size);
   EXPECT_EQ(posix_strerror_r(errcode, nullptr, 0), -1);
   buf[0] = 'A';
@@ -3824,7 +3827,7 @@ constexpr char kFailureWriterTag[] = "writer>";
 
 // Tags what the failure writer receives, so that it can be told apart from
 // output written to stderr directly.
-static void WriteTaggedToStderr(const char* data, size_t size) {
+static void WriteTaggedToStderr(const char* data, std::size_t size) {
   std::fprintf(stderr, "%s%.*s", kFailureWriterTag, static_cast<int>(size),
                data);
 }

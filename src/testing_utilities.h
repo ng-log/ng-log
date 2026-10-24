@@ -37,7 +37,7 @@
 
 namespace nglog {
 
-extern int posix_strerror_r(int err, char* buf, size_t len);
+extern int posix_strerror_r(int err, char* buf, std::size_t len);
 extern std::string StrError(int err);
 
 //! System temporary directory that other processes modify concurrently.

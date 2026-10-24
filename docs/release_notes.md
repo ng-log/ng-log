@@ -35,6 +35,8 @@ SPDX-License-Identifier: BSD-3-Clause
 - Move `DFATAL_LEVEL` and `IF_DEBUG_MODE` to `ng-log/logging.h`.
   `ng-log/log_severity.h` provides `NGLOG_DFATAL_LEVEL` and
   `NGLOG_IF_DEBUG_MODE`
+- Remove the `nglog::int32`, `nglog::uint32`, `nglog::int64` and
+  `nglog::uint64` aliases in favor of the `<cstdint>` types
 
 #### Features
 

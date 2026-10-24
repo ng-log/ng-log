@@ -313,7 +313,7 @@ bool UnwinderWalksPastMaxStackDumpFrames() {
 // noinline prevents a -Wmismatched-new-delete false positive: GCC loses
 // track of the malloc/free pairing across inlined operator new/delete.
 // See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=103993
-[[gnu::noinline]] void* operator new(size_t size,
+[[gnu::noinline]] void* operator new(std::size_t size,
                                      const std::nothrow_t&) noexcept {
   if (nglog::g_new_hook) {
     nglog::g_new_hook();
@@ -324,7 +324,7 @@ bool UnwinderWalksPastMaxStackDumpFrames() {
   return malloc(size);
 }
 
-[[gnu::noinline]] void* operator new(size_t size) {
+[[gnu::noinline]] void* operator new(std::size_t size) {
   if (nglog::g_new_hook) {
     nglog::g_new_hook();
   }
@@ -338,7 +338,7 @@ bool UnwinderWalksPastMaxStackDumpFrames() {
   return p;
 }
 
-[[gnu::noinline]] void* operator new[](size_t size) {
+[[gnu::noinline]] void* operator new[](std::size_t size) {
   if (nglog::g_new_hook) {
     nglog::g_new_hook();
   }
@@ -354,8 +354,12 @@ bool UnwinderWalksPastMaxStackDumpFrames() {
 
 [[gnu::noinline]] void operator delete(void* p) noexcept { free(p); }
 
-[[gnu::noinline]] void operator delete(void* p, size_t) noexcept { free(p); }
+[[gnu::noinline]] void operator delete(void* p, std::size_t) noexcept {
+  free(p);
+}
 
 [[gnu::noinline]] void operator delete[](void* p) noexcept { free(p); }
 
-[[gnu::noinline]] void operator delete[](void* p, size_t) noexcept { free(p); }
+[[gnu::noinline]] void operator delete[](void* p, std::size_t) noexcept {
+  free(p);
+}

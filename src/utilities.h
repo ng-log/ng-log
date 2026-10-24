@@ -20,7 +20,7 @@
 #include <type_traits>
 #include <utility>
 
-// printf macros for size_t, in the style of inttypes.h
+// printf macros for std::size_t, in the style of inttypes.h
 #ifdef _LP64
 #  define __PRIS_PREFIX "z"
 #else
@@ -29,7 +29,7 @@
 
 // Use these macros after a % in a printf format string
 // to get correct 32/64 bit behavior, like this:
-// size_t size = records.size();
+// std::size_t size = records.size();
 // printf("%"PRIuS"\n", size);
 
 #define PRIdS __PRIS_PREFIX "d"
@@ -56,7 +56,6 @@ using ssize_t = std::ptrdiff_t;
 #endif
 #include "ng-log/export.h"
 #include "ng-log/log_severity.h"
-#include "ng-log/types.h"
 #include "stacktrace.h"
 
 // There are three different ways we can try to get the stack trace:
@@ -143,7 +142,7 @@ const char* ProgramInvocationShortName();
 // such as a setuid program or one with file capabilities, inherits the
 // environment of its caller, which must not.
 bool TrustsEnvironment();
-int32 GetMainThreadPid();
+std::int32_t GetMainThreadPid();
 bool PidHasChanged();
 
 const std::string& MyUserName();

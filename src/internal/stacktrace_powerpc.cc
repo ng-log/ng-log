@@ -11,7 +11,7 @@
 //    http://www.linux-foundation.org/spec/ELF/ppc64/PPC-elf64abi-1.9.html#STACK
 // Linux has similar code: http://patchwork.ozlabs.org/linuxppc/patch?id=8882
 
-#include <cstdint>  // for uintptr_t
+#include <cstdint>  // for std::uintptr_t
 #include <cstdio>
 
 #include "stacktrace.h"
@@ -34,18 +34,19 @@ static void** NextStackFrame(void** old_sp) {
     // at a greater address that the current one.
     if (new_sp <= old_sp) return nullptr;
     // Assume stack frames larger than 100,000 bytes are bogus.
-    if ((uintptr_t)new_sp - (uintptr_t)old_sp > 100000) return nullptr;
+    if ((std::uintptr_t)new_sp - (std::uintptr_t)old_sp > 100000)
+      return nullptr;
   } else {
     // In the non-strict mode, allow discontiguous stack frames.
     // (alternate-signal-stacks for example).
     if (new_sp == old_sp) return nullptr;
     // And allow frames upto about 1MB.
     if ((new_sp > old_sp) &&
-        ((uintptr_t)new_sp - (uintptr_t)old_sp > 1000000)) {
+        ((std::uintptr_t)new_sp - (std::uintptr_t)old_sp > 1000000)) {
       return nullptr;
     }
   }
-  if ((uintptr_t)new_sp & (sizeof(void*) - 1)) return nullptr;
+  if ((std::uintptr_t)new_sp & (sizeof(void*) - 1)) return nullptr;
   return new_sp;
 }
 

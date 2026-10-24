@@ -36,7 +36,6 @@
 #endif
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
-#include "ng-log/types.h"
 #include "subprocess.h"
 #include "symbolize.h"
 #include "testing_utilities.h"
@@ -418,7 +417,7 @@ class Addr2LineSymbolizeCallback : public ::testing::Test {
   // where a timeout would take a different path than the one under test.
   static void DisableAddr2LineTimeout() {
     nglog::SetFlag(FLAGS_addr2line_timeout_ms,
-                   std::numeric_limits<nglog::int32>::max());
+                   std::numeric_limits<std::int32_t>::max());
   }
 
   void TearDown() override {
@@ -429,7 +428,7 @@ class Addr2LineSymbolizeCallback : public ::testing::Test {
 
  private:
   const bool symbolize_line_info_ = nglog::GetFlag(FLAGS_symbolize_line_info);
-  const nglog::int32 addr2line_timeout_ms_ =
+  const std::int32_t addr2line_timeout_ms_ =
       nglog::GetFlag(FLAGS_addr2line_timeout_ms);
 };
 
@@ -533,7 +532,7 @@ TEST_F(Addr2LineSymbolizeCallback, SkipsGracefullyWhenUnavailable) {
 TEST_F(Addr2LineSymbolizeCallback, DoesNotHangOnAnUnresponsiveAddr2Line) {
   // Short enough to keep this test fast, while still giving the helper
   // plenty of time to be seen as unresponsive.
-  constexpr nglog::int32 kTimeoutMs = 50;
+  constexpr std::int32_t kTimeoutMs = 50;
 
   const char* symbol = nullptr;
   {
@@ -563,7 +562,7 @@ TEST_F(Addr2LineSymbolizeCallback, UsesOneTimeoutForSlowOutput) {
 
   const ScopedFakeAddr2Line fake{ADDR2LINE_FAKE_STREAM_PATH};
   nglog::SetFlag(FLAGS_addr2line_timeout_ms,
-                 static_cast<nglog::int32>(kTimeout.count()));
+                 static_cast<std::int32_t>(kTimeout.count()));
   EXPECT_TRUE(InstallAddr2LineSymbolizeCallback());
 
   char symbol[kSymbolBufferSize];

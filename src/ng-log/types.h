@@ -8,18 +8,6 @@
 #define NGLOG_TYPES_H
 
 #include <cstddef>
-#include <cstdint>
-
-#include "ng-log/platform.h"
-
-namespace nglog {
-
-using int32 = std::int32_t;
-using uint32 = std::uint32_t;
-using int64 = std::int64_t;
-using uint64 = std::uint64_t;
-
-}  // namespace nglog
 
 #if defined(__has_feature)
 #  if __has_feature(thread_sanitizer)
@@ -42,7 +30,8 @@ using uint64 = std::uint64_t;
 // We need to identify the static variables as "benign" races
 // to avoid noisy reports from TSAN.
 extern "C" void AnnotateBenignRaceSized(const char* file, int line,
-                                        const volatile void* mem, size_t size,
+                                        const volatile void* mem,
+                                        std::size_t size,
                                         const char* description);
 #endif  // defined(NGLOG_SANITIZE_THREAD)
 

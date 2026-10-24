@@ -1077,7 +1077,7 @@ int main(int argc, char** argv) {
   // longer than the default timeout. None of the tests measure time, so let
   // addr2line finish however long it takes.
   nglog::SetFlag(FLAGS_addr2line_timeout_ms,
-                 std::numeric_limits<nglog::int32>::max());
+                 std::numeric_limits<std::int32_t>::max());
 #    endif
 #  endif  // defined(HAVE_ELF_H) || defined(HAVE_SYS_EXEC_ELF_H)
 #endif    // HAVE_SYMBOLIZE

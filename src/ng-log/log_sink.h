@@ -63,7 +63,7 @@ class NGLOG_EXPORT LogSink {
   virtual void send(LogSeverity severity, const char* full_filename,
                     const char* base_filename, int line,
                     const LogMessageTime& time, const char* message,
-                    size_t message_len) = 0;
+                    std::size_t message_len) = 0;
 
   // Redefine this to implement waiting for
   // the sink's logging logic to complete.
@@ -84,7 +84,7 @@ class NGLOG_EXPORT LogSink {
   // Can be useful to implement send().
   static std::string ToString(LogSeverity severity, const char* file, int line,
                               const LogMessageTime& time, const char* message,
-                              size_t message_len);
+                              std::size_t message_len);
 };
 
 // Add or remove a LogSink as a consumer of logging data.  Thread-safe.

@@ -124,7 +124,7 @@ static void DieInThread() {
   raise(SIGFPE);
 }
 
-static void WriteToStderr(const char* data, size_t size) {
+static void WriteToStderr(const char* data, std::size_t size) {
   if (write(fileno(stderr), data, size) < 0) {
     // Ignore errors.
   }
@@ -132,14 +132,14 @@ static void WriteToStderr(const char* data, size_t size) {
 
 // Marks every chunk of the failure dump to tell it apart from the output of
 // the default writer.
-static void WriteWithMarker(const char* data, size_t size) {
+static void WriteWithMarker(const char* data, std::size_t size) {
   WriteToStderr(kCustomWriterMarker, sizeof(kCustomWriterMarker) - 1);
   WriteToStderr(data, size);
 }
 
 // The first time this runs, it crashes again with a different signal
 // while the first crash is still being dumped.
-static void WriteAndReenter(const char* data, size_t size) {
+static void WriteAndReenter(const char* data, std::size_t size) {
   WriteToStderr(data, size);
   static std::atomic_flag entered = ATOMIC_FLAG_INIT;
   if (!entered.test_and_set()) {
@@ -152,7 +152,7 @@ static void WriteAndReenter(const char* data, size_t size) {
 static void CrashInThread() { raise(SIGSEGV); }
 
 #if defined(NGLOG_OS_LINUX)
-static void DiscardFailureDump(const char*, size_t) {}
+static void DiscardFailureDump(const char*, std::size_t) {}
 
 static void ReturnFromFailureHandler() {
   g_suppress_default_sigterm = 1;
@@ -305,7 +305,7 @@ struct ColorlogtostderrResult {
 
 static ColorlogtostderrResult RunColorlogtostderrChild(const char* self_path) {
   constexpr int kChildExecFailure = 127;
-  constexpr size_t kOutputBufferSize = 256;
+  constexpr std::size_t kOutputBufferSize = 256;
   ColorlogtostderrResult result;
   FileDescriptor master{posix_openpt(O_RDWR | O_NOCTTY)};
   if (!master || grantpt(master.get()) != 0 || unlockpt(master.get()) != 0) {
@@ -351,7 +351,7 @@ static ColorlogtostderrResult RunColorlogtostderrChild(const char* self_path) {
   for (;;) {
     const ssize_t bytes_read = read(master.get(), buffer, sizeof(buffer));
     if (bytes_read > 0) {
-      result.output.append(buffer, static_cast<size_t>(bytes_read));
+      result.output.append(buffer, static_cast<std::size_t>(bytes_read));
       continue;
     }
     if (bytes_read < 0 && errno == EINTR) {

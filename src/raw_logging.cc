@@ -63,26 +63,26 @@ std::intmax_t SafeWrite(int fd, const void* data, std::size_t size) noexcept {
 // *DoRawLog writes to *buf of *size and move them past the written portion.
 // It returns true iff there was no overflow or error.
 NGLOG_ATTRIBUTE_FORMAT(printf, 3, 4)
-static bool DoRawLog(char** buf, size_t* size, const char* format, ...) {
+static bool DoRawLog(char** buf, std::size_t* size, const char* format, ...) {
   va_list ap;
   va_start(ap, format);
   int n = std::vsnprintf(*buf, *size, format, ap);
   va_end(ap);
   // The terminating null character must fit as well.
-  if (n < 0 || static_cast<size_t>(n) >= *size) return false;
-  *size -= static_cast<size_t>(n);
+  if (n < 0 || static_cast<std::size_t>(n) >= *size) return false;
+  *size -= static_cast<std::size_t>(n);
   *buf += n;
   return true;
 }
 
 // Helper for RawLog below.
-static bool FormatRawMessage(char** buf, size_t* size,
+static bool FormatRawMessage(char** buf, std::size_t* size,
                              internal::RawMessageFormatter format,
                              void* context) {
   int n = format(context, *buf, *size);
   // The terminating null character must fit as well.
-  if (n < 0 || static_cast<size_t>(n) >= *size) return false;
-  *size -= static_cast<size_t>(n);
+  if (n < 0 || static_cast<std::size_t>(n) >= *size) return false;
+  *size -= static_cast<std::size_t>(n);
   *buf += n;
   return true;
 }
@@ -210,7 +210,7 @@ void RawLog(LogSeverity severity, const char* file, int line,
   // can't call localtime_r here: it can allocate
   char buffer[kLogBufSize];
   char* buf = buffer;
-  size_t size = sizeof(buffer);
+  std::size_t size = sizeof(buffer);
 
   // NOTE: this format should match the specification in base/logging.h
   DoRawLog(&buf, &size, "%c00000000 00:00:00.000000 %5s %s:%d] RAW: ",
@@ -219,11 +219,11 @@ void RawLog(LogSeverity severity, const char* file, int line,
 
   // Record the position and size of the buffer after the prefix
   const char* msg_start = buf;
-  const size_t msg_size = size;
+  const std::size_t msg_size = size;
 
   // Reserves room for the newline that ends the message.
-  constexpr size_t kNewlineSize = 1;
-  size_t message_size = size - kNewlineSize;
+  constexpr std::size_t kNewlineSize = 1;
+  std::size_t message_size = size - kNewlineSize;
   const bool no_chop = FormatRawMessage(&buf, &message_size, format, context);
   size = message_size + kNewlineSize;
   if (no_chop) {

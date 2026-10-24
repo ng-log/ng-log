@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <ostream>
@@ -26,7 +27,6 @@
 #include "ng-log/log_severity.h"
 #include "ng-log/log_sink.h"
 #include "ng-log/platform.h"
-#include "ng-log/types.h"
 
 // The global value of NGLOG_STRIP_LOG. All the messages logged to
 // LOG(XXX) with severity less than NGLOG_STRIP_LOG will not be displayed.
@@ -286,7 +286,9 @@ class NGLOG_EXPORT LogStreamBuf : public std::streambuf {
   int_type overflow(int_type ch) { return ch; }
 
   // Legacy public ostrstream method.
-  size_t pcount() const { return static_cast<size_t>(pptr() - pbase()); }
+  std::size_t pcount() const {
+    return static_cast<std::size_t>(pptr() - pbase());
+  }
   char* pbase() const { return std::streambuf::pbase(); }
 };
 
@@ -333,7 +335,7 @@ class NGLOG_EXPORT LogMessage {
     // removed by the linker. We use this attribute to prevent the linker from
     // discarding it.
     NGLOG_ATTRIBUTE_USED
-    LogStream(char* buf, int len, int64 ctr)
+    LogStream(char* buf, int len, std::int64_t ctr)
         : std::ostream(nullptr),
           streambuf_(buf, len),
           ctr_(ctr),
@@ -359,8 +361,8 @@ class NGLOG_EXPORT LogMessage {
       return *this;
     }
 
-    int64 ctr() const { return ctr_; }
-    void set_ctr(int64 ctr) { ctr_ = ctr; }
+    std::int64_t ctr() const { return ctr_; }
+    void set_ctr(std::int64_t ctr) { ctr_ = ctr; }
     LogStream* self() const { return self_; }
 
     void SetStyleRecorder(internal::StyleRecorder* recorder);
@@ -368,7 +370,7 @@ class NGLOG_EXPORT LogMessage {
     void PopStyle();
 
     // Legacy std::streambuf methods.
-    size_t pcount() const { return streambuf_.pcount(); }
+    std::size_t pcount() const { return streambuf_.pcount(); }
     char* pbase() const { return streambuf_.pbase(); }
     char* str() const { return pbase(); }
     void append(const char* data, std::size_t length) {
@@ -380,7 +382,7 @@ class NGLOG_EXPORT LogMessage {
 
    private:
     base_logging::LogStreamBuf streambuf_;
-    int64 ctr_;        // Counter hack (for the LOG_EVERY_X() macro)
+    std::int64_t ctr_;  // Counter hack (for the LOG_EVERY_X() macro)
     LogStream* self_;  // Consistency check hack
     internal::StyleRecorder* style_recorder_;
   };
@@ -389,7 +391,7 @@ class NGLOG_EXPORT LogMessage {
   // icc 8 requires this typedef to avoid an internal compiler error.
   typedef void (LogMessage::*SendMethod)();
 
-  LogMessage(const char* file, int line, LogSeverity severity, int64 ctr,
+  LogMessage(const char* file, int line, LogSeverity severity, std::int64_t ctr,
              SendMethod send_method);
 
   // Two special constructors that generate reduced amounts of code at
@@ -439,7 +441,7 @@ class NGLOG_EXPORT LogMessage {
 
   // An arbitrary limit on the length of a single log message.  This
   // is so that streaming can be done more efficiently.
-  static const size_t kMaxLogMessageLen;
+  static const std::size_t kMaxLogMessageLen;
 
   // These should not be called directly outside of logging.*,
   // only passed as SendMethod arguments to other LogMessage methods:
@@ -458,7 +460,7 @@ class NGLOG_EXPORT LogMessage {
   int preserved_errno() const;
 
   // Must be called without the log_mutex held.  (L < log_mutex)
-  static int64 num_messages(int severity);
+  static std::int64_t num_messages(int severity);
 
   LogSeverity severity() const noexcept;
   int line() const noexcept;
@@ -488,7 +490,7 @@ class NGLOG_EXPORT LogMessage {
   void RecordCrashReason(internal::CrashReason* reason);
 
   // Counts of messages sent at each priority:
-  static std::atomic<int64> num_messages_[NUM_SEVERITIES];
+  static std::atomic<std::int64_t> num_messages_[NUM_SEVERITIES];
 
   // We keep the data in a separate struct so that each instance of
   // LogMessage uses less stack space.
@@ -559,8 +561,8 @@ NGLOG_EXPORT std::ostream& operator<<(std::ostream& os, const Counter_t&);
 // Derived class for PLOG*() of ng-log/logging.h.
 class NGLOG_EXPORT ErrnoLogMessage : public LogMessage {
  public:
-  ErrnoLogMessage(const char* file, int line, LogSeverity severity, int64 ctr,
-                  void (LogMessage::*send_method)());
+  ErrnoLogMessage(const char* file, int line, LogSeverity severity,
+                  std::int64_t ctr, void (LogMessage::*send_method)());
 
   // Postpends ": strerror(errno) [errno]".
   ~ErrnoLogMessage();

@@ -17,7 +17,6 @@
 #include "internal/lock_metrics.h"
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
-#include "ng-log/types.h"
 
 #ifdef NGLOG_ENABLE_LOCK_METRICS
 #  include <cstdio>
@@ -37,9 +36,9 @@ class NullLogger : public base::Logger {
  public:
   void Write(bool /* force_flush */,
              const std::chrono::system_clock::time_point& /* timestamp */,
-             const char* /* message */, size_t /* length */) override {}
+             const char* /* message */, std::size_t /* length */) override {}
   void Flush() override {}
-  uint32 LogSize() override { return 0; }
+  std::uint32_t LogSize() override { return 0; }
 };
 
 class NullSink : public LogSink {
@@ -47,7 +46,7 @@ class NullSink : public LogSink {
   void send(LogSeverity /* severity */, const char* /* full_filename */,
             const char* /* base_filename */, int /* line */,
             const LogMessageTime& /* logmsgtime */, const char* /* message */,
-            size_t /* message_len */) override {}
+            std::size_t /* message_len */) override {}
 };
 
 // Non-constant so the compiler cannot fold the comparisons below away.

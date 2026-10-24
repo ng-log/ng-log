@@ -407,11 +407,11 @@ const char* ProgramInvocationShortName() {
 #endif
 }
 
-static int32 g_main_thread_pid = getpid();
-int32 GetMainThreadPid() { return g_main_thread_pid; }
+static std::int32_t g_main_thread_pid = getpid();
+std::int32_t GetMainThreadPid() { return g_main_thread_pid; }
 
 bool PidHasChanged() {
-  int32 pid = getpid();
+  std::int32_t pid = getpid();
   if (g_main_thread_pid == pid) {
     return false;
   }

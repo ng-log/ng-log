@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cassert>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <functional>  // IWYU pragma: keep
 #include <mutex>
@@ -23,7 +24,6 @@
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "ng-log/platform.h"
-#include "ng-log/types.h"
 #include "utilities.h"
 
 namespace nglog {
@@ -217,7 +217,7 @@ void LogCleaner::Worker() {
           pattern.second.next_cleanup_time =
               now +
               std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                  std::chrono::duration<int32>{
+                  std::chrono::duration<std::int32_t>{
                       nglog::GetFlag(FLAGS_logcleansecs)});
         }
       }

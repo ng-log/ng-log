@@ -56,7 +56,6 @@
 #include "ng-log/logging.h"
 #include "ng-log/platform.h"
 #include "ng-log/raw_logging.h"
-#include "ng-log/types.h"
 #include "stacktrace.h"
 #include "utilities.h"
 
@@ -113,7 +112,7 @@ using std::fdopen;
 #endif
 
 #ifndef HAVE_PREAD
-static ssize_t pread(int fd, void* buf, size_t count, off_t offset) {
+static ssize_t pread(int fd, void* buf, std::size_t count, off_t offset) {
   off_t orig_offset = lseek(fd, 0, SEEK_CUR);
   if (orig_offset == (off_t)-1) return -1;
   if (lseek(fd, offset, SEEK_CUR) == (off_t)-1) return -1;
@@ -125,7 +124,7 @@ static ssize_t pread(int fd, void* buf, size_t count, off_t offset) {
 #endif  // !HAVE_PREAD
 
 #ifndef HAVE_PWRITE
-static ssize_t pwrite(int fd, void* buf, size_t count, off_t offset) {
+static ssize_t pwrite(int fd, void* buf, std::size_t count, off_t offset) {
   off_t orig_offset = lseek(fd, 0, SEEK_CUR);
   if (orig_offset == (off_t)-1) return -1;
   if (lseek(fd, offset, SEEK_CUR) == (off_t)-1) return -1;
@@ -183,9 +182,10 @@ static Role SeverityToRole(LogSeverity severity) {
 // Values large enough to overflow the "MaxLogSize() << 20" byte computation
 // are capped to the 4095 MiB maximum instead of being silently reduced to the
 // minimum, which would produce surprisingly tiny log files.
-static uint32 MaxLogSize() {
-  constexpr uint32 max_megabytes = 4095;  // 4095 << 20 fits in a uint32.
-  const uint32 max_log_size = nglog::GetFlag(FLAGS_max_log_size);
+static std::uint32_t MaxLogSize() {
+  // 4095 << 20 fits in a std::uint32_t.
+  constexpr std::uint32_t max_megabytes = 4095;
+  const std::uint32_t max_log_size = nglog::GetFlag(FLAGS_max_log_size);
   if (max_log_size == 0) {
     return 1;
   }
@@ -194,7 +194,7 @@ static uint32 MaxLogSize() {
 
 // An arbitrary limit on the length of a single log message.  This
 // is so that streaming can be done more efficiently.
-const size_t LogMessage::kMaxLogMessageLen = 30000;
+const std::size_t LogMessage::kMaxLogMessageLen = 30000;
 
 namespace internal {
 struct LogMessageData {
@@ -214,9 +214,9 @@ struct LogMessageData {
         outvec_;            // nullptr or vector to push message onto
     std::string* message_;  // nullptr or string to write message into
   };
-  size_t num_prefix_chars_;     // # of chars of prefix in this message
-  size_t num_chars_to_log_;     // # of chars of msg to send to log
-  size_t num_chars_to_syslog_;  // # of chars of msg to send to syslog
+  std::size_t num_prefix_chars_;     // # of chars of prefix in this message
+  std::size_t num_chars_to_log_;     // # of chars of msg to send to log
+  std::size_t num_chars_to_syslog_;  // # of chars of msg to send to syslog
   const char* basename_;        // basename of file that called LOG
   const char* fullname_;        // fullname of file that called LOG
   const char* tag_;             // tag for platform loggers, or nullptr
@@ -237,10 +237,10 @@ struct LogMessageData {
   // when has_default_prefix_ is true: a caller-supplied prefix formatter
   // (see InstallPrefixFormatter()) has no known sub-structure to color
   // this way.
-  size_t prefix_severity_len_;
-  size_t prefix_timestamp_len_;
-  size_t prefix_threadid_len_;
-  size_t prefix_fileline_len_;
+  std::size_t prefix_severity_len_;
+  std::size_t prefix_timestamp_len_;
+  std::size_t prefix_threadid_len_;
+  std::size_t prefix_fileline_len_;
   bool has_default_prefix_;
 
   LogMessageData(const LogMessageData&) = delete;
@@ -265,7 +265,7 @@ const char* MessageTag(const internal::LogMessageData& data) noexcept {
 static internal::LogMutex log_mutex;
 
 // Number of messages sent at each severity.  Under log_mutex.
-std::atomic<int64> LogMessage::num_messages_[NUM_SEVERITIES]{};
+std::atomic<std::int64_t> LogMessage::num_messages_[NUM_SEVERITIES]{};
 
 // Globally disable log writing (if disk is full)
 static std::atomic<bool> stop_writing{false};
@@ -495,12 +495,12 @@ class LogFileObject : public base::Logger {
   void Write(bool force_flush,  // Should we force a flush here?
              const std::chrono::system_clock::time_point&
                  timestamp,  // Timestamp for this entry
-             const char* message, size_t message_len) override;
+             const char* message, std::size_t message_len) override;
 
   // Called while the global logging mutex serializes the default logger.
   void WriteUnlocked(bool force_flush,
                      const std::chrono::system_clock::time_point& timestamp,
-                     const char* message, size_t message_len,
+                     const char* message, std::size_t message_len,
                      std::unique_lock<internal::FileMutex>* lock);
 
   // Configuration options
@@ -513,9 +513,9 @@ class LogFileObject : public base::Logger {
 
   // It is the actual file length for the system loggers,
   // i.e., INFO, ERROR, etc.
-  uint32 LogSize() override {
+  std::uint32_t LogSize() override {
     std::lock_guard<internal::FileMutex> l{mutex_};
-    return static_cast<uint32>(file_length_);
+    return static_cast<std::uint32_t>(file_length_);
   }
 
   // Internal flush routine.  Exposed so that FlushLogFilesUnsafe()
@@ -524,7 +524,7 @@ class LogFileObject : public base::Logger {
   void FlushUnlocked(const std::chrono::system_clock::time_point& now);
 
  private:
-  static const uint32 kRolloverAttemptFrequency = 0x20;
+  static const std::uint32_t kRolloverAttemptFrequency = 0x20;
 
   internal::FileMutex mutex_;
   internal::LogFilenameSource filename_source_;
@@ -618,28 +618,28 @@ class LogDestination {
   static void MaybeLogToLogfile(
       LogSeverity severity,
       const std::chrono::system_clock::time_point& timestamp,
-      const char* message, size_t len);
+      const char* message, std::size_t len);
   static void MaybeLogToLogfileLocked(
       LogSeverity severity,
       const std::chrono::system_clock::time_point& timestamp,
-      const char* message, size_t len);
+      const char* message, std::size_t len);
   // Take a log message of a particular severity and log it to the file
   // for that severity and also for all files with severity less than
   // this severity.
   static void LogToAllLogfiles(
       LogSeverity severity,
       const std::chrono::system_clock::time_point& timestamp,
-      const char* message, size_t len);
+      const char* message, std::size_t len);
   static void LogToAllLogfilesLocked(
       LogSeverity severity,
       const std::chrono::system_clock::time_point& timestamp,
-      const char* message, size_t len);
+      const char* message, std::size_t len);
 
   // Send logging info to all registered sinks.
   static bool LogToSinks(LogSeverity severity, const char* full_filename,
                          const char* base_filename, int line,
                          const LogMessageTime& time, const char* message,
-                         size_t message_len);
+                         std::size_t message_len);
 
   static std::shared_ptr<const std::vector<LogSink*>> GetSinks();
   // Counts a call of a sink that is still registered and returns whether the
@@ -700,10 +700,10 @@ class LogDestination {
   // that holding it alone suffices to read sinks_.
   static std::mutex sink_call_mutex_;
   static std::condition_variable sink_call_cond_;
-  static std::unordered_map<LogSink*, size_t> sink_call_counts_;
+  static std::unordered_map<LogSink*, std::size_t> sink_call_counts_;
   // Calls of each sink made by threads that wait for the calls of that sink
   // to end. Such calls cannot end before the wait does.
-  static std::unordered_map<LogSink*, size_t> sink_waiting_call_counts_;
+  static std::unordered_map<LogSink*, std::size_t> sink_waiting_call_counts_;
 
   // Disallow
   LogDestination(const LogDestination&) = delete;
@@ -722,9 +722,11 @@ std::atomic<bool> LogDestination::sinks_present_{false};
 LogDestination::SinkMutex LogDestination::sink_mutex_;
 std::mutex LogDestination::sink_call_mutex_;
 std::condition_variable LogDestination::sink_call_cond_;
-std::unordered_map<LogSink*, size_t> LogDestination::sink_call_counts_;
-std::unordered_map<LogSink*, size_t> LogDestination::sink_waiting_call_counts_;
-thread_local std::unordered_map<LogSink*, size_t> sink_call_counts_for_thread;
+std::unordered_map<LogSink*, std::size_t> LogDestination::sink_call_counts_;
+std::unordered_map<LogSink*, std::size_t>
+    LogDestination::sink_waiting_call_counts_;
+thread_local std::unordered_map<LogSink*, std::size_t>
+    sink_call_counts_for_thread;
 std::once_flag LogDestination::hostname_once_;
 
 /* static */
@@ -882,9 +884,9 @@ struct FileFormatter {
   // change the console state between writes and therefore write directly.
   std::string* buffer = nullptr;
 
-  void AppendString(const char* text, size_t len) { Write(text, len); }
+  void AppendString(const char* text, std::size_t len) { Write(text, len); }
 
-  void Write(const char* text, size_t len) {
+  void Write(const char* text, std::size_t len) {
     if (buffer != nullptr) {
       buffer->append(text, len);
     } else {
@@ -919,7 +921,7 @@ std::string* ColoredLineBuffer(ColorMode mode, std::string& buffer) {
 // sequences the way signalhandler.cc's g_failure_writer does.
 static void WriteTerminalField(FILE* output, FileFormatter& formatter,
                                ColorMode mode, ColorSpec spec, const char* text,
-                               size_t len) {
+                               std::size_t len) {
   if (len == 0) {
     return;
   }
@@ -944,10 +946,10 @@ static void WriteStyledLogField(FILE* output, FileFormatter& formatter,
                                 ColorMode mode,
                                 const TextAttributes& attributes,
                                 bool hyperlinks_enabled, const char* text,
-                                size_t len) {
+                                std::size_t len) {
   const auto write_line = [&formatter, output, mode, &attributes,
                            hyperlinks_enabled](const char* line_text,
-                                               size_t line_len) {
+                                               std::size_t line_len) {
     const auto write_colored = [&formatter, output, mode, &attributes,
                                 line_text, line_len] {
       WriteTerminalField(output, formatter, mode, attributes.color, line_text,
@@ -960,7 +962,7 @@ static void WriteStyledLogField(FILE* output, FileFormatter& formatter,
     }
   };
   const auto write_newline = [&formatter](const char* newline,
-                                          size_t newline_len) {
+                                          std::size_t newline_len) {
     formatter.Write(newline, newline_len);
   };
   WriteTextByLines(text, len, write_line, write_newline);
@@ -1009,8 +1011,8 @@ static void WriteStyledLogBody(FILE* output, FileFormatter& formatter,
                                const internal::StyleRecorder& styles,
                                const ColorSpec& base_attributes,
                                bool hyperlinks_enabled, const char* message,
-                               size_t begin, size_t end) {
-  size_t cursor = begin;
+                               std::size_t begin, std::size_t end) {
+  std::size_t cursor = begin;
   for (std::size_t index = 0; index < styles.size(); ++index) {
     const internal::StyleRecorder::Span& span = styles.span(index);
     if (span.end <= begin) {
@@ -1020,8 +1022,8 @@ static void WriteStyledLogBody(FILE* output, FileFormatter& formatter,
       break;
     }
 
-    const size_t span_begin = std::max(span.begin, begin);
-    const size_t span_end = std::min(span.end, end);
+    const std::size_t span_begin = std::max(span.begin, begin);
+    const std::size_t span_end = std::min(span.end, end);
     if (span_begin > cursor) {
       WriteStyledLogField(
           output, formatter, mode, TextAttributes{base_attributes, Hyperlink()},
@@ -1060,7 +1062,7 @@ static void MaybeFlushStdout(FILE* output, LogSeverity severity) {
 // LogMessage backing the call at all (e.g. LogToAllLogfiles() replaying a
 // previously stored FATAL message).
 static void ColoredWriteToStderrOrStdout(FILE* output, LogSeverity severity,
-                                         const char* message, size_t len) {
+                                         const char* message, std::size_t len) {
   const bool is_stdout = (output == stdout);
   const bool want_color =
       (!is_stdout && nglog::GetFlag(FLAGS_colorlogtostderr)) ||
@@ -1092,7 +1094,7 @@ static void ColoredWriteToStderrOrStdout(FILE* output, LogSeverity severity,
 }
 
 static void ColoredWriteToStdout(LogSeverity severity, const char* message,
-                                 size_t len) {
+                                 std::size_t len) {
   FILE* output = stdout;
   // We also need to send logs to the stderr when the severity is
   // higher or equal to the stderr threshold.
@@ -1103,12 +1105,12 @@ static void ColoredWriteToStdout(LogSeverity severity, const char* message,
 }
 
 static void ColoredWriteToStderr(LogSeverity severity, const char* message,
-                                 size_t len) {
+                                 std::size_t len) {
   ColoredWriteToStderrOrStdout(stderr, severity, message, len);
 }
 
 // As ColoredWriteToStderrOrStdout(FILE*, LogSeverity, const char*,
-// size_t) above, but colors the severity/timestamp, thread id, and
+// std::size_t) above, but colors the severity/timestamp, thread id, and
 // file:line fields of "data"'s prefix separately, matching how the
 // crash handler colors the analogous fields of a stack trace, rather
 // than as part of one whole-line block. The message body keeps the
@@ -1158,7 +1160,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
       (!is_stdout && nglog::GetFlag(FLAGS_colorlogtostderr)) ||
       (is_stdout && nglog::GetFlag(FLAGS_colorlogtostdout));
   const char* const message = data.message_text_;
-  const size_t len = data.num_chars_to_log_;
+  const std::size_t len = data.num_chars_to_log_;
   const ColorMode mode =
       want_color ? StreamColorMode(output) : ColorMode::kNone;
 
@@ -1183,7 +1185,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
   // body keeps the existing whole-block, severity-based coloring. The
   // severity character shares the message body's severity-based color,
   // and the timestamp shares the crash banner's "date -d" command color.
-  size_t pos = 0;
+  std::size_t pos = 0;
   WriteStyledLogField(output, formatter, mode,
                       TextAttributes{text_spec, Hyperlink()}, false,
                       message + pos, data.prefix_severity_len_);
@@ -1213,9 +1215,9 @@ static void ColoredWriteToStderrOrStdoutWithFields(
     char span[600];
     const int span_len =
         std::snprintf(span, sizeof(span), "%s:%d", data.fullname_, data.line_);
-    if (span_len > 0 && static_cast<size_t>(span_len) < sizeof(span)) {
+    if (span_len > 0 && static_cast<std::size_t>(span_len) < sizeof(span)) {
       if (BuildFileLineUri(
-              span, static_cast<size_t>(span_len),
+              span, static_cast<std::size_t>(span_len),
               nglog::GetFlag(FLAGS_symbolize_file_base_path).c_str(),
               CachedHostname().c_str(), uri, sizeof(uri))) {
         uri_pointer = uri;
@@ -1224,7 +1226,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
   }
   const ColorSpec file_line_spec = theme.Get(Role::kLogFileLine);
   const char* const file_line_text = message + pos;
-  const size_t file_line_len = data.prefix_fileline_len_;
+  const std::size_t file_line_len = data.prefix_fileline_len_;
 
   WriteStyledLogField(output, formatter, mode,
                       TextAttributes{file_line_spec, Hyperlink(uri_pointer)},
@@ -1270,7 +1272,7 @@ static void ColoredWriteToStderrWithFields(
   ColoredWriteToStderrOrStdoutWithFields(stderr, data);
 }
 
-static void WriteToStderr(const char* message, size_t len) {
+static void WriteToStderr(const char* message, std::size_t len) {
   // Avoid using cerr from this module since we may get called during
   // exit code, and cerr may be partially or fully destroyed by then.
   internal::WriteUtf8(stderr, message, len);
@@ -1288,7 +1290,7 @@ static void WritePreInitializationWarning() {
                              ? StreamColorMode(stderr)
                              : ColorMode::kNone;
   const Theme& theme = DefaultTheme();
-  const auto write_content = [](const char* text, size_t) {
+  const auto write_content = [](const char* text, std::size_t) {
     WriteRawToStderr(text);
   };
   const auto write_styled = [mode, &write_content](ColorSpec spec,
@@ -1330,7 +1332,7 @@ inline void LogDestination::SendEmailForLogMessage(
 inline void LogDestination::MaybeLogToLogfile(
     LogSeverity severity,
     const std::chrono::system_clock::time_point& timestamp, const char* message,
-    size_t len) {
+    std::size_t len) {
   const bool should_flush = severity > nglog::GetFlag(FLAGS_logbuflevel);
   LogDestination* destination = log_destination(severity);
   destination->logger_->Write(should_flush, timestamp, message, len);
@@ -1339,7 +1341,7 @@ inline void LogDestination::MaybeLogToLogfile(
 inline void LogDestination::MaybeLogToLogfileLocked(
     LogSeverity severity,
     const std::chrono::system_clock::time_point& timestamp, const char* message,
-    size_t len) {
+    std::size_t len) {
   const bool should_flush = severity > nglog::GetFlag(FLAGS_logbuflevel);
   LogDestination* destination = log_destination(severity);
   // The default logger also takes the mutex of its file, which it shares with
@@ -1350,7 +1352,7 @@ inline void LogDestination::MaybeLogToLogfileLocked(
 inline void LogDestination::LogToAllLogfiles(
     LogSeverity severity,
     const std::chrono::system_clock::time_point& timestamp, const char* message,
-    size_t len) {
+    std::size_t len) {
   if (nglog::GetFlag(FLAGS_logtostdout)) {  // global flag: never log to file
     ColoredWriteToStdout(severity, message, len);
   } else if (nglog::GetFlag(
@@ -1367,7 +1369,7 @@ inline void LogDestination::LogToAllLogfiles(
 inline void LogDestination::LogToAllLogfilesLocked(
     LogSeverity severity,
     const std::chrono::system_clock::time_point& timestamp, const char* message,
-    size_t len) {
+    std::size_t len) {
   if (nglog::GetFlag(FLAGS_logtostdout)) {
     ColoredWriteToStdout(severity, message, len);
   } else if (nglog::GetFlag(FLAGS_logtostderr)) {
@@ -1385,12 +1387,12 @@ inline bool LogDestination::LogToSinks(LogSeverity severity,
                                        const char* base_filename, int line,
                                        const LogMessageTime& time,
                                        const char* message,
-                                       size_t message_len) {
+                                       std::size_t message_len) {
   const auto sinks = GetSinks();
   if (!sinks) {
     return false;
   }
-  for (size_t i = sinks->size(); i-- > 0;) {
+  for (std::size_t i = sinks->size(); i-- > 0;) {
     LogSink* sink = (*sinks)[i];
     SinkCallGuard guard{sink};
     if (guard) {
@@ -1407,7 +1409,7 @@ inline void LogDestination::WaitForSinks(internal::LogMessageData* data,
   if (wait_for_registered_sinks) {
     const auto sinks = GetSinks();
     if (sinks) {
-      for (size_t i = sinks->size(); i-- > 0;) {
+      for (std::size_t i = sinks->size(); i-- > 0;) {
         LogSink* sink = (*sinks)[i];
         SinkCallGuard guard{sink};
         if (guard) {
@@ -1469,7 +1471,7 @@ void LogDestination::EndSinkCall(LogSink* sink) {
 void LogDestination::WaitForSinkCalls(LogSink* sink) {
   std::unique_lock<std::mutex> l{sink_call_mutex_};
   const auto thread_it = sink_call_counts_for_thread.find(sink);
-  const size_t thread_count =
+  const std::size_t thread_count =
       thread_it == sink_call_counts_for_thread.end() ? 0 : thread_it->second;
   if (thread_count == 0) {
     // No callback waits for a thread that is not inside one, so it can wait
@@ -1486,7 +1488,7 @@ void LogDestination::WaitForSinkCalls(LogSink* sink) {
   sink_call_cond_.notify_all();
   sink_call_cond_.wait(l, [sink] {
     const auto global_it = sink_call_counts_.find(sink);
-    const size_t global_count =
+    const std::size_t global_count =
         global_it == sink_call_counts_.end() ? 0 : global_it->second;
     return global_count == sink_waiting_call_counts_[sink];
   });
@@ -1502,9 +1504,9 @@ void LogDestination::WaitForAllSinkCalls() {
   sink_call_cond_.wait(l, [] {
     for (const auto& entry : sink_call_counts_) {
       const auto thread_it = sink_call_counts_for_thread.find(entry.first);
-      const size_t thread_count = thread_it == sink_call_counts_for_thread.end()
-                                      ? 0
-                                      : thread_it->second;
+      const std::size_t thread_count =
+          thread_it == sink_call_counts_for_thread.end() ? 0
+                                                         : thread_it->second;
       if (entry.second != thread_count) {
         return false;
       }
@@ -1649,7 +1651,8 @@ void LogFileObject::FlushUnlocked(
   // Figure out when we are due for another flush.
   next_flush_time_ =
       now + std::chrono::duration_cast<std::chrono::system_clock::duration>(
-                std::chrono::duration<int32>{nglog::GetFlag(FLAGS_logbufsecs)});
+                std::chrono::duration<std::int32_t>{
+                    nglog::GetFlag(FLAGS_logbufsecs)});
 }
 
 bool LogFileObject::CreateLogfile(const std::string& filename) {
@@ -1839,14 +1842,14 @@ bool LogFileObject::CreateLogfile(const std::string& filename) {
 
 void LogFileObject::Write(
     bool force_flush, const std::chrono::system_clock::time_point& timestamp,
-    const char* message, size_t message_len) {
+    const char* message, std::size_t message_len) {
   std::unique_lock<internal::FileMutex> l{mutex_};
   WriteUnlocked(force_flush, timestamp, message, message_len, &l);
 }
 
 void LogFileObject::WriteUnlocked(
     bool force_flush, const std::chrono::system_clock::time_point& timestamp,
-    const char* message, size_t message_len,
+    const char* message, std::size_t message_len,
     std::unique_lock<internal::FileMutex>* lock) {
 #if !defined(NGLOG_OS_LINUX) || !defined(HAVE_POSIX_FADVISE)
   (void)lock;
@@ -2004,7 +2007,7 @@ void LogFileObject::WriteUnlocked(
       }
       const string& file_header_string = file_header_stream.str();
 
-      const size_t header_len = file_header_string.size();
+      const std::size_t header_len = file_header_string.size();
       std::fwrite(file_header_string.data(), 1, header_len, file_.get());
       file_length_ += header_len;
       bytes_since_flush_ += header_len;
@@ -2126,7 +2129,7 @@ internal::LogMessageData::LogMessageData()
     : stream_(message_text_, LogMessage::kMaxLogMessageLen, 0), styles_() {}
 
 LogMessage::LogMessage(const char* file, int line, LogSeverity severity,
-                       int64 ctr, void (LogMessage::*send_method)())
+                       std::int64_t ctr, void (LogMessage::*send_method)())
     : allocated_(nullptr) {
   Init(file, line, severity, send_method);
   data_->stream_.set_ctr(ctr);
@@ -2469,7 +2472,7 @@ static char fatal_message[256];
 
 void ReprintFatalMessage() {
   if (fatal_message[0]) {
-    const size_t n = strlen(fatal_message);
+    const std::size_t n = strlen(fatal_message);
     // Also write to stderr without color.
     WriteToStderr(fatal_message, n);
     if (!nglog::GetFlag(FLAGS_logtostderr)) {
@@ -2527,7 +2530,7 @@ void LogMessage::SendToLog() NGLOG_LOCKS_REQUIRED(log_mutex) {
       SetCrashReason(&crash_reason);
 
       // Store shortened fatal message for other logs and GWQ status
-      const size_t copy =
+      const std::size_t copy =
           min(data_->num_chars_to_log_, sizeof(fatal_message) - 1);
       memcpy(fatal_message, data_->message_text_, copy);
       fatal_message[copy] = '\0';
@@ -2616,7 +2619,7 @@ void LogMessage::SaveOrSendToLog() NGLOG_LOCKS_REQUIRED(log_mutex) {
                "");
     // Omit prefix of message and trailing newline when recording in outvec_.
     const char* start = data_->message_text_ + data_->num_prefix_chars_;
-    size_t len = data_->num_chars_to_log_ - data_->num_prefix_chars_ - 1;
+    std::size_t len = data_->num_chars_to_log_ - data_->num_prefix_chars_ - 1;
     data_->outvec_->push_back(string(start, len));
   } else {
     SendToLog();
@@ -2630,7 +2633,7 @@ void LogMessage::WriteToStringAndLog() NGLOG_LOCKS_REQUIRED(log_mutex) {
                "");
     // Omit prefix of message and trailing newline when writing to message_.
     const char* start = data_->message_text_ + data_->num_prefix_chars_;
-    size_t len = data_->num_chars_to_log_ - data_->num_prefix_chars_ - 1;
+    std::size_t len = data_->num_chars_to_log_ - data_->num_prefix_chars_ - 1;
     data_->message_->assign(start, len);
   }
   SendToLog();
@@ -2669,7 +2672,7 @@ void base::SetLogger(LogSeverity severity, base::Logger* logger) {
 }
 
 // L < log_mutex.
-int64 LogMessage::num_messages(int severity) {
+std::int64_t LogMessage::num_messages(int severity) {
   return num_messages_[severity].load(std::memory_order_relaxed);
 }
 
@@ -2688,7 +2691,7 @@ ostream& operator<<(ostream& os, const Counter_t&) {
 }
 
 ErrnoLogMessage::ErrnoLogMessage(const char* file, int line,
-                                 LogSeverity severity, int64 ctr,
+                                 LogSeverity severity, std::int64_t ctr,
                                  void (LogMessage::*send_method)())
     : LogMessage(file, line, severity, ctr, send_method) {}
 
@@ -2737,7 +2740,7 @@ void LogSink::WaitTillSent() {
 
 string LogSink::ToString(LogSeverity severity, const char* file, int line,
                          const LogMessageTime& time, const char* message,
-                         size_t message_len) {
+                         std::size_t message_len) {
   ostringstream stream;
   stream.fill('0');
 
@@ -2828,7 +2831,7 @@ static string ShellEscape(const string& src) {
   } else {
     // needs double quote escaping
     result.assign("\"");
-    for (size_t i = 0; i < src.size(); ++i) {
+    for (std::size_t i = 0; i < src.size(); ++i) {
       switch (src[i]) {
         case '\\':
         case '$':
@@ -3095,7 +3098,7 @@ void GetExistingTempDirectories(vector<string>& list) {
 
 #if defined(HAVE_UNISTD_H) || defined(HAVE__CHSIZE_S)
 static void TruncateLogFileDescriptor(FileDescriptor fd, const char* path,
-                                      uint64 limit, uint64 keep) {
+                                      std::uint64_t limit, std::uint64_t keep) {
   struct stat statbuf;
   const int kCopyBlockSize = 8 << 10;
   char copybuf[kCopyBlockSize];
@@ -3123,8 +3126,8 @@ static void TruncateLogFileDescriptor(FileDescriptor fd, const char* path,
   ssize_t bytesin, bytesout;
   while ((bytesin = pread(fd.get(), copybuf, sizeof(copybuf), read_offset)) >
          0) {
-    bytesout =
-        pwrite(fd.get(), copybuf, static_cast<size_t>(bytesin), write_offset);
+    bytesout = pwrite(fd.get(), copybuf, static_cast<std::size_t>(bytesin),
+                      write_offset);
     if (bytesout == -1) {
       PLOG(ERROR) << "Unable to write to " << path;
       break;
@@ -3149,7 +3152,7 @@ static void TruncateLogFileDescriptor(FileDescriptor fd, const char* path,
 }
 
 #  ifdef NGLOG_OS_WINDOWS
-static bool TruncateWindowsFile(const std::string& path, uint64 size) {
+static bool TruncateWindowsFile(const std::string& path, std::uint64_t size) {
   std::wstring wide_path;
   std::wstring prepared_path;
   if (!internal::Utf8ToWide(path.data(), path.size(), &wide_path) ||
@@ -3201,7 +3204,8 @@ static bool GetWindowsFilePath(HANDLE handle, std::string* path) {
 #  endif
 #endif
 
-void TruncateLogFile(const char* path, uint64 limit, uint64 keep) {
+void TruncateLogFile(const char* path, std::uint64_t limit,
+                     std::uint64_t keep) {
 #if defined(HAVE_UNISTD_H) || defined(HAVE__CHSIZE_S)
   // Do not follow symlinks unless they are the process file descriptors used
   // by TruncateStdoutStderr on Linux.
@@ -3247,13 +3251,13 @@ void TruncateLogFile(const char* path, uint64 limit, uint64 keep) {
 }
 
 void TruncateStdoutStderr() {
-  uint64 limit = MaxLogSize() << 20U;
-  uint64 keep = 1U << 20U;
+  std::uint64_t limit = MaxLogSize() << 20U;
+  std::uint64_t keep = 1U << 20U;
 #ifdef NGLOG_OS_WINDOWS
 #  if defined(HAVE_UNISTD_H) || defined(HAVE__CHSIZE_S)
   const std::array<FILE*, 2> outputs = {stdout, stderr};
   for (FILE* output : outputs) {
-    const intptr_t native_handle = _get_osfhandle(_fileno(output));
+    const std::intptr_t native_handle = _get_osfhandle(_fileno(output));
     if (native_handle == -1) {
       PLOG(ERROR) << "Unable to get the handle for "
                   << (output == stdout ? "stdout" : "stderr");
@@ -3323,7 +3327,7 @@ DEFINE_CHECK_STROP_IMPL(CHECK_STRCASENE, strcasecmp, false)
 // use the value of "buf". It will never have an undefined value.
 // DEPRECATED: Use StrError(int) instead.
 NGLOG_NO_EXPORT
-int posix_strerror_r(int err, char* buf, size_t len) {
+int posix_strerror_r(int err, char* buf, std::size_t len) {
   // Sanity check input parameters
   if (buf == nullptr || len <= 0) {
     errno = EINVAL;
@@ -3363,7 +3367,7 @@ int posix_strerror_r(int err, char* buf, size_t len) {
       buf[0] = '\000';
 #if defined(NGLOG_OS_MACOSX) || defined(NGLOG_OS_FREEBSD) || \
     defined(NGLOG_OS_OPENBSD)
-      if (reinterpret_cast<intptr_t>(rc) < sys_nerr) {
+      if (reinterpret_cast<std::intptr_t>(rc) < sys_nerr) {
         // This means an error on MacOSX or FreeBSD.
         return -1;
       }

@@ -87,7 +87,7 @@ struct PcInfoContext {
 // Formats the innermost (first) location backtrace_pcinfo() reports for a
 // pc, and returns non-zero so backtrace_pcinfo() stops there instead of
 // continuing on to any further inlined call frames.
-int PcInfoCallback(void* data, uintptr_t /*pc*/, const char* filename,
+int PcInfoCallback(void* data, std::uintptr_t /*pc*/, const char* filename,
                    int lineno, const char* /*function*/) {
   auto* ctx = static_cast<PcInfoContext*>(data);
   if (filename != nullptr) {
@@ -105,7 +105,7 @@ int PcInfoCallback(void* data, uintptr_t /*pc*/, const char* filename,
 // the raw runtime "pc".
 int LibbacktraceSymbolizeCallback(int /*fd*/, void* pc, char* out,
                                   std::size_t out_size,
-                                  uint64_t /*relocation*/) {
+                                  std::uint64_t /*relocation*/) {
   if (!nglog::GetFlag(FLAGS_symbolize_line_info)) {
     return 0;
   }
@@ -121,7 +121,7 @@ int LibbacktraceSymbolizeCallback(int /*fd*/, void* pc, char* out,
   }
 
   PcInfoContext ctx{out, out_size, 0};
-  backtrace_pcinfo(state, reinterpret_cast<uintptr_t>(pc), &PcInfoCallback,
+  backtrace_pcinfo(state, reinterpret_cast<std::uintptr_t>(pc), &PcInfoCallback,
                    &ErrorCallback, &ctx);
   return static_cast<int>(ctx.written);
 }

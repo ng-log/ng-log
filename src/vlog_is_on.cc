@@ -10,6 +10,7 @@
 
 #include <atomic>
 #include <cerrno>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -19,7 +20,6 @@
 #include "ng-log/export.h"
 #include "ng-log/flags.h"
 #include "ng-log/raw_logging.h"
-#include "ng-log/types.h"
 
 using std::string;
 
@@ -31,10 +31,10 @@ inline namespace tools {
 // of arguments and does not allocate any memory,
 // but we only support "*" and "?" wildcards, not the "[...]" patterns.
 // It's not a static function for the unittest.
-NGLOG_NO_EXPORT bool SafeFNMatch_(const char* pattern, size_t patt_len,
-                                  const char* str, size_t str_len) {
-  size_t p = 0;
-  size_t s = 0;
+NGLOG_NO_EXPORT bool SafeFNMatch_(const char* pattern, std::size_t patt_len,
+                                  const char* str, std::size_t str_len) {
+  std::size_t p = 0;
+  std::size_t s = 0;
   while (true) {
     if (p == patt_len && s == str_len) return true;
     if (p == patt_len) return false;
@@ -71,7 +71,7 @@ using tools::SafeFNMatch_;
 // when it's safe to delete/update it: other threads need to use it w/o locks.
 struct VModuleInfo {
   string module_pattern;
-  mutable std::atomic<int32> vlog_level{0};
+  mutable std::atomic<std::int32_t> vlog_level{0};
   const VModuleInfo* next;
 };
 
@@ -96,7 +96,7 @@ static void VLOG2Initializer() {
   VModuleInfo* head = nullptr;
   VModuleInfo* tail = nullptr;
   while ((sep = strchr(vmodule, '=')) != nullptr) {
-    string pattern(vmodule, static_cast<size_t>(sep - vmodule));
+    string pattern(vmodule, static_cast<std::size_t>(sep - vmodule));
     int module_level;
     if (sscanf(sep, "=%d", &module_level) == 1) {
       auto* info = new VModuleInfo;
@@ -124,7 +124,7 @@ static void VLOG2Initializer() {
 // This can be called very early, so we use SpinLock and RAW_VLOG here.
 int SetVLOGLevel(const char* module_pattern, int log_level) {
   int result = nglog::GetFlag(FLAGS_v);
-  size_t const pattern_len = strlen(module_pattern);
+  std::size_t const pattern_len = strlen(module_pattern);
   bool found = false;
   bool found_exact = false;
   {
@@ -186,7 +186,7 @@ int SetVLOGLevel(const char* module_pattern, int log_level) {
 // NOTE: This function must not allocate memory or require any locks.
 bool InitializeVLOG3(SiteFlag& site_flag,
                      const Flag<std::int32_t>& level_default, const char* fname,
-                     int32 verbose_level) {
+                     std::int32_t verbose_level) {
   std::lock_guard<std::mutex> l(vmodule_mutex);
 
   // Another thread may have initialized the site while this one waited for the
@@ -194,7 +194,7 @@ bool InitializeVLOG3(SiteFlag& site_flag,
   // written again. The cache is only written under the lock, which makes
   // relaxed loads sufficient.
   if (site_flag.initialized.load(std::memory_order_relaxed)) {
-    std::atomic<int32>* const level =
+    std::atomic<std::int32_t>* const level =
         site_flag.level.load(std::memory_order_relaxed);
     return level == nullptr
                ? GetFlag(*site_flag.default_level) >= verbose_level
@@ -211,7 +211,7 @@ bool InitializeVLOG3(SiteFlag& site_flag,
   int old_errno = errno;
 
   // site_default normally points to FLAGS_v
-  std::atomic<int32>* site_flag_value = nullptr;
+  std::atomic<std::int32_t>* site_flag_value = nullptr;
 
   // Get basename for file
   const char* base = strrchr(fname, '/');
@@ -224,8 +224,8 @@ bool InitializeVLOG3(SiteFlag& site_flag,
 
   base = base ? (base + 1) : fname;
   const char* base_end = strchr(base, '.');
-  size_t base_length =
-      base_end ? static_cast<size_t>(base_end - base) : strlen(base);
+  std::size_t base_length =
+      base_end ? static_cast<std::size_t>(base_end - base) : strlen(base);
 
   // Trim out trailing "-inl" if any
   if (base_length >= 4 && (memcmp(base + base_length - 4, "-inl", 4) == 0)) {

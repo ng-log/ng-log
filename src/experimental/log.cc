@@ -10,6 +10,7 @@
 #include "ng-log/experimental/log.h"
 
 #include <cerrno>
+#include <cstdint>
 #include <cstdlib>
 #include <format>
 #include <iterator>
@@ -27,7 +28,6 @@
 #include "ng-log/experimental/sink.h"
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
-#include "ng-log/types.h"
 
 namespace nglog::experimental::internal {
 namespace {
@@ -51,7 +51,7 @@ class FormattingScope {
 };
 
 // Counter value of messages the macros log without a counter.
-constexpr int64 kNoCounter = 0;
+constexpr std::int64_t kNoCounter = 0;
 
 // Forwards a message to each of several sinks.
 class FanOutSink final : public LogSink {

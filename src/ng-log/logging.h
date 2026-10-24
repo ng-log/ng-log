@@ -15,6 +15,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <ostream>
 #include <string>
@@ -565,11 +566,11 @@ using _Check_string = std::string;
   constexpr std::chrono::nanoseconds LOG_TIME_PERIOD =                         \
       std::chrono::duration_cast<std::chrono::nanoseconds>(                    \
           std::chrono::duration<double>(seconds));                             \
-  static std::atomic<nglog::int64> LOG_PREVIOUS_TIME_RAW;                      \
+  static std::atomic<std::int64_t> LOG_PREVIOUS_TIME_RAW;                      \
   NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                        \
-      __FILE__, __LINE__, &LOG_TIME_PERIOD, sizeof(nglog::int64), ""));        \
+      __FILE__, __LINE__, &LOG_TIME_PERIOD, sizeof(std::int64_t), ""));        \
   NGLOG_IFDEF_THREAD_SANITIZER(AnnotateBenignRaceSized(                        \
-      __FILE__, __LINE__, &LOG_PREVIOUS_TIME_RAW, sizeof(nglog::int64), ""));  \
+      __FILE__, __LINE__, &LOG_PREVIOUS_TIME_RAW, sizeof(std::int64_t), ""));  \
   const auto LOG_CURRENT_TIME =                                                \
       std::chrono::duration_cast<std::chrono::nanoseconds>(                    \
           std::chrono::steady_clock::now().time_since_epoch());                \

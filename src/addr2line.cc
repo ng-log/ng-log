@@ -273,7 +273,7 @@ std::size_t RunAddr2Line(char* const argv[], char* out, std::size_t out_size) {
 }
 
 int Addr2LineSymbolizeCallback(int /*fd*/, void* pc, char* out,
-                               std::size_t out_size, uint64_t relocation) {
+                               std::size_t out_size, std::uint64_t relocation) {
   if (!nglog::GetFlag(FLAGS_symbolize_line_info)) {
     return 0;
   }
@@ -292,8 +292,8 @@ int Addr2LineSymbolizeCallback(int /*fd*/, void* pc, char* out,
   char object_path[kMaxObjectPathLength];
   std::snprintf(object_path, sizeof(object_path), "%s", out + 1);
 
-  const auto pc0 = reinterpret_cast<uintptr_t>(pc);
-  char address_buf[2 + 2 * sizeof(uintptr_t) + 1];  // "0x" + hex digits.
+  const auto pc0 = reinterpret_cast<std::uintptr_t>(pc);
+  char address_buf[2 + 2 * sizeof(std::uintptr_t) + 1];  // "0x" + hex digits.
   std::snprintf(address_buf, sizeof(address_buf), "0x%llx",
                 static_cast<unsigned long long>(pc0 - relocation));
 
@@ -394,14 +394,14 @@ bool SplitAddr2LineFunctionsOutput(const char* input, std::size_t input_len,
 }
 
 bool ResolveFunctionAndLine(const char* object_path, void* pc,
-                            uint64_t relocation, char* out,
+                            std::uint64_t relocation, char* out,
                             std::size_t out_size, SymbolizeOptions options,
                             SymbolizedFrame* frame) {
   char object_path_buf[kMaxObjectPathLength];
   std::snprintf(object_path_buf, sizeof(object_path_buf), "%s", object_path);
 
-  const auto pc0 = reinterpret_cast<uintptr_t>(pc);
-  char address_buf[2 + 2 * sizeof(uintptr_t) + 1];  // "0x" + hex digits.
+  const auto pc0 = reinterpret_cast<std::uintptr_t>(pc);
+  char address_buf[2 + 2 * sizeof(std::uintptr_t) + 1];  // "0x" + hex digits.
   std::snprintf(address_buf, sizeof(address_buf), "0x%llx",
                 static_cast<unsigned long long>(pc0 - relocation));
 

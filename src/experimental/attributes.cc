@@ -22,7 +22,6 @@
 #include "context.h"
 #include "internal/log_message_access.h"
 #include "ng-log/raw_logging.h"
-#include "ng-log/types.h"
 
 namespace nglog::experimental {
 
@@ -69,7 +68,7 @@ static_assert(decltype(SiteFlag::level)::is_always_lock_free,
               "call site through an atomic pointer, which is not lock-free "
               "on this platform. Disable the experimental logging functions "
               "with WITH_EXPERIMENTAL=OFF.");
-static_assert(std::atomic<int32>::is_always_lock_free,
+static_assert(std::atomic<std::int32_t>::is_always_lock_free,
               "Signal-safe verbose logging reads atomic verbosity levels, "
               "which are not lock-free on this platform. Disable the "
               "experimental logging functions with WITH_EXPERIMENTAL=OFF.");
@@ -83,13 +82,13 @@ template <internal::StandardInteger T>
 bool Verbose<T>::Admit(Context& context) const {
   // Saturates levels outside the range of the verbosity flag instead of
   // wrapping around like a conversion would.
-  constexpr int32 kMinLevel = std::numeric_limits<int32>::min();
-  constexpr int32 kMaxLevel = std::numeric_limits<int32>::max();
-  int32 verbosity = kMaxLevel;
+  constexpr std::int32_t kMinLevel = std::numeric_limits<std::int32_t>::min();
+  constexpr std::int32_t kMaxLevel = std::numeric_limits<std::int32_t>::max();
+  std::int32_t verbosity = kMaxLevel;
   if (std::cmp_less(level, kMinLevel)) {
     verbosity = kMinLevel;
   } else if (std::cmp_less_equal(level, kMaxLevel)) {
-    verbosity = static_cast<int32>(level);
+    verbosity = static_cast<std::int32_t>(level);
   }
   return nglog::internal::IsVLogOn(context.site().state<SiteFlag>(), verbosity,
                                    context.location().file_name());

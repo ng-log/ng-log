@@ -5,7 +5,8 @@
 //
 // Produce a stack trace.
 
-#include <cstdint>  // for uintptr_t
+#include <cstddef>
+#include <cstdint>  // for std::uintptr_t
 
 #include "ng-log/platform.h"
 #include "utilities.h"  // for OS_* macros
@@ -37,8 +38,8 @@ static void** NextStackFrame(void** old_sp) {
     // at a greater address that the current one.
     if (new_sp <= old_sp) return nullptr;
     // Assume stack frames larger than 100,000 bytes are bogus.
-    if (reinterpret_cast<uintptr_t>(new_sp) -
-            reinterpret_cast<uintptr_t>(old_sp) >
+    if (reinterpret_cast<std::uintptr_t>(new_sp) -
+            reinterpret_cast<std::uintptr_t>(old_sp) >
         100000) {
       return nullptr;
     }
@@ -47,20 +48,20 @@ static void** NextStackFrame(void** old_sp) {
     // (alternate-signal-stacks for example).
     if (new_sp == old_sp) return nullptr;
     // And allow frames upto about 1MB.
-    if ((new_sp > old_sp) && (reinterpret_cast<uintptr_t>(new_sp) -
-                                  reinterpret_cast<uintptr_t>(old_sp) >
+    if ((new_sp > old_sp) && (reinterpret_cast<std::uintptr_t>(new_sp) -
+                                  reinterpret_cast<std::uintptr_t>(old_sp) >
                               1000000)) {
       return nullptr;
     }
   }
-  if (reinterpret_cast<uintptr_t>(new_sp) & (sizeof(void*) - 1)) {
+  if (reinterpret_cast<std::uintptr_t>(new_sp) & (sizeof(void*) - 1)) {
     return nullptr;
   }
 #ifdef __i386__
   // On 64-bit machines, the stack pointer can be very close to
   // 0xffffffff, so we explicitly check for a pointer into the
   // last two pages in the address space
-  if ((uintptr_t)new_sp >= 0xffffe000) return nullptr;
+  if ((std::uintptr_t)new_sp >= 0xffffe000) return nullptr;
 #endif
 #if !defined(NGLOG_OS_WINDOWS)
   if (!STRICT_UNWINDING) {
@@ -71,9 +72,10 @@ static void** NextStackFrame(void** old_sp) {
     //       is already on its last leg, so it's ok to be slow here.
     static int page_size = getpagesize();
     void* new_sp_aligned =
-        reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(new_sp) &
-                                static_cast<uintptr_t>(~(page_size - 1)));
-    if (msync(new_sp_aligned, static_cast<size_t>(page_size), MS_ASYNC) == -1) {
+        reinterpret_cast<void*>(reinterpret_cast<std::uintptr_t>(new_sp) &
+                                static_cast<std::uintptr_t>(~(page_size - 1)));
+    if (msync(new_sp_aligned, static_cast<std::size_t>(page_size), MS_ASYNC) ==
+        -1) {
       return nullptr;
     }
   }

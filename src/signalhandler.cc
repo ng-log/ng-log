@@ -25,7 +25,6 @@
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "ng-log/platform.h"
-#include "ng-log/types.h"
 #include "stacktrace.h"
 #include "symbolize.h"
 #include "utilities.h"
@@ -109,7 +108,7 @@ constexpr unsigned kHexadecimalRadix = 16;
 // as it's not async signal safe.
 class MinimalFormatter {
  public:
-  MinimalFormatter(char* buffer, size_t size)
+  MinimalFormatter(char* buffer, std::size_t size)
       : buffer_(buffer), cursor_(buffer), end_(buffer + size) {}
 
   // Returns the number of bytes written in the buffer.
@@ -124,7 +123,7 @@ class MinimalFormatter {
 
   // Appends string from "str" and updates the internal cursor.
   void AppendString(const char* str) {
-    ptrdiff_t i = 0;
+    std::ptrdiff_t i = 0;
     while (str[i] != '\0' && cursor_ + i < end_) {
       cursor_[i] = str[i];
       ++i;
@@ -135,8 +134,8 @@ class MinimalFormatter {
   // Appends exactly "len" bytes from "str", which need not be
   // NUL-terminated (or may contain embedded NULs), and updates the
   // internal cursor.
-  void AppendString(const char* str, size_t len) {
-    size_t i = 0;
+  void AppendString(const char* str, std::size_t len) {
+    std::size_t i = 0;
     while (i < len && cursor_ + i < end_) {
       cursor_[i] = str[i];
       ++i;
@@ -146,10 +145,10 @@ class MinimalFormatter {
 
   // Formats "number" in "radix" and updates the internal cursor.
   // Lowercase letters are used for 'a' - 'z'.
-  void AppendUint64(uint64 number, unsigned radix) {
+  void AppendUint64(std::uint64_t number, unsigned radix) {
     unsigned i = 0;
     while (cursor_ + i < end_) {
-      const uint64 tmp = number % radix;
+      const std::uint64_t tmp = number % radix;
       number /= radix;
       cursor_[i] = kHexDigits[tmp];
       ++i;
@@ -164,11 +163,11 @@ class MinimalFormatter {
 
   // Formats "number" as hexadecimal number, and updates the internal
   // cursor.  Padding will be added in front if needed.
-  void AppendHexWithPadding(uint64 number, int width) {
+  void AppendHexWithPadding(std::uint64_t number, int width) {
     char* const start = cursor_;
     AppendString("0x");
     AppendUint64(number, kHexadecimalRadix);
-    const int64 content_len = cursor_ - start;
+    const std::int64_t content_len = cursor_ - start;
     if (content_len < width) {
       // The padded field, [start, start + target_len), must include both
       // the shifted-right content and the padding spaces in front of it.
@@ -177,9 +176,10 @@ class MinimalFormatter {
       // can never make the std::copy_backward()/std::fill() below write past
       // it. The content moves right within the buffer, so it is copied from
       // its end.
-      const int64 target_len =
-          std::min(static_cast<int64>(width), static_cast<int64>(end_ - start));
-      const int64 delta = target_len - content_len;  // Padding spaces.
+      const std::int64_t target_len =
+          std::min(static_cast<std::int64_t>(width),
+                   static_cast<std::int64_t>(end_ - start));
+      const std::int64_t delta = target_len - content_len;  // Padding spaces.
       if (delta > 0) {
         std::copy_backward(start, cursor_, start + target_len);
         std::fill(start, start + delta, ' ');
@@ -195,7 +195,7 @@ class MinimalFormatter {
 };
 
 // Writes the given data with the size to the standard error.
-void WriteToStderr(const char* data, size_t size) {
+void WriteToStderr(const char* data, std::size_t size) {
 #ifdef NGLOG_OS_WINDOWS
   internal::WriteSignalSafeToFileDescriptor(fileno(stderr), data, size);
 #else
@@ -206,7 +206,7 @@ void WriteToStderr(const char* data, size_t size) {
 }
 
 // The writer function can be changed by InstallFailureWriter().
-void (*g_failure_writer)(const char* data, size_t size) = WriteToStderr;
+void (*g_failure_writer)(const char* data, std::size_t size) = WriteToStderr;
 
 #if defined(HAVE_STACKTRACE) && defined(HAVE_SIGACTION)
 constexpr std::size_t kThreadNameBufferSize = 64;
@@ -342,7 +342,7 @@ void DumpTimeInfo() {
     // this is the same value, just in a different format.
     char time_buf[24];  // Big enough for a 64-bit decimal unix time.
     MinimalFormatter time_formatter(time_buf, sizeof(time_buf));
-    time_formatter.AppendUint64(static_cast<uint64>(time_in_sec),
+    time_formatter.AppendUint64(static_cast<std::uint64_t>(time_in_sec),
                                 kDecimalRadix);
     WriteStyledField(theme.Get(Role::kShellCommand), mode, g_failure_writer,
                      time_buf, time_formatter.num_bytes_written());
@@ -359,7 +359,8 @@ void DumpTimeInfo() {
     char command_buf[64];
     MinimalFormatter command(command_buf, sizeof(command_buf));
     command.AppendString("date -d @");
-    command.AppendUint64(static_cast<uint64>(time_in_sec), kDecimalRadix);
+    command.AppendUint64(static_cast<std::uint64_t>(time_in_sec),
+                         kDecimalRadix);
     WriteStyledField(theme.Get(Role::kShellCommand), mode, g_failure_writer,
                      command_buf, command.num_bytes_written());
   }
@@ -427,7 +428,8 @@ void DumpSignalInfo(int signal_number, siginfo_t* siginfo) {
     char buf[24];  // Big enough for "Signal " + a 64-bit decimal number.
     MinimalFormatter formatter(buf, sizeof(buf));
     formatter.AppendString("Signal ");
-    formatter.AppendUint64(static_cast<uint64>(signal_number), kDecimalRadix);
+    formatter.AppendUint64(static_cast<std::uint64_t>(signal_number),
+                           kDecimalRadix);
     WriteStyledField(theme.Get(Role::kSignalName), mode, g_failure_writer, buf,
                      formatter.num_bytes_written());
   }
@@ -448,7 +450,7 @@ void DumpSignalInfo(int signal_number, siginfo_t* siginfo) {
     char buf[24];  // Big enough for a padded, prefixed 64-bit address.
     MinimalFormatter formatter(buf, sizeof(buf));
     formatter.AppendString("0x");
-    formatter.AppendUint64(reinterpret_cast<uintptr_t>(siginfo->si_addr),
+    formatter.AppendUint64(reinterpret_cast<std::uintptr_t>(siginfo->si_addr),
                            kHexadecimalRadix);
     WriteStyledField(theme.Get(Role::kStackAddress), mode, g_failure_writer,
                      buf, formatter.num_bytes_written());
@@ -465,7 +467,7 @@ void DumpSignalInfo(int signal_number, siginfo_t* siginfo) {
   {
     char buf[24];  // Big enough for a 64-bit decimal PID.
     MinimalFormatter formatter(buf, sizeof(buf));
-    formatter.AppendUint64(static_cast<uint64>(getpid()), kDecimalRadix);
+    formatter.AppendUint64(static_cast<std::uint64_t>(getpid()), kDecimalRadix);
     WriteStyledField(theme.Get(Role::kMetaIdentifier), mode, g_failure_writer,
                      buf, formatter.num_bytes_written());
   }
@@ -486,7 +488,7 @@ void DumpSignalInfo(int signal_number, siginfo_t* siginfo) {
     char buf[kThreadIdBufferSize];
     MinimalFormatter formatter(buf, sizeof(buf));
     formatter.AppendString("0x");
-    formatter.AppendUint64(static_cast<uint64>(thread_value),
+    formatter.AppendUint64(static_cast<std::uint64_t>(thread_value),
                            kHexadecimalRadix);
     WriteStyledField(theme.Get(Role::kMetaIdentifier), mode, g_failure_writer,
                      buf, formatter.num_bytes_written());
@@ -502,7 +504,7 @@ void DumpSignalInfo(int signal_number, siginfo_t* siginfo) {
 
     char buf[24];  // Big enough for a 64-bit decimal LWP id.
     MinimalFormatter formatter(buf, sizeof(buf));
-    formatter.AppendUint64(static_cast<uint64>(tid), kDecimalRadix);
+    formatter.AppendUint64(static_cast<std::uint64_t>(tid), kDecimalRadix);
     WriteStyledField(theme.Get(Role::kMetaIdentifier), mode, g_failure_writer,
                      buf, formatter.num_bytes_written());
   }
@@ -533,7 +535,8 @@ void DumpSignalInfo(int signal_number, siginfo_t* siginfo) {
 
     char buf[24];  // Big enough for a 64-bit decimal PID.
     MinimalFormatter formatter(buf, sizeof(buf));
-    formatter.AppendUint64(static_cast<uint64>(siginfo->si_pid), kDecimalRadix);
+    formatter.AppendUint64(static_cast<std::uint64_t>(siginfo->si_pid),
+                           kDecimalRadix);
     WriteStyledField(theme.Get(Role::kMetaIdentifier), mode, g_failure_writer,
                      buf, formatter.num_bytes_written());
 
@@ -615,7 +618,8 @@ void DumpStackFrameInfoImpl(const char* prefix, void* pc,
     char addr_buf[32];  // Big enough for a padded, prefixed 64-bit address.
     MinimalFormatter addr_formatter(addr_buf, sizeof(addr_buf));
     const int width = 2 * sizeof(void*) + 2;  // + 2  for "0x".
-    addr_formatter.AppendHexWithPadding(reinterpret_cast<uintptr_t>(pc), width);
+    addr_formatter.AppendHexWithPadding(reinterpret_cast<std::uintptr_t>(pc),
+                                        width);
     WriteStyledField(theme.Get(Role::kStackAddress), mode, g_failure_writer,
                      addr_buf, addr_formatter.num_bytes_written());
   }
@@ -926,14 +930,14 @@ void InstallFailureSignalHandler() {
   }
   g_failure_signal_handler_installed = true;
 #elif defined(NGLOG_OS_WINDOWS)
-  for (size_t i = 0; i < ARRAYSIZE(kFailureSignals); ++i) {
+  for (std::size_t i = 0; i < ARRAYSIZE(kFailureSignals); ++i) {
     CHECK_NE(signal(kFailureSignals[i].number, &FailureSignalHandler), SIG_ERR);
   }
   g_failure_signal_handler_installed = true;
 #endif  // HAVE_SIGACTION
 }
 
-void InstallFailureWriter(void (*writer)(const char* data, size_t size)) {
+void InstallFailureWriter(void (*writer)(const char* data, std::size_t size)) {
 #if defined(HAVE_SIGACTION) || defined(NGLOG_OS_WINDOWS)
   g_failure_writer = writer;
 #endif  // HAVE_SIGACTION

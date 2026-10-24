@@ -62,7 +62,7 @@ SymbolizeOpenObjectFileCallback g_symbolize_open_object_file_callback = nullptr;
 // itself rather than leave it to trip -Wunused-function there.
 #  if !(defined(NGLOG_OS_WINDOWS) && defined(HAVE_ADDR2LINE))
 NGLOG_ATTRIBUTE_NOINLINE
-void DemangleInplace(char* out, size_t out_size) {
+void DemangleInplace(char* out, std::size_t out_size) {
   char demangled[256];  // Big enough for sane demangled symbols.
   if (Demangle(out, demangled, sizeof(demangled))) {
     // Demangling succeeded. Copy to out if the space allows. The scan is
@@ -74,8 +74,8 @@ void DemangleInplace(char* out, size_t out_size) {
     const void* const terminator =
         std::memchr(demangled, '\0', sizeof(demangled));
     NGLOG_SAFE_ASSERT(terminator != nullptr);
-    const size_t len =
-        static_cast<size_t>(static_cast<const char*>(terminator) - demangled);
+    const std::size_t len = static_cast<std::size_t>(
+        static_cast<const char*>(terminator) - demangled);
     if (len + 1 <= out_size) {  // +1 for '\0'.
       memmove(out, demangled, len + 1);
     }
@@ -112,17 +112,17 @@ namespace {
 
 struct SymInfoContext {
   char* out;
-  size_t out_size;
+  std::size_t out_size;
   bool found;
 };
 
-void SymInfoCallback(void* data, uintptr_t /*pc*/, const char* symname,
-                     uintptr_t /*symval*/, uintptr_t /*symsize*/) {
+void SymInfoCallback(void* data, std::uintptr_t /*pc*/, const char* symname,
+                     std::uintptr_t /*symval*/, std::uintptr_t /*symsize*/) {
   auto* ctx = static_cast<SymInfoContext*>(data);
   if (symname == nullptr || ctx->out_size == 0) {
     return;
   }
-  const size_t symbol_length = std::strlen(symname);
+  const std::size_t symbol_length = std::strlen(symname);
   if (symbol_length >= ctx->out_size) {
     return;
   }
@@ -148,7 +148,7 @@ void ErrorCallback(void* /*data*/, const char* /*msg*/, int /*errnum*/) {}
 // OpenObjectFileContainingPcAndGetStartAddress() nor
 // g_symbolize_open_object_file_callback is consulted here.
 NGLOG_ATTRIBUTE_NOINLINE
-static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
+static bool SymbolizeAndDemangle(void* pc, char* out, std::size_t out_size,
                                  SymbolizeOptions options,
                                  SymbolizedFrame* frame) {
   if (out_size < 1) {
@@ -169,12 +169,12 @@ static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
         // The callback writes "<file>:<line> " (see
         // FormatLibbacktraceLocation()). Trim the trailing space so the
         // span covers exactly "<file>:<line>".
-        const auto written = static_cast<size_t>(num_bytes_written);
+        const auto written = static_cast<std::size_t>(num_bytes_written);
         frame->file_line_offset = 0;
         frame->file_line_length = written > 1 ? written - 1 : 0;
       }
-      out += static_cast<size_t>(num_bytes_written);
-      out_size -= static_cast<size_t>(num_bytes_written);
+      out += static_cast<std::size_t>(num_bytes_written);
+      out_size -= static_cast<std::size_t>(num_bytes_written);
     }
   }
 
@@ -184,8 +184,8 @@ static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
   }
 
   SymInfoContext ctx{out, out_size, false};
-  backtrace_syminfo(state, reinterpret_cast<uintptr_t>(pc), &SymInfoCallback,
-                    &ErrorCallback, &ctx);
+  backtrace_syminfo(state, reinterpret_cast<std::uintptr_t>(pc),
+                    &SymInfoCallback, &ErrorCallback, &ctx);
 
   if (!ctx.found) {
     return false;
@@ -1125,7 +1125,8 @@ namespace {
 // and std::snprintf().
 class LineReader {
  public:
-  explicit LineReader(int fd, char* buf, size_t buf_len, size_t offset)
+  explicit LineReader(int fd, char* buf, std::size_t buf_len,
+                      std::size_t offset)
       : fd_(fd),
         buf_(buf),
         buf_len_(buf_len),
@@ -1145,25 +1146,26 @@ class LineReader {
       if (num_bytes <= 0) {  // EOF or error.
         return false;
       }
-      offset_ += static_cast<size_t>(num_bytes);
+      offset_ += static_cast<std::size_t>(num_bytes);
       eod_ = buf_ + num_bytes;
       bol_ = buf_;
     } else {
       bol_ = eol_ + 1;  // Advance to the next line in the buffer.
       NGLOG_SAFE_ASSERT(bol_ <= eod_);  // "bol_" can point to "eod_".
       if (!HasCompleteLine()) {
-        const auto incomplete_line_length = static_cast<size_t>(eod_ - bol_);
+        const auto incomplete_line_length =
+            static_cast<std::size_t>(eod_ - bol_);
         // Move the trailing incomplete line to the beginning.
         memmove(buf_, bol_, incomplete_line_length);
         // Read text from file and append it.
         char* const append_pos = buf_ + incomplete_line_length;
-        const size_t capacity_left = buf_len_ - incomplete_line_length;
+        const std::size_t capacity_left = buf_len_ - incomplete_line_length;
         const ssize_t num_bytes =
             ReadFromOffset(fd_, append_pos, capacity_left, offset_);
         if (num_bytes <= 0) {  // EOF or error.
           return false;
         }
-        offset_ += static_cast<size_t>(num_bytes);
+        offset_ += static_cast<std::size_t>(num_bytes);
         eod_ = append_pos + num_bytes;
         bol_ = buf_;
       }
@@ -1191,7 +1193,7 @@ class LineReader {
 
   char* FindLineFeed() {
     return reinterpret_cast<char*>(
-        memchr(bol_, '\n', static_cast<size_t>(eod_ - bol_)));
+        memchr(bol_, '\n', static_cast<std::size_t>(eod_ - bol_)));
   }
 
   bool BufferIsEmpty() { return buf_ == eod_; }
@@ -1202,8 +1204,8 @@ class LineReader {
 
   const int fd_;
   char* const buf_;
-  const size_t buf_len_;
-  size_t offset_;
+  const std::size_t buf_len_;
+  std::size_t offset_;
   char* bol_;
   char* eol_;
   const char* eod_;  // End of data in "buf_".
@@ -1212,15 +1214,15 @@ class LineReader {
 
 // Place the hex number read from "start" into "*hex".  The pointer to
 // the first non-hex character or "end" is returned.
-static char* GetHex(const char* start, const char* end, uint64_t* hex) {
+static char* GetHex(const char* start, const char* end, std::uint64_t* hex) {
   *hex = 0;
   const char* p;
   for (p = start; p < end; ++p) {
     int ch = *p;
     if ((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'F') ||
         (ch >= 'a' && ch <= 'f')) {
-      *hex = (*hex << 4U) |
-             (ch < 'A' ? static_cast<uint64_t>(ch - '0') : (ch & 0xF) + 9U);
+      *hex = (*hex << 4U) | (ch < 'A' ? static_cast<std::uint64_t>(ch - '0')
+                                      : (ch & 0xF) + 9U);
     } else {  // Encountered the first non-hex character.
       break;
     }
@@ -1239,8 +1241,8 @@ static char* GetHex(const char* start, const char* end, uint64_t* hex) {
 // (including the null-terminator).
 NGLOG_ATTRIBUTE_NOINLINE
 static FileDescriptor OpenObjectFileContainingPcAndGetStartAddress(
-    uint64_t pc, uint64_t& start_address, uint64_t& base_address,
-    char* out_file_name, size_t out_file_name_size) {
+    std::uint64_t pc, std::uint64_t& start_address, std::uint64_t& base_address,
+    char* out_file_name, std::size_t out_file_name_size) {
   FileDescriptor maps_fd{
       FailureRetry([] { return open("/proc/self/maps", O_RDONLY); })};
   if (!maps_fd) {
@@ -1279,7 +1281,7 @@ static FileDescriptor OpenObjectFileContainingPcAndGetStartAddress(
     ++cursor;  // Skip '-'.
 
     // Read end address.
-    uint64_t end_address;
+    std::uint64_t end_address;
     cursor = GetHex(cursor, eol, &end_address);
     if (cursor == eol || *cursor != ' ') {
       return nullptr;  // Malformed line.
@@ -1353,7 +1355,7 @@ static FileDescriptor OpenObjectFileContainingPcAndGetStartAddress(
     ++cursor;  // Skip ' '.
 
     // Read file offset.
-    uint64_t file_offset;
+    std::uint64_t file_offset;
     cursor = GetHex(cursor, eol, &file_offset);
     if (cursor == eol || *cursor != ' ') {
       return nullptr;  // Malformed line.
@@ -1394,10 +1396,10 @@ static FileDescriptor OpenObjectFileContainingPcAndGetStartAddress(
 // "sz" bytes. Output will be truncated as needed, and a NUL character is always
 // appended.
 // NOTE: code from sandbox/linux/seccomp-bpf/demo.cc.
-static char* itoa_r(uintptr_t i, char* buf, size_t sz, unsigned base,
-                    size_t padding) {
+static char* itoa_r(std::uintptr_t i, char* buf, std::size_t sz, unsigned base,
+                    std::size_t padding) {
   // Make sure we can write at least one NUL byte.
-  size_t n = 1;
+  std::size_t n = 1;
   if (n > sz) {
     return nullptr;
   }
@@ -1445,8 +1447,9 @@ static char* itoa_r(uintptr_t i, char* buf, size_t sz, unsigned base,
 
 // Safely appends string |source| to string |dest|.  Never writes past the
 // buffer size |dest_size| and guarantees that |dest| is null-terminated.
-static void SafeAppendString(const char* source, char* dest, size_t dest_size) {
-  size_t dest_string_length = strlen(dest);
+static void SafeAppendString(const char* source, char* dest,
+                             std::size_t dest_size) {
+  std::size_t dest_string_length = strlen(dest);
   NGLOG_SAFE_ASSERT(dest_string_length < dest_size);
   dest += dest_string_length;
   dest_size -= dest_string_length;
@@ -1458,7 +1461,8 @@ static void SafeAppendString(const char* source, char* dest, size_t dest_size) {
 // Converts a 64-bit value into a hex string, and safely appends it to |dest|.
 // Never writes past the buffer size |dest_size| and guarantees that |dest| is
 // null-terminated.
-static void SafeAppendHexNumber(uint64_t value, char* dest, size_t dest_size) {
+static void SafeAppendHexNumber(std::uint64_t value, char* dest,
+                                std::size_t dest_size) {
   // 64-bit numbers in hex can have up to 16 digits.
   char buf[17] = {'\0'};
   SafeAppendString(itoa_r(value, buf, sizeof(buf), 16, 0), dest, dest_size);
@@ -1473,12 +1477,12 @@ static void SafeAppendHexNumber(uint64_t value, char* dest, size_t dest_size) {
 // To keep stack consumption low, we would like this function to not
 // get inlined.
 NGLOG_ATTRIBUTE_NOINLINE
-static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
+static bool SymbolizeAndDemangle(void* pc, char* out, std::size_t out_size,
                                  SymbolizeOptions options,
                                  SymbolizedFrame* frame) {
-  auto pc0 = reinterpret_cast<uintptr_t>(pc);
-  uint64_t start_address = 0;
-  uint64_t base_address = 0;
+  auto pc0 = reinterpret_cast<std::uintptr_t>(pc);
+  std::uint64_t start_address = 0;
+  std::uint64_t base_address = 0;
   FileDescriptor object_fd;
 
   constexpr std::size_t kMinimumOutputSize = 2;
@@ -1531,7 +1535,7 @@ static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
     // GetSymbolFromObjectFile() below uses to resolve "pc" against the
     // object's own symbol table, so it is what correctly maps "pc" back to
     // a file-relative address for PIE executables and shared libraries.
-    uint64_t relocation = (elf_type == ET_DYN) ? base_address : 0;
+    std::uint64_t relocation = (elf_type == ET_DYN) ? base_address : 0;
     int num_bytes_written =
         g_symbolize_callback(object_fd.get(), pc, out, out_size, relocation);
     if (num_bytes_written > 0) {
@@ -1540,12 +1544,12 @@ static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
         // " (see FormatAddr2LineOutput()), discarding the "(" appended
         // above. Trim the trailing space so the span covers exactly
         // "<file>:<line>".
-        const auto written = static_cast<size_t>(num_bytes_written);
+        const auto written = static_cast<std::size_t>(num_bytes_written);
         frame->file_line_offset = 0;
         frame->file_line_length = written > 1 ? written - 1 : 0;
       }
-      out += static_cast<size_t>(num_bytes_written);
-      out_size -= static_cast<size_t>(num_bytes_written);
+      out += static_cast<std::size_t>(num_bytes_written);
+      out_size -= static_cast<std::size_t>(num_bytes_written);
     }
   }
   const SymbolLookupResult symbol_result = GetSymbolFromObjectFile(
@@ -1586,7 +1590,7 @@ namespace nglog {
 inline namespace tools {
 
 NGLOG_ATTRIBUTE_NOINLINE
-static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
+static bool SymbolizeAndDemangle(void* pc, char* out, std::size_t out_size,
                                  SymbolizeOptions /*options*/,
                                  SymbolizedFrame* /*frame*/) {
   Dl_info info;
@@ -1631,7 +1635,7 @@ namespace nglog {
 inline namespace tools {
 
 NGLOG_ATTRIBUTE_NOINLINE
-static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
+static bool SymbolizeAndDemangle(void* pc, char* out, std::size_t out_size,
                                  SymbolizeOptions options,
                                  SymbolizedFrame* frame) {
   HMODULE module = nullptr;
@@ -1649,12 +1653,12 @@ static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
   // address is where the loaded image's own PE header sits in memory,
   // making its declared ImageBase readable directly from the running
   // process without any extra API calls.
-  const auto runtime_base = reinterpret_cast<uintptr_t>(module);
+  const auto runtime_base = reinterpret_cast<std::uintptr_t>(module);
   const auto* dos_header = reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
   const auto* nt_headers = reinterpret_cast<const IMAGE_NT_HEADERS*>(
       reinterpret_cast<const std::uint8_t*>(module) + dos_header->e_lfanew);
   const auto image_base =
-      static_cast<uintptr_t>(nt_headers->OptionalHeader.ImageBase);
+      static_cast<std::uintptr_t>(nt_headers->OptionalHeader.ImageBase);
   const auto relocation = runtime_base - image_base;
 
   constexpr std::size_t kBufferGrowthFactor = 2;
@@ -1758,7 +1762,7 @@ class SymInitializer final {
 }  // namespace
 
 NGLOG_ATTRIBUTE_NOINLINE
-static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
+static bool SymbolizeAndDemangle(void* pc, char* out, std::size_t out_size,
                                  SymbolizeOptions options,
                                  SymbolizedFrame* frame) {
   const static SymInitializer symInitializer;
@@ -1775,7 +1779,7 @@ static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
   // This could break if a symbol has Unicode in it.
   BOOL ret = SymFromAddr(symInitializer.process, reinterpret_cast<DWORD64>(pc),
                          0, symbol);
-  std::size_t namelen = static_cast<size_t>(symbol->NameLen);
+  std::size_t namelen = static_cast<std::size_t>(symbol->NameLen);
   if (ret && namelen < out_size) {
     std::strncpy(out, symbol->Name, namelen);
     out[namelen] = '\0';
@@ -1840,8 +1844,8 @@ static bool SymbolizeAndDemangle(void* pc, char* out, size_t out_size,
 namespace nglog {
 inline namespace tools {
 
-bool Symbolize(void* pc, char* out, size_t out_size, SymbolizeOptions options,
-               SymbolizedFrame* frame) {
+bool Symbolize(void* pc, char* out, std::size_t out_size,
+               SymbolizeOptions options, SymbolizedFrame* frame) {
   if (frame != nullptr) {
     *frame = SymbolizedFrame{};
   }
