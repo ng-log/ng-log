@@ -812,6 +812,10 @@ target_sources (ng-log PUBLIC
   FILES ${NGLOG_PUBLIC_H}
 )
 
+# The experimental headers require C++20, unlike the remainder of the public
+# headers. The verification of the header set therefore skips them.
+set_property (SOURCE ${NGLOG_EXPERIMENTAL_PUBLIC_H} PROPERTY SKIP_LINTING ON)
+
 # The private header sets provide the include directories of the library
 # sources, which the targets compiled like the library sources share.
 target_sources (ng-log_internal PRIVATE
@@ -1148,6 +1152,16 @@ logging libraries\"\n#endif\n")
     src/ng-log/log_severity.h
     src/ng-log/log_sink.h
   )
+
+  # Verifies that each public header compiles without other includes. The
+  # verification is excluded from the default build otherwise. Include what
+  # you use rejects the include directives of the generated sources.
+  if (NOT CMAKE_CXX_INCLUDE_WHAT_YOU_USE)
+    set_property (TARGET ng-log PROPERTY VERIFY_INTERFACE_HEADER_SETS ON)
+    add_custom_target (ng-log_verify_headers ALL)
+    add_dependencies (ng-log_verify_headers
+      ng-log_verify_interface_header_sets)
+  endif (NOT CMAKE_CXX_INCLUDE_WHAT_YOU_USE)
 
   add_executable (email_test_helper
     src/email_test_helper.cc
