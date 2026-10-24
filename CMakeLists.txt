@@ -585,6 +585,7 @@ if (HAVE_EXPERIMENTAL_LOGGING)
     src/ng-log/experimental/log_call.h
     src/ng-log/experimental/logging.h
     src/ng-log/experimental/requirements.h
+    src/ng-log/experimental/setup.h
     src/ng-log/experimental/signal_safe_log.h
     src/ng-log/experimental/sink.h
   )
@@ -698,6 +699,7 @@ if (HAVE_EXPERIMENTAL_LOGGING)
     src/experimental/context.h
     src/experimental/ensure.cc
     src/experimental/log.cc
+    src/experimental/setup.cc
     src/experimental/signal_safe_log.cc
     src/experimental/site.cc
   )
@@ -1282,6 +1284,27 @@ logging libraries\"\n#endif\n")
         DISCOVERY_TIMEOUT 30
       )
     endforeach (_ng-log_TEST)
+
+    add_executable (experimental_setup_unittest
+      src/experimental/setup_module_test_helper.cc
+      src/experimental/setup_module_test_helper.h
+      src/experimental/setup_unittest.cc
+      src/experimental/testing.cc
+      src/experimental/testing.h
+    )
+
+    target_compile_features (experimental_setup_unittest PRIVATE cxx_std_20)
+    target_link_libraries (experimental_setup_unittest PRIVATE
+      $<TARGET_OBJECTS:ng-log_experimental_objects> ng-log_test)
+    add_dependencies (experimental_setup_unittest email_test_helper)
+    target_compile_definitions (experimental_setup_unittest PRIVATE
+      EMAIL_TEST_HELPER_PATH="$<TARGET_FILE:email_test_helper>"
+    )
+
+    gtest_discover_tests (experimental_setup_unittest
+      TEST_PREFIX experimental_setup.
+      DISCOVERY_TIMEOUT 30
+    )
 
     # C++26 rejects comparing arrays, which the comparisons of That() must
     # therefore avoid, and provides extended floating-point types, which

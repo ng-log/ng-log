@@ -255,8 +255,6 @@ void SetThreadName(const char* name) {
 
 namespace nglog {
 
-using DebugWriter = void(const char*, void*);
-
 // The %p field width for printf() functions is two characters per byte.
 // For some environments, add two extra bytes for the leading "0x".
 static const int kPrintfPointerFieldWidth = 2 + 2 * sizeof(void*);
@@ -274,7 +272,7 @@ static void DebugWriteToStderr(const char* data, void*) {
                  std::strlen(data));
 }
 
-static void DebugWriteToString(const char* data, void* arg) {
+void DebugWriteToString(const char* data, void* arg) {
   reinterpret_cast<std::string*>(arg)->append(data);
 }
 
@@ -354,7 +352,7 @@ static void DumpStackFrames(void* const* stack, int depth, bool truncated,
 }
 
 // Dump current stack trace as directed by writerfn
-static void DumpStackTrace(int skip_count, DebugWriter* writerfn, void* arg) {
+void DumpStackTrace(int skip_count, DebugWriter* writerfn, void* arg) {
   // Print stack trace. One frame more than is printed is captured, so that a
   // trace cut off at the limit says so instead of looking complete.
   void* stack[kMaxStackDumpFrames + 1];

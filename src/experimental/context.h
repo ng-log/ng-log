@@ -238,6 +238,16 @@ class ErrnoRestorer {
   const ContextImpl* context_;
 };
 
+// Context of the message sent on this thread, or null while the thread sends
+// no message of the experimental logging functions.
+const ContextImpl* SendingContext() noexcept;
+
+// Sends a message of a context to structured sinks together with the fields of
+// its attributes.
+void SendRecord(const ContextImpl& context, std::span<Sink* const> sinks,
+                LogSeverity severity, const LogMessageTime& time,
+                std::string_view text);
+
 inline ContextImpl& Impl(Context& context) noexcept {
   return static_cast<ContextImpl&>(context);
 }

@@ -21,10 +21,12 @@
 // - ng-log/experimental/signal_safe_log.h: the SignalSafe destination
 // - ng-log/experimental/ensure.h: Ensure(), the comparisons and NotNull()
 // - ng-log/experimental/sink.h: Sink and the Record it receives
+// - ng-log/experimental/setup.h: the setup functions, such as Initialize() and
+//   SetLogFile()
 //
-// It also includes the headers of the setup functions and of LogSink. None of
-// these headers defines unprefixed macros such as LOG or CHECK, so they can be
-// combined with libraries that define the same names.
+// It also includes the headers of the setup functions of the logging macros and
+// of LogSink. None of these headers defines unprefixed macros such as LOG or
+// CHECK, so they can be combined with libraries that define the same names.
 //
 // For example:
 //
@@ -43,6 +45,7 @@
 #include "ng-log/experimental/format.h"           // IWYU pragma: export
 #include "ng-log/experimental/log.h"              // IWYU pragma: export
 #include "ng-log/experimental/log_call.h"         // IWYU pragma: export
+#include "ng-log/experimental/setup.h"            // IWYU pragma: export
 #include "ng-log/experimental/signal_safe_log.h"  // IWYU pragma: export
 #include "ng-log/experimental/sink.h"             // IWYU pragma: export
 #include "ng-log/log_setup.h"                     // IWYU pragma: export
