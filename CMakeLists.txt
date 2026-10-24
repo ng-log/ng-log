@@ -562,28 +562,6 @@ foreach (_ng-log_FIND_MODULE IN LISTS _ng-log_FIND_MODULES)
     ${ng-log_BINARY_DIR}/modules/${_ng-log_FIND_MODULE} COPYONLY)
 endforeach (_ng-log_FIND_MODULE)
 
-set (NGLOG_PUBLIC_H
-  ${ng-log_BINARY_DIR}/ng-log/export.h
-  src/ng-log/flags.h
-  src/ng-log/internal/color.h
-  src/ng-log/internal/color_spec.h
-  src/ng-log/internal/hyperlink.h
-  src/ng-log/internal/style_markers.h
-  src/ng-log/internal/styled_value.h
-  src/ng-log/internal/text_attributes.h
-  src/ng-log/internal/text_style.h
-  src/ng-log/internal/utf8_encoder.h
-  src/ng-log/log_message.h
-  src/ng-log/log_setup.h
-  src/ng-log/log_severity.h
-  src/ng-log/log_sink.h
-  src/ng-log/logging.h
-  src/ng-log/platform.h
-  src/ng-log/raw_logging.h
-  src/ng-log/stl_logging.h
-  src/ng-log/vlog_is_on.h
-)
-
 # Unless WITH_EXPERIMENTAL is disabled, the experimental logging functions are
 # built whenever the compiler supports them.
 if (WITH_EXPERIMENTAL)
@@ -594,92 +572,45 @@ else (WITH_EXPERIMENTAL)
   set (HAVE_EXPERIMENTAL_LOGGING OFF)
 endif (WITH_EXPERIMENTAL)
 
-if (HAVE_EXPERIMENTAL_LOGGING)
-  set (NGLOG_EXPERIMENTAL_PUBLIC_H
-    src/ng-log/experimental/attributes.h
-    src/ng-log/experimental/ensure.h
-    src/ng-log/experimental/format.h
-    src/ng-log/experimental/log.h
-    src/ng-log/experimental/log_call.h
-    src/ng-log/experimental/logging.h
-    src/ng-log/experimental/requirements.h
-    src/ng-log/experimental/signal_safe_log.h
-    src/ng-log/experimental/sink.h
-  )
-  list (APPEND NGLOG_PUBLIC_H ${NGLOG_EXPERIMENTAL_PUBLIC_H})
-endif (HAVE_EXPERIMENTAL_LOGGING)
-
-set (NGLOG_SRCS
-  ${NGLOG_PUBLIC_H}
+add_library (ng-log_internal OBJECT
   src/addr2line.cc
-  src/addr2line.h
   src/demangle.cc
-  src/demangle.h
   src/flags.cc
-  src/initializer.h
-  src/internal/attributes.h
-  src/internal/checked_arithmetic.h
   src/internal/color_format.cc
   src/internal/emscripten_console.cc
-  src/internal/emscripten_console.h
-  src/internal/flag_display.h
   src/internal/flag_registry.cc
   src/internal/hyperlink.cc
   src/internal/levenshtein.cc
   src/internal/lock_metrics.cc
-  src/internal/lock_metrics.h
   src/internal/log_cleaner.cc
-  src/internal/log_cleaner.h
-  src/internal/log_message_access.h
   src/internal/path.cc
-  src/internal/path.h
   src/internal/process_flag_registry.cc
-  src/internal/process_flag_registry.h
-  src/internal/raw_log.h
   src/internal/source_location.cc
-  src/internal/source_location.h
   src/internal/style_recorder.cc
-  src/internal/style_recorder.h
   src/internal/styled_output.cc
-  src/internal/styled_output.h
   src/internal/terminal_capabilities.cc
-  src/internal/terminal_capabilities.h
   src/internal/theme.cc
-  src/internal/theme.h
   src/internal/utf8.cc
-  src/internal/utf8.h
   src/libbacktrace.cc
-  src/libbacktrace.h
   src/logging.cc
   src/raw_logging.cc
   src/signalhandler.cc
-  src/stacktrace.h
   src/subprocess.cc
   src/subprocess_fork.cc
-  src/subprocess_fork.h
-  src/subprocess.h
   src/symbolize.cc
-  src/symbolize.h
   src/utilities.cc
-  src/utilities.h
   src/vlog_is_on.cc
 )
 
 if (_ng-log_STACKTRACE_SOURCE)
-  list (APPEND NGLOG_SRCS ${_ng-log_STACKTRACE_SOURCE})
+  target_sources (ng-log_internal PRIVATE ${_ng-log_STACKTRACE_SOURCE})
 endif (_ng-log_STACKTRACE_SOURCE)
 
 # NOTE MSYS2 defines both WIN32 and UNIX. Do not use windows port in this case.
 if ((CYGWIN OR WIN32) AND NOT UNIX)
-  list (APPEND NGLOG_SRCS
-    src/windows/port.cc
-    src/windows/port.h
-  )
+  target_sources (ng-log_internal PRIVATE src/windows/port.cc)
 endif ((CYGWIN OR WIN32) AND NOT UNIX)
 
-add_library (ng-log_internal OBJECT
-  ${NGLOG_SRCS}
-)
 target_compile_features (ng-log_internal PUBLIC $<TARGET_PROPERTY:ng-log,COMPILE_FEATURES>)
 
 # GCC emits GNU unique symbols for some standard library templates, and glibc
@@ -710,13 +641,20 @@ add_library (ng-log::ng-log ALIAS ng-log)
 if (HAVE_EXPERIMENTAL_LOGGING)
   add_library (ng-log_experimental_objects OBJECT
     src/experimental/async.cc
-    src/experimental/async.h
     src/experimental/attributes.cc
-    src/experimental/context.h
     src/experimental/ensure.cc
     src/experimental/log.cc
     src/experimental/signal_safe_log.cc
     src/experimental/site.cc
+  )
+
+  target_sources (ng-log_experimental_objects PRIVATE
+    FILE_SET private_headers
+    TYPE HEADERS
+    BASE_DIRS ${ng-log_SOURCE_DIR}/src
+    FILES
+      src/experimental/async.h
+      src/experimental/context.h
   )
 
   target_compile_features (ng-log_experimental_objects PRIVATE cxx_std_20)
@@ -803,27 +741,100 @@ endif (CYGWIN OR WIN32)
 target_sources (ng-log PUBLIC
   FILE_SET HEADERS
   BASE_DIRS ${ng-log_BINARY_DIR} ${ng-log_SOURCE_DIR}/src
-  FILES ${NGLOG_PUBLIC_H}
+  FILES
+    ${ng-log_BINARY_DIR}/ng-log/export.h
+    src/ng-log/flags.h
+    src/ng-log/internal/color.h
+    src/ng-log/internal/color_spec.h
+    src/ng-log/internal/hyperlink.h
+    src/ng-log/internal/style_markers.h
+    src/ng-log/internal/styled_value.h
+    src/ng-log/internal/text_attributes.h
+    src/ng-log/internal/text_style.h
+    src/ng-log/internal/utf8_encoder.h
+    src/ng-log/log_message.h
+    src/ng-log/log_setup.h
+    src/ng-log/log_severity.h
+    src/ng-log/log_sink.h
+    src/ng-log/logging.h
+    src/ng-log/platform.h
+    src/ng-log/raw_logging.h
+    src/ng-log/stl_logging.h
+    src/ng-log/vlog_is_on.h
 )
 
-target_include_directories (ng-log BEFORE PUBLIC
-  "$<BUILD_INTERFACE:${ng-log_BINARY_DIR}>"
-  "$<BUILD_INTERFACE:${ng-log_SOURCE_DIR}/src>"
-  PRIVATE ${ng-log_BINARY_DIR}
-  PRIVATE ${ng-log_SOURCE_DIR}/src)
+# The experimental headers require C++20, unlike the remainder of the public
+# headers. They form a header set of their own.
+set (_ng-log_EXPERIMENTAL_HEADERS_INSTALL)
 
+if (HAVE_EXPERIMENTAL_LOGGING)
+  target_sources (ng-log PUBLIC
+    FILE_SET experimental_headers
+    TYPE HEADERS
+    BASE_DIRS ${ng-log_SOURCE_DIR}/src
+    FILES
+      src/ng-log/experimental/attributes.h
+      src/ng-log/experimental/ensure.h
+      src/ng-log/experimental/format.h
+      src/ng-log/experimental/log.h
+      src/ng-log/experimental/log_call.h
+      src/ng-log/experimental/logging.h
+      src/ng-log/experimental/requirements.h
+      src/ng-log/experimental/signal_safe_log.h
+      src/ng-log/experimental/sink.h
+  )
+
+  set (_ng-log_EXPERIMENTAL_HEADERS_INSTALL
+    FILE_SET experimental_headers COMPONENT Development)
+endif (HAVE_EXPERIMENTAL_LOGGING)
+
+# The private header sets provide the include directories of the library
+# sources, which the targets compiled like the library sources share.
+target_sources (ng-log_internal PRIVATE
+  FILE_SET private_headers
+  TYPE HEADERS
+  BASE_DIRS ${ng-log_BINARY_DIR} ${ng-log_SOURCE_DIR}/src
+  FILES
+    ${ng-log_BINARY_DIR}/config.h
+    src/addr2line.h
+    src/demangle.h
+    src/initializer.h
+    src/internal/attributes.h
+    src/internal/checked_arithmetic.h
+    src/internal/emscripten_console.h
+    src/internal/flag_display.h
+    src/internal/lock_metrics.h
+    src/internal/log_cleaner.h
+    src/internal/log_message_access.h
+    src/internal/path.h
+    src/internal/process_flag_registry.h
+    src/internal/raw_log.h
+    src/internal/source_location.h
+    src/internal/style_recorder.h
+    src/internal/styled_output.h
+    src/internal/terminal_capabilities.h
+    src/internal/theme.h
+    src/internal/utf8.h
+    src/libbacktrace.h
+    src/stacktrace.h
+    src/subprocess_fork.h
+    src/subprocess.h
+    src/symbolize.h
+    src/utilities.h
+)
+
+# The port header is included without its directory. The directory is nested
+# in a base directory of the other private header set and therefore requires
+# a set of its own.
 if (CYGWIN OR WIN32)
-  target_include_directories (ng-log_internal PUBLIC
-    "$<BUILD_INTERFACE:${ng-log_SOURCE_DIR}/src/windows>"
-    PRIVATE ${ng-log_SOURCE_DIR}/src/windows)
-
-  target_include_directories (ng-log PUBLIC
-    "$<BUILD_INTERFACE:${ng-log_SOURCE_DIR}/src/windows>"
-    PRIVATE ${ng-log_SOURCE_DIR}/src/windows)
+  target_sources (ng-log_internal PRIVATE
+    FILE_SET windows_headers
+    TYPE HEADERS
+    BASE_DIRS ${ng-log_SOURCE_DIR}/src/windows
+    FILES src/windows/port.h
+  )
 endif (CYGWIN OR WIN32)
 
-target_include_directories (ng-log_internal PUBLIC
-  $<TARGET_PROPERTY:ng-log,INCLUDE_DIRECTORIES>)
 target_compile_definitions (ng-log_internal PUBLIC
   $<TARGET_PROPERTY:ng-log,COMPILE_DEFINITIONS>
   PRIVATE ng_log_EXPORTS)
@@ -928,7 +939,7 @@ if (WITH_FUZZING AND NOT WITH_FUZZING STREQUAL none)
   # affecting the library.
   add_executable (fuzz_demangle
     src/fuzz_demangle.cc
-    ${NGLOG_SRCS}
+    $<TARGET_PROPERTY:ng-log_internal,SOURCES>
   )
 
   target_compile_definitions (fuzz_demangle PRIVATE NGLOG_STATIC_DEFINE
@@ -936,7 +947,7 @@ if (WITH_FUZZING AND NOT WITH_FUZZING STREQUAL none)
   target_compile_features (fuzz_demangle PRIVATE
     $<TARGET_PROPERTY:ng-log,COMPILE_FEATURES>)
   target_include_directories (fuzz_demangle PRIVATE
-    $<TARGET_PROPERTY:ng-log,INCLUDE_DIRECTORIES>)
+    $<TARGET_PROPERTY:ng-log_internal,INCLUDE_DIRECTORIES>)
   target_link_libraries (fuzz_demangle PRIVATE
     $<TARGET_PROPERTY:ng-log,LINK_LIBRARIES>)
 
@@ -1064,7 +1075,7 @@ if (PROJECT_IS_TOP_LEVEL AND BUILD_TESTING AND GTest_FOUND)
   target_compile_features (ng-log_testing_utilities PRIVATE
     $<TARGET_PROPERTY:ng-log,COMPILE_FEATURES>)
   target_include_directories (ng-log_testing_utilities PRIVATE
-    $<TARGET_PROPERTY:ng-log,INCLUDE_DIRECTORIES>)
+    $<TARGET_PROPERTY:ng-log_internal,INCLUDE_DIRECTORIES>)
   target_link_libraries (ng-log_testing_utilities PRIVATE GTest::gtest
     GTest::gmock)
 
@@ -1079,14 +1090,21 @@ if (PROJECT_IS_TOP_LEVEL AND BUILD_TESTING AND GTest_FOUND)
   endif (WITH_LOCK_METRICS)
   target_compile_features (ng-log_test INTERFACE
     $<TARGET_PROPERTY:ng-log,COMPILE_FEATURES>)
-  target_include_directories (ng-log_test INTERFACE $<TARGET_PROPERTY:ng-log,INCLUDE_DIRECTORIES>)
+  target_include_directories (ng-log_test INTERFACE $<TARGET_PROPERTY:ng-log_internal,INCLUDE_DIRECTORIES>)
 
   # Collects the unprefixed macros of the public headers. Lines are not read
   # individually, since a list element that ends with the backslash of a
   # continuation line escapes the list separator.
   set (NGLOG_UNPREFIXED_MACROS)
+  get_target_property (_ng-log_PUBLIC_HEADERS ng-log HEADER_SET)
 
-  foreach (_ng-log_HEADER IN LISTS NGLOG_PUBLIC_H)
+  if (HAVE_EXPERIMENTAL_LOGGING)
+    get_target_property (_ng-log_EXPERIMENTAL_HEADERS ng-log
+      HEADER_SET_experimental_headers)
+    list (APPEND _ng-log_PUBLIC_HEADERS ${_ng-log_EXPERIMENTAL_HEADERS})
+  endif (HAVE_EXPERIMENTAL_LOGGING)
+
+  foreach (_ng-log_HEADER IN LISTS _ng-log_PUBLIC_HEADERS)
     file (READ ${_ng-log_HEADER} _ng-log_CONTENT)
     string (REGEX MATCHALL "\n#[ \t]*define[ \t]+[A-Za-z0-9_]+"
       _ng-log_DEFINES "${_ng-log_CONTENT}")
@@ -1103,7 +1121,7 @@ if (PROJECT_IS_TOP_LEVEL AND BUILD_TESTING AND GTest_FOUND)
   list (REMOVE_DUPLICATES NGLOG_UNPREFIXED_MACROS)
   # Rescans the headers once they change.
   set_property (DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    ${NGLOG_PUBLIC_H})
+    ${_ng-log_PUBLIC_HEADERS})
 
   # Verifies that each header compiles without other includes and leaves the
   # unprefixed macros undefined. Such headers can be combined with libraries
@@ -1112,8 +1130,9 @@ if (PROJECT_IS_TOP_LEVEL AND BUILD_TESTING AND GTest_FOUND)
     set (_SOURCES)
 
     foreach (_HEADER IN LISTS ARGN)
-      file (RELATIVE_PATH _INCLUDE ${ng-log_SOURCE_DIR}/src
-        ${ng-log_SOURCE_DIR}/${_HEADER})
+      cmake_path (ABSOLUTE_PATH _HEADER BASE_DIRECTORY ${ng-log_SOURCE_DIR})
+      cmake_path (RELATIVE_PATH _HEADER BASE_DIRECTORY ${ng-log_SOURCE_DIR}/src
+        OUTPUT_VARIABLE _INCLUDE)
       string (MAKE_C_IDENTIFIER ${_INCLUDE} _NAME)
       set (_SOURCE ${ng-log_BINARY_DIR}/${_TARGET}/${_NAME}.cc)
       set (_CHECKS)
@@ -1227,7 +1246,7 @@ logging libraries\"\n#endif\n")
       target_compile_features (${_ng-log_library_copy_target} PRIVATE
         $<TARGET_PROPERTY:ng-log,COMPILE_FEATURES>)
       target_include_directories (${_ng-log_library_copy_target} PRIVATE
-        $<TARGET_PROPERTY:ng-log,INCLUDE_DIRECTORIES>)
+        $<TARGET_PROPERTY:ng-log_internal,INCLUDE_DIRECTORIES>)
       target_link_libraries (${_ng-log_library_copy_target} PRIVATE
         $<TARGET_PROPERTY:ng-log,LINK_LIBRARIES>)
     endforeach (_ng-log_library_copy)
@@ -1314,7 +1333,7 @@ logging libraries\"\n#endif\n")
 
   if (HAVE_EXPERIMENTAL_LOGGING)
     nglog_add_header_test (experimental_headers_unittest
-      ${NGLOG_EXPERIMENTAL_PUBLIC_H})
+      ${_ng-log_EXPERIMENTAL_HEADERS})
     target_compile_features (experimental_headers_unittest PRIVATE
       cxx_std_20)
 
@@ -2276,6 +2295,7 @@ install (TARGETS ng-log
   LIBRARY COMPONENT Runtime NAMELINK_COMPONENT Development
   ARCHIVE COMPONENT Development
   FILE_SET HEADERS COMPONENT Development
+  ${_ng-log_EXPERIMENTAL_HEADERS_INSTALL}
 )
 
 if (WITH_PKGCONFIG)
