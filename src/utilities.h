@@ -266,6 +266,16 @@ using FilePtr = std::unique_ptr<std::FILE, FileCloser>;
 
 }  // namespace tools
 
+#ifdef HAVE_STACKTRACE
+using DebugWriter = void(const char*, void*);
+
+// Appends the text to the std::string that arg points to.
+void DebugWriteToString(const char* data, void* arg);
+
+// Writes the stack trace of the caller after skipping skip_count more frames.
+void DumpStackTrace(int skip_count, DebugWriter* writerfn, void* arg);
+#endif
+
 void DumpStackFrameInfo(const char* prefix, void* pc);
 // Writes kStackDumpCutOffMarker to the same sink as DumpStackFrameInfo().
 void DumpStackCutOffMarker();

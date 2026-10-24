@@ -38,17 +38,23 @@ namespace {
 // placeholder reads.
 thread_local const ContextImpl* formatting_context = nullptr;
 
-// Exposes the context of a message while formatting it. Restores the previous
-// one, so that formatters may log themselves.
-class FormattingScope {
+// Context of the message sent on this thread, which the sinks AddSink()
+// registers read.
+thread_local const ContextImpl* sending_context = nullptr;
+
+// Exposes the context of a message through a variable while in scope. Restores
+// the previous one, so that formatters may log themselves.
+class ContextScope {
  public:
-  explicit FormattingScope(const ContextImpl& context) noexcept
-      : previous_{std::exchange(formatting_context, &context)} {}
-  FormattingScope(const FormattingScope& other) = delete;
-  FormattingScope& operator=(const FormattingScope& other) = delete;
-  ~FormattingScope() { formatting_context = previous_; }
+  ContextScope(const ContextImpl*& variable,
+               const ContextImpl& context) noexcept
+      : variable_{&variable}, previous_{std::exchange(variable, &context)} {}
+  ContextScope(const ContextScope& other) = delete;
+  ContextScope& operator=(const ContextScope& other) = delete;
+  ~ContextScope() { *variable_ = previous_; }
 
  private:
+  const ContextImpl** variable_;
   const ContextImpl* previous_;
 };
 
@@ -91,18 +97,8 @@ class StructuredSinks final : public LogSink {
             const char* /*base_filename*/, int /*line*/,
             const LogMessageTime& time, const char* message,
             std::size_t message_len) override {
-    const std::vector<Field> fields = context_->FieldViews();
-    const Record record{severity,
-                        context_->location(),
-                        time.when(),
-                        time.gmtoffset(),
-                        nglog::GetFlag(FLAGS_log_utc_time),
-                        context_->tag(),
-                        std::string_view{message, message_len},
-                        fields};
-    for (Sink* const sink : context_->structured_sinks()) {
-      sink->Send(record);
-    }
+    SendRecord(*context_, context_->structured_sinks(), severity, time,
+               std::string_view{message, message_len});
   }
 
  private:
@@ -114,7 +110,8 @@ class StructuredSinks final : public LogSink {
 class Output {
  public:
   explicit Output(const ContextImpl& context)
-      : structured_sinks_{context},
+      : context_{&context},
+        structured_sinks_{context},
         sinks_{Sinks(context, structured_sinks_)},
         fan_out_{sinks_},
         strings_{context.strings()},
@@ -165,10 +162,13 @@ class Output {
   // failure function throws instead, the exception propagates from here.
   void Send() {
     LogMessage* const message = std::exchange(message_, nullptr);
-    if (fatal_) {
-      static_cast<LogMessageFatal*>(message)->~LogMessageFatal();
-    } else {
-      message->~LogMessage();
+    {
+      const ContextScope sending{sending_context, *context_};
+      if (fatal_) {
+        static_cast<LogMessageFatal*>(message)->~LogMessageFatal();
+      } else {
+        message->~LogMessage();
+      }
     }
     // The message stores its text in the first string or vector only.
     if (!strings_.empty()) {
@@ -213,6 +213,7 @@ class Output {
     return targets.empty() ? nullptr : targets.front();
   }
 
+  const ContextImpl* context_;
   StructuredSinks structured_sinks_;
   std::vector<LogSink*> sinks_;
   FanOutSink fan_out_;
@@ -232,6 +233,25 @@ static_assert(
     "the storage for a LogMessage must also be aligned for a LogMessageFatal");
 
 }  // namespace
+
+const ContextImpl* SendingContext() noexcept { return sending_context; }
+
+void SendRecord(const ContextImpl& context, std::span<Sink* const> sinks,
+                LogSeverity severity, const LogMessageTime& time,
+                std::string_view text) {
+  const std::vector<Field> fields = context.FieldViews();
+  const Record record{severity,
+                      context.location(),
+                      time.when(),
+                      time.gmtoffset(),
+                      nglog::GetFlag(FLAGS_log_utc_time),
+                      context.tag(),
+                      text,
+                      fields};
+  for (Sink* const sink : sinks) {
+    sink->Send(record);
+  }
+}
 
 bool IsAdmitted(std::span<const ErasedAttribute> attributes,
                 const CallerConfiguration& configuration,
@@ -307,7 +327,7 @@ void Compose(std::span<const ErasedAttribute> attributes, ContextImpl& context,
     RunHooks(attributes, &Hooks::prefix, message);
 
     {
-      const FormattingScope scope{context};
+      const ContextScope scope{formatting_context, context};
       compose(output.get());
     }
 

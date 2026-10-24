@@ -51,6 +51,7 @@ namespace ngx = nglog::experimental;
 | `ng-log/experimental/signal_safe_log.h` | The [`SignalSafe`](#signal-safe-logging) destination of `Log` and `Ensure` |
 | `ng-log/experimental/ensure.h` | `Ensure`, [comparisons](#comparisons), `That`, `NGLOG_COMPARE` and `NotNull` |
 | `ng-log/experimental/sink.h` | [Structured sinks](#structured-sinks) |
+| `ng-log/experimental/setup.h` | The [setup functions](#setup) |
 
 `log.h`, `signal_safe_log.h` and `ensure.h` include `log_call.h`,
 `attributes.h` and `format.h`. `Log` and `Ensure` write to the regular
@@ -537,6 +538,103 @@ if (ngx::IsEnabled(kStatistics)) {
 }
 ```
 
+## Setup
+
+`ng-log/experimental/setup.h` initializes, configures and shuts down logging.
+Strings are passed as
+[`std::string_view`](https://en.cppreference.com/w/cpp/string/basic_string_view)
+and files as
+[`std::filesystem::path`](https://en.cppreference.com/w/cpp/filesystem/path),
+so neither needs to be null-terminated. A file name or email address that
+contains a null character terminates the program like a failed check, since
+the system would silently cut it off.
+
+```cpp title="Setting up logging"
+#include <ng-log/experimental/setup.h>
+
+int main(int argc, char** argv) {
+  ngx::Initialize(argv[0]);
+  ngx::SetVerbosity(1);
+  ngx::SetVerbosity("network*", 3);
+  ngx::SetStderrThreshold(ngx::Warning);
+  ngx::SetLogFile(ngx::Info, "/var/log/app/app.");
+  // ...
+  ngx::Shutdown();
+}
+```
+
+`Initialize(program_name)`, `IsInitialized()`, `Shutdown()`
+
+:   Initialize and shut down logging. The program name is copied, so the
+    argument need not outlive the call.
+
+`SetVerbosity(level)`, `SetVerbosity(module_pattern, level)`
+
+:   Set the level up to which [`Verbose`](#verbosity) messages are logged,
+    like `--v` and `--vmodule`. The second form returns the level that
+    applied to the pattern before.
+
+`SetStderrThreshold(severity)`, `LogOnlyToStderr()`
+
+:   Log messages of at least the severity to the standard error as well, or
+    every message to the standard error only.
+
+`SetLogFile(severity, base_filename)`, `DisableLogFile(severity)`
+
+:   Write the messages of a severity to log files whose names start with the
+    base file name, or stop writing them. The base file name must not be
+    empty.
+
+`SetLogFileLink(severity, link_name)`, `DisableLogFileLink(severity)`
+
+:   Name the link to the latest log file of a severity, or stop creating it.
+    The link name must be a file name without directories.
+
+`SetLogFileSuffix(suffix)`
+
+:   Appends a suffix to the names of all log files.
+
+`SetEmailThreshold(severity, addresses)`
+
+:   Sends messages of at least the severity by email to addresses separated
+    by commas.
+
+`Flush(severity)`
+
+:   Flushes the log files of at least the severity once the logging thread
+    wrote the messages that [`Async`](#asynchronous-delivery) passed to it.
+
+`Name(severity)`
+
+:   Name of a severity, such as `WARNING`.
+
+`LogDirectories()`
+
+:   Directories tried in order for log files that `--log_dir` does not place.
+
+`SetFingerprint(fingerprint)`
+
+:   Identifies the build of the application in the header of log files.
+
+`SetFatalHandler(handler)`, `SetFailureWriter(writer)`
+
+:   Set the function called after a fatal message and the function that
+    writes the dump of the failure signal handler. Neither may be null. The
+    writer runs in a signal handler and must be async-signal-safe.
+
+`AddSink(sink)`, `RemoveSink(sink)`
+
+:   Send every message of the experimental logging functions to a
+    [structured sink](#structured-sinks) as well, like `nglog::AddLogSink()`
+    does for a `nglog::LogSink`. Messages of the macros carry no
+    [`std::source_location`](https://en.cppreference.com/w/cpp/utility/source_location)
+    and therefore do not reach structured sinks. A sink must not be added
+    twice or removed without being added.
+
+`StackTrace()`
+
+:   Stack trace of the caller, one frame per line.
+
 ## Attributes
 
 Attributes are composed with `|` and apply in order:
@@ -829,7 +927,8 @@ Conditions preferably become `if` statements, which also skip evaluating the
 arguments. `ngx::Log(c, ngx::Error, "msg")` corresponds to `LOG_IF(ERROR, c)`
 but evaluates the arguments regardless. Macro variants become attribute
 combinations. The functions below are declared in `log.h`,
-`signal_safe_log.h` and `ensure.h` of `ng-log/experimental`, the macros in
+`signal_safe_log.h`, `ensure.h` and `setup.h` of `ng-log/experimental`, the
+macros in
 `ng-log/logging.h` and `ng-log/raw_logging.h`. Comparisons use `That`. Where a failure must read
 exactly like the macro's, such as `a == b (1 vs. 2)`, use `NGLOG_COMPARE`
 instead. The examples assume [`using namespace std::chrono_literals;`](https://en.cppreference.com/w/cpp/symbol_index/chrono_literals).
@@ -1226,6 +1325,35 @@ ngx::Ensure(p, ngx::Syslog, "p");
 ```
 
 </div>
+
+#### Setup
+
+The setup functions of `ng-log/log_setup.h`, `ng-log/log_sink.h` and
+`ng-log/vlog_is_on.h` correspond to these:
+
+| Macros | Functions |
+| --- | --- |
+| `InitializeLogging(argv0)` | `Initialize(program_name)` |
+| `IsLoggingInitialized()` | `IsInitialized()` |
+| `ShutdownLogging()` | `Shutdown()` |
+| `SetFlag(FLAGS_v, level)` | `SetVerbosity(level)` |
+| `SetVLOGLevel(pattern, level)` | `SetVerbosity(pattern, level)` |
+| `SetStderrLogging(severity)` | `SetStderrThreshold(severity)` |
+| `LogToStderr()` | `LogOnlyToStderr()` |
+| `SetLogDestination(severity, base)` | `SetLogFile(severity, base)` |
+| `SetLogDestination(severity, "")` | `DisableLogFile(severity)` |
+| `SetLogSymlink(severity, name)` | `SetLogFileLink(severity, name)` |
+| `SetLogSymlink(severity, "")` | `DisableLogFileLink(severity)` |
+| `SetLogFilenameExtension(suffix)` | `SetLogFileSuffix(suffix)` |
+| `SetEmailLogging(severity, addresses)` | `SetEmailThreshold(severity, addresses)` |
+| `FlushLogFiles(severity)` | `Flush(severity)` |
+| `GetLogSeverityName(severity)` | `Name(severity)` |
+| `GetLoggingDirectories()` | `LogDirectories()` |
+| `SetApplicationFingerprint(fingerprint)` | `SetFingerprint(fingerprint)` |
+| `InstallFailureFunction(handler)` | `SetFatalHandler(handler)` |
+| `InstallFailureWriter(writer)` | `SetFailureWriter(writer)` |
+| `AddLogSink(sink)`, `RemoveLogSink(sink)` | `AddSink(sink)`, `RemoveSink(sink)` |
+| `GetStackTrace()` | `StackTrace()` |
 
 ## Custom Attributes
 

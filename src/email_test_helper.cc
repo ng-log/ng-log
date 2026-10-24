@@ -4,9 +4,9 @@
 //
 // Author: Sergiu Deitsch
 //
-// A dependency-free mailer used by logging_unittest.cc. It consumes the
-// message before optionally staying alive long enough to expose logging lock
-// contention.
+// A dependency-free mailer used by the tests. It consumes the message before
+// optionally staying alive long enough to expose logging lock contention, and
+// optionally records its arguments.
 
 #include <array>
 #include <chrono>
@@ -39,6 +39,8 @@ constexpr char kMailerTerminateEnvironment[] = "NGLOG_TEST_MAILER_TERMINATE";
 // When set, the mailer exits with the given status after reading the
 // message.
 constexpr char kMailerExitStatusEnvironment[] = "NGLOG_TEST_MAILER_EXIT_STATUS";
+// When set, the mailer writes its arguments to the file at the given path.
+constexpr char kMailerArgumentsEnvironment[] = "NGLOG_TEST_MAILER_ARGUMENTS";
 constexpr std::size_t kInputBufferSize = 4096;
 
 bool ConsumeInput() {
@@ -61,9 +63,22 @@ bool SigpipeIsBlocked() {
 #endif
 }
 
+// Writes each argument after the program name on a line of its own.
+bool RecordArguments(const char* path, int argc, char** argv) {
+  std::ofstream arguments{std::string{path}};
+  for (int i = 1; i < argc; ++i) {
+    arguments << argv[i] << '\n';
+  }
+  return static_cast<bool>(arguments);
+}
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+  const char* const arguments_path = std::getenv(kMailerArgumentsEnvironment);
+  if (arguments_path != nullptr &&
+      !RecordArguments(arguments_path, argc, argv)) {
+    return EXIT_FAILURE;
+  }
   if (std::getenv(kMailerSignalsEnvironment) != nullptr && SigpipeIsBlocked()) {
     return EXIT_FAILURE;
   }
