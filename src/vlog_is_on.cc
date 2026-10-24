@@ -10,13 +10,13 @@
 
 #include <atomic>
 #include <cerrno>
-#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <string>
 
+#include "internal/log_setup.h"
 #include "ng-log/export.h"
 #include "ng-log/flags.h"
 #include "ng-log/raw_logging.h"
@@ -123,8 +123,13 @@ static void VLOG2Initializer() {
 
 // This can be called very early, so we use SpinLock and RAW_VLOG here.
 int SetVLOGLevel(const char* module_pattern, int log_level) {
+  return internal::SetVLOGLevel(module_pattern, std::strlen(module_pattern),
+                                log_level);
+}
+
+int internal::SetVLOGLevel(const char* module_pattern,
+                           std::size_t pattern_length, int log_level) {
   int result = nglog::GetFlag(FLAGS_v);
-  std::size_t const pattern_len = strlen(module_pattern);
   bool found = false;
   bool found_exact = false;
   {
@@ -136,7 +141,8 @@ int SetVLOGLevel(const char* module_pattern, int log_level) {
     }
     for (const VModuleInfo* info = vmodule_list; info != nullptr;
          info = info->next) {
-      if (info->module_pattern == module_pattern) {
+      if (info->module_pattern.compare(0, std::string::npos, module_pattern,
+                                       pattern_length) == 0) {
         if (!found) {
           result = info->vlog_level.load(std::memory_order_relaxed);
           found = true;
@@ -145,7 +151,7 @@ int SetVLOGLevel(const char* module_pattern, int log_level) {
         info->vlog_level.store(log_level, std::memory_order_relaxed);
       } else if (!found && SafeFNMatch_(info->module_pattern.c_str(),
                                         info->module_pattern.size(),
-                                        module_pattern, pattern_len)) {
+                                        module_pattern, pattern_length)) {
         result = info->vlog_level.load(std::memory_order_relaxed);
         found = true;
       }
@@ -155,7 +161,7 @@ int SetVLOGLevel(const char* module_pattern, int log_level) {
     // that are initialized from now on.
     if (!found_exact) {
       auto* info = new VModuleInfo;
-      info->module_pattern = module_pattern;
+      info->module_pattern.assign(module_pattern, pattern_length);
       info->vlog_level.store(log_level, std::memory_order_relaxed);
       info->next = vmodule_list;
       vmodule_list = info;
@@ -166,7 +172,7 @@ int SetVLOGLevel(const char* module_pattern, int log_level) {
       // We traverse the list fully because the pattern can match several items
       // from the list.
       while (item) {
-        if (SafeFNMatch_(module_pattern, pattern_len, item->base_name,
+        if (SafeFNMatch_(module_pattern, pattern_length, item->base_name,
                          item->base_len)) {
           // Redirect the cached value to its module override.
           item->level.store(&info->vlog_level, std::memory_order_release);
@@ -178,7 +184,8 @@ int SetVLOGLevel(const char* module_pattern, int log_level) {
       }
     }
   }
-  RAW_VLOG(1, "Set VLOG level for \"%s\" to %d", module_pattern, log_level);
+  RAW_VLOG(1, "Set VLOG level for \"%.*s\" to %d",
+           static_cast<int>(pattern_length), module_pattern, log_level);
   return result;
 }
 

@@ -47,6 +47,7 @@
 #include "internal/lock_metrics.h"
 #include "internal/log_cleaner.h"
 #include "internal/log_message_access.h"
+#include "internal/log_setup.h"
 #include "internal/path.h"
 #include "internal/source_location.h"
 #include "internal/style_recorder.h"
@@ -532,9 +533,10 @@ class LogFileObject : public base::Logger {
                      std::unique_lock<internal::FileMutex>* lock);
 
   // Configuration options
-  void SetBasename(const char* basename);
-  void SetExtension(const char* ext);
-  void SetSymlinkBasename(const char* symlink_basename);
+  // Each takes the first length characters of the name.
+  void SetBasename(const char* basename, std::size_t length);
+  void SetExtension(const char* ext, std::size_t length);
+  void SetSymlinkBasename(const char* symlink_basename, std::size_t length);
 
   // Normal flushing routine
   void Flush() override;
@@ -599,14 +601,17 @@ class LogDestination {
   friend void base::SetLogger(LogSeverity, base::Logger*);
 
   // These methods are just forwarded to by their global versions.
-  static void SetLogDestination(LogSeverity severity,
-                                const char* base_filename);
-  static void SetLogSymlink(LogSeverity severity, const char* symlink_basename);
+  static void SetLogDestination(LogSeverity severity, const char* base_filename,
+                                std::size_t length);
+  static void SetLogSymlink(LogSeverity severity, const char* symlink_basename,
+                            std::size_t length);
   static void AddLogSink(LogSink* destination);
   static void RemoveLogSink(LogSink* destination);
-  static void SetLogFilenameExtension(const char* filename_extension);
+  static void SetLogFilenameExtension(const char* filename_extension,
+                                      std::size_t length);
   static void SetStderrLogging(LogSeverity min_severity);
-  static void SetEmailLogging(LogSeverity min_severity, const char* addresses);
+  static void SetEmailLogging(LogSeverity min_severity, const char* addresses,
+                              std::size_t length);
   static void LogToStderr();
   // Flush all log files that are at least at the given severity level
   static void FlushLogFiles(int min_severity);
@@ -828,19 +833,22 @@ inline void LogDestination::FlushLogFiles(int min_severity) {
 }
 
 inline void LogDestination::SetLogDestination(LogSeverity severity,
-                                              const char* base_filename) {
+                                              const char* base_filename,
+                                              std::size_t length) {
   // Prevent any subtle race conditions by wrapping a mutex lock around
   // all this stuff.
   CheckSeverityInRange(severity);
   std::lock_guard<::nglog::internal::LogMutex> l{log_mutex};
-  log_destination(severity)->fileobject_.SetBasename(base_filename);
+  log_destination(severity)->fileobject_.SetBasename(base_filename, length);
 }
 
 inline void LogDestination::SetLogSymlink(LogSeverity severity,
-                                          const char* symlink_basename) {
+                                          const char* symlink_basename,
+                                          std::size_t length) {
   CheckSeverityInRange(severity);
   std::lock_guard<::nglog::internal::LogMutex> l{log_mutex};
-  log_destination(severity)->fileobject_.SetSymlinkBasename(symlink_basename);
+  log_destination(severity)->fileobject_.SetSymlinkBasename(symlink_basename,
+                                                            length);
 }
 
 inline void LogDestination::AddLogSink(LogSink* destination) {
@@ -881,13 +889,14 @@ inline void LogDestination::RemoveLogSink(LogSink* destination) {
   WaitForSinkCalls(destination);
 }
 
-inline void LogDestination::SetLogFilenameExtension(const char* ext) {
+inline void LogDestination::SetLogFilenameExtension(const char* ext,
+                                                    std::size_t length) {
   // Prevent any subtle race conditions by wrapping a mutex lock around
   // all this stuff.
   std::lock_guard<::nglog::internal::LogMutex> l{log_mutex};
   for (int severity = 0; severity < NUM_SEVERITIES; ++severity) {
     log_destination(static_cast<LogSeverity>(severity))
-        ->fileobject_.SetExtension(ext);
+        ->fileobject_.SetExtension(ext, length);
   }
 }
 
@@ -904,18 +913,19 @@ inline void LogDestination::LogToStderr() {
   // SetLogDestination already do the locking!
   SetStderrLogging(NGLOG_INFO);  // thus everything is "also" logged to stderr
   for (int i = 0; i < NUM_SEVERITIES; ++i) {
-    SetLogDestination(static_cast<LogSeverity>(i),
-                      "");  // "" turns off logging to a logfile
+    // An empty name turns off logging to a file.
+    SetLogDestination(static_cast<LogSeverity>(i), "", 0);
   }
 }
 
 inline void LogDestination::SetEmailLogging(LogSeverity min_severity,
-                                            const char* addresses) {
+                                            const char* addresses,
+                                            std::size_t length) {
   // Prevent any subtle race conditions by wrapping a mutex lock around
   // all this stuff.
   std::lock_guard<internal::LogMutex> l{log_mutex};
   LogDestination::email_logging_severity_ = min_severity;
-  LogDestination::addresses_ = addresses;
+  LogDestination::addresses_.assign(addresses, length);
 }
 
 // Returns the wide text whose encoding the message text contains, or an empty
@@ -1679,34 +1689,35 @@ LogFileObject::~LogFileObject() {
   file_ = nullptr;
 }
 
-void LogFileObject::SetBasename(const char* basename) {
+void LogFileObject::SetBasename(const char* basename, std::size_t length) {
   std::lock_guard<internal::FileMutex> l{mutex_};
   filename_source_ = internal::LogFilenameSource::kSelected;
-  if (base_filename_ != basename) {
+  if (base_filename_.compare(0, string::npos, basename, length) != 0) {
     // Get rid of old log file since we are changing names
     DiscardFileIfInherited();
     file_ = nullptr;
     file_length_ = bytes_since_flush_ = dropped_mem_length_ = 0;
     rollover_attempt_ = kRolloverAttemptFrequency - 1;
-    base_filename_ = basename;
+    base_filename_.assign(basename, length);
   }
 }
 
-void LogFileObject::SetExtension(const char* ext) {
+void LogFileObject::SetExtension(const char* ext, std::size_t length) {
   std::lock_guard<internal::FileMutex> l{mutex_};
-  if (filename_extension_ != ext) {
+  if (filename_extension_.compare(0, string::npos, ext, length) != 0) {
     // Get rid of old log file since we are changing names
     DiscardFileIfInherited();
     file_ = nullptr;
     file_length_ = bytes_since_flush_ = dropped_mem_length_ = 0;
     rollover_attempt_ = kRolloverAttemptFrequency - 1;
-    filename_extension_ = ext;
+    filename_extension_.assign(ext, length);
   }
 }
 
-void LogFileObject::SetSymlinkBasename(const char* symlink_basename) {
+void LogFileObject::SetSymlinkBasename(const char* symlink_basename,
+                                       std::size_t length) {
   std::lock_guard<internal::FileMutex> l{mutex_};
-  symlink_basename_ = symlink_basename;
+  symlink_basename_.assign(symlink_basename, length);
 }
 
 // The public methods take only the mutex of the file. Loggers that wrap the
@@ -3003,11 +3014,13 @@ void FlushLogFilesUnsafe(LogSeverity min_severity) {
 }
 
 void SetLogDestination(LogSeverity severity, const char* base_filename) {
-  LogDestination::SetLogDestination(severity, base_filename);
+  LogDestination::SetLogDestination(severity, base_filename,
+                                    std::strlen(base_filename));
 }
 
 void SetLogSymlink(LogSeverity severity, const char* symlink_basename) {
-  LogDestination::SetLogSymlink(severity, symlink_basename);
+  LogDestination::SetLogSymlink(severity, symlink_basename,
+                                std::strlen(symlink_basename));
 }
 
 LogSink::~LogSink() = default;
@@ -3048,7 +3061,7 @@ void RemoveLogSink(LogSink* destination) {
 }
 
 void SetLogFilenameExtension(const char* ext) {
-  LogDestination::SetLogFilenameExtension(ext);
+  LogDestination::SetLogFilenameExtension(ext, std::strlen(ext));
 }
 
 void SetStderrLogging(LogSeverity min_severity) {
@@ -3056,10 +3069,39 @@ void SetStderrLogging(LogSeverity min_severity) {
 }
 
 void SetEmailLogging(LogSeverity min_severity, const char* addresses) {
-  LogDestination::SetEmailLogging(min_severity, addresses);
+  LogDestination::SetEmailLogging(min_severity, addresses,
+                                  std::strlen(addresses));
 }
 
 void LogToStderr() { LogDestination::LogToStderr(); }
+
+namespace internal {
+
+void InitializeLogging(const char* argv0, std::size_t length) {
+  InitializeLoggingUtilities(argv0, length);
+}
+
+void SetLogDestination(LogSeverity severity, const char* base_filename,
+                       std::size_t length) {
+  LogDestination::SetLogDestination(severity, base_filename, length);
+}
+
+void SetLogSymlink(LogSeverity severity, const char* symlink_basename,
+                   std::size_t length) {
+  LogDestination::SetLogSymlink(severity, symlink_basename, length);
+}
+
+void SetLogFilenameExtension(const char* filename_extension,
+                             std::size_t length) {
+  LogDestination::SetLogFilenameExtension(filename_extension, length);
+}
+
+void SetEmailLogging(LogSeverity min_severity, const char* addresses,
+                     std::size_t length) {
+  LogDestination::SetEmailLogging(min_severity, addresses, length);
+}
+
+}  // namespace internal
 
 namespace base {
 namespace internal {
@@ -3865,7 +3907,9 @@ void MakeCheckOpValueString(std::ostream* os, const std::nullptr_t& /*v*/) {
 
 }  // namespace internal
 
-void InitializeLogging(const char* argv0) { InitializeLoggingUtilities(argv0); }
+void InitializeLogging(const char* argv0) {
+  InitializeLoggingUtilities(argv0, std::strlen(argv0));
+}
 
 void InstallPrefixFormatter(PrefixFormatterCallback callback, void* data) {
   if (callback != nullptr) {

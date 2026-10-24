@@ -809,6 +809,7 @@ target_sources (ng-log_internal PRIVATE
     src/internal/lock_metrics.h
     src/internal/log_cleaner.h
     src/internal/log_message_access.h
+    src/internal/log_setup.h
     src/internal/path.h
     src/internal/process_flag_registry.h
     src/internal/raw_log.h
