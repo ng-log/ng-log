@@ -82,6 +82,45 @@ target_link_libraries (myapp PRIVATE ng-log::experimental)
 If ng-log is added using `add_subdirectory`, the target exists only if the
 functions were built, which `if (TARGET ng-log::experimental)` determines.
 
+### C++ Module
+
+The `nglog.experimental` module provides the declarations of
+`ng-log/experimental/logging.h` to translation units that import it instead of
+including the headers:
+
+```cpp title="Importing the functions"
+import nglog.experimental;
+
+namespace ngx = nglog::experimental;
+```
+
+ng-log builds the module along with the functions whenever CMake, the
+generator and the compiler support importing modules, which requires CMake
+3.28.4 or newer, one of the
+[Ninja generators](https://cmake.org/cmake/help/latest/manual/cmake-generators.7.html#ninja-generators)
+and a compiler that
+[CMake supports for modules](https://cmake.org/cmake/help/latest/manual/cmake-cxxmodules.7.html#compiler-support),
+such as GCC 15, Clang 16 or MSVC 19.34 and newer. GCC 14 is not supported,
+since it fails to deduce the template arguments of `Log` through the module.
+Configuring with `-DWITH_MODULES=OFF` omits the module. The installation
+contains the module interface next to the headers but no compiled module
+interface, which every consumer compiles with its own compiler and flags.
+
+`ng-log::experimental` then provides the module in addition to the headers if
+the consuming project uses CMake 3.28.4 or newer, a Ninja generator and a
+compiler that supports modules, which `find_package` checks. Otherwise, the
+target provides the headers only, since CMake fails to generate build systems
+of other generators for targets that link a module, and earlier versions of
+CMake compile imported modules without the include directories of their
+dependencies.
+
+Modules cannot export macros, so `NGLOG_COMPARE` requires including
+`ng-log/experimental/ensure.h`. The defaults of the template arguments that
+capture `NGLOG_STRIP_LOG` and the debug mode are fixed when the module
+interface is compiled rather than in each importing translation unit.
+Translation units that define `NGLOG_STRIP_LOG` themselves must therefore
+include the headers.
+
 ## Functions
 
 `Log(attributes, format, args...)`

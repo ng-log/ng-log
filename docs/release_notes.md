@@ -46,7 +46,8 @@ SPDX-License-Identifier: BSD-3-Clause
   by default, with hyperlinked `file:line` references
 - Add opt-in C++20 [experimental logging functions](logging/experimental.md)
   based on `std::format` and `std::source_location`. Extensible attributes
-  select severity, Android log tag, verbosity, rate limit and destination
+  select severity, Android log tag, verbosity, rate limit and destination.
+  The functions are also available as the C++ module `nglog.experimental`
 - Skip message construction for suppressed log statements and reduce lock
   contention
 - Run sink callbacks concurrently and allow logging from them

@@ -51,6 +51,9 @@ option (PRINT_UNSYMBOLIZED_STACK_TRACES
   "Print file offsets in traces instead of symbolizing" OFF)
 option (WITH_EXPERIMENTAL
   "Build the experimental logging functions if the compiler supports them" ON)
+option (WITH_MODULES
+  "Build the C++ module of the experimental logging functions if the \
+generator and the compiler support it" ON)
 option (WITH_PKGCONFIG "Enable pkg-config support" OFF)
 option (WITH_SYMBOLIZE "Enable symbolize module" ON)
 
@@ -708,15 +711,6 @@ if (HAVE_EXPERIMENTAL_LOGGING)
     $<TARGET_PROPERTY:ng-log_internal,COMPILE_OPTIONS>)
 
   target_sources (ng-log PRIVATE $<TARGET_OBJECTS:ng-log_experimental_objects>)
-
-  # Consumers of the experimental logging functions require C++20, unlike
-  # those of the remainder of the library. The package configuration defines
-  # the target of an installation, since it depends on the consumer compiler.
-  add_library (ng-log_experimental INTERFACE)
-  target_compile_features (ng-log_experimental INTERFACE cxx_std_20)
-  target_link_libraries (ng-log_experimental INTERFACE ng-log)
-
-  add_library (ng-log::experimental ALIAS ng-log_experimental)
 endif (HAVE_EXPERIMENTAL_LOGGING)
 
 set (ng-log_libraries_options_for_static_linking)
@@ -817,6 +811,45 @@ generate_export_header (ng-log
   EXPORT_FILE_NAME ${ng-log_BINARY_DIR}/ng-log/export.h
   CUSTOM_CONTENT_FROM_VARIABLE _ng-log_EXPORT_CONTENT)
 
+# Unless WITH_MODULES is disabled, the module of the experimental logging
+# functions is built whenever the generator and the compiler support it.
+if (HAVE_EXPERIMENTAL_LOGGING AND WITH_MODULES)
+  nglog_check_experimental_module (HAVE_EXPERIMENTAL_MODULE)
+else (HAVE_EXPERIMENTAL_LOGGING AND WITH_MODULES)
+  set (HAVE_EXPERIMENTAL_MODULE OFF)
+endif (HAVE_EXPERIMENTAL_LOGGING AND WITH_MODULES)
+
+# Consumers of the experimental logging functions require C++20, unlike those
+# of the remainder of the library. The package configuration selects the target
+# of an installation, since it depends on the consumer compiler and generator.
+if (HAVE_EXPERIMENTAL_MODULE)
+  # Importers link the library, since compilers emit an initializer for each
+  # module interface unit.
+  add_library (ng-log_experimental STATIC)
+  target_sources (ng-log_experimental PUBLIC
+    FILE_SET CXX_MODULES
+    BASE_DIRS ${ng-log_SOURCE_DIR}/src
+    FILES src/ng-log/experimental/logging.cppm
+  )
+  set_target_properties (ng-log_experimental PROPERTIES
+    EXPORT_NAME experimental)
+
+  set (_ng-log_EXPERIMENTAL_SCOPE PUBLIC)
+elseif (HAVE_EXPERIMENTAL_LOGGING)
+  add_library (ng-log_experimental INTERFACE)
+
+  set (_ng-log_EXPERIMENTAL_SCOPE INTERFACE)
+endif (HAVE_EXPERIMENTAL_MODULE)
+
+if (HAVE_EXPERIMENTAL_LOGGING)
+  target_compile_features (ng-log_experimental ${_ng-log_EXPERIMENTAL_SCOPE}
+    cxx_std_20)
+  target_link_libraries (ng-log_experimental ${_ng-log_EXPERIMENTAL_SCOPE}
+    ng-log)
+
+  add_library (ng-log::experimental ALIAS ng-log_experimental)
+endif (HAVE_EXPERIMENTAL_LOGGING)
+
 string (STRIP "${ng-log_libraries_options_for_static_linking}" ng-log_libraries_options_for_static_linking)
 
 if (WITH_PKGCONFIG)
@@ -878,10 +911,13 @@ if (BUILD_TESTING AND GTest_FOUND)
   set (CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE PRE_TEST)
 
   # Configures and builds a target of a separate project against the ng-log
-  # build tree. The test optionally runs a command of that project afterwards.
+  # package in PACKAGE_DIR, which defaults to the build tree. The test
+  # optionally runs a command of that project afterwards. GENERATOR selects
+  # another generator than the one of the ng-log build.
   function (nglog_add_build_test _NAME)
     cmake_parse_arguments (PARSE_ARGV 1 _ARGS ""
-      "SOURCE_DIR;TARGET;CONFIG;EXPECT_FAILURE" "TEST_COMMAND;OPTIONS")
+      "SOURCE_DIR;TARGET;CONFIG;EXPECT_FAILURE;GENERATOR;PACKAGE_DIR"
+      "TEST_COMMAND;OPTIONS")
 
     if (DEFINED _ARGS_UNPARSED_ARGUMENTS OR NOT DEFINED _ARGS_SOURCE_DIR OR
         NOT DEFINED _ARGS_TARGET)
@@ -915,34 +951,46 @@ if (BUILD_TESTING AND GTest_FOUND)
       set (_TEST_COMMAND --test-command ${_ARGS_TEST_COMMAND})
     endif (DEFINED _ARGS_TEST_COMMAND)
 
+    if (NOT DEFINED _ARGS_PACKAGE_DIR)
+      set (_ARGS_PACKAGE_DIR ${ng-log_BINARY_DIR})
+    endif (NOT DEFINED _ARGS_PACKAGE_DIR)
+
     # Empty values are omitted, since the driver of builds that must fail
     # passes the command on as a list, which drops empty elements.
     set (_GENERATOR_OPTIONS)
 
-    if (CMAKE_GENERATOR_PLATFORM)
-      list (APPEND _GENERATOR_OPTIONS
-        --build-generator-platform ${CMAKE_GENERATOR_PLATFORM})
-    endif (CMAKE_GENERATOR_PLATFORM)
+    # The platform, toolset and build program belong to the generator of the
+    # ng-log build and are left to another generator to determine.
+    if (NOT DEFINED _ARGS_GENERATOR)
+      set (_ARGS_GENERATOR ${CMAKE_GENERATOR})
 
-    if (CMAKE_GENERATOR_TOOLSET)
+      if (CMAKE_GENERATOR_PLATFORM)
+        list (APPEND _GENERATOR_OPTIONS
+          --build-generator-platform ${CMAKE_GENERATOR_PLATFORM})
+      endif (CMAKE_GENERATOR_PLATFORM)
+
+      if (CMAKE_GENERATOR_TOOLSET)
+        list (APPEND _GENERATOR_OPTIONS
+          --build-generator-toolset ${CMAKE_GENERATOR_TOOLSET})
+      endif (CMAKE_GENERATOR_TOOLSET)
+
       list (APPEND _GENERATOR_OPTIONS
-        --build-generator-toolset ${CMAKE_GENERATOR_TOOLSET})
-    endif (CMAKE_GENERATOR_TOOLSET)
+        --build-makeprogram ${CMAKE_MAKE_PROGRAM})
+    endif (NOT DEFINED _ARGS_GENERATOR)
 
     set (_COMMAND ${CMAKE_CTEST_COMMAND}
       --build-config ${_ARGS_CONFIG}
       --build-and-test
       "${ng-log_SOURCE_DIR}/${_ARGS_SOURCE_DIR}"
       "${ng-log_BINARY_DIR}/Tests/${_NAME}"
-      --build-generator ${CMAKE_GENERATOR}
+      --build-generator ${_ARGS_GENERATOR}
       ${_GENERATOR_OPTIONS}
-      --build-makeprogram ${CMAKE_MAKE_PROGRAM}
       --build-target ${_ARGS_TARGET}
       --build-options
       -DCMAKE_BUILD_TYPE=${_ARGS_CONFIG}
       -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
       -DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=ON
-      -Dng-log_DIR=${ng-log_BINARY_DIR}
+      -Dng-log_DIR=${_ARGS_PACKAGE_DIR}
       ${_OPTIONS}
       ${_TEST_COMMAND}
     )
@@ -1573,6 +1621,36 @@ logging libraries\"\n#endif\n")
     set (_ng-log_EXPECT_EXPERIMENTAL FALSE)
   endif (HAVE_EXPERIMENTAL_LOGGING)
 
+  # Consumers using the generator and the compiler of the ng-log build import
+  # the module whenever cmake-cxxmodules(7) lists both as supporting modules,
+  # except for GCC 14, whose importers fail to deduce the template arguments of
+  # Log, and CMake before 3.28.4, which compiles imported modules without the
+  # usage requirements of their dependencies. The expectation is independent of
+  # the check that decides whether to build the module.
+  set (_ng-log_EXPECT_EXPERIMENTAL_MODULE FALSE)
+
+  if (HAVE_EXPERIMENTAL_LOGGING AND WITH_MODULES AND
+      CMAKE_GENERATOR MATCHES "^Ninja" AND
+      CMAKE_VERSION VERSION_GREATER_EQUAL 3.28.4)
+    if ((CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
+         CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 15) OR
+        (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
+         CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "GNU" AND
+         CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 16) OR
+        (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND
+         CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 19.34))
+      set (_ng-log_EXPECT_EXPERIMENTAL_MODULE TRUE)
+    endif ((CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
+         CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 15) OR
+        (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
+         CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "GNU" AND
+         CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 16) OR
+        (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND
+         CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 19.34))
+  endif (HAVE_EXPERIMENTAL_LOGGING AND WITH_MODULES AND
+      CMAKE_GENERATOR MATCHES "^Ninja" AND
+      CMAKE_VERSION VERSION_GREATER_EQUAL 3.28.4)
+
   # Requiring the experimental component fails with a reason unless the
   # library was built with the experimental logging functions.
   if (HAVE_EXPERIMENTAL_LOGGING)
@@ -1582,6 +1660,7 @@ logging libraries\"\n#endif\n")
       OPTIONS
         -DNGLOG_REQUIRED_COMPONENTS=experimental
         -DNGLOG_EXPECT_EXPERIMENTAL=TRUE
+        -DNGLOG_EXPECT_EXPERIMENTAL_MODULE=${_ng-log_EXPECT_EXPERIMENTAL_MODULE}
     )
 
     # C++98 orders after C++20 numerically, which must not keep the check of
@@ -1593,6 +1672,7 @@ logging libraries\"\n#endif\n")
         -DCMAKE_CXX_STANDARD=98
         -DNGLOG_OPTIONAL_COMPONENTS=experimental
         -DNGLOG_EXPECT_EXPERIMENTAL=TRUE
+        -DNGLOG_EXPECT_EXPERIMENTAL_MODULE=${_ng-log_EXPECT_EXPERIMENTAL_MODULE}
     )
 
     # A consumer whose compiler lacks the requirements cannot use the
@@ -1653,13 +1733,73 @@ logging libraries\"\n#endif\n")
     OPTIONS
       -DNGLOG_OPTIONAL_COMPONENTS=experimental
       -DNGLOG_EXPECT_EXPERIMENTAL=${_ng-log_EXPECT_EXPERIMENTAL}
+      -DNGLOG_EXPECT_EXPERIMENTAL_MODULE=${_ng-log_EXPECT_EXPERIMENTAL_MODULE}
   )
+
+  # Generators that cannot import modules receive the target without the
+  # module, which consumers use through the headers.
+  find_program (_ng-log_MAKE_PROGRAM NAMES gmake make NO_CACHE)
+
+  if (HAVE_EXPERIMENTAL_MODULE AND CMAKE_HOST_UNIX AND _ng-log_MAKE_PROGRAM)
+    nglog_add_build_test (cmake_package_config_experimental_makefiles
+      SOURCE_DIR src/package_config_unittest/components
+      TARGET ng-log_package_components
+      GENERATOR "Unix Makefiles"
+      OPTIONS
+        -DNGLOG_REQUIRED_COMPONENTS=experimental
+        -DNGLOG_EXPECT_EXPERIMENTAL=TRUE
+        -DNGLOG_EXPECT_EXPERIMENTAL_MODULE=FALSE
+    )
+  endif (HAVE_EXPERIMENTAL_MODULE AND CMAKE_HOST_UNIX AND _ng-log_MAKE_PROGRAM)
+
+  # The installation provides the experimental component like the build tree.
+  # Installing into the build tree requires every destination to be relative
+  # to the prefix.
+  set (_ng-log_INSTALL_RELOCATABLE ON)
+
+  foreach (_ng-log_INSTALL_DIR IN ITEMS BINDIR DATADIR INCLUDEDIR LIBDIR)
+    if (IS_ABSOLUTE "${CMAKE_INSTALL_${_ng-log_INSTALL_DIR}}")
+      set (_ng-log_INSTALL_RELOCATABLE OFF)
+    endif (IS_ABSOLUTE "${CMAKE_INSTALL_${_ng-log_INSTALL_DIR}}")
+  endforeach (_ng-log_INSTALL_DIR)
+
+  if (HAVE_EXPERIMENTAL_LOGGING AND _ng-log_INSTALL_RELOCATABLE)
+    set (_ng-log_INSTALL_PREFIX ${ng-log_BINARY_DIR}/Tests/install)
+
+    # Files of an earlier installation would hide missing ones.
+    add_test (NAME cmake_install_clean
+      COMMAND ${CMAKE_COMMAND} -E rm -rf ${_ng-log_INSTALL_PREFIX})
+    add_test (NAME cmake_install
+      COMMAND ${CMAKE_COMMAND} --install ${ng-log_BINARY_DIR} --config $<CONFIG>
+        --prefix ${_ng-log_INSTALL_PREFIX})
+
+    nglog_add_build_test (cmake_package_config_installed_experimental
+      SOURCE_DIR src/package_config_unittest/components
+      TARGET ng-log_package_components
+      PACKAGE_DIR ${_ng-log_INSTALL_PREFIX}/${_ng-log_CMake_INSTALLDIR}
+      OPTIONS
+        -DNGLOG_EXPECT_INSTALLED=ON
+        -DNGLOG_REQUIRED_COMPONENTS=experimental
+        -DNGLOG_EXPECT_EXPERIMENTAL=TRUE
+        -DNGLOG_EXPECT_EXPERIMENTAL_MODULE=${_ng-log_EXPECT_EXPERIMENTAL_MODULE}
+    )
+
+    set_tests_properties (cmake_install_clean PROPERTIES
+      FIXTURES_SETUP ng-log_install_clean)
+    set_tests_properties (cmake_install PROPERTIES
+      FIXTURES_REQUIRED ng-log_install_clean
+      FIXTURES_SETUP ng-log_install)
+    set_tests_properties (cmake_package_config_installed_experimental PROPERTIES
+      FIXTURES_REQUIRED ng-log_install)
+  endif (HAVE_EXPERIMENTAL_LOGGING AND _ng-log_INSTALL_RELOCATABLE)
 
   # Without components, the experimental component is reported as well.
   nglog_add_build_test (cmake_package_config_no_components
     SOURCE_DIR src/package_config_unittest/components
     TARGET ng-log_package_components
-    OPTIONS -DNGLOG_EXPECT_EXPERIMENTAL=${_ng-log_EXPECT_EXPERIMENTAL}
+    OPTIONS
+      -DNGLOG_EXPECT_EXPERIMENTAL=${_ng-log_EXPECT_EXPERIMENTAL}
+      -DNGLOG_EXPECT_EXPERIMENTAL_MODULE=${_ng-log_EXPECT_EXPERIMENTAL_MODULE}
   )
 
   nglog_add_build_test (cmake_package_config_unknown_component
@@ -2104,6 +2244,27 @@ install (FILES ${_ng-log_FIND_MODULES}
 
 install (EXPORT ng-log-targets NAMESPACE ng-log:: DESTINATION
   ${_ng-log_CMake_INSTALLDIR})
+
+# The package configuration loads the module target only for consumers that
+# can import it. These compile the module interface themselves, since its
+# compiled form depends on the compiler and its flags, so the compiled module
+# interfaces of the build are not installed.
+if (HAVE_EXPERIMENTAL_MODULE)
+  install (TARGETS ng-log_experimental
+    EXPORT ng-log-experimental-targets
+    FILE_SET CXX_MODULES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  )
+
+  install (EXPORT ng-log-experimental-targets
+    NAMESPACE ng-log::
+    DESTINATION ${_ng-log_CMake_INSTALLDIR}
+  )
+
+  export (EXPORT ng-log-experimental-targets
+    NAMESPACE ng-log::
+    FILE ng-log-experimental-targets.cmake
+  )
+endif (HAVE_EXPERIMENTAL_MODULE)
 
 if (CMAKE_VERSION VERSION_GREATER_EQUAL 4.3
   AND CMAKE_EXPERIMENTAL_GENERATE_SBOM)

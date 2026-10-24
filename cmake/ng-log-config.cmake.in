@@ -53,6 +53,7 @@ include (${CMAKE_CURRENT_LIST_DIR}/ng-log-targets.cmake)
 set (ng-log_experimental_FOUND @_ng-log_EXPERIMENTAL_FOUND@)
 set (_ng-log_EXPERIMENTAL_MISSING_REASON
   "@_ng-log_EXPERIMENTAL_MISSING_REASON@")
+set (_ng-log_EXPERIMENTAL_MODULE @HAVE_EXPERIMENTAL_MODULE@)
 
 if (ng-log_experimental_FOUND AND NOT TARGET ng-log::experimental)
   if (NOT CMAKE_CXX_COMPILER_LOADED)
@@ -73,20 +74,33 @@ if (ng-log_experimental_FOUND AND NOT TARGET ng-log::experimental)
     nglog_check_experimental_logging (_ng-log_EXPERIMENTAL_LOGGING_COMPILES
       ${_ng-log_QUIET} INCLUDES ${_ng-log_INCLUDE_DIRECTORIES})
 
+    # The module target provides the headers as well but breaks the generation
+    # of build systems that cannot import modules.
+    if (_ng-log_EXPERIMENTAL_LOGGING_COMPILES AND _ng-log_EXPERIMENTAL_MODULE)
+      nglog_check_experimental_module (_ng-log_EXPERIMENTAL_MODULE_IMPORTABLE
+        ${_ng-log_QUIET})
+    else (_ng-log_EXPERIMENTAL_LOGGING_COMPILES AND _ng-log_EXPERIMENTAL_MODULE)
+      set (_ng-log_EXPERIMENTAL_MODULE_IMPORTABLE OFF)
+    endif (_ng-log_EXPERIMENTAL_LOGGING_COMPILES AND _ng-log_EXPERIMENTAL_MODULE)
+
     unset (_ng-log_INCLUDE_DIRECTORIES)
     unset (_ng-log_QUIET)
 
-    if (_ng-log_EXPERIMENTAL_LOGGING_COMPILES)
+    if (_ng-log_EXPERIMENTAL_MODULE_IMPORTABLE)
+      include (${CMAKE_CURRENT_LIST_DIR}/ng-log-experimental-targets.cmake)
+    elseif (_ng-log_EXPERIMENTAL_LOGGING_COMPILES)
       add_library (ng-log::experimental INTERFACE IMPORTED)
       set_target_properties (ng-log::experimental PROPERTIES
         INTERFACE_COMPILE_FEATURES cxx_std_20
         INTERFACE_LINK_LIBRARIES ng-log::ng-log)
-    else (_ng-log_EXPERIMENTAL_LOGGING_COMPILES)
+    else (_ng-log_EXPERIMENTAL_MODULE_IMPORTABLE)
       set (ng-log_experimental_FOUND FALSE)
       set (_ng-log_EXPERIMENTAL_MISSING_REASON "the C++ compiler \
 ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} does not support the \
 experimental logging functions")
-    endif (_ng-log_EXPERIMENTAL_LOGGING_COMPILES)
+    endif (_ng-log_EXPERIMENTAL_MODULE_IMPORTABLE)
+
+    unset (_ng-log_EXPERIMENTAL_MODULE_IMPORTABLE)
   endif (NOT CMAKE_CXX_COMPILER_LOADED)
 endif (ng-log_experimental_FOUND AND NOT TARGET ng-log::experimental)
 
@@ -97,3 +111,4 @@ unavailable since ${_ng-log_EXPERIMENTAL_MISSING_REASON}.")
 endif (NOT ng-log_experimental_FOUND AND ng-log_FIND_REQUIRED_experimental)
 
 unset (_ng-log_EXPERIMENTAL_MISSING_REASON)
+unset (_ng-log_EXPERIMENTAL_MODULE)
