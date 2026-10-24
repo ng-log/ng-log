@@ -609,59 +609,61 @@ if (HAVE_EXPERIMENTAL_LOGGING)
   list (APPEND NGLOG_PUBLIC_H ${NGLOG_EXPERIMENTAL_PUBLIC_H})
 endif (HAVE_EXPERIMENTAL_LOGGING)
 
-set (NGLOG_SRCS
-  ${NGLOG_PUBLIC_H}
-  src/addr2line.cc
+set (NGLOG_PRIVATE_H
   src/addr2line.h
-  src/demangle.cc
   src/demangle.h
-  src/flags.cc
   src/initializer.h
   src/internal/attributes.h
   src/internal/checked_arithmetic.h
-  src/internal/color_format.cc
-  src/internal/emscripten_console.cc
   src/internal/emscripten_console.h
   src/internal/flag_display.h
+  src/internal/lock_metrics.h
+  src/internal/log_cleaner.h
+  src/internal/log_message_access.h
+  src/internal/path.h
+  src/internal/process_flag_registry.h
+  src/internal/raw_log.h
+  src/internal/source_location.h
+  src/internal/style_recorder.h
+  src/internal/styled_output.h
+  src/internal/terminal_capabilities.h
+  src/internal/theme.h
+  src/internal/utf8.h
+  src/libbacktrace.h
+  src/stacktrace.h
+  src/subprocess_fork.h
+  src/subprocess.h
+  src/symbolize.h
+  src/utilities.h
+)
+
+set (NGLOG_SRCS
+  src/addr2line.cc
+  src/demangle.cc
+  src/flags.cc
+  src/internal/color_format.cc
+  src/internal/emscripten_console.cc
   src/internal/flag_registry.cc
   src/internal/hyperlink.cc
   src/internal/levenshtein.cc
   src/internal/lock_metrics.cc
-  src/internal/lock_metrics.h
   src/internal/log_cleaner.cc
-  src/internal/log_cleaner.h
-  src/internal/log_message_access.h
   src/internal/path.cc
-  src/internal/path.h
   src/internal/process_flag_registry.cc
-  src/internal/process_flag_registry.h
-  src/internal/raw_log.h
   src/internal/source_location.cc
-  src/internal/source_location.h
   src/internal/style_recorder.cc
-  src/internal/style_recorder.h
   src/internal/styled_output.cc
-  src/internal/styled_output.h
   src/internal/terminal_capabilities.cc
-  src/internal/terminal_capabilities.h
   src/internal/theme.cc
-  src/internal/theme.h
   src/internal/utf8.cc
-  src/internal/utf8.h
   src/libbacktrace.cc
-  src/libbacktrace.h
   src/logging.cc
   src/raw_logging.cc
   src/signalhandler.cc
-  src/stacktrace.h
   src/subprocess.cc
   src/subprocess_fork.cc
-  src/subprocess_fork.h
-  src/subprocess.h
   src/symbolize.cc
-  src/symbolize.h
   src/utilities.cc
-  src/utilities.h
   src/vlog_is_on.cc
 )
 
@@ -671,10 +673,7 @@ endif (_ng-log_STACKTRACE_SOURCE)
 
 # NOTE MSYS2 defines both WIN32 and UNIX. Do not use windows port in this case.
 if ((CYGWIN OR WIN32) AND NOT UNIX)
-  list (APPEND NGLOG_SRCS
-    src/windows/port.cc
-    src/windows/port.h
-  )
+  list (APPEND NGLOG_SRCS src/windows/port.cc)
 endif ((CYGWIN OR WIN32) AND NOT UNIX)
 
 add_library (ng-log_internal OBJECT
@@ -710,13 +709,20 @@ add_library (ng-log::ng-log ALIAS ng-log)
 if (HAVE_EXPERIMENTAL_LOGGING)
   add_library (ng-log_experimental_objects OBJECT
     src/experimental/async.cc
-    src/experimental/async.h
     src/experimental/attributes.cc
-    src/experimental/context.h
     src/experimental/ensure.cc
     src/experimental/log.cc
     src/experimental/signal_safe_log.cc
     src/experimental/site.cc
+  )
+
+  target_sources (ng-log_experimental_objects PRIVATE
+    FILE_SET private_headers
+    TYPE HEADERS
+    BASE_DIRS ${ng-log_SOURCE_DIR}/src
+    FILES
+      src/experimental/async.h
+      src/experimental/context.h
   )
 
   target_compile_features (ng-log_experimental_objects PRIVATE cxx_std_20)
@@ -806,24 +812,27 @@ target_sources (ng-log PUBLIC
   FILES ${NGLOG_PUBLIC_H}
 )
 
-target_include_directories (ng-log BEFORE PUBLIC
-  "$<BUILD_INTERFACE:${ng-log_BINARY_DIR}>"
-  "$<BUILD_INTERFACE:${ng-log_SOURCE_DIR}/src>"
-  PRIVATE ${ng-log_BINARY_DIR}
-  PRIVATE ${ng-log_SOURCE_DIR}/src)
+# The private header sets provide the include directories of the library
+# sources, which the targets compiled like the library sources share.
+target_sources (ng-log_internal PRIVATE
+  FILE_SET private_headers
+  TYPE HEADERS
+  BASE_DIRS ${ng-log_BINARY_DIR} ${ng-log_SOURCE_DIR}/src
+  FILES ${ng-log_BINARY_DIR}/config.h ${NGLOG_PRIVATE_H}
+)
 
+# The port header is included without its directory. The directory is nested
+# in a base directory of the other private header set and therefore requires
+# a set of its own.
 if (CYGWIN OR WIN32)
-  target_include_directories (ng-log_internal PUBLIC
-    "$<BUILD_INTERFACE:${ng-log_SOURCE_DIR}/src/windows>"
-    PRIVATE ${ng-log_SOURCE_DIR}/src/windows)
-
-  target_include_directories (ng-log PUBLIC
-    "$<BUILD_INTERFACE:${ng-log_SOURCE_DIR}/src/windows>"
-    PRIVATE ${ng-log_SOURCE_DIR}/src/windows)
+  target_sources (ng-log_internal PRIVATE
+    FILE_SET windows_headers
+    TYPE HEADERS
+    BASE_DIRS ${ng-log_SOURCE_DIR}/src/windows
+    FILES src/windows/port.h
+  )
 endif (CYGWIN OR WIN32)
 
-target_include_directories (ng-log_internal PUBLIC
-  $<TARGET_PROPERTY:ng-log,INCLUDE_DIRECTORIES>)
 target_compile_definitions (ng-log_internal PUBLIC
   $<TARGET_PROPERTY:ng-log,COMPILE_DEFINITIONS>
   PRIVATE ng_log_EXPORTS)
@@ -936,7 +945,7 @@ if (WITH_FUZZING AND NOT WITH_FUZZING STREQUAL none)
   target_compile_features (fuzz_demangle PRIVATE
     $<TARGET_PROPERTY:ng-log,COMPILE_FEATURES>)
   target_include_directories (fuzz_demangle PRIVATE
-    $<TARGET_PROPERTY:ng-log,INCLUDE_DIRECTORIES>)
+    $<TARGET_PROPERTY:ng-log_internal,INCLUDE_DIRECTORIES>)
   target_link_libraries (fuzz_demangle PRIVATE
     $<TARGET_PROPERTY:ng-log,LINK_LIBRARIES>)
 
@@ -1064,7 +1073,7 @@ if (PROJECT_IS_TOP_LEVEL AND BUILD_TESTING AND GTest_FOUND)
   target_compile_features (ng-log_testing_utilities PRIVATE
     $<TARGET_PROPERTY:ng-log,COMPILE_FEATURES>)
   target_include_directories (ng-log_testing_utilities PRIVATE
-    $<TARGET_PROPERTY:ng-log,INCLUDE_DIRECTORIES>)
+    $<TARGET_PROPERTY:ng-log_internal,INCLUDE_DIRECTORIES>)
   target_link_libraries (ng-log_testing_utilities PRIVATE GTest::gtest
     GTest::gmock)
 
@@ -1079,7 +1088,7 @@ if (PROJECT_IS_TOP_LEVEL AND BUILD_TESTING AND GTest_FOUND)
   endif (WITH_LOCK_METRICS)
   target_compile_features (ng-log_test INTERFACE
     $<TARGET_PROPERTY:ng-log,COMPILE_FEATURES>)
-  target_include_directories (ng-log_test INTERFACE $<TARGET_PROPERTY:ng-log,INCLUDE_DIRECTORIES>)
+  target_include_directories (ng-log_test INTERFACE $<TARGET_PROPERTY:ng-log_internal,INCLUDE_DIRECTORIES>)
 
   # Collects the unprefixed macros of the public headers. Lines are not read
   # individually, since a list element that ends with the backslash of a
@@ -1227,7 +1236,7 @@ logging libraries\"\n#endif\n")
       target_compile_features (${_ng-log_library_copy_target} PRIVATE
         $<TARGET_PROPERTY:ng-log,COMPILE_FEATURES>)
       target_include_directories (${_ng-log_library_copy_target} PRIVATE
-        $<TARGET_PROPERTY:ng-log,INCLUDE_DIRECTORIES>)
+        $<TARGET_PROPERTY:ng-log_internal,INCLUDE_DIRECTORIES>)
       target_link_libraries (${_ng-log_library_copy_target} PRIVATE
         $<TARGET_PROPERTY:ng-log,LINK_LIBRARIES>)
     endforeach (_ng-log_library_copy)
