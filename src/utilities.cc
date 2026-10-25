@@ -172,13 +172,14 @@ std::regex MakeLogFilenameMatcher(const std::string& base_filename,
 }
 
 void AlsoErrorWrite(LogSeverity severity, const char* tag, const char* message,
-                    std::size_t message_length) noexcept {
+                    std::size_t message_length,
+                    const internal::WideSpan& wide) noexcept {
 #if defined(NGLOG_OS_WINDOWS)
   (void)severity;
   (void)tag;
   // On Windows, also output to the debugger
-  internal::WriteUtf8AsWide(message, message_length,
-                            WriteWideToDebuggerSkippingNulls, nullptr);
+  internal::WriteUtf8WithWideAsWide(message, message_length, wide,
+                                    WriteWideToDebuggerSkippingNulls, nullptr);
 #elif defined(NGLOG_OS_ANDROID)
   constexpr int android_log_levels[] = {
       ANDROID_LOG_INFO,
@@ -188,10 +189,12 @@ void AlsoErrorWrite(LogSeverity severity, const char* tag, const char* message,
   };
 
   (void)message_length;
+  (void)wide;
   __android_log_write(android_log_levels[severity], tag, message);
 #elif defined(NGLOG_OS_EMSCRIPTEN)
   (void)tag;
   (void)message_length;
+  (void)wide;
   internal::WriteEmscriptenLog(
       internal::EmscriptenLogLevelForSeverity(severity), message);
 #else
@@ -199,6 +202,7 @@ void AlsoErrorWrite(LogSeverity severity, const char* tag, const char* message,
   (void)tag;
   (void)message;
   (void)message_length;
+  (void)wide;
 #endif
 }
 

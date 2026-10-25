@@ -23,6 +23,7 @@
 #include <cstring>
 #include <ctime>
 #include <exception>
+#include <functional>
 #include <iomanip>
 #include <iterator>
 #include <memory>
@@ -217,11 +218,17 @@ struct LogMessageData {
   std::size_t num_prefix_chars_;     // # of chars of prefix in this message
   std::size_t num_chars_to_log_;     // # of chars of msg to send to log
   std::size_t num_chars_to_syslog_;  // # of chars of msg to send to syslog
-  const char* basename_;        // basename of file that called LOG
-  const char* fullname_;        // fullname of file that called LOG
-  const char* tag_;             // tag for platform loggers, or nullptr
-  bool has_been_flushed_;       // false => data has not been flushed
-  bool first_fatal_;            // true => this was first fatal msg
+  const char* basename_;             // basename of file that called LOG
+  const char* fullname_;             // fullname of file that called LOG
+  const char* tag_;                  // tag for platform loggers, or nullptr
+  // Wide text whose UTF-8 encoding occupies [wide_begin_, wide_end_) of
+  // message_text_, or nullptr.
+  const wchar_t* wide_text_;
+  size_t wide_length_;
+  size_t wide_begin_;
+  size_t wide_end_;
+  bool has_been_flushed_;  // false => data has not been flushed
+  bool first_fatal_;       // true => this was first fatal msg
   std::thread::id thread_id_;
 
   // Byte lengths of the individual fields making up the default log
@@ -873,6 +880,17 @@ inline void LogDestination::SetEmailLogging(LogSeverity min_severity,
   LogDestination::addresses_ = addresses;
 }
 
+// Returns the wide text whose encoding the message text contains, or an empty
+// span.
+static internal::WideSpan WideSpanOf(const internal::LogMessageData& data) {
+  if (data.wide_text_ == nullptr) {
+    return {};
+  }
+  return {data.message_text_ + data.wide_begin_,
+          data.message_text_ + data.wide_end_, data.wide_text_,
+          data.wide_length_};
+}
+
 // Adapts a FILE* stream to the formatter that WithColor() in
 // internal/styled_output.h and Hyperlink::Wrap() expect, and writes the
 // colored content as well.
@@ -883,15 +901,27 @@ struct FileFormatter {
   // stream in a single write instead of one per field. Legacy console colors
   // change the console state between writes and therefore write directly.
   std::string* buffer = nullptr;
+  // Wide text of the message, which a console receives in place of its
+  // encoding.
+  internal::WideSpan wide = {};
 
   void AppendString(const char* text, std::size_t len) { Write(text, len); }
 
   void Write(const char* text, std::size_t len) {
-    if (buffer != nullptr) {
+    // Text that refers to the wide text is written directly, since the
+    // buffer would move it away from the span.
+    if (buffer != nullptr && !Overlaps(text, len)) {
       buffer->append(text, len);
     } else {
-      internal::WriteUtf8(output, text, len);
+      Flush();
+      internal::WriteUtf8(output, text, len, wide);
     }
+  }
+
+  bool Overlaps(const char* text, std::size_t len) const {
+    const std::less<const char*> before;
+    return wide.text != nullptr && before(text, wide.end) &&
+           before(wide.begin, text + len);
   }
 
   // Writes the collected line.
@@ -1128,7 +1158,8 @@ static void ColoredWriteToStderrOrStdoutWithFields(
     const ColorMode mode =
         want_color ? StreamColorMode(output) : ColorMode::kNone;
     if (mode == ColorMode::kNone) {
-      internal::WriteUtf8(output, data.message_text_, data.num_chars_to_log_);
+      internal::WriteUtf8(output, data.message_text_, data.num_chars_to_log_,
+                          WideSpanOf(data));
       MaybeFlushStdout(output, data.severity_);
       return;
     }
@@ -1136,7 +1167,8 @@ static void ColoredWriteToStderrOrStdoutWithFields(
     const Theme& theme = DefaultTheme();
     const ColorSpec text_spec = theme.Get(SeverityToRole(data.severity_));
     std::string line_buffer;
-    FileFormatter formatter{output, ColoredLineBuffer(mode, line_buffer)};
+    FileFormatter formatter{output, ColoredLineBuffer(mode, line_buffer),
+                            WideSpanOf(data)};
     const bool hyperlinks_enabled =
         mode == ColorMode::kAnsi &&
         nglog::GetFlag(FLAGS_symbolize_hyperlinks) &&
@@ -1167,7 +1199,7 @@ static void ColoredWriteToStderrOrStdoutWithFields(
   // Avoid using cerr from this module since we may get called during
   // exit code, and cerr may be partially or fully destroyed by then.
   if (mode == ColorMode::kNone) {
-    internal::WriteUtf8(output, message, len);
+    internal::WriteUtf8(output, message, len, WideSpanOf(data));
     MaybeFlushStdout(output, data.severity_);
     return;
   }
@@ -1178,7 +1210,8 @@ static void ColoredWriteToStderrOrStdoutWithFields(
                             text_spec.background != Color::kDefault ||
                             text_spec.style != TextStyle::kNone;
   std::string line_buffer;
-  FileFormatter formatter{output, ColoredLineBuffer(mode, line_buffer)};
+  FileFormatter formatter{output, ColoredLineBuffer(mode, line_buffer),
+                          WideSpanOf(data)};
 
   // The severity character, timestamp, thread id, file:line, and closing
   // "]" fields of the prefix are each colored separately. The message
@@ -1314,7 +1347,8 @@ inline void LogDestination::MaybeLogToStderr(
     ColoredWriteToStderrWithFields(data);
     AlsoErrorWrite(data.severity_, MessageTag(data),
                    data.message_text_ + data.num_prefix_chars_,
-                   data.num_chars_to_log_ - data.num_prefix_chars_);
+                   data.num_chars_to_log_ - data.num_prefix_chars_,
+                   WideSpanOf(data));
   }
 }
 
@@ -2285,6 +2319,7 @@ void LogMessage::Init(const char* file, int line, LogSeverity severity,
   data_->basename_ = const_basename(file);
   data_->fullname_ = file;
   data_->tag_ = nullptr;
+  data_->wide_text_ = nullptr;
   data_->has_been_flushed_ = false;
   data_->thread_id_ =
       origin != nullptr ? origin->thread_id : std::this_thread::get_id();
@@ -2821,6 +2856,39 @@ void WaitForPendingMessages() {
 }
 
 }  // namespace
+
+void LogMessageAccess::AppendWide(LogMessage& message, const wchar_t* text,
+                                  std::size_t length) {
+  LogMessageData& data = *message.data_;
+  struct Appender {
+    std::ostream* stream;
+    std::size_t length;
+  };
+  Appender appender{&data.stream_, 0};
+  const std::size_t begin = data.stream_.pcount();
+  WriteWideAsUtf8(
+      text, length,
+      [](const char* input, std::size_t input_length, void* context) {
+        auto* const target = static_cast<Appender*>(context);
+        target->stream->write(input,
+                              static_cast<std::streamsize>(input_length));
+        target->length += input_length;
+        return true;
+      },
+      &appender);
+  const std::size_t end = data.stream_.pcount();
+  // A full stream drops the rest of the encoding silently.
+  if (end - begin == appender.length) {
+    data.wide_text_ = text;
+    data.wide_length_ = length;
+    data.wide_begin_ = begin;
+    data.wide_end_ = end;
+  }
+}
+
+WideSpan LogMessageAccess::WideSpanOf(const LogMessage& message) noexcept {
+  return nglog::WideSpanOf(*message.data_);
+}
 
 }  // namespace internal
 

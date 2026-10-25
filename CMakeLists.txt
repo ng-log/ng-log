@@ -551,6 +551,7 @@ set (NGLOG_PUBLIC_H
   src/ng-log/internal/styled_value.h
   src/ng-log/internal/text_attributes.h
   src/ng-log/internal/text_style.h
+  src/ng-log/internal/utf8_encoder.h
   src/ng-log/log_message.h
   src/ng-log/log_setup.h
   src/ng-log/log_severity.h

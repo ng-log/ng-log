@@ -39,6 +39,7 @@
 #define PRIoS __PRIS_PREFIX "o"
 
 #include "config.h"
+#include "internal/utf8.h"
 #include "ng-log/platform.h"
 #if defined(NGLOG_OS_WINDOWS)
 #  include "port.h"
@@ -108,8 +109,11 @@ std::intmax_t SafeWrite(int fd, const void* data, std::size_t size) noexcept;
 
 inline namespace tools {
 
+// Writes the message to the platform logger, such as the debugger on Windows,
+// which receives the wide text in place of its encoding.
 void AlsoErrorWrite(LogSeverity severity, const char* tag, const char* message,
-                    std::size_t message_length) noexcept;
+                    std::size_t message_length,
+                    const internal::WideSpan& wide = {}) noexcept;
 
 void SetThreadName(const char* name);
 

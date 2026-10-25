@@ -24,6 +24,48 @@ namespace internal {
 NGLOG_NO_EXPORT bool WriteUtf8(std::FILE* output, const char* input,
                                std::size_t input_length);
 
+/**
+ * Wide text whose UTF-8 encoding, as WriteWideAsUtf8() writes it, occupies
+ * [begin, end) of narrow text. Writers of wide characters write the wide text
+ * in place of its encoding, so that it reaches them without conversion.
+ */
+struct WideSpan {
+  const char* begin = nullptr;
+  const char* end = nullptr;
+  const wchar_t* text = nullptr;
+  std::size_t length = 0;
+};
+
+/**
+ * Writes UTF-8 text like WriteUtf8(std::FILE*, const char*, std::size_t),
+ * except that a Windows console receives the wide text @p wide covers in
+ * place of its encoding.
+ */
+NGLOG_NO_EXPORT bool WriteUtf8(std::FILE* output, const char* input,
+                               std::size_t input_length, const WideSpan& wide);
+
+//! Maximum number of bytes passed to a Utf8WriteFunction at once.
+constexpr std::size_t kMaximumUtf8ChunkLength = 1024;
+
+using Utf8WriteFunction = bool (*)(const char* input, std::size_t input_length,
+                                   void* context);
+
+/**
+ * Writes the UTF-8 encoding of wide text in chunks of at most
+ * kMaximumUtf8ChunkLength bytes that end on code point boundaries.
+ *
+ * Code units that do not form a Unicode scalar value, such as unpaired
+ * surrogates, are written as U+FFFD. Nothing is allocated, so that signal
+ * handlers may call the function.
+ *
+ * @return @c false if @p input is null while @p input_length is not zero, if
+ *   @p writer is null, or if @p writer fails, which stops writing.
+ */
+NGLOG_NO_EXPORT bool WriteWideAsUtf8(const wchar_t* input,
+                                     std::size_t input_length,
+                                     Utf8WriteFunction writer,
+                                     void* context) noexcept;
+
 #ifdef NGLOG_OS_WINDOWS
 enum class WindowsPathKind { kInvalid, kNarrow, kWide };
 
@@ -55,6 +97,18 @@ NGLOG_NO_EXPORT bool WriteUtf8AsWide(const char* input,
 NGLOG_NO_EXPORT bool WriteWideAsChunks(const wchar_t* input,
                                        std::size_t input_length,
                                        WideWriteFunction writer, void* context);
+/**
+ * Writes UTF-8 text like WriteUtf8AsWide(), except for the part that @p wide
+ * covers, whose wide text is written unchanged.
+ *
+ * The text may be a part of the text @p wide refers to, such as a line of it.
+ * A part that ends within an encoded code point is converted instead.
+ */
+NGLOG_NO_EXPORT bool WriteUtf8WithWideAsWide(const char* input,
+                                             std::size_t input_length,
+                                             const WideSpan& wide,
+                                             WideWriteFunction writer,
+                                             void* context);
 NGLOG_NO_EXPORT bool WriteUtf8ToFileDescriptor(int file_descriptor,
                                                const char* input,
                                                std::size_t input_length);

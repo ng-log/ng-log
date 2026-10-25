@@ -5,8 +5,10 @@
 
 #include "internal/utf8.h"
 
+#include <array>
 #include <cerrno>
 
+#include "ng-log/internal/utf8_encoder.h"
 #include "ng-log/platform.h"
 
 #ifdef NGLOG_OS_WINDOWS
@@ -19,11 +21,11 @@
 #  include <pathcch.h>
 
 #  include <algorithm>
-#  include <array>
 #  include <climits>
 #  include <cstdint>
 #  include <cstring>
 #  include <cwchar>
+#  include <functional>
 #  include <limits>
 #  include <string>
 #  include <utility>
@@ -641,12 +643,28 @@ bool WriteBytesToFileDescriptor(int file_descriptor, const char* input,
                   });
 }
 
+// ASCII text, unlike the encoding of other wide text, equals its wide text.
 bool WriteUtf8ToConsole(HANDLE handle, const char* input,
-                        std::size_t input_length) {
+                        std::size_t input_length, const WideSpan& wide = {}) {
   if (IsAscii(input, input_length)) {
     return WriteBytesToHandle(handle, input, input_length);
   }
-  return WriteUtf8AsWide(input, input_length, WriteWideToConsole, handle);
+  return WriteUtf8WithWideAsWide(input, input_length, wide, WriteWideToConsole,
+                                 handle);
+}
+
+// Returns the length of the next chunk of at most kMaximumWideChunkLength code
+// units that does not split a surrogate pair.
+std::size_t WideChunkLength(const wchar_t* input, std::size_t input_length) {
+  constexpr wchar_t kHighSurrogateMin = 0xd800;
+  constexpr wchar_t kHighSurrogateMax = 0xdbff;
+  std::size_t chunk_length = std::min(input_length, kMaximumWideChunkLength);
+  const wchar_t last = input[chunk_length - 1];
+  if (chunk_length < input_length && last >= kHighSurrogateMin &&
+      last <= kHighSurrogateMax) {
+    --chunk_length;
+  }
+  return chunk_length;
 }
 
 }  // namespace
@@ -694,6 +712,86 @@ bool WriteUtf8AsWide(const char* input, std::size_t input_length,
   return true;
 }
 
+namespace {
+
+// Determines the code unit of wide text whose UTF-8 encoding begins at the
+// byte offset. Fails unless the offset lies between two encoded code points.
+bool WideOffsetOf(const WideSpan& wide, std::size_t narrow_offset,
+                  std::size_t* wide_offset) {
+  Utf8Encoder encoder;
+  std::array<char, Utf8Encoder::kMaximumLength> encoded;
+  std::size_t position = 0;
+  // A high surrogate encodes nothing until the next code unit completes it,
+  // so an offset is found at the high surrogate before its low surrogate.
+  for (std::size_t index = 0; index < wide.length; ++index) {
+    if (position == narrow_offset) {
+      *wide_offset = index;
+      return true;
+    }
+    position += encoder.Put(wide.text[index], encoded.data());
+  }
+  position += encoder.Finish(encoded.data());
+  if (position != narrow_offset) {
+    return false;
+  }
+  *wide_offset = wide.length;
+  return true;
+}
+
+// Writes wide text in chunks that keep surrogate pairs and null characters.
+bool WriteWideUnchanged(const wchar_t* input, std::size_t input_length,
+                        WideWriteFunction writer, void* context) {
+  std::size_t offset = 0;
+  while (offset < input_length) {
+    const std::size_t chunk_length =
+        WideChunkLength(input + offset, input_length - offset);
+    if (!WriteAll(
+            input + offset, chunk_length, chunk_length,
+            [writer, context](const wchar_t* chunk, std::size_t chunk_size,
+                              std::size_t* written) {
+              return writer(chunk, chunk_size, written, context);
+            })) {
+      return false;
+    }
+    offset += chunk_length;
+  }
+  return true;
+}
+
+}  // namespace
+
+bool WriteUtf8WithWideAsWide(const char* input, std::size_t input_length,
+                             const WideSpan& wide, WideWriteFunction writer,
+                             void* context) {
+  if ((input == nullptr && input_length != 0) || writer == nullptr) {
+    return SetConversionError();
+  }
+
+  // An empty span overlaps no text. The text and the encoding of the wide text
+  // may belong to different buffers, whose addresses only std::less orders.
+  const std::less<const char*> before;
+  const char* const end = input + input_length;
+  const char* const overlap_begin =
+      before(input, wide.begin) ? wide.begin : input;
+  const char* const overlap_end = before(wide.end, end) ? wide.end : end;
+  std::size_t wide_begin = 0;
+  std::size_t wide_end = 0;
+  if (!before(overlap_begin, overlap_end) ||
+      !WideOffsetOf(wide, static_cast<std::size_t>(overlap_begin - wide.begin),
+                    &wide_begin) ||
+      !WideOffsetOf(wide, static_cast<std::size_t>(overlap_end - wide.begin),
+                    &wide_end)) {
+    return WriteUtf8AsWide(input, input_length, writer, context);
+  }
+  return WriteUtf8AsWide(input, static_cast<std::size_t>(overlap_begin - input),
+                         writer, context) &&
+         WriteWideUnchanged(wide.text + wide_begin, wide_end - wide_begin,
+                            writer, context) &&
+         WriteUtf8AsWide(overlap_end,
+                         static_cast<std::size_t>(end - overlap_end), writer,
+                         context);
+}
+
 bool WriteWideAsChunks(const wchar_t* input, std::size_t input_length,
                        WideWriteFunction writer, void* context) {
   if ((input == nullptr && input_length != 0) || writer == nullptr) {
@@ -709,16 +807,8 @@ bool WriteWideAsChunks(const wchar_t* input, std::size_t input_length,
       break;
     }
 
-    const std::size_t remaining = input_length - offset;
-    std::size_t chunk_length = std::min(remaining, kMaximumWideChunkLength);
-    constexpr wchar_t kHighSurrogateMin = 0xd800;
-    constexpr wchar_t kHighSurrogateMax = 0xdbff;
-    const wchar_t last = input[offset + chunk_length - 1];
-    // Keep surrogate pairs within a single chunk.
-    if (chunk_length < remaining && last >= kHighSurrogateMin &&
-        last <= kHighSurrogateMax) {
-      --chunk_length;
-    }
+    const std::size_t chunk_length =
+        WideChunkLength(input + offset, input_length - offset);
     const wchar_t* const null_character =
         std::find(input + offset, input + offset + chunk_length, L'\0');
     const std::size_t writable_length =
@@ -757,7 +847,44 @@ bool WriteSignalSafeToFileDescriptor(int file_descriptor, const char* input,
 
 #endif  // NGLOG_OS_WINDOWS
 
+bool WriteWideAsUtf8(const wchar_t* input, std::size_t input_length,
+                     Utf8WriteFunction writer, void* context) noexcept {
+  if ((input == nullptr && input_length != 0) || writer == nullptr) {
+    return false;
+  }
+
+  std::array<char, kMaximumUtf8ChunkLength> buffer;
+  std::size_t length = 0;
+  Utf8Encoder encoder;
+  // Flushing before the encoder could overflow the buffer ends every chunk on
+  // a code point boundary.
+  const auto reserve = [&buffer, &length, writer, context] {
+    if (buffer.size() - length < Utf8Encoder::kMaximumLength) {
+      if (!writer(buffer.data(), length, context)) {
+        return false;
+      }
+      length = 0;
+    }
+    return true;
+  };
+  for (std::size_t offset = 0; offset < input_length; ++offset) {
+    if (!reserve()) {
+      return false;
+    }
+    length += encoder.Put(input[offset], buffer.data() + length);
+  }
+  // Finish() writes only after a high surrogate, whose Put() wrote nothing
+  // into the space reserved for it.
+  length += encoder.Finish(buffer.data() + length);
+  return length == 0 || writer(buffer.data(), length, context);
+}
+
 bool WriteUtf8(std::FILE* output, const char* input, std::size_t input_length) {
+  return WriteUtf8(output, input, input_length, WideSpan{});
+}
+
+bool WriteUtf8(std::FILE* output, const char* input, std::size_t input_length,
+               const WideSpan& wide) {
   if (output == nullptr || (input == nullptr && input_length != 0)) {
     errno = EINVAL;
     return false;
@@ -773,13 +900,15 @@ bool WriteUtf8(std::FILE* output, const char* input, std::size_t input_length) {
     if (std::fflush(output) != 0) {
       return false;
     }
-    if (WriteUtf8ToConsole(handle, input, input_length)) {
+    if (WriteUtf8ToConsole(handle, input, input_length, wide)) {
       return true;
     }
     if (RefreshConsoleStream(output, handle)) {
       return false;
     }
   }
+#else
+  static_cast<void>(wide);
 #endif
 
   // Redirected output keeps the translation mode chosen by the application.

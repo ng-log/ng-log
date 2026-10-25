@@ -67,7 +67,9 @@
 #ifdef NGLOG_ENABLE_LOCK_METRICS
 #  include "internal/lock_metrics.h"
 #endif
+#include "internal/log_message_access.h"
 #include "internal/path.h"
+#include "internal/utf8.h"
 #include "mock-log.h"
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
@@ -998,6 +1000,89 @@ TEST(DeathRawCHECK, logging) {
                      "RAW: Check 1 == 2 failed: failure 2");
 }
 #endif
+
+namespace {
+
+constexpr wchar_t kUnpairedSurrogate = L'\xDC00';
+// Length of the UTF-8 encoding of L"wide".
+constexpr size_t kWideEncodingLength = 4;
+
+// Number of bytes the stream of the message can still hold. The stream keeps
+// room for a newline and a null character.
+size_t RemainingCapacity(LogMessage& message) {
+  constexpr size_t kReservedLength = 2;
+  return LogMessage::kMaxLogMessageLen - kReservedLength -
+         static_cast<LogMessage::LogStream&>(message.stream()).pcount();
+}
+
+}  // namespace
+
+TEST(LogMessageWideText, RecordsItsEncoding) {
+  const std::wstring wide{L'a', kUnpairedSurrogate, L'b'};
+  vector<string> texts;
+  {
+    LogMessage message(__FILE__, __LINE__, NGLOG_INFO, &texts);
+    message.stream() << "prefix ";
+    nglog::internal::LogMessageAccess::AppendWide(message, wide.data(),
+                                                  wide.size());
+    message.stream() << " suffix";
+
+    const nglog::internal::WideSpan span =
+        nglog::internal::LogMessageAccess::WideSpanOf(message);
+    EXPECT_EQ(span.text, wide.data());
+    EXPECT_EQ(span.length, wide.size());
+    ASSERT_NE(span.begin, nullptr);
+    EXPECT_EQ(string(span.begin, span.end),
+              "a\xEF\xBF\xBD"
+              "b");
+    EXPECT_EQ(string(span.begin - strlen("prefix "), span.begin), "prefix ");
+    EXPECT_EQ(string(span.end, span.end + strlen(" suffix")), " suffix");
+  }
+  EXPECT_THAT(texts, ElementsAre(HasSubstr("prefix a\xEF\xBF\xBD"
+                                           "b suffix")));
+}
+
+TEST(LogMessageWideText, IsRecordedWhenItsEncodingFits) {
+  const std::wstring wide = L"wide";
+  vector<string> texts;
+  LogMessage message(__FILE__, __LINE__, NGLOG_INFO, &texts);
+  message.stream() << string(RemainingCapacity(message) - kWideEncodingLength,
+                             'x');
+  nglog::internal::LogMessageAccess::AppendWide(message, wide.data(),
+                                                wide.size());
+
+  EXPECT_EQ(nglog::internal::LogMessageAccess::WideSpanOf(message).text,
+            wide.data());
+}
+
+TEST(LogMessageWideText, IsNotRecordedWhenItsEncodingIsTruncated) {
+  const std::wstring wide = L"wide";
+  vector<string> texts;
+  LogMessage message(__FILE__, __LINE__, NGLOG_INFO, &texts);
+  message.stream() << string(
+      RemainingCapacity(message) - kWideEncodingLength + 1, 'x');
+  nglog::internal::LogMessageAccess::AppendWide(message, wide.data(),
+                                                wide.size());
+
+  EXPECT_EQ(nglog::internal::LogMessageAccess::WideSpanOf(message).text,
+            nullptr);
+}
+
+TEST(LogMessageWideText, IsForgottenByLaterMessages) {
+  const std::wstring wide = L"wide";
+  vector<string> texts;
+  {
+    LogMessage first(__FILE__, __LINE__, NGLOG_INFO, &texts);
+    nglog::internal::LogMessageAccess::AppendWide(first, wide.data(),
+                                                  wide.size());
+    ASSERT_EQ(nglog::internal::LogMessageAccess::WideSpanOf(first).text,
+              wide.data());
+  }
+  LogMessage second(__FILE__, __LINE__, NGLOG_INFO, &texts);
+
+  EXPECT_EQ(nglog::internal::LogMessageAccess::WideSpanOf(second).text,
+            nullptr);
+}
 
 void TestLogString() {
   vector<string> errors;

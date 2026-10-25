@@ -8,8 +8,10 @@
 #define NGLOG_INTERNAL_LOG_MESSAGE_ACCESS_H
 
 #include <chrono>
+#include <cstddef>
 #include <thread>
 
+#include "internal/utf8.h"
 #include "ng-log/export.h"
 #include "ng-log/log_message.h"
 #include "stacktrace.h"
@@ -58,6 +60,22 @@ struct LogMessageAccess {
    */
   NGLOG_NO_EXPORT static void SetTag(LogMessage& message,
                                      const char* tag) noexcept;
+
+  /**
+   * Appends the UTF-8 encoding of wide text to the message and records the
+   * wide text, which writers of wide characters, such as the Windows console,
+   * write instead of its encoding. The text is not recorded if the message
+   * truncates its encoding.
+   *
+   * The text must outlive the message.
+   */
+  NGLOG_NO_EXPORT static void AppendWide(LogMessage& message,
+                                         const wchar_t* text,
+                                         std::size_t length);
+
+  //! The wide text the message records, or an empty span.
+  NGLOG_NO_EXPORT static WideSpan WideSpanOf(
+      const LogMessage& message) noexcept;
 };
 
 //! Appends ": strerror(errno) [errno]" for the errno preserved by the message.

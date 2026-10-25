@@ -11,12 +11,16 @@
 #include <sys/types.h>
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
+#include <limits>
 #include <regex>
 #include <string>
+#include <vector>
 
 #if defined(NGLOG_OS_WINDOWS) && defined(HAVE_GET_THREAD_DESCRIPTION)
 #  include <windows.h>
@@ -55,6 +59,7 @@ void LogSystemResultOutsideNamespace(DWORD result) { LOG_SYSRESULT(result); }
 #  include <cstdint>
 #  include <limits>
 #  include <stdexcept>
+#  include <utility>
 #  include <vector>
 
 #  include "long_path_test.h"
@@ -617,6 +622,175 @@ TEST(Utf8Output, PreservesLengthDelimitedBytes) {
   EXPECT_THAT(output, ElementsAreArray(message));
 }
 
+namespace {
+
+// Records the chunks WriteWideAsUtf8() writes and fails once the given number
+// of chunks has been recorded.
+struct Utf8Chunks {
+  std::vector<std::string> chunks;
+  std::size_t maximum_chunks = std::numeric_limits<std::size_t>::max();
+  std::size_t calls = 0;
+
+  std::string Joined() const {
+    std::string text;
+    for (const std::string& chunk : chunks) {
+      text += chunk;
+    }
+    return text;
+  }
+};
+
+bool RecordUtf8Chunk(const char* input, std::size_t input_length,
+                     void* context) {
+  auto* const recorded = static_cast<Utf8Chunks*>(context);
+  ++recorded->calls;
+  if (recorded->chunks.size() == recorded->maximum_chunks) {
+    return false;
+  }
+  recorded->chunks.emplace_back(input, input_length);
+  return true;
+}
+
+// Encodes wide text into a single string.
+std::string EncodeWide(const std::wstring& text) {
+  Utf8Chunks recorded;
+  EXPECT_TRUE(nglog::internal::WriteWideAsUtf8(text.data(), text.size(),
+                                               RecordUtf8Chunk, &recorded));
+  return recorded.Joined();
+}
+
+constexpr wchar_t kHighSurrogate = L'\xD83D';
+constexpr wchar_t kLowSurrogate = L'\xDE00';
+constexpr char kReplacementCharacter[] = "\xEF\xBF\xBD";
+
+}  // namespace
+
+TEST(WideToUtf8, EncodesBasicMultilingualPlane) {
+  EXPECT_EQ(EncodeWide(L"a\u00e9\u20ac\uffee"),
+            "a\xC3\xA9\xE2\x82\xAC\xEF\xBF\xAE");
+}
+
+TEST(WideToUtf8, EncodesCodePointsAtLengthBoundaries) {
+  EXPECT_EQ(EncodeWide(L"\u007f\u0080"), "\x7F\xC2\x80");
+  EXPECT_EQ(EncodeWide(L"\u07ff\u0800"), "\xDF\xBF\xE0\xA0\x80");
+  EXPECT_EQ(EncodeWide(L"\uffff\U00010000"), "\xEF\xBF\xBF\xF0\x90\x80\x80");
+}
+
+// The code points next to the surrogates and the bounds of the
+// supplementary planes, which UTF-16 encodes using the bounds of the
+// surrogates.
+TEST(WideToUtf8, EncodesCodePointsAroundSurrogates) {
+  EXPECT_EQ(EncodeWide(L"\ud7ff\ue000"), "\xED\x9F\xBF\xEE\x80\x80");
+  EXPECT_EQ(EncodeWide(L"\U00010000\U0010FFFF"),
+            "\xF0\x90\x80\x80\xF4\x8F\xBF\xBF");
+}
+
+TEST(WideToUtf8, EncodesSupplementaryCharacters) {
+  EXPECT_EQ(EncodeWide(L"\U0001F600\U0010FFFF"),
+            "\xF0\x9F\x98\x80\xF4\x8F\xBF\xBF");
+}
+
+TEST(WideToUtf8, PreservesEmbeddedNullCharacters) {
+  const std::wstring text(L"a\0b", 3);
+  EXPECT_EQ(EncodeWide(text), std::string("a\0b", 3));
+}
+
+TEST(WideToUtf8, ReplacesUnpairedSurrogates) {
+  const std::wstring lone_high{L'a', kHighSurrogate, L'b'};
+  const std::wstring lone_low{L'a', kLowSurrogate, L'b'};
+  const std::wstring reversed{kLowSurrogate, kHighSurrogate};
+  const std::wstring trailing_high{L'a', kHighSurrogate};
+  const std::string replacement = kReplacementCharacter;
+
+  EXPECT_EQ(EncodeWide(lone_high), "a" + replacement + "b");
+  EXPECT_EQ(EncodeWide(lone_low), "a" + replacement + "b");
+  EXPECT_EQ(EncodeWide(reversed), replacement + replacement);
+  EXPECT_EQ(EncodeWide(trailing_high), "a" + replacement);
+}
+
+TEST(WideToUtf8, PairsSurrogatesOfUtf16) {
+  if (sizeof(wchar_t) != sizeof(char16_t)) {
+    GTEST_SKIP() << sizeof(wchar_t) << "-byte wchar_t holds UTF-32";
+  }
+  const std::wstring pair{kHighSurrogate, kLowSurrogate};
+  const std::wstring repeated_high{kHighSurrogate, kHighSurrogate,
+                                   kLowSurrogate};
+  const std::string replacement = kReplacementCharacter;
+
+  EXPECT_EQ(EncodeWide(pair), "\xF0\x9F\x98\x80");
+  EXPECT_EQ(EncodeWide(repeated_high), replacement + "\xF0\x9F\x98\x80");
+}
+
+TEST(WideToUtf8, ReplacesSurrogatesOfUtf32) {
+  if (sizeof(wchar_t) != sizeof(char32_t)) {
+    GTEST_SKIP() << sizeof(wchar_t) << "-byte wchar_t holds UTF-16";
+  }
+  const std::wstring pair{kHighSurrogate, kLowSurrogate};
+  const std::wstring bounds{L'\xD800', L'\xDFFF'};
+  const std::string replacement = kReplacementCharacter;
+
+  EXPECT_EQ(EncodeWide(pair), replacement + replacement);
+  EXPECT_EQ(EncodeWide(bounds), replacement + replacement);
+}
+
+TEST(WideToUtf8, ReplacesCodeUnitsBeyondUnicode) {
+  if (sizeof(wchar_t) < sizeof(char32_t)) {
+    GTEST_SKIP() << "every code unit of " << sizeof(wchar_t)
+                 << "-byte wchar_t lies within Unicode";
+  }
+  constexpr std::uint32_t kBeyondUnicode = 0x110000;
+  const std::wstring text{L'a', static_cast<wchar_t>(kBeyondUnicode),
+                          static_cast<wchar_t>(-1), L'b'};
+  const std::string replacement = kReplacementCharacter;
+
+  EXPECT_EQ(EncodeWide(text), "a" + replacement + replacement + "b");
+}
+
+TEST(WideToUtf8, WritesLargeTextInCodePointAlignedChunks) {
+  constexpr std::size_t kCodePoints = 300;
+  constexpr std::size_t kEncodedLength = 4;
+  std::wstring text;
+  std::string expected;
+  for (std::size_t i = 0; i < kCodePoints; ++i) {
+    text += L"\U0001F600";
+    expected += "\xF0\x9F\x98\x80";
+  }
+  Utf8Chunks recorded;
+
+  ASSERT_TRUE(nglog::internal::WriteWideAsUtf8(text.data(), text.size(),
+                                               RecordUtf8Chunk, &recorded));
+
+  EXPECT_GT(recorded.chunks.size(), 1U);
+  for (const std::string& chunk : recorded.chunks) {
+    EXPECT_LE(chunk.size(), nglog::internal::kMaximumUtf8ChunkLength);
+    EXPECT_EQ(chunk.size() % kEncodedLength, 0U)
+        << "chunk of " << chunk.size() << " bytes splits a code point";
+  }
+  EXPECT_EQ(recorded.Joined(), expected);
+}
+
+TEST(WideToUtf8, StopsWhenWriterFails) {
+  const std::wstring text(nglog::internal::kMaximumUtf8ChunkLength * 2, L'a');
+  Utf8Chunks recorded;
+  recorded.maximum_chunks = 1;
+
+  EXPECT_FALSE(nglog::internal::WriteWideAsUtf8(text.data(), text.size(),
+                                                RecordUtf8Chunk, &recorded));
+  EXPECT_EQ(recorded.chunks.size(), 1U);
+  EXPECT_EQ(recorded.calls, 2U);
+}
+
+TEST(WideToUtf8, RejectsNullInputWithLength) {
+  constexpr std::size_t kLength = 1;
+  Utf8Chunks recorded;
+
+  EXPECT_FALSE(nglog::internal::WriteWideAsUtf8(nullptr, kLength,
+                                                RecordUtf8Chunk, &recorded));
+  EXPECT_TRUE(
+      nglog::internal::WriteWideAsUtf8(nullptr, 0, RecordUtf8Chunk, &recorded));
+  EXPECT_THAT(recorded.chunks, IsEmpty());
+}
+
 #ifdef NGLOG_OS_WINDOWS
 TEST(Utf8Output, PreservesRedirectedTextModeBytes) {
   const std::unique_ptr<std::FILE> file_owner{std::tmpfile()};
@@ -1164,6 +1338,115 @@ TEST(Utf8Output, KeepsSurrogatePairsWithinWideChunks) {
     output += chunk;
   }
   EXPECT_EQ(output, message);
+}
+
+namespace {
+
+constexpr wchar_t kUnpairedLowSurrogate = L'\xDC00';
+
+// Narrow text that embeds the UTF-8 encoding of wide text between a prefix and
+// a suffix, and the span that refers to the encoding.
+class EmbeddedWideText {
+ public:
+  EmbeddedWideText(const std::string& prefix, std::wstring text,
+                   const std::string& suffix)
+      : text_{std::move(text)},
+        narrow_{prefix + EncodeWide(text_) + suffix},
+        begin_{prefix.size()},
+        end_{narrow_.size() - suffix.size()} {}
+  EmbeddedWideText(const EmbeddedWideText& other) = delete;
+  EmbeddedWideText& operator=(const EmbeddedWideText& other) = delete;
+
+  const std::string& narrow() const noexcept { return narrow_; }
+  std::size_t begin() const noexcept { return begin_; }
+
+  nglog::internal::WideSpan span() const noexcept {
+    return {narrow_.data() + begin_, narrow_.data() + end_, text_.data(),
+            text_.size()};
+  }
+
+ private:
+  std::wstring text_;
+  std::string narrow_;
+  std::size_t begin_;
+  std::size_t end_;
+};
+
+// Writes the part [begin, end) of the narrow text.
+std::wstring WriteEmbeddedPart(const EmbeddedWideText& text, std::size_t begin,
+                               std::size_t end) {
+  WideWriteContext context;
+  EXPECT_TRUE(nglog::internal::WriteUtf8WithWideAsWide(
+      text.narrow().data() + begin, end - begin, text.span(), AppendWideOutput,
+      &context));
+  return context.output;
+}
+
+}  // namespace
+
+TEST(Utf8Output, WritesWideTextWithoutConversion) {
+  const std::wstring wide{L'a', kUnpairedLowSurrogate, L'\0', kHighSurrogate,
+                          kLowSurrogate};
+  const EmbeddedWideText text{"prefix ", wide, " suffix"};
+
+  EXPECT_EQ(WriteEmbeddedPart(text, 0, text.narrow().size()),
+            L"prefix " + wide + L" suffix");
+}
+
+// The replacement of a trailing high surrogate ends the encoding.
+TEST(Utf8Output, WritesWideTextEndingInHighSurrogateWithoutConversion) {
+  const std::wstring wide{L'a', kHighSurrogate};
+  const EmbeddedWideText text{"", wide, " suffix"};
+
+  EXPECT_EQ(WriteEmbeddedPart(text, 0, text.narrow().size()),
+            wide + L" suffix");
+}
+
+TEST(Utf8Output, WritesWideTextLongerThanChunkWithoutConversion) {
+  constexpr std::size_t kTrailingLength = 1500;
+  std::wstring wide(nglog::internal::kMaximumWideChunkLength - 1, L'a');
+  wide += kHighSurrogate;
+  wide += kLowSurrogate;
+  wide += kUnpairedLowSurrogate;
+  wide.append(kTrailingLength, L'b');
+  const EmbeddedWideText text{"", wide, ""};
+
+  EXPECT_EQ(WriteEmbeddedPart(text, 0, text.narrow().size()), wide);
+}
+
+TEST(Utf8Output, WritesLinesOfWideTextWithoutConversion) {
+  const std::wstring wide{L'a', kUnpairedLowSurrogate, L'\n', L'b',
+                          kUnpairedLowSurrogate};
+  const EmbeddedWideText text{"", wide, ""};
+  const std::size_t newline = text.narrow().find('\n');
+  ASSERT_NE(newline, std::string::npos);
+
+  const std::wstring first_line = WriteEmbeddedPart(text, 0, newline);
+  const std::wstring separator = WriteEmbeddedPart(text, newline, newline + 1);
+  const std::wstring second_line =
+      WriteEmbeddedPart(text, newline + 1, text.narrow().size());
+
+  EXPECT_EQ(first_line, wide.substr(0, 2));
+  EXPECT_EQ(separator, L"\n");
+  EXPECT_EQ(second_line, wide.substr(3));
+}
+
+TEST(Utf8Output, ConvertsPartOfWideTextWithinCodePoint) {
+  const EmbeddedWideText text{"", L"\u00e9", ""};
+
+  EXPECT_EQ(WriteEmbeddedPart(text, 0, 1), L"\uFFFD");
+  EXPECT_EQ(WriteEmbeddedPart(text, 1, 2), L"\uFFFD");
+}
+
+TEST(Utf8Output, ConvertsTextOutsideWideText) {
+  const EmbeddedWideText text{"", std::wstring{L'a', kUnpairedLowSurrogate},
+                              ""};
+  constexpr char kOther[] = {'x', '\xFF'};
+  WideWriteContext context;
+
+  EXPECT_TRUE(nglog::internal::WriteUtf8WithWideAsWide(
+      kOther, sizeof(kOther), text.span(), AppendWideOutput, &context));
+  EXPECT_EQ(context.output, L"x\uFFFD");
 }
 
 TEST(Utf8StandardStream, RedirectionToReusedHandleWritesFile) {
