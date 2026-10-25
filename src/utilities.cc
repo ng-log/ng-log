@@ -376,11 +376,15 @@ std::string TrimTrailingCRLF(std::string message) {
 }
 
 const char* const_basename(const char* filepath) {
-  const char* base = strrchr(filepath, '/');
-#ifdef NGLOG_OS_WINDOWS  // Look for either path separator in Windows
-  if (!base) base = strrchr(filepath, '\\');
+  const char* base = std::strrchr(filepath, '/');
+#ifdef NGLOG_OS_WINDOWS
+  // Windows accepts either separator, also mixed within one path.
+  const char* const backslash = std::strrchr(filepath, '\\');
+  if (backslash != nullptr && (base == nullptr || backslash > base)) {
+    base = backslash;
+  }
 #endif
-  return base ? (base + 1) : filepath;
+  return base != nullptr ? base + 1 : filepath;
 }
 
 const char* ProgramInvocationShortName() {

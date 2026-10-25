@@ -356,6 +356,15 @@ TEST(EmscriptenConsole, MapsSeverityToConsoleLevel) {
             internal::EmscriptenLogLevel::kError);
 }
 
+TEST(utilities, BasenameFollowsTheLastSeparator) {
+  EXPECT_STREQ(nglog::tools::const_basename("dir/file.cc"), "file.cc");
+  EXPECT_STREQ(nglog::tools::const_basename("file.cc"), "file.cc");
+#ifdef NGLOG_OS_WINDOWS
+  EXPECT_STREQ(nglog::tools::const_basename("C:\\src/sub\\file.cc"), "file.cc");
+  EXPECT_STREQ(nglog::tools::const_basename("./build\\app.exe"), "app.exe");
+#endif
+}
+
 TEST(utilities, TrimTrailingCRLFRemovesTrailingNewlines) {
   EXPECT_EQ(nglog::TrimTrailingCRLF("message\r\n"), "message");
   EXPECT_EQ(nglog::TrimTrailingCRLF("message\n"), "message");
