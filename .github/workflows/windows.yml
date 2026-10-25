@@ -19,8 +19,11 @@ jobs:
       run:
         shell: powershell
     env:
-      CL: /MP
-      CXXFLAGS: /WX /permissive-
+      # Compiling several sources in one compiler process prevents caching
+      # them. The cached configurations run one compiler process per source in
+      # parallel instead. ccache refuses to run whenever CL is defined, even
+      # if empty, so /MP goes into the flags.
+      CXXFLAGS: ${{ matrix.codeql && '/WX /permissive- /MP' || '/WX /permissive-' }}
     strategy:
       fail-fast: true
       matrix:
@@ -34,11 +37,20 @@ jobs:
           - msvc: VS-18-2026
             os: windows-2025-vs2026
             generator: 'Visual Studio 18 2026'
+          # CodeQL traces the compiler and misses translation units served
+          # from the compiler cache. Analyze a single configuration without
+          # the cache.
+          - arch: x64
+            build_type: Release
+            lib: shared
+            std: 20
+            codeql: true
 
     steps:
       - uses: actions/checkout@v7
 
       - name: Initialize CodeQL
+        if: matrix.codeql
         uses: github/codeql-action/init@v4
         with:
           languages: cpp
@@ -76,10 +88,27 @@ jobs:
           echo "GTest_ROOT=$((Get-Item .).FullName)/gtest" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           echo "${{github.workspace}}/gtest/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - name: Setup Release Environment
-        if: matrix.build_type != 'Debug'
+      # The ccache that ships with the runner image is too old to cache
+      # these builds.
+      - name: Setup Compiler Cache
+        if: ${{ !matrix.codeql }}
+        uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          install: binary
+          key: msvc-${{matrix.arch}}-C++${{matrix.std}}-${{matrix.build_type}}-${{matrix.lib}}
+          evict-old-files: job
+          save: ${{ github.event_name == 'push' }}
+
+      # The Visual Studio generator ignores compiler launchers. MSBuild runs
+      # cl.exe from CLToolPath, where a copy of ccache named cl.exe forwards to
+      # the actual compiler.
+      - name: Setup Compiler Launcher
+        if: ${{ !matrix.codeql }}
         run: |
-          echo "CXXFLAGS=/Zi ${{env.CXXFLAGS}}" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $launcher = Join-Path $env:RUNNER_TEMP ccache-msvc
+          New-Item -ItemType Directory -Force -Path $launcher | Out-Null
+          Copy-Item (Get-Command ccache).Source (Join-Path $launcher cl.exe)
+          echo "VS_GLOBALS=CLToolExe=cl.exe;CLToolPath=$launcher;UseMultiToolTask=true" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Configure
         run: |
@@ -92,7 +121,9 @@ jobs:
                 -DCMAKE_EXE_LINKER_FLAGS='/NOIMPLIB' `
                 -DCMAKE_EXE_LINKER_FLAGS_RELEASE='/INCREMENTAL:NO /DEBUG' `
                 -DCMAKE_INSTALL_PREFIX:PATH=./install `
+                -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded `
                 -DCMAKE_MSVC_RUNTIME_LIBRARY='MultiThreaded$<$<CONFIG:Debug>:Debug>DLL' `
+                "-DCMAKE_VS_GLOBALS=$env:VS_GLOBALS" `
                 -G "${{matrix.generator}}" `
                 -Werror=author
 
@@ -115,9 +146,10 @@ jobs:
                 --target install
 
       - name: Perform CodeQL Analysis
+        if: matrix.codeql
         uses: github/codeql-action/analyze@v4
         with:
-          category: language:cpp
+          category: /language:cpp/msvc
 
   build-mingw:
     name: ${{matrix.sys}}-${{matrix.env}}-C++${{matrix.std}}-${{matrix.build_type}}-${{matrix.lib}}
@@ -141,11 +173,17 @@ jobs:
         include:
          - sys: ucrt64
            env: ucrt-x86_64
+         # CodeQL traces the compiler and misses translation units served from
+         # the compiler cache. Analyze a single configuration without the cache.
+         - lib: static
+           std: 20
+           codeql: true
 
     steps:
       - uses: actions/checkout@v7
 
       - name: Initialize CodeQL
+        if: matrix.codeql
         uses: github/codeql-action/init@v4
         with:
           languages: cpp
@@ -163,6 +201,25 @@ jobs:
             mingw-w64-${{matrix.env}}-python-lxml
             mingw-w64-${{matrix.env}}-python-pip
             mingw-w64-${{matrix.env}}-python-pygments
+
+      # The ccache that ships with the runner image is too old to cache
+      # these builds.
+      - name: Setup Compiler Cache
+        if: ${{ !matrix.codeql }}
+        uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          install: binary
+          key: mingw-${{matrix.sys}}-C++${{matrix.std}}-${{matrix.build_type}}-${{matrix.lib}}
+          evict-old-files: job
+          save: ${{ github.event_name == 'push' }}
+
+      # The MSYS2 shell does not inherit PATH, so name ccache by its location.
+      - name: Setup Compiler Launcher
+        if: ${{ !matrix.codeql }}
+        shell: powershell
+        run: |
+          $ccache = (Get-Command ccache).Source -replace '\\', '/'
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=$ccache" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Setup Coverage Dependencies
         if: matrix.build_type == 'Debug'
@@ -229,4 +286,7 @@ jobs:
           retention-days: 1
 
       - name: Perform CodeQL Analysis
+        if: matrix.codeql
         uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:cpp/mingw

@@ -18,17 +18,27 @@ jobs:
       actions: read
       contents: read
       security-events: write
+    env:
+      CMAKE_CXX_COMPILER_LAUNCHER: ${{ !matrix.codeql && 'ccache' || '' }}
     strategy:
       fail-fast: true
       matrix:
         build_type: [Release, Debug]
         lib: [shared, static]
         std: [14, 17, 20, 23]
+        # CodeQL traces the compiler and misses translation units served from
+        # the compiler cache. Analyze a single configuration without the cache.
+        include:
+          - build_type: Release
+            lib: shared
+            std: 20
+            codeql: true
 
     steps:
       - uses: actions/checkout@v7
 
       - name: Initialize CodeQL
+        if: matrix.codeql
         uses: github/codeql-action/init@v4
         with:
           languages: cpp
@@ -45,10 +55,20 @@ jobs:
             libunwind-dev \
             ninja-build
 
+      - name: Setup Compiler Cache
+        if: ${{ !matrix.codeql }}
+        uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          key: linux-C++${{matrix.std}}-${{matrix.build_type}}-${{matrix.lib}}
+          evict-old-files: job
+          save: ${{ github.event_name == 'push' }}
+
       - uses: actions/setup-python@v7
         if: matrix.build_type == 'Debug'
         with:
           python-version: '3.x'
+          cache: pip
+          cache-dependency-path: .github/coverage/requirements.txt
 
       - name: Setup Coverage Dependencies
         if: matrix.build_type == 'Debug'
@@ -139,4 +159,7 @@ jobs:
           retention-days: 1
 
       - name: Perform CodeQL Analysis
+        if: matrix.codeql
         uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:cpp/linux

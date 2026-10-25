@@ -30,10 +30,29 @@ jobs:
         run: |
           brew install google-benchmark googletest ninja
 
+      - name: Setup Compiler Cache
+        uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          key: macos-C++${{matrix.std}}-${{matrix.build_type}}
+          evict-old-files: job
+          save: ${{ github.event_name == 'push' }}
+
+      # The Xcode generator ignores compiler launchers. Xcode runs the
+      # compilers named by its build settings, so point these to ccache. The
+      # paths are absolute because Xcode does not search the PATH of the job.
+      - name: Setup Compiler Launcher
+        run: |
+          for compiler in clang clang++; do
+            printf '#!/bin/sh\nexec "%s" "%s" "$@"\n' "$(command -v ccache)" "$(xcrun -f "$compiler")" > "$RUNNER_TEMP/ccache-$compiler"
+            chmod +x "$RUNNER_TEMP/ccache-$compiler"
+          done
+
       - uses: actions/setup-python@v7
         if: matrix.build_type == 'Debug'
         with:
           python-version: '3.x'
+          cache: pip
+          cache-dependency-path: .github/coverage/requirements.txt
 
       - name: Setup Coverage Dependencies
         if: matrix.build_type == 'Debug'
@@ -55,6 +74,11 @@ jobs:
                 -DCMAKE_CXX_EXTENSIONS=OFF \
                 -DCMAKE_CXX_STANDARD=${{matrix.std}} \
                 -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+                -DCMAKE_XCODE_ATTRIBUTE_CC="$RUNNER_TEMP/ccache-clang" \
+                -DCMAKE_XCODE_ATTRIBUTE_CXX="$RUNNER_TEMP/ccache-clang++" \
+                -DCMAKE_XCODE_ATTRIBUTE_COMPILER_INDEX_STORE_ENABLE=NO \
+                -DCMAKE_XCODE_ATTRIBUTE_LD="$(xcrun -f clang)" \
+                -DCMAKE_XCODE_ATTRIBUTE_LDPLUSPLUS="$(xcrun -f clang++)" \
                 -G "${{matrix.generator}}" \
                 -Werror=author
 

@@ -71,6 +71,8 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.x'
+          cache: pip
+          cache-dependency-path: .github/coverage/requirements.txt
 
       - name: Setup Dependencies
         run: |

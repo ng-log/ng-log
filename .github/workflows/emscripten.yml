@@ -18,15 +18,22 @@ jobs:
       actions: read
       contents: read
       security-events: write
-    container: emscripten/emsdk
     strategy:
       fail-fast: true
       matrix:
         build_type: [Release, Debug]
         lib: [static]
         std: [14, 17, 20, 23]
+        # CodeQL traces the compiler and misses translation units served from
+        # the compiler cache. Analyze a single configuration without the cache.
+        include:
+          - build_type: Release
+            lib: static
+            std: 20
+            codeql: true
 
     env:
+      CMAKE_CXX_COMPILER_LAUNCHER: ${{ !matrix.codeql && 'ccache' || '' }}
       # Tests require threads and exceptions which Emscripten disables by default.
       EMSCRIPTEN_FLAGS: -pthread -fexceptions
 
@@ -45,15 +52,51 @@ jobs:
           DEBIAN_FRONTEND=noninteractive sudo apt-get install -y \
             cmake \
             gpg \
-            ninja-build \
-            python3-venv
+            ninja-build
+
+      # The SDK lives outside the workspace to keep its headers out of the
+      # coverage report.
+      - name: Resolve Emscripten Version
+        id: emsdk
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          echo "version=$(jq -r .aliases.latest "$RUNNER_TEMP/emsdk/emscripten-releases-tags.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Emscripten
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{runner.temp}}/emsdk/node
+            ${{runner.temp}}/emsdk/upstream
+          key: emsdk-${{steps.emsdk.outputs.version}}-${{runner.os}}-${{runner.arch}}
+
+      - name: Setup Emscripten
+        working-directory: ${{runner.temp}}/emsdk
+        run: |
+          ./emsdk install "${{steps.emsdk.outputs.version}}"
+          ./emsdk activate "${{steps.emsdk.outputs.version}}"
+          echo "EMSDK=$PWD" >> "$GITHUB_ENV"
+          echo "$PWD/upstream/emscripten" >> "$GITHUB_PATH"
+
+      - name: Setup Compiler Cache
+        if: ${{ !matrix.codeql }}
+        uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          key: emscripten-C++${{matrix.std}}-${{matrix.build_type}}-${{matrix.lib}}
+          evict-old-files: job
+          save: ${{ github.event_name == 'push' }}
+
+      - uses: actions/setup-python@v7
+        if: matrix.build_type == 'Debug'
+        with:
+          python-version: '3.x'
+          cache: pip
+          cache-dependency-path: .github/coverage/requirements.txt
 
       - name: Setup Coverage Dependencies
         if: matrix.build_type == 'Debug'
         run: |
-          python3 -m venv "$RUNNER_TEMP/venv"
-          echo "$RUNNER_TEMP/venv/bin" >> $GITHUB_PATH
-          "$RUNNER_TEMP/venv/bin/pip" install -r .github/coverage/requirements.txt
+          pip install -r .github/coverage/requirements.txt
 
       - name: Setup Environment
         if: matrix.build_type == 'Debug'
@@ -75,6 +118,7 @@ jobs:
           cmake --build build_googletest --target install
 
       - name: Initialize CodeQL
+        if: matrix.codeql
         uses: github/codeql-action/init@v4
         with:
           languages: cpp
@@ -136,4 +180,7 @@ jobs:
           retention-days: 1
 
       - name: Perform CodeQL Analysis
+        if: matrix.codeql
         uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:cpp/emscripten
