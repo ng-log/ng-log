@@ -138,6 +138,11 @@ inline std::string TrimTrailingCharacters(std::string input,
 
 const char* ProgramInvocationShortName();
 
+// Returns whether the environment may decide which files and programs the
+// process uses. A process that the system started with elevated privileges,
+// such as a setuid program or one with file capabilities, inherits the
+// environment of its caller, which must not.
+bool TrustsEnvironment();
 int32 GetMainThreadPid();
 bool PidHasChanged();
 

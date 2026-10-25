@@ -70,6 +70,8 @@ SPDX-License-Identifier: BSD-3-Clause
 - Fix an out-of-bounds read for empty `TEST_TMPDIR`, `TMPDIR` and `TMP`
   values
 - Reject malformed ELF symbol tables
+- Ignore `USER`, `USERNAME`, `NGLOG_DIR`, `TEST_TMPDIR`, `TMPDIR` and `TMP`
+  in programs started with elevated privileges
 - Fix a data race between `EnableLogCleaner` and logging threads by [@devtejasx]
 - Fix a data race on concurrent initialization of `VLOG` call sites
 - Let `SetVLOGLevel` take precedence over matching `--vmodule` patterns

@@ -39,7 +39,9 @@ Environment variables can provide defaults by prefixing the flag name with
 
 An environment value uses the same syntax as the corresponding command-line
 option. A value that cannot be parsed is ignored and the flag keeps its
-declared default.
+declared default. Programs that the system starts with elevated
+privileges, such as setuid programs or programs with file capabilities,
+ignore the environment, since their caller controls it.
 
 ## Quick Start
 

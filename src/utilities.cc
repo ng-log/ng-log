@@ -61,6 +61,9 @@
 #ifdef HAVE_PWD_H
 #  include <pwd.h>
 #endif
+#ifdef HAVE_GETAUXVAL
+#  include <sys/auxv.h>
+#endif
 #ifdef HAVE_PTHREAD_SETNAME_NP
 #  include <pthread.h>
 #endif
@@ -488,7 +491,8 @@ std::string GetEnvironmentUserName() {
 }
 
 std::string GetMyUserName() {
-  std::string user_name = GetEnvironmentUserName();
+  std::string user_name =
+      TrustsEnvironment() ? GetEnvironmentUserName() : std::string{};
   if (!user_name.empty()) {
     return user_name;
   }
@@ -501,6 +505,26 @@ std::string GetMyUserName() {
 }
 
 }  // namespace
+
+bool TrustsEnvironment() {
+  // The system marks programs that it started with elevated privileges, such
+  // as setuid programs and programs with file capabilities, even after they
+  // set their real IDs to the effective ones.
+#if defined(HAVE_GETAUXVAL) && defined(AT_SECURE)
+  if (getauxval(AT_SECURE) != 0) {
+    return false;
+  }
+#elif defined(HAVE_ISSETUGID)
+  if (issetugid() != 0) {
+    return false;
+  }
+#endif
+#if defined(HAVE_UNISTD_H) && !defined(NGLOG_OS_WINDOWS)
+  return getuid() == geteuid() && getgid() == getegid();
+#else
+  return true;
+#endif
+}
 
 static void MyUserNameInitializer() { g_my_user_name = GetMyUserName(); }
 REGISTER_MODULE_INITIALIZER(utilities, MyUserNameInitializer())

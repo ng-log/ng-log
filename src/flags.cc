@@ -13,6 +13,7 @@
 #include "internal/flag_display.h"
 #include "ng-log/log_severity.h"
 #include "ng-log/platform.h"
+#include "utilities.h"
 
 namespace {
 
@@ -27,6 +28,9 @@ constexpr std::int32_t kDefaultAddr2lineTimeoutMs = 2000;
 
 // Compute the default value for --log_dir
 static const char* DefaultLogDir() {
+  if (!nglog::TrustsEnvironment()) {
+    return "";
+  }
   constexpr const char* const names[]{"NGLOG_DIR", "TEST_TMPDIR"};
   for (const char* const name : names) {
     const char* const env = std::getenv(name);

@@ -37,6 +37,7 @@
 #include "styled_output.h"
 #include "terminal_capabilities.h"
 #include "theme.h"
+#include "utilities.h"
 
 #ifdef NGLOG_OS_WINDOWS
 #  include <windows.h>
@@ -1793,7 +1794,7 @@ bool FlagGroup::AddFlag(FlagBase& flag) const {
   entry.group = name_;
   entry.module_identity = module_identity_.get();
   const auto environment_prefix = module->second.environment_prefix;
-  if (!environment_prefix.empty()) {
+  if (!environment_prefix.empty() && TrustsEnvironment()) {
     const std::string environment_name = environment_prefix + flag.name();
     const char* const environment_value = std::getenv(environment_name.c_str());
     if (environment_value != nullptr) {

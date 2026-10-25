@@ -211,6 +211,12 @@ int RunPrintUserName(ChildSetup setup, std::string* output) {
 
 }  // namespace
 
+// The tests run without elevated privileges, so the environment applies. A
+// program started with elevated privileges cannot be run from a unit test.
+TEST(utilities, UnprivilegedProgramTrustsTheEnvironment) {
+  EXPECT_TRUE(TrustsEnvironment());
+}
+
 TEST(utilities, EmptyUserEnvironmentUsesSystemUserName) {
   std::string output;
   ASSERT_EQ(RunPrintUserName(&NoChildSetup, &output), EXIT_SUCCESS);

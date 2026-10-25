@@ -50,6 +50,12 @@
 /* Define if you have the 'fork' function in <unistd.h> */
 #cmakedefine HAVE_FORK
 
+/* Define if you have the 'getauxval' function in <sys/auxv.h> */
+#cmakedefine HAVE_GETAUXVAL
+
+/* Define if you have the 'issetugid' function in <unistd.h> */
+#cmakedefine HAVE_ISSETUGID
+
 /* Define if you have the '_Fork' function in <unistd.h> */
 #cmakedefine HAVE__FORK
 
