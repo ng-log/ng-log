@@ -490,10 +490,22 @@ std::string GetEnvironmentUserName() {
 #endif
 }
 
+// The user name becomes part of log file names, so it must be a single file
+// name component.
+bool IsFileNameComponent(const std::string& name) {
+#if defined(NGLOG_OS_WINDOWS)
+  constexpr char kForbiddenCharacters[] = "/\\:*?\"<>|";
+#else
+  constexpr char kForbiddenCharacters[] = "/";
+#endif
+  return !name.empty() && name != "." && name != ".." &&
+         name.find_first_of(kForbiddenCharacters) == std::string::npos;
+}
+
 std::string GetMyUserName() {
   std::string user_name =
       TrustsEnvironment() ? GetEnvironmentUserName() : std::string{};
-  if (!user_name.empty()) {
+  if (IsFileNameComponent(user_name)) {
     return user_name;
   }
 
