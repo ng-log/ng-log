@@ -7,7 +7,9 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <cerrno>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <type_traits>
@@ -28,6 +30,10 @@
 #  include <vector>
 
 #  include "internal/utf8.h"
+#else
+#  include <sys/stat.h>
+#  include <sys/types.h>
+#  include <unistd.h>
 #endif
 
 #ifdef NGLOG_OS_EMSCRIPTEN
@@ -660,6 +666,40 @@ TEST(SourceLocation, CachesHostAndWorkingDirectory) {
   EXPECT_EQ(&CachedHostname(), &CachedHostname());
   EXPECT_EQ(&CachedCwd(), &CachedCwd());
 }
+
+#if !defined(NGLOG_OS_WINDOWS) && !defined(NGLOG_OS_EMSCRIPTEN) && \
+    defined(GTEST_HAS_DEATH_TEST)
+// Exits successfully if the cached working directory of a fresh process
+// matches a working directory longer than common fixed-size buffers.
+[[noreturn]] void CheckLongWorkingDirectory() {
+  constexpr std::size_t kMinimumLength = 1024;
+  constexpr mode_t kDirectoryMode = 0700;
+  const std::string component(64, 'd');
+  if (chdir(TestTmpDir().c_str()) != 0) {
+    std::exit(EXIT_FAILURE);
+  }
+  std::string cwd = TestTmpDir();
+  while (cwd.size() < kMinimumLength) {
+    if ((mkdir(component.c_str(), kDirectoryMode) != 0 && errno != EEXIST) ||
+        chdir(component.c_str()) != 0) {
+      std::exit(EXIT_FAILURE);
+    }
+    cwd += '/' + component;
+  }
+  char* const actual = getcwd(nullptr, 0);
+  const bool matches = actual != nullptr && CachedCwd() == actual;
+  std::free(actual);
+  std::exit(matches ? EXIT_SUCCESS : EXIT_FAILURE);
+}
+
+TEST(SourceLocation, CachesLongWorkingDirectory) {
+  // The working directory is cached on first use, so the check needs a
+  // process that has not used it yet.
+  const ScopedDeathTestStyle style{"threadsafe"};
+  EXPECT_EXIT(CheckLongWorkingDirectory(),
+              testing::ExitedWithCode(EXIT_SUCCESS), "");
+}
+#endif
 
 #ifdef NGLOG_OS_WINDOWS
 TEST(SourceLocation, UsesUtf8ComputerName) {

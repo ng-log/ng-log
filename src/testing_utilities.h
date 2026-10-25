@@ -75,6 +75,23 @@ class ScopedEnvironmentVariable final {
   bool had_previous_;
 };
 
+#ifdef GTEST_HAS_DEATH_TEST
+//! Selects a death test style and restores the previous one.
+class ScopedDeathTestStyle final {
+ public:
+  explicit ScopedDeathTestStyle(const char* style)
+      : previous_(GTEST_FLAG_GET(death_test_style)) {
+    GTEST_FLAG_SET(death_test_style, style);
+  }
+  ScopedDeathTestStyle(const ScopedDeathTestStyle& other) = delete;
+  ScopedDeathTestStyle& operator=(const ScopedDeathTestStyle& other) = delete;
+  ~ScopedDeathTestStyle() { GTEST_FLAG_SET(death_test_style, previous_); }
+
+ private:
+  std::string previous_;
+};
+#endif
+
 //! Names each instance of a parameterized test after the name of its case.
 struct CaseName {
   template <typename Case>

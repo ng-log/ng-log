@@ -8,10 +8,12 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <cstring>
 #include <iterator>
 #include <limits>
 #include <locale>
+#include <vector>
 
 #include "config.h"
 #include "ng-log/platform.h"
@@ -525,21 +527,37 @@ const std::string& CachedHostname() {
 
 const std::string& CachedCwd() {
   static const std::string cwd = [] {
-    char buf[512] = "";
+    // Working directories can exceed any fixed buffer, so the buffer grows
+    // until the directory fits.
+    constexpr std::size_t kInitialSize = 256;
 #ifdef NGLOG_OS_WINDOWS
-    wchar_t wide_buf[sizeof(buf) / sizeof(buf[0])];
-    const DWORD len = GetCurrentDirectoryW(
-        static_cast<DWORD>(sizeof(wide_buf) / sizeof(wide_buf[0])), wide_buf);
-    if (len == 0 || len >= sizeof(wide_buf) / sizeof(wide_buf[0])) {
-      return std::string();
+    std::vector<wchar_t> buffer(kInitialSize);
+    for (;;) {
+      const DWORD length = GetCurrentDirectoryW(
+          static_cast<DWORD>(buffer.size()), buffer.data());
+      if (length == 0) {
+        return std::string();
+      }
+      if (length < buffer.size()) {
+        std::string converted;
+        return WideToUtf8(buffer.data(), length, &converted) ? converted
+                                                             : std::string();
+      }
+      // The required size includes the terminating null character.
+      buffer.resize(length);
     }
-    std::string converted;
-    return WideToUtf8(wide_buf, len, &converted) ? converted : std::string();
 #elif defined(HAVE_UNISTD_H)
-    if (getcwd(buf, sizeof(buf)) == nullptr) {
-      buf[0] = '\0';
+    constexpr std::size_t kGrowthFactor = 2;
+    std::vector<char> buffer(kInitialSize);
+    while (getcwd(buffer.data(), buffer.size()) == nullptr) {
+      if (errno != ERANGE) {
+        return std::string();
+      }
+      buffer.resize(buffer.size() * kGrowthFactor);
     }
-    return std::string(buf);
+    return std::string(buffer.data());
+#else
+    return std::string();
 #endif
   }();
   return cwd;
