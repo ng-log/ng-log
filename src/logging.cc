@@ -3024,7 +3024,9 @@ static void GetTempDirectories(vector<string>& list) {
   };
 
   for (auto d : candidates) {
-    if (!d) continue;  // Empty env var
+    if (d == nullptr || d[0] == '\0') {
+      continue;  // Unset or empty env var
+    }
 
     // Make sure we don't surprise anyone who's expecting a '/'
     string dstr = d;
