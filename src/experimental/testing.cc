@@ -25,7 +25,7 @@ PredefinedAttributesOfAnotherTranslationUnit() {
   return {&ngx::Info,        &ngx::Warning,      &ngx::Error,
           &ngx::Fatal,       &ngx::FatalInDebug, &ngx::Errno,
           &ngx::Debug,       &ngx::Occurrence,   &ngx::Syslog,
-          &ngx::SkipLogFile, &ngx::SignalSafe};
+          &ngx::SkipLogFile, &ngx::SignalSafe,   &ngx::Async};
 }
 
 }  // namespace ngx_testing

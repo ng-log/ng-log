@@ -19,6 +19,9 @@ set (_cases
   ensure/constexpr_not_null
   ensure/constexpr_that
   ensure/nodiscard
+  log/async_lazy
+  log/async_to_string
+  log/async_to_vector
   log/conflicting_destinations
   log/misdeclared_hook
   log/repeated_severity
@@ -33,6 +36,8 @@ set (_cases
   requires/format
   requires/source_location
   signal_safe/alternate
+  signal_safe/async
+  signal_safe/async_ensure
   signal_safe/dynamic
   signal_safe/fill_brace
   signal_safe/fill_non_ascii

@@ -14,6 +14,7 @@
 #include <atomic>
 #include <cerrno>
 #include <csignal>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -317,16 +318,10 @@ static void EndCutOffStackTrace(DebugWriter* writerfn, void* arg) {
   writerfn(kStackDumpCutOffMarker, arg);
 }
 
-// Dump current stack trace as directed by writerfn
-static void DumpStackTrace(int skip_count, DebugWriter* writerfn, void* arg) {
-  // Print stack trace. One frame more than is printed is captured, so that a
-  // trace cut off at the limit says so instead of looking complete.
-  void* stack[kMaxStackDumpFrames + 1];
-  int depth = GetStackTrace(stack, ARRAYSIZE(stack), skip_count + 1);
-  const bool truncated = depth > kMaxStackDumpFrames;
-  if (truncated) {
-    depth = kMaxStackDumpFrames;
-  }
+// Dump stack frames as directed by writerfn, followed by the cut-off marker if
+// the stack has more frames.
+static void DumpStackFrames(void* const* stack, int depth, bool truncated,
+                            DebugWriter* writerfn, void* arg) {
   for (int i = 0; i < depth; i++) {
 #  if defined(HAVE_SYMBOLIZE)
     if (nglog::GetFlag(FLAGS_symbolize_stacktrace)) {
@@ -341,6 +336,19 @@ static void DumpStackTrace(int skip_count, DebugWriter* writerfn, void* arg) {
   if (truncated) {
     EndCutOffStackTrace(writerfn, arg);
   }
+}
+
+// Dump current stack trace as directed by writerfn
+static void DumpStackTrace(int skip_count, DebugWriter* writerfn, void* arg) {
+  // Print stack trace. One frame more than is printed is captured, so that a
+  // trace cut off at the limit says so instead of looking complete.
+  void* stack[kMaxStackDumpFrames + 1];
+  int depth = GetStackTrace(stack, ARRAYSIZE(stack), skip_count + 1);
+  const bool truncated = depth > kMaxStackDumpFrames;
+  if (truncated) {
+    depth = kMaxStackDumpFrames;
+  }
+  DumpStackFrames(stack, depth, truncated, writerfn, arg);
 }
 
 [[noreturn]] static void DumpStackTraceAndExit() {
@@ -586,6 +594,30 @@ std::string GetStackTrace() {
   DumpStackTrace(1, DebugWriteToString, &stacktrace);
   return stacktrace;
 }
+
+inline namespace tools {
+
+CapturedStackTrace CaptureStackTrace(int skip_count) {
+  // One frame more than is formatted is captured like by DumpStackTrace().
+  CapturedStackTrace trace;
+  trace.frames.resize(kMaxStackDumpFrames + 1);
+  const int depth =
+      GetStackTrace(trace.frames.data(), static_cast<int>(trace.frames.size()),
+                    skip_count + 1);
+  trace.truncated = depth > kMaxStackDumpFrames;
+  trace.frames.resize(
+      static_cast<std::size_t>(trace.truncated ? kMaxStackDumpFrames : depth));
+  return trace;
+}
+
+std::string FormatStackTrace(const CapturedStackTrace& trace) {
+  std::string stacktrace;
+  DumpStackFrames(trace.frames.data(), static_cast<int>(trace.frames.size()),
+                  trace.truncated, DebugWriteToString, &stacktrace);
+  return stacktrace;
+}
+
+}  // namespace tools
 #endif
 
 }  // namespace nglog

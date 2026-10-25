@@ -687,6 +687,8 @@ add_library (ng-log::ng-log ALIAS ng-log)
 
 if (HAVE_EXPERIMENTAL_LOGGING)
   add_library (ng-log_experimental_objects OBJECT
+    src/experimental/async.cc
+    src/experimental/async.h
     src/experimental/attributes.cc
     src/experimental/context.h
     src/experimental/ensure.cc
@@ -1212,7 +1214,7 @@ logging libraries\"\n#endif\n")
     target_compile_features (experimental_headers_unittest PRIVATE
       cxx_std_20)
 
-    foreach (_ng-log_TEST IN ITEMS attributes ensure log signal_safe_log)
+    foreach (_ng-log_TEST IN ITEMS async attributes ensure log signal_safe_log)
       set (_ng-log_TARGET experimental_${_ng-log_TEST}_unittest)
 
       add_executable (${_ng-log_TARGET}
@@ -1897,6 +1899,11 @@ logging libraries\"\n#endif\n")
       log/skip_log_file_alone
       log/misdeclared_hook
       log/severity_out_of_range
+      log/async_lazy
+      log/async_to_string
+      log/async_to_vector
+      signal_safe/async
+      signal_safe/async_ensure
       ensure/nodiscard
       ensure/constexpr
       ensure/constexpr_comparison
@@ -1942,6 +1949,11 @@ logging libraries\"\n#endif\n")
       "SkipLogFile requires a ToSink destination"
       "Admit\\(\\) of an attribute must be const"
       SeverityIsOutOfRange
+      "Async cannot defer a Lazy argument"
+      "Async cannot store the text"
+      "Async cannot store the text"
+      "SignalSafe cannot be combined with Async"
+      "SignalSafe cannot be combined with Async"
       "Pass the comparison to Ensure"
       EnsureFailedDuringConstantEvaluation
       EnsureFailedDuringConstantEvaluation

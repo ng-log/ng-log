@@ -2115,6 +2115,64 @@ static thread_local internal::LogMessageData fatal_msg_data_shared;
 // allocations).
 static thread_local bool thread_data_available = true;
 
+namespace internal {
+namespace {
+
+// Origin of a call on another thread that the next message this thread creates
+// reports.
+thread_local const LogMessageOrigin* next_message_origin = nullptr;
+
+#ifdef HAVE_STACKTRACE
+// Whether --log_backtrace_at names the call site at the file and line.
+bool BacktraceRequestedAt(const char* basename, int line) {
+  // Checking emptiness first avoids locking the flag for every message.
+  if (FlagValueAccess::Empty(FLAGS_log_backtrace_at)) {
+    return false;
+  }
+  const std::string log_backtrace_at = nglog::GetFlag(FLAGS_log_backtrace_at);
+  char fileline[128];
+  const int fileline_len =
+      std::snprintf(fileline, sizeof(fileline), "%s:%d", basename, line);
+  return fileline_len >= 0 &&
+         static_cast<std::size_t>(fileline_len) < sizeof(fileline) &&
+         log_backtrace_at == fileline;
+}
+#endif
+
+}  // namespace
+}  // namespace internal
+
+// Thread that composed the message this thread sends, which differs from this
+// thread for messages composed on another one.
+static thread_local const std::thread::id* sending_thread_id = nullptr;
+
+namespace {
+
+// Exposes the thread that composed a message while sending it. Restores the
+// previous one, so that sinks may log themselves.
+class SendingThreadScope {
+ public:
+  explicit SendingThreadScope(const std::thread::id& thread_id) noexcept
+      : previous_{sending_thread_id} {
+    sending_thread_id = &thread_id;
+  }
+  SendingThreadScope(const SendingThreadScope&) = delete;
+  SendingThreadScope& operator=(const SendingThreadScope&) = delete;
+  ~SendingThreadScope() { sending_thread_id = previous_; }
+
+ private:
+  const std::thread::id* previous_;
+};
+
+// Returns the thread that composed the message being sent, or this thread
+// outside of sending.
+std::thread::id SendingThreadId() noexcept {
+  return sending_thread_id != nullptr ? *sending_thread_id
+                                      : std::this_thread::get_id();
+}
+
+}  // namespace
+
 #if defined(__cpp_lib_byte) && __cpp_lib_byte >= 201603L
 // std::aligned_storage is deprecated in C++23
 alignas(internal::LogMessageData) static thread_local std::byte
@@ -2205,6 +2263,10 @@ void LogMessage::Init(const char* file, int line, LogSeverity severity,
     }
   }
 
+  // A message on behalf of a call on another thread reports that call.
+  const internal::LogMessageOrigin* const origin =
+      std::exchange(internal::next_message_origin, nullptr);
+
   data_->preserved_errno_ = errno;
   data_->severity_ = severity;
   data_->line_ = line;
@@ -2212,7 +2274,8 @@ void LogMessage::Init(const char* file, int line, LogSeverity severity,
   data_->sink_ = nullptr;
   data_->outvec_ = nullptr;
 
-  const auto now = std::chrono::system_clock::now();
+  const auto now =
+      origin != nullptr ? origin->time : std::chrono::system_clock::now();
   time_ = LogMessageTime(now);
 
   data_->num_chars_to_log_ = 0;
@@ -2223,7 +2286,8 @@ void LogMessage::Init(const char* file, int line, LogSeverity severity,
   data_->fullname_ = file;
   data_->tag_ = nullptr;
   data_->has_been_flushed_ = false;
-  data_->thread_id_ = std::this_thread::get_id();
+  data_->thread_id_ =
+      origin != nullptr ? origin->thread_id : std::this_thread::get_id();
 
   data_->has_default_prefix_ = false;
 
@@ -2246,18 +2310,13 @@ void LogMessage::Init(const char* file, int line, LogSeverity severity,
   data_->num_prefix_chars_ = data_->stream_.pcount();
 
 #ifdef HAVE_STACKTRACE
-  // Checking emptiness first avoids locking the flag for every message.
-  if (!internal::FlagValueAccess::Empty(FLAGS_log_backtrace_at)) {
-    const std::string log_backtrace_at = nglog::GetFlag(FLAGS_log_backtrace_at);
-    char fileline[128];
-    const int fileline_len = std::snprintf(fileline, sizeof(fileline), "%s:%d",
-                                           data_->basename_, line);
-    if (fileline_len >= 0 &&
-        static_cast<std::size_t>(fileline_len) < sizeof(fileline) &&
-        log_backtrace_at == fileline) {
-      string stacktrace = GetStackTrace();
-      stream() << " (stacktrace:\n" << stacktrace << ") ";
+  if (origin != nullptr) {
+    if (origin->has_backtrace) {
+      stream() << " (stacktrace:\n"
+               << FormatStackTrace(origin->backtrace) << ") ";
     }
+  } else if (internal::BacktraceRequestedAt(data_->basename_, line)) {
+    stream() << " (stacktrace:\n" << GetStackTrace() << ") ";
   }
 #endif
 }
@@ -2378,6 +2437,7 @@ void LogMessage::Flush() {
   }
   data_->message_text_[data_->num_chars_to_log_] = '\0';
 
+  const SendingThreadScope sending_thread{data_->thread_id_};
   const auto send_method = data_->send_method_;
   const bool send_to_sink = send_method == &LogMessage::SendToSink ||
                             send_method == &LogMessage::SendToSinkAndLog;
@@ -2714,9 +2774,58 @@ void LogMessageAccess::SetTag(LogMessage& message, const char* tag) noexcept {
   message.data_->tag_ = tag;
 }
 
+LogMessageOrigin CaptureLogMessageOrigin(const char* file, int line) {
+  LogMessageOrigin origin;
+  origin.time = std::chrono::system_clock::now();
+  origin.thread_id = std::this_thread::get_id();
+#ifdef HAVE_STACKTRACE
+  if (BacktraceRequestedAt(const_basename(file), line)) {
+    origin.has_backtrace = true;
+    origin.backtrace = CaptureStackTrace(1);
+  }
+#else
+  // Without stack traces, the call site is irrelevant.
+  static_cast<void>(file);
+  static_cast<void>(line);
+#endif
+  return origin;
+}
+
+LogMessageOriginScope::LogMessageOriginScope(
+    const LogMessageOrigin* origin) noexcept
+    : previous_{next_message_origin} {
+  next_message_origin = origin;
+}
+
+LogMessageOriginScope::~LogMessageOriginScope() {
+  next_message_origin = previous_;
+}
+
+namespace {
+
+std::atomic<void (*)()> pending_messages_waiter{nullptr};
+
+}  // namespace
+
+void SetPendingMessagesWaiter(void (*waiter)()) noexcept {
+  pending_messages_waiter.store(waiter, std::memory_order_release);
+}
+
+namespace {
+
+void WaitForPendingMessages() {
+  if (const auto wait =
+          pending_messages_waiter.load(std::memory_order_acquire)) {
+    wait();
+  }
+}
+
+}  // namespace
+
 }  // namespace internal
 
 void FlushLogFiles(LogSeverity min_severity) {
+  internal::WaitForPendingMessages();
   LogDestination::FlushLogFiles(min_severity);
 }
 
@@ -2751,8 +2860,8 @@ string LogSink::ToString(LogSeverity severity, const char* file, int line,
   stream << setw(2) << 1 + time.month() << setw(2) << time.day() << ' '
          << setw(2) << time.hour() << ':' << setw(2) << time.min() << ':'
          << setw(2) << time.sec() << '.' << setw(6) << time.usec() << ' '
-         << setfill(' ') << setw(5) << std::this_thread::get_id()
-         << setfill('0') << ' ' << file << ':' << line << "] ";
+         << setfill(' ') << setw(5) << SendingThreadId() << setfill('0') << ' '
+         << file << ':' << line << "] ";
 
   // A call to `write' is enclosed in parenthneses to prevent possible macro
   // expansion.  On Windows, `write' could be a macro defined for portability.
@@ -3468,6 +3577,7 @@ void InstallPrefixFormatter(PrefixFormatterCallback callback, void* data) {
 }
 
 void ShutdownLogging() {
+  internal::WaitForPendingMessages();
   ShutdownLoggingUtilities();
   LogDestination::DeleteLogDestinations();
   logging_directories_list = nullptr;

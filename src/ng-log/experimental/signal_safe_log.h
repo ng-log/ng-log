@@ -410,6 +410,12 @@ struct LogFormatFor<true, Args...> {
 // Writes the message like RAW_LOG() without allocating.
 template <class A>
 struct LogTraits<A, true> {
+  static_assert(!kAsync<A>,
+                "SignalSafe cannot be combined with Async, since passing a "
+                "message to the logging thread allocates and acquires a lock, "
+                "and a message still pending when a signal terminates the "
+                "program is lost.");
+
   static constexpr bool kAttributes = kSignalSafeAttribute<A>;
 
   template <class... Args>

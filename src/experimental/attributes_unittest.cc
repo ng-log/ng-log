@@ -28,7 +28,6 @@
 #include <limits>
 #include <ostream>
 #include <ratio>
-#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -67,34 +66,6 @@ using testing::HasSubstr;
 using testing::IsEmpty;
 using testing::Not;
 
-// Records the messages a structured sink receives.
-class RecordingStructuredSink final : public ngx::Sink {
- public:
-  struct Received {
-    nglog::LogSeverity severity;
-    std::string text;
-    std::uint_least32_t line;
-    std::string function;
-    std::string tag;
-    ngx::Record::Time time;
-    std::vector<std::string> fields;
-  };
-
-  void Send(const ngx::Record& record) override {
-    std::vector<std::string> fields;
-    for (const ngx::Field& field : record.fields()) {
-      fields.push_back(std::format("{}={}", field.name, field.value));
-    }
-    received.push_back(Received{record.severity(), std::string{record.text()},
-                                record.location().line(),
-                                record.location().function_name(),
-                                record.tag() == nullptr ? "" : record.tag(),
-                                record.time(), std::move(fields)});
-  }
-
-  std::vector<Received> received;
-};
-
 #if defined(__cpp_lib_chrono) && __cpp_lib_chrono >= 201907L
 // Records the zoned time of the last message a structured sink receives.
 class ZoneSink final : public ngx::Sink {
@@ -115,16 +86,6 @@ class ZoneSink final : public ngx::Sink {
   bool same_time = false;
 };
 #endif
-
-// Adds a field to the message. A message may carry several of them.
-struct Annotation {
-  using Multiplicity = ngx::Multiple;
-
-  std::string_view name;
-  std::string_view value;
-
-  void Fields(ngx::FieldWriter& fields) const { fields.Add(name, value); }
-};
 
 // Counts how often the fields of the message are collected.
 struct CountedFields {
@@ -1030,7 +991,7 @@ TEST(ExperimentalAttributes, PredefinedAttributesHaveExternalLinkage) {
               ElementsAre(&ngx::Info, &ngx::Warning, &ngx::Error, &ngx::Fatal,
                           &ngx::FatalInDebug, &ngx::Errno, &ngx::Debug,
                           &ngx::Occurrence, &ngx::Syslog, &ngx::SkipLogFile,
-                          &ngx::SignalSafe));
+                          &ngx::SignalSafe, &ngx::Async));
 }
 
 TEST_F(ExperimentalLogging, UserPrefixAndSuffix) {

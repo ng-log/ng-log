@@ -18,6 +18,8 @@
 #include <cstdint>
 #include <format>
 #include <regex>
+#include <source_location>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -26,7 +28,9 @@
 #include <utility>
 #include <vector>
 
+#include "ng-log/experimental/attributes.h"
 #include "ng-log/experimental/ensure.h"
+#include "ng-log/experimental/sink.h"
 #include "ng-log/flags.h"
 #include "ng-log/logging.h"
 #include "testing_utilities.h"
@@ -67,17 +71,55 @@ using nglog::NGLOG_0;
 using testing::HasSubstr;
 
 // Number of the attributes and arguments the headers predefine as variables.
-inline constexpr std::size_t kPredefinedAttributes = 11;
+inline constexpr std::size_t kPredefinedAttributes = 12;
 
 // Addresses of the predefined attributes as another translation unit sees
 // them: Info, Warning, Error, Fatal, FatalInDebug, Errno, Debug, Occurrence,
-// Syslog, SkipLogFile and SignalSafe.
+// Syslog, SkipLogFile, SignalSafe and Async.
 std::array<const void*, kPredefinedAttributes>
 PredefinedAttributesOfAnotherTranslationUnit();
 
 // Matches a comparison that holds. Failures print the comparison, which
 // describes it like the failure message of Ensure().
 MATCHER(Holds, negation ? "does not hold" : "holds") { return arg.holds(); }
+
+// Records the messages a structured sink receives.
+class RecordingStructuredSink final : public ngx::Sink {
+ public:
+  struct Received {
+    nglog::LogSeverity severity;
+    std::string text;
+    std::uint_least32_t line;
+    std::string function;
+    std::string tag;
+    ngx::Record::Time time;
+    std::vector<std::string> fields;
+  };
+
+  void Send(const ngx::Record& record) override {
+    std::vector<std::string> fields;
+    for (const ngx::Field& field : record.fields()) {
+      fields.push_back(std::format("{}={}", field.name, field.value));
+    }
+    received.push_back(Received{record.severity(), std::string{record.text()},
+                                record.location().line(),
+                                record.location().function_name(),
+                                record.tag() == nullptr ? "" : record.tag(),
+                                record.time(), std::move(fields)});
+  }
+
+  std::vector<Received> received;
+};
+
+// Adds a field to the message. A message may carry several of them.
+struct Annotation {
+  using Multiplicity = ngx::Multiple;
+
+  std::string_view name;
+  std::string_view value;
+
+  void Fields(ngx::FieldWriter& fields) const { fields.Add(name, value); }
+};
 
 // Output of a logging statement written to stderr and to a sink.
 struct Output {

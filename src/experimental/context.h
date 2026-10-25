@@ -94,6 +94,10 @@ class ContextImpl final : public Context {
   const std::source_location& location() const noexcept override {
     return *location_;
   }
+  // Refers to another copy of the location, which must outlive the context.
+  void set_location(const std::source_location& location) noexcept {
+    location_ = &location;
+  }
 
   Site& site() override {
     if (site_ == nullptr) {
@@ -131,6 +135,8 @@ class ContextImpl final : public Context {
   // configured.
   bool escalate_in_debug = false;
   Destination destination = Destination::kLog;
+  // Passes the message to the logging thread instead of sending it.
+  bool async = false;
   // Sends a message with sinks only to them.
   bool skip_log_file = false;
   // Add the targets of the destination. A message can have several of them.

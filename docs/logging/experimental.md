@@ -112,7 +112,8 @@ functions were built, which `if (TARGET ng-log::experimental)` determines.
 `Ensure(condition, [attributes,] format, args...)`
 
 :   Terminates with `Check failed: ` followed by the message unless the
-    condition holds. Accepts all attributes except a severity.
+    condition holds. Accepts all attributes except a severity. With `Async`,
+    the failure is written once the pending messages are.
 
 `Ensure(comparison, [attributes,] [format, args...])`
 
@@ -354,7 +355,7 @@ at compile time:
   `void` pointers, `nullptr`, C strings, [`std::string_view`](https://en.cppreference.com/w/cpp/string/basic_string_view) and `std::string`
 - the locale-specific option `L`
 - attributes other than a severity, `Debug` and `Verbose`, including the other
-  destinations
+  destinations and `Async`
 - comparisons and `NotNull` in `Ensure`, whose descriptions allocate
 
 Like `RAW_VLOG`, `Verbose` allocates and acquires a lock on the first call of
@@ -403,7 +404,10 @@ ngx::Log(ngx::Verbose{2}, "state: {:>20}",
          ngx::Lazy([&] { return Dump(state); }));
 ```
 
-`SignalSafe` does not accept lazy arguments, since the callable may allocate.
+`SignalSafe` does not accept lazy arguments, since the callable may allocate,
+and neither does [`Async`](#asynchronous-delivery), since the callable may
+refer to state of the caller that ends before the logging thread formats the
+message.
 
 ### Types Without a Formatter
 
@@ -490,7 +494,7 @@ or `CategoriesAreDistinct`. In the following table, `?` means at most once and
 | `Every`, `First` | Rate limit | `?` |
 | `Syslog`, `SignalSafe` | Destination | `?` |
 | `ToSink`, `ToString`, `ToVector` | Destination | `*` |
-| `Tag`, `Errno`, `Debug`, `Verbose`, `FatalInDebug`, `SkipLogFile` | Own | `?` |
+| `Tag`, `Errno`, `Debug`, `Verbose`, `FatalInDebug`, `SkipLogFile`, `Async` | Own | `?` |
 | Custom attributes | `Category`, if declared | `?`, or `*` if `Multiple` |
 
 A message therefore has, for instance, a single severity and a destination of
@@ -632,6 +636,80 @@ ngx::Log(ngx::Every{100}, "Got the {}th cookie", ngx::Occurrence);
 | `SkipLogFile` | Logs to the sinks of `ToSink` only. Requires a sink. | `LOG_TO_SINK_BUT_NOT_TO_LOGFILE` with `ToSink` |
 | `ToString{&text}` | Also stores the text in a string. Repeat it for several strings. | `LOG_TO_STRING(severity, &text)` |
 | `ToVector{&texts}` | Appends the text to a vector instead of logging. Repeat it for several vectors. Null vectors are ignored, and the message is logged if all of them are null. | `LOG_STRING(severity, &texts)` |
+
+#### Asynchronous Delivery
+
+| Attribute | Effect | Macro equivalent |
+|-----------|--------|------------------|
+| `Async` | Passes the message to the logging thread, which writes it to the destinations. | none |
+
+`Async` keeps the calling thread from waiting for slow destinations, such as a
+log file on a busy disk or a sink that sends messages over the network. It
+applies to any combination of the other attributes, so every form of `Log`
+logs asynchronously with it:
+
+```cpp title="Logging without waiting for the destinations"
+#include <ng-log/experimental/log.h>
+
+ngx::Log(ngx::Async | ngx::Warning, "Queue {} is {}% full", name, usage);
+ngx::Log(ngx::Async | ngx::Verbose{2} | ngx::ToSink{&sink}, "Took {}", time);
+nglog::FlushLogFiles(NGLOG_INFO);  // waits for both messages
+```
+
+!!! warning "Caveats"
+    - Sinks of `ToSink` must stay valid until the message is written. Call
+      `FlushLogFiles()` before destroying them, also for sinks with static
+      storage duration, which exiting may destroy before it writes the pending
+      messages.
+    - Arguments other than C strings and string views, which are copied as
+      strings, and the attributes are copied as they are. They must not refer
+      to state that changes or ends before the logging thread formats the
+      message, such as through a pointer or a view.
+    - A formatter that throws on the logging thread terminates the program
+      once the message is written.
+    - Pending messages are lost if the program crashes, such as on a signal.
+    - A message logged later without `Async` can appear before pending ones.
+    - On Windows, a message the logging thread is writing when the program
+      exits can be lost.
+
+The calling thread only decides whether to log the message, which runs the
+`Configure`, `Admit` and `Throttle` hooks, and copies the attributes and the
+arguments. The logging thread, which starts with the first such message,
+composes the messages in the order they were logged from the copies. It
+collects the fields, writes the prefix, runs the `Prefix` and `Suffix` hooks,
+formats the arguments and writes the message to the log files, the standard
+streams, syslog and the sinks. The message reports the time, the thread and the
+`errno` of the call, and a stack trace that `--log_backtrace_at` requests shows
+the stack of the call. Sinks receive the time of the call, and
+`LogSink::ToString()` names the thread of the call.
+
+`FlushLogFiles()` and `ShutdownLogging()` wait until the logging thread wrote
+the messages logged before, and so does exiting the program. A fatal
+message, including a failed `Ensure` and an `Error | FatalInDebug` message in
+debug mode, is written by the calling thread once the pending messages are, so
+the program terminates where it failed.
+
+At most 8 MiB of copied messages wait for the logging thread. Once that much is
+pending, callers wait for the logging thread instead of dropping messages or
+using more memory. Messages logged on the logging thread itself, such as by a
+sink, are written right away.
+
+A tag is copied. `ToString` and `ToVector` cannot be combined with `Async`
+since the caller reads their text right after the call, and neither can
+`SignalSafe`, since passing a message to another thread allocates and acquires
+a lock. [`Lazy`](#lazy-arguments) arguments cannot be deferred either, since
+their callables may refer to state of the caller. All of these are rejected at
+compile time.
+
+The child of a `fork()` starts a logging thread of its own on first use.
+Messages pending in the parent while it forks are written by the parent only.
+Like any thread, the logging thread may hold locks of the C library while it
+composes a message, which a child forked meanwhile inherits locked. A child
+that logs should therefore be forked after `FlushLogFiles()`, which waits until
+the logging thread is idle.
+On Windows, the operating system terminates the logging thread before a library
+writes the pending messages on exit. The exiting thread then writes the
+messages that the logging thread did not start writing.
 
 ### Argument Evaluation Order
 

@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <format>
 #include <iterator>
+#include <memory>
 #include <new>
 #include <source_location>
 #include <span>
@@ -22,6 +23,7 @@
 #include <utility>
 #include <vector>
 
+#include "async.h"
 #include "context.h"
 #include "internal/log_message_access.h"
 #include "ng-log/experimental/attributes.h"
@@ -243,14 +245,12 @@ bool IsAdmitted(std::span<const ErasedAttribute> attributes,
   return admitted;
 }
 
-void Dispatch(std::span<const ErasedAttribute> attributes,
-              const CallerConfiguration& configuration,
-              const std::source_location& location, std::string_view format,
-              std::format_args args) {
-  // Hooks and site lookups may clobber errno before the message preserves it.
-  // Attributes that captured errno at the call site replace the value.
-  ContextImpl context{location, configuration.debug, errno};
-  const ErrnoRestorer restore_errno{context};
+namespace {
+
+// Runs the hooks that decide whether to log a message. Rejected messages and
+// stripped ones that are not fatal return false.
+bool Admit(std::span<const ErasedAttribute> attributes,
+           const CallerConfiguration& configuration, ContextImpl& context) {
   RunHooks(attributes, &Hooks::configure, context);
   // Escalating after all severities are configured makes the order of the
   // attributes irrelevant. Like LOG(DFATAL), the message terminates only if
@@ -263,7 +263,7 @@ void Dispatch(std::span<const ErasedAttribute> attributes,
   }
 
   if (!PassHooks(attributes, &Hooks::admit, context)) {
-    return;
+    return false;
   }
 
   // Stripped messages are compiled away by the macros, which still terminate
@@ -273,25 +273,33 @@ void Dispatch(std::span<const ErasedAttribute> attributes,
     if (context.severity() == NGLOG_FATAL) {
       std::abort();
     }
-    return;
+    return false;
   }
 
   // Rate limits count occurrences regardless of the minimum log level.
   if (!PassHooks(attributes, &Hooks::throttle, context)) {
-    return;
+    return false;
   }
 
-  if (!nglog::internal::IsLogSeverityEnabled(context.severity())) {
-    return;
-  }
+  return nglog::internal::IsLogSeverityEnabled(context.severity());
+}
 
+// Composes an admitted message and sends it. The origin, if any, is the call
+// on another thread the message reports.
+template <class Format>
+void Compose(std::span<const ErasedAttribute> attributes, ContextImpl& context,
+             const nglog::internal::LogMessageOrigin* origin,
+             const Format& format) {
   // Fields are collected only for structured sinks.
   if (!context.structured_sinks().empty()) {
     RunHooks(attributes, &Hooks::fields, context.fields());
   }
 
   errno = context.preserved_errno();
-  Output output{context};
+  Output output = [&context, origin] {
+    const nglog::internal::LogMessageOriginScope scope{origin};
+    return Output{context};
+  }();
   MessageImpl message{output.get()};
 
   try {
@@ -299,8 +307,7 @@ void Dispatch(std::span<const ErasedAttribute> attributes,
 
     {
       const FormattingScope scope{context};
-      std::vformat_to(std::ostreambuf_iterator<char>{output.get().stream()},
-                      format, args);
+      format(std::ostreambuf_iterator<char>{output.get().stream()});
     }
 
     RunHooks(attributes, &Hooks::suffix, message);
@@ -312,6 +319,61 @@ void Dispatch(std::span<const ErasedAttribute> attributes,
   }
 
   output.Send();
+}
+
+}  // namespace
+
+void Dispatch(std::span<const ErasedAttribute> attributes,
+              const CallerConfiguration& configuration,
+              const std::source_location& location, std::string_view format,
+              std::format_args args) {
+  // Hooks and site lookups may clobber errno before the message preserves it.
+  // Attributes that captured errno at the call site replace the value.
+  ContextImpl context{location, configuration.debug, errno};
+  const ErrnoRestorer restore_errno{context};
+  if (!Admit(attributes, configuration, context)) {
+    return;
+  }
+  Compose(attributes, context, nullptr,
+          [format, &args](std::ostreambuf_iterator<char> out) {
+            std::vformat_to(out, format, args);
+          });
+}
+
+void DispatchDeferred(std::span<const ErasedAttribute> attributes,
+                      const CallerConfiguration& configuration,
+                      const std::source_location& location,
+                      const MessageCopier& copier) {
+  ContextImpl context{location, configuration.debug, errno};
+  const ErrnoRestorer restore_errno{context};
+  if (!Admit(attributes, configuration, context)) {
+    return;
+  }
+
+  std::unique_ptr<DeferredMessage> message = copier.copy(copier.message);
+  // A fatal message terminates the calling thread once the logging thread sent
+  // the messages passed to it before.
+  if (context.severity() == NGLOG_FATAL) {
+    WaitForPendingMessages();
+    const DeferredMessage& fatal = *message;
+    Compose(
+        fatal.attributes(), context, nullptr,
+        [&fatal](std::ostreambuf_iterator<char> out) { fatal.Format(out); });
+    return;
+  }
+
+  Defer(std::make_unique<PendingMessage>(
+      context, std::move(message),
+      nglog::internal::CaptureLogMessageOrigin(
+          location.file_name(), static_cast<int>(location.line()))));
+}
+
+void Send(PendingMessage& message) {
+  const DeferredMessage& deferred = message.message();
+  Compose(deferred.attributes(), message.context(), &message.origin(),
+          [&deferred](std::ostreambuf_iterator<char> out) {
+            deferred.Format(out);
+          });
 }
 
 std::format_context::iterator FormatOccurrence(std::format_context& context) {

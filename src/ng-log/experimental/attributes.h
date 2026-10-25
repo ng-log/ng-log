@@ -405,6 +405,7 @@ struct VerbosityCategory;
 struct RateLimitCategory;
 struct LogFileCategory;
 struct EscalationCategory;
+struct AsyncCategory;
 
 }  // namespace internal
 
@@ -899,6 +900,27 @@ struct ToVector {
 
   NGLOG_EXPORT void Configure(Context& context) const;
 };
+
+// Passes the message to the logging thread, which writes it to the
+// destinations, so that the caller does not wait for them.
+struct AsyncDelivery {
+  using Category = internal::AsyncCategory;
+
+  NGLOG_EXPORT void Configure(Context& context) const;
+};
+
+inline constexpr AsyncDelivery Async{};
+
+namespace internal {
+
+// Whether attributes pass the message to the logging thread.
+template <class T>
+inline constexpr bool kAsync = std::is_same_v<T, AsyncDelivery>;
+
+template <class... As>
+inline constexpr bool kAsync<Attributes<As...>> = (kAsync<As> || ...);
+
+}  // namespace internal
 
 }  // namespace nglog::experimental
 

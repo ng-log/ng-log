@@ -250,4 +250,8 @@ void ToVector::Configure(Context& context) const {
   Impl(context).AddVector(texts);
 }
 
+void AsyncDelivery::Configure(Context& context) const {
+  Impl(context).async = true;
+}
+
 }  // namespace nglog::experimental
