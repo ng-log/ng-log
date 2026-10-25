@@ -391,7 +391,8 @@ To guarantee that formatting neither allocates nor locks, `SignalSafe` rejects
 at compile time:
 
 - arguments other than integers, floating-point numbers, characters, `bool`,
-  `void` pointers, `nullptr`, C strings, [`std::string_view`](https://en.cppreference.com/w/cpp/string/basic_string_view) and `std::string`
+  `void` pointers, `nullptr`, C strings, [`std::string_view`](https://en.cppreference.com/w/cpp/string/basic_string_view) and `std::string`,
+  and their wide counterparts with a [wide format string](#wide-format-strings)
 - the locale-specific option `L`
 - attributes other than a severity, `Debug` and `Verbose`, including the other
   destinations and `Async`
@@ -428,6 +429,11 @@ ngx::Log(ngx::SignalSafe, "{:f}", 1.0L);    // rejected: long double fixed
 
 A format error detected at runtime, such as a negative dynamic width of an
 integer argument, throws [`std::format_error`](https://en.cppreference.com/w/cpp/utility/format/format_error), which allocates.
+
+A message of a [wide format string](#wide-format-strings) is formatted into a
+buffer of 1024 code units without allocating and then encoded as UTF-8. A
+longer message is reported as too long, like a message whose encoding exceeds
+the buffer of `RAW_LOG`.
 
 ### Lazy Arguments
 
@@ -478,6 +484,39 @@ struct std::formatter<Point> {
 
 ngx::Log("Moved to {}", Point{1, 2});
 ```
+
+### Wide Format Strings
+
+A format string of wide characters, such as `L"cannot open {}"`, is checked at
+compile time like a [`std::wformat_string`](https://en.cppreference.com/w/cpp/utility/format/basic_format_string)
+and formatted by the formatters for `wchar_t`. Wide arguments, such as
+`wchar_t`, wide C strings, `std::wstring_view` and `std::wstring`, are
+formatted without conversion, and so is a type with a `std::formatter<T,
+wchar_t>` specialization. Like with `std::format`, narrow strings cannot be
+formatted into a wide format string and wide ones not into a narrow one.
+`Log`, `Ensure`, `Lazy`, `Occurrence` and `Async` accept wide format strings:
+
+```cpp title="Logging with a wide format string"
+#include <string>
+
+#include <ng-log/experimental/log.h>
+
+const std::wstring name = L"caf\u00e9";
+ngx::Log(ngx::Warning, L"cannot open {}", name);
+// W20261025 12:00:00.000000  1234 file.cc:6] cannot open café
+```
+
+The formatted message is encoded as UTF-8 for the log files, the sinks and the
+other destinations, the same way on every platform, although `wchar_t` holds
+UTF-16 code units on Windows and UTF-32 code units elsewhere. Code units that
+do not form a Unicode scalar value, such as unpaired surrogates, are encoded as
+U+FFFD.
+
+On Windows, the console and the debugger receive the formatted wide text
+without conversion, including code units that are not valid UTF-16. The prefix
+and the text that attributes add are converted from UTF-8 as for narrow
+messages. A message that is truncated at the length limit of messages writes
+its encoding instead.
 
 ### Querying the Verbosity
 
@@ -701,7 +740,8 @@ nglog::FlushLogFiles(NGLOG_INFO);  // waits for both messages
       storage duration, which exiting may destroy before it writes the pending
       messages.
     - Arguments other than C strings and string views, which are copied as
-      strings, and the attributes are copied as they are. They must not refer
+      strings of their character type, and the attributes are copied as they
+      are. They must not refer
       to state that changes or ends before the logging thread formats the
       message, such as through a pointer or a view.
     - A formatter that throws on the logging thread terminates the program

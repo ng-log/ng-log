@@ -12,6 +12,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <atomic>
 #include <cerrno>
 #include <cstddef>
@@ -306,6 +307,149 @@ std::string SignalSafeMessage(const std::string& output) {
   return output.substr(text, output.find('\n', text) - text);
 }
 
+TEST_F(ExperimentalLogging, SignalSafeLogOfWideFormatMatchesNarrowFormat) {
+  const std::string narrow_text = "wide";
+  const std::wstring wide_text = L"wide";
+  const Output narrow = Capture([&narrow_text] {
+    ngx::Log(ngx::SignalSafe | ngx::Warning,
+             "caf\xC3\xA9 {} {} {} {} {:>4} {:+.2f} {}", 1, "text",
+             std::string_view{"view"}, narrow_text, 'c', 1.5, true);
+  });
+  const Output wide = Capture([&wide_text] {
+    ngx::Log(ngx::SignalSafe | ngx::Warning,
+             L"caf\u00e9 {} {} {} {} {:>4} {:+.2f} {}", 1, L"text",
+             std::wstring_view{L"view"}, wide_text, L'c', 1.5, true);
+  });
+  EXPECT_EQ(SignalSafeMessage(wide.stderr_text),
+            "caf\xC3\xA9 1 text view wide    c +1.50 true");
+  EXPECT_EQ(SignalSafeMessage(wide.stderr_text),
+            SignalSafeMessage(narrow.stderr_text));
+}
+
+// The text is encoded as UTF-8 whether wchar_t holds UTF-16 or UTF-32.
+TEST_F(ExperimentalLogging, SignalSafeLogEncodesWideTextAsUtf8) {
+  constexpr wchar_t kUnpairedSurrogate = L'\xDC00';
+  constexpr wchar_t kTrailingSurrogate = L'\xD800';
+  const Output output = Capture([] {
+    ngx::Log(ngx::SignalSafe | ngx::Warning, L"{} {} {}", L"\U0001F600",
+             std::wstring{L'a', kUnpairedSurrogate, L'b'},
+             std::wstring{L'c', kTrailingSurrogate});
+  });
+  EXPECT_EQ(SignalSafeMessage(output.stderr_text),
+            "\xF0\x9F\x98\x80 a\xEF\xBF\xBD"
+            "b c\xEF\xBF\xBD");
+}
+
+TEST_F(ExperimentalLogging, SignalSafeLogOfWideFormatDoesNotAllocate) {
+  constexpr std::size_t kLength = 1000;
+  const std::wstring text(kLength, L'x');
+  int allocations = -1;
+  const Output output = Capture([&text, &allocations] {
+    ngx::Log(ngx::SignalSafe | ngx::Warning, L"{}", 0);
+    const ScopedAllocationCounter counter;
+    ngx::Log(ngx::SignalSafe | ngx::Warning, L"{} {} {:e}", text, 1, 2.5);
+    allocations = counter.count();
+  });
+  EXPECT_EQ(allocations, 0);
+  EXPECT_THAT(output.stderr_text,
+              HasSubstr(std::string(kLength, 'x') + " 1 2.500000e+00"));
+}
+
+TEST_F(ExperimentalLogging, SignalSafeLogOfWideFormatLimitsCodeUnits) {
+  constexpr std::size_t kLength = ngx::internal::kSignalSafeWideLength;
+  const std::wstring longest(kLength, L'x');
+  const std::wstring too_long(kLength + 1, L'x');
+  const Output fitting = Capture(
+      [&longest] { ngx::Log(ngx::SignalSafe | ngx::Warning, L"{}", longest); });
+  const Output truncated = Capture([&too_long] {
+    ngx::Log(ngx::SignalSafe | ngx::Warning, L"{}", too_long);
+  });
+  EXPECT_EQ(SignalSafeMessage(fitting.stderr_text), std::string(kLength, 'x'));
+  EXPECT_EQ(SignalSafeMessage(truncated.stderr_text),
+            "RAW_LOG ERROR: The Message was too long!");
+}
+
+// Returns whether a signal-safe message of the text fits the buffer.
+template <class Text>
+bool SignalSafeMessageFits(const Text& text) {
+  const Output output = Capture(
+      [&text] { ngx::Log(ngx::SignalSafe | ngx::Warning, "{}", text); });
+  return SignalSafeMessage(output.stderr_text) == text;
+}
+
+template <class Text>
+bool SignalSafeWideMessageFits(const Text& text, std::string_view encoding) {
+  const Output output = Capture(
+      [&text] { ngx::Log(ngx::SignalSafe | ngx::Warning, L"{}", text); });
+  return SignalSafeMessage(output.stderr_text) == encoding;
+}
+
+// The encoding of wide text fits the buffer exactly where narrow text of the
+// same length does, also if the last code point is encoded in several bytes.
+TEST_F(ExperimentalLogging, SignalSafeLogOfWideFormatFillsBuffer) {
+  constexpr std::size_t kMaximumLength = 4096;
+  constexpr std::size_t kEuroLength = 3;
+  std::size_t longest = kMaximumLength;
+  while (longest != 0 && !SignalSafeMessageFits(std::string(longest, 'x'))) {
+    --longest;
+  }
+  const std::size_t euros = longest / kEuroLength;
+  const std::size_t padding = longest % kEuroLength;
+  ASSERT_GT(euros, 0U);
+  ASSERT_LT(padding + 1 + euros, ngx::internal::kSignalSafeWideLength);
+
+  std::wstring fitting(padding, L'x');
+  std::string encoding(padding, 'x');
+  for (std::size_t i = 0; i != euros; ++i) {
+    fitting += L"\u20ac";
+    encoding += "\xE2\x82\xAC";
+  }
+  EXPECT_TRUE(SignalSafeWideMessageFits(fitting, encoding));
+  EXPECT_FALSE(SignalSafeWideMessageFits(L"x" + fitting, "x" + encoding));
+}
+
+// Formats like std::snprintf: the text is terminated, only whole code points
+// that precede the first one not fitting are written, and the length is less
+// than the size only if the text fits.
+TEST(ExperimentalSignalSafe, WideMessageFormatsLikeSnprintf) {
+  using Message = ngx::internal::SignalSafeWideMessage<std::wstring_view>;
+  constexpr std::wstring_view kText = L"ab\u20acc";
+  constexpr char kGuard = '#';
+  constexpr std::size_t kFittingSize = 7;
+  constexpr std::size_t kEncodingLength = 6;
+  constexpr std::size_t kTruncatingSize = 5;
+  constexpr std::size_t kTruncatedLength = 2;
+  Message message{"", L"{}", {kText}};
+  std::array<char, kFittingSize + 1> buffer;
+
+  buffer.fill(kGuard);
+  EXPECT_EQ(Message::Format(&message, buffer.data(), kFittingSize),
+            static_cast<int>(kEncodingLength));
+  EXPECT_EQ(std::string(buffer.data(), kEncodingLength),
+            "ab\xE2\x82\xAC"
+            "c");
+  EXPECT_EQ(buffer[kEncodingLength], '\0');
+  EXPECT_EQ(buffer[kFittingSize], kGuard);
+
+  buffer.fill(kGuard);
+  EXPECT_GE(Message::Format(&message, buffer.data(), kTruncatingSize),
+            static_cast<int>(kTruncatingSize));
+  EXPECT_EQ(std::string(buffer.data(), kTruncatedLength), "ab");
+  EXPECT_EQ(buffer[kTruncatedLength], '\0');
+  EXPECT_EQ(buffer[kTruncatingSize], kGuard);
+}
+
+// The encoding of fewer code units than the limit may still exceed the
+// buffer.
+TEST_F(ExperimentalLogging, SignalSafeLogOfWideFormatLimitsEncoding) {
+  constexpr std::size_t kLength = 1000;
+  const std::wstring text(kLength, L'\u20ac');
+  const Output output = Capture(
+      [&text] { ngx::Log(ngx::SignalSafe | ngx::Warning, L"{}", text); });
+  EXPECT_EQ(SignalSafeMessage(output.stderr_text),
+            "RAW_LOG ERROR: The Message was too long!");
+}
+
 // Formats a floating-point value signal safely and using std::format() with
 // the same format string, which must produce identical text.
 #define EXPECT_RAW_FLOAT(format_string, value)                           \
@@ -388,6 +532,18 @@ TEST_F(ExperimentalLogging, SignalSafeFloatsDoNotAllocate) {
 template <class... Args>
 concept SignalSafeLoggable =
     requires(const Args&... args) { ngx::Log(ngx::SignalSafe, "", args...); };
+
+template <class... Args>
+concept SignalSafeWideLoggable =
+    requires(const Args&... args) { ngx::Log(ngx::SignalSafe, L"", args...); };
+
+static_assert(
+    SignalSafeWideLoggable<const wchar_t*, std::wstring, std::wstring_view>,
+    "SignalSafe formats const wchar_t*, std::wstring, std::wstring_view "
+    "without allocating");
+static_assert(SignalSafeWideLoggable<int, wchar_t, bool, double>,
+              "SignalSafe formats int, wchar_t, bool, double in wide format "
+              "strings without allocating");
 
 template <class A>
 concept SignalSafeLoggableWith = requires(const A& attributes) {

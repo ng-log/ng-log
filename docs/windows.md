@@ -78,7 +78,10 @@ console API. Redirected output is written as UTF-8 through the stream's
 existing translation mode, so a text-mode stream translates line feeds into
 CRLF sequences exactly like the application's own output. Ill-formed UTF-8
 sequences are replaced with U+FFFD when writing to the console or the debugger.
-Debugger output uses the corresponding Unicode debugger API.
+Debugger output uses the corresponding Unicode debugger API. The console and
+the debugger receive the text of a message of the [experimental logging
+functions](logging/experimental.md#wide-format-strings) with a wide format
+string without conversion.
 
 ## Log file links
 

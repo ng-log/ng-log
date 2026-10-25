@@ -522,6 +522,53 @@ TEST_F(ExperimentalAsync, CopiesArguments) {
               ElementsAre(testing::EndsWith("|original original original")));
 }
 
+// Wide C strings and string views are copied as wide strings.
+TEST_F(ExperimentalAsync, CopiesWideArguments) {
+  GatedSink held;
+  RecordingSink sink;
+  ngx::Log(ngx::Async | ngx::ToSink{&held} | ngx::SkipLogFile, "held");
+  wchar_t buffer[] = L"original";
+  std::wstring viewed = L"original";
+  std::wstring text = L"original";
+  ngx::Log(ngx::Async | ngx::ToSink{&sink} | ngx::SkipLogFile, L"{} {} {}",
+           buffer, std::wstring_view{viewed}, text);
+  std::ranges::fill(std::span{buffer}.first(std::size(buffer) - 1), L'x');
+  std::ranges::fill(viewed, L'x');
+  text = L"changed";
+  held.Open();
+  nglog::FlushLogFiles(NGLOG_INFO);
+  EXPECT_THAT(sink.messages,
+              ElementsAre(testing::EndsWith("|original original original")));
+}
+
+// The copy of a message counts the bytes of its wide texts against the
+// capacity of the queue.
+TEST(ExperimentalAsyncCopy, CountsBytesOfWideText) {
+  using Message = ngx::internal::DeferredMessageOf<wchar_t, ngx::Attributes<>,
+                                                   std::wstring_view>;
+  constexpr std::wstring_view kFormat = L"{}";
+  constexpr std::wstring_view kText = L"text";
+  const Message message{ngx::Attributes<>{}, kFormat, kText};
+  EXPECT_EQ(message.size(), sizeof(Message) + ((kFormat.size() + kText.size()) *
+                                               sizeof(wchar_t)));
+}
+
+// The logging thread encodes the message of a wide format string as UTF-8 and
+// keeps its wide text for writers of wide characters, such as the Windows
+// console.
+TEST_F(ExperimentalAsync, ComposesWideFormatOnLoggingThread) {
+  RecordingSink sink;
+  std::wstring text;
+  std::string encoding;
+  ngx::Log(ngx::Async | ngx::ToSink{&sink} | ngx::SkipLogFile |
+               WideTextRecorder{&text, &encoding},
+           L"caf\u00e9 {}", 42);
+  nglog::FlushLogFiles(NGLOG_INFO);
+  EXPECT_THAT(sink.messages, ElementsAre(testing::EndsWith("|caf\xC3\xA9 42")));
+  EXPECT_EQ(text, L"caf\u00e9 42");
+  EXPECT_EQ(encoding, "caf\xC3\xA9 42");
+}
+
 // The tag reaches structured sinks although the caller changes it before the
 // held logging thread sends the message.
 TEST_F(ExperimentalAsync, KeepsSettingsOfCall) {
@@ -596,6 +643,15 @@ TEST_F(ExperimentalAsync, FatalTerminatesCallerAfterPendingMessages) {
                }()),
                AllOf(ContainsInOrder("] pending", "] fatal"),
                      Not(HasSubstr("continued"))));
+}
+
+// The caller composes a fatal message of a wide format string itself.
+TEST_F(ExperimentalAsync, FatalOfWideFormatTerminatesCaller) {
+  EXPECT_DEATH(([] {
+                 ngx::Log(ngx::Async, "pending");
+                 ngx::Log(ngx::Async | ngx::Fatal, L"fatal {}", 1);
+               }()),
+               ContainsInOrder("] pending", "] fatal 1"));
 }
 
 // A failed check terminates the caller like a fatal message.

@@ -21,6 +21,7 @@
 #include <ostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <type_traits>
 
 #include "ng-log/experimental/attributes.h"
@@ -33,6 +34,7 @@ namespace {
 
 using namespace ngx_testing;
 using testing::ElementsAre;
+using testing::EndsWith;
 using testing::HasSubstr;
 using testing::IsEmpty;
 using testing::Not;
@@ -253,6 +255,77 @@ static_assert(
 static_assert(
     !LazyFormattable<Unformattable (*)()>,
     "Lazy rejects a callable Unformattable (*)() without a formattable result");
+
+TEST_F(ExperimentalLogging, WideFormatMatchesMacro) {
+  EXPECT_SAME_OUTPUT(LOG(INFO) << "value " << 42, ngx::Log(L"value {}", 42));
+}
+
+TEST_F(ExperimentalLogging, WideFormatWithAttributesMatchesMacro) {
+  EXPECT_SAME_OUTPUT(LOG(WARNING) << "careful " << 1.5,
+                     ngx::Log(ngx::Warning, L"careful {}", 1.5));
+}
+
+TEST_F(ExperimentalLogging, WideFormatOfEveryFormMatchesMacro) {
+  EXPECT_SAME_OUTPUT(LOG_IF(INFO, true) << "conditional",
+                     ngx::Log(true, L"conditional"));
+  EXPECT_SAME_OUTPUT(LOG_IF(ERROR, true) << "attributed",
+                     ngx::Log(true, ngx::Error, L"attributed"));
+  // Parentheses keep the call from declaring a variable named Error.
+  EXPECT_SAME_OUTPUT(LOG(ERROR) << "staged", (ngx::Log(ngx::Error))(L"staged"));
+  EXPECT_SAME_OUTPUT(LOG(ERROR) << "braced", (ngx::Log{ngx::Error, L"braced"}));
+}
+
+// The text is encoded as UTF-8 whether wchar_t holds UTF-16 or UTF-32.
+TEST_F(ExperimentalLogging, WideFormatIsLoggedAsUtf8) {
+  RecordingSink sink;
+  ngx::Log(ngx::Info | ngx::ToSink{&sink} | ngx::SkipLogFile,
+           L"caf\u00e9 {} {}", L"\U0001F600", std::wstring{L"\u20ac"});
+  EXPECT_THAT(
+      sink.messages,
+      ElementsAre(EndsWith("|caf\xC3\xA9 \xF0\x9F\x98\x80 \xE2\x82\xAC")));
+}
+
+TEST_F(ExperimentalLogging, WideFormatFormatsWideArguments) {
+  RecordingSink sink;
+  const wchar_t* const pointer = L"pointer";
+  constexpr std::wstring_view kView = L"view";
+  ngx::Log(ngx::Info | ngx::ToSink{&sink} | ngx::SkipLogFile,
+           L"[{:>4}] {} {} {} {}", L"ab", pointer, kView, L'c',
+           WideFormattable{L"custom"});
+  EXPECT_THAT(sink.messages,
+              ElementsAre(EndsWith("|[  ab] pointer view c custom")));
+}
+
+TEST_F(ExperimentalLogging, WideFormatReplacesUnpairedSurrogates) {
+  constexpr wchar_t kHighSurrogate = L'\xD800';
+  RecordingSink sink;
+  ngx::Log(ngx::Info | ngx::ToSink{&sink} | ngx::SkipLogFile, L"a{}b",
+           std::wstring{kHighSurrogate});
+  EXPECT_THAT(sink.messages, ElementsAre(EndsWith("|a\xEF\xBF\xBD"
+                                                  "b")));
+}
+
+// Writers of wide characters, such as the Windows console, receive the
+// formatted wide text instead of its encoding.
+TEST_F(ExperimentalLogging, WideFormatKeepsFormattedWideText) {
+  constexpr wchar_t kUnpairedSurrogate = L'\xDC00';
+  std::wstring text;
+  std::string encoding;
+  RecordingSink sink;
+  ngx::Log(ngx::Info | ngx::ToSink{&sink} | ngx::SkipLogFile |
+               WideTextRecorder{&text, &encoding},
+           L"a{}b", std::wstring{kUnpairedSurrogate});
+  EXPECT_EQ(text, (std::wstring{L'a', kUnpairedSurrogate, L'b'}));
+  EXPECT_EQ(encoding,
+            "a\xEF\xBF\xBD"
+            "b");
+}
+
+TEST_F(ExperimentalLogging, WideFormatOfLazyArgumentMatchesMacro) {
+  EXPECT_SAME_OUTPUT(LOG(INFO) << "lazy " << 42 << " text",
+                     ngx::Log(L"lazy {} {}", ngx::Lazy([] { return 42; }),
+                              ngx::Lazy([] { return std::wstring{L"text"}; })));
+}
 
 TEST_F(ExperimentalLogging, IsEnabledMatchesVerboseMacro) {
   nglog::SetFlag(FLAGS_v, static_cast<std::int32_t>(1));

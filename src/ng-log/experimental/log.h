@@ -15,6 +15,7 @@
 
 #if defined(NGLOG_INTERNAL_EXPERIMENTAL_LOGGING_SUPPORTED)
 
+#  include <concepts>
 #  include <cstddef>
 #  include <format>
 #  include <iterator>
@@ -46,6 +47,11 @@ NGLOG_EXPORT void Dispatch(std::span<const ErasedAttribute> attributes,
                            const std::source_location& location,
                            std::string_view format, std::format_args args);
 
+NGLOG_EXPORT void Dispatch(std::span<const ErasedAttribute> attributes,
+                           const CallerConfiguration& configuration,
+                           const std::source_location& location,
+                           std::wstring_view format, std::wformat_args args);
+
 // Copies of the attributes and the arguments of a message, which the logging
 // thread composes.
 class DeferredMessage {
@@ -56,8 +62,10 @@ class DeferredMessage {
 
   // The copies of the attributes with their types erased.
   virtual std::span<const ErasedAttribute> attributes() const noexcept = 0;
-  // Formats the copies of the arguments.
-  virtual void Format(std::ostreambuf_iterator<char> out) const = 0;
+  // Formats the copies of the arguments into out, or into wide for a wide
+  // format string, whose text the caller writes.
+  virtual void Format(std::ostreambuf_iterator<char> out,
+                      std::wstring& wide) const = 0;
   // Bytes of the copies, which count against the capacity of the queue.
   virtual std::size_t size() const noexcept = 0;
 
@@ -79,14 +87,19 @@ NGLOG_EXPORT void DispatchDeferred(std::span<const ErasedAttribute> attributes,
                                    const std::source_location& location,
                                    const MessageCopier& copier);
 
+template <class T, class CharT>
+inline constexpr bool kBorrowedText =
+    std::is_same_v<std::decay_t<T>, const CharT*> ||
+    std::is_same_v<std::decay_t<T>, CharT*> ||
+    std::is_same_v<std::remove_cvref_t<T>, std::basic_string_view<CharT>>;
+
 // The copy of an argument for the logging thread. C strings and string views
 // are copied as strings, since their text may change or end with the call.
 template <class T>
-using DeferredArgument = std::conditional_t<
-    std::is_same_v<std::decay_t<T>, const char*> ||
-        std::is_same_v<std::decay_t<T>, char*> ||
-        std::is_same_v<std::remove_cvref_t<T>, std::string_view>,
-    std::string, std::decay_t<T>>;
+using DeferredArgument =
+    std::conditional_t<kBorrowedText<T, char>, std::string,
+                       std::conditional_t<kBorrowedText<T, wchar_t>,
+                                          std::wstring, std::decay_t<T>>>;
 
 template <class T>
 inline constexpr bool kLazy = false;
@@ -94,10 +107,10 @@ inline constexpr bool kLazy = false;
 template <class F>
 inline constexpr bool kLazy<Lazy<F>> = true;
 
-template <class A, class... Args>
+template <class CharT, class A, class... Args>
 class DeferredMessageOf final : public DeferredMessage {
  public:
-  DeferredMessageOf(const A& attributes, std::string_view format,
+  DeferredMessageOf(const A& attributes, std::basic_string_view<CharT> format,
                     const Args&... arguments)
       : attributes_{attributes},
         erased_{attributes_.Erase()},
@@ -108,18 +121,27 @@ class DeferredMessageOf final : public DeferredMessage {
     return erased_;
   }
 
-  void Format(std::ostreambuf_iterator<char> out) const override {
-    std::apply(
-        [this, &out](const DeferredArgument<Args>&... arguments) {
-          std::vformat_to(out, format_, std::make_format_args(arguments...));
-        },
-        arguments_);
+  void Format([[maybe_unused]] std::ostreambuf_iterator<char> out,
+              [[maybe_unused]] std::wstring& wide) const override {
+    if constexpr (std::is_same_v<CharT, wchar_t>) {
+      wide = std::apply(
+          [this](const DeferredArgument<Args>&... arguments) {
+            return std::vformat(format_, std::make_wformat_args(arguments...));
+          },
+          arguments_);
+    } else {
+      std::apply(
+          [this, &out](const DeferredArgument<Args>&... arguments) {
+            std::vformat_to(out, format_, std::make_format_args(arguments...));
+          },
+          arguments_);
+    }
   }
 
   std::size_t size() const noexcept override {
     return std::apply(
         [this](const DeferredArgument<Args>&... arguments) {
-          return sizeof(*this) + format_.size() +
+          return sizeof(*this) + TextSize(format_) +
                  (std::size_t{0} + ... + TextSize(arguments));
         },
         arguments_);
@@ -128,8 +150,9 @@ class DeferredMessageOf final : public DeferredMessage {
  private:
   template <class T>
   static std::size_t TextSize(const T& argument) noexcept {
-    if constexpr (std::is_same_v<T, std::string>) {
-      return argument.size();
+    if constexpr (std::is_same_v<T, std::string> ||
+                  std::is_same_v<T, std::wstring>) {
+      return argument.size() * sizeof(typename T::value_type);
     } else {
       return 0;
     }
@@ -137,7 +160,7 @@ class DeferredMessageOf final : public DeferredMessage {
 
   A attributes_;
   decltype(std::declval<const A&>().Erase()) erased_;
-  std::string format_;
+  std::basic_string<CharT> format_;
   std::tuple<DeferredArgument<Args>...> arguments_;
 };
 
@@ -159,24 +182,28 @@ template <class... As>
 inline constexpr bool kStoresText =
     ((std::is_same_v<As, ToString> || std::is_same_v<As, ToVector>) || ...);
 
-template <class... As, class... Args>
-void Write(const Attributes<As...>& attributes,
-           const CallerConfiguration& configuration, std::string_view format,
-           const std::source_location& location, Args&... args) {
-  static_assert(kHasDestination<As...>,
-                "SkipLogFile requires a ToSink destination, since the message "
-                "would not be logged anywhere otherwise.");
-  static_assert(!(kAsync<Attributes<As...>> && kStoresText<As...>),
-                "Async cannot store the text in a ToString or ToVector "
-                "destination, since the caller reads it before the logging "
-                "thread writes it.");
-  const auto erased = attributes.Erase();
+// Formats that may consist of wide characters, unlike the empty one of a
+// message without text.
+template <class F>
+concept WideCapableFormat = requires(const F& format) {
+  { format.wide() } -> std::same_as<bool>;
+  { format.get_wide() } -> std::convertible_to<std::wstring_view>;
+};
+
+// Logs a message of a format string of narrow or wide characters, on the
+// logging thread if the attributes include Async.
+template <class CharT, class... As, class... Args>
+void WriteText(const Attributes<As...>& attributes,
+               std::span<const ErasedAttribute> erased,
+               const CallerConfiguration& configuration,
+               const std::source_location& location,
+               std::basic_string_view<CharT> format, Args&... args) {
   if constexpr (kAsync<Attributes<As...>>) {
     static_assert(!(kLazy<std::remove_cvref_t<Args>> || ...),
                   "Async cannot defer a Lazy argument, since its callable may "
                   "refer to state of the caller that ends before the logging "
                   "thread formats the message.");
-    using Message = DeferredMessageOf<Attributes<As...>, Args...>;
+    using Message = DeferredMessageOf<CharT, Attributes<As...>, Args...>;
     const auto copy = [&attributes, format, &args...] {
       return std::make_unique<Message>(attributes, format, args...);
     };
@@ -189,7 +216,35 @@ void Write(const Attributes<As...>& attributes,
             }});
   } else {
     Dispatch(erased, configuration, location, format,
-             std::make_format_args(args...));
+             std::make_format_args<
+                 std::conditional_t<std::is_same_v<CharT, wchar_t>,
+                                    std::wformat_context, std::format_context>>(
+                 args...));
+  }
+}
+
+template <class... As, class F, class... Args>
+void Write(const Attributes<As...>& attributes,
+           const CallerConfiguration& configuration, const F& format,
+           Args&... args) {
+  static_assert(kHasDestination<As...>,
+                "SkipLogFile requires a ToSink destination, since the message "
+                "would not be logged anywhere otherwise.");
+  static_assert(!(kAsync<Attributes<As...>> && kStoresText<As...>),
+                "Async cannot store the text in a ToString or ToVector "
+                "destination, since the caller reads it before the logging "
+                "thread writes it.");
+  const auto erased = attributes.Erase();
+  if constexpr (WideCapableFormat<F> && (Formattable<Args, wchar_t> && ...)) {
+    if (format.wide()) {
+      WriteText(attributes, erased, configuration, format.location(),
+                format.get_wide(), args...);
+      return;
+    }
+  }
+  if constexpr ((Formattable<Args, char> && ...)) {
+    WriteText(attributes, erased, configuration, format.location(),
+              format.get(), args...);
   }
 }
 
@@ -212,7 +267,7 @@ struct LogTraits<A, false> {
   static void Emit(const Attributes<As...>& attributes,
                    const CallerConfiguration& configuration, const F& format,
                    std::string_view /*prefix*/, Args&... args) {
-    Write(attributes, configuration, format.get(), format.location(), args...);
+    Write(attributes, configuration, format, args...);
   }
 };
 

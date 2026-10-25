@@ -284,12 +284,13 @@ bool Admit(std::span<const ErasedAttribute> attributes,
   return nglog::internal::IsLogSeverityEnabled(context.severity());
 }
 
-// Composes an admitted message and sends it. The origin, if any, is the call
-// on another thread the message reports.
-template <class Format>
+// Composes an admitted message, whose text compose() writes to the message,
+// and sends it. The origin, if any, is the call on another thread the message
+// reports.
+template <class Composer>
 void Compose(std::span<const ErasedAttribute> attributes, ContextImpl& context,
              const nglog::internal::LogMessageOrigin* origin,
-             const Format& format) {
+             const Composer& compose) {
   // Fields are collected only for structured sinks.
   if (!context.structured_sinks().empty()) {
     RunHooks(attributes, &Hooks::fields, context.fields());
@@ -307,7 +308,7 @@ void Compose(std::span<const ErasedAttribute> attributes, ContextImpl& context,
 
     {
       const FormattingScope scope{context};
-      format(std::ostreambuf_iterator<char>{output.get().stream()});
+      compose(output.get());
     }
 
     RunHooks(attributes, &Hooks::suffix, message);
@@ -319,6 +320,17 @@ void Compose(std::span<const ErasedAttribute> attributes, ContextImpl& context,
   }
 
   output.Send();
+}
+
+// Writes the text of a deferred message. The message refers to the text of a
+// wide format string until it is sent.
+void FormatDeferred(const DeferredMessage& deferred, LogMessage& message,
+                    std::wstring& text) {
+  deferred.Format(std::ostreambuf_iterator<char>{message.stream()}, text);
+  if (!text.empty()) {
+    nglog::internal::LogMessageAccess::AppendWide(message, text.data(),
+                                                  text.size());
+  }
 }
 
 }  // namespace
@@ -334,9 +346,28 @@ void Dispatch(std::span<const ErasedAttribute> attributes,
   if (!Admit(attributes, configuration, context)) {
     return;
   }
+  Compose(attributes, context, nullptr, [format, &args](LogMessage& message) {
+    std::vformat_to(std::ostreambuf_iterator<char>{message.stream()}, format,
+                    args);
+  });
+}
+
+void Dispatch(std::span<const ErasedAttribute> attributes,
+              const CallerConfiguration& configuration,
+              const std::source_location& location, std::wstring_view format,
+              std::wformat_args args) {
+  ContextImpl context{location, configuration.debug, errno};
+  const ErrnoRestorer restore_errno{context};
+  if (!Admit(attributes, configuration, context)) {
+    return;
+  }
+  // The message refers to the text until it is sent.
+  std::wstring text;
   Compose(attributes, context, nullptr,
-          [format, &args](std::ostreambuf_iterator<char> out) {
-            std::vformat_to(out, format, args);
+          [format, &args, &text](LogMessage& message) {
+            text = std::vformat(format, args);
+            nglog::internal::LogMessageAccess::AppendWide(message, text.data(),
+                                                          text.size());
           });
 }
 
@@ -356,9 +387,11 @@ void DispatchDeferred(std::span<const ErasedAttribute> attributes,
   if (context.severity() == NGLOG_FATAL) {
     WaitForPendingMessages();
     const DeferredMessage& fatal = *message;
-    Compose(
-        fatal.attributes(), context, nullptr,
-        [&fatal](std::ostreambuf_iterator<char> out) { fatal.Format(out); });
+    std::wstring text;
+    Compose(fatal.attributes(), context, nullptr,
+            [&fatal, &text](LogMessage& composed) {
+              FormatDeferred(fatal, composed, text);
+            });
     return;
   }
 
@@ -370,13 +403,20 @@ void DispatchDeferred(std::span<const ErasedAttribute> attributes,
 
 void Send(PendingMessage& message) {
   const DeferredMessage& deferred = message.message();
+  std::wstring text;
   Compose(deferred.attributes(), message.context(), &message.origin(),
-          [&deferred](std::ostreambuf_iterator<char> out) {
-            deferred.Format(out);
+          [&deferred, &text](LogMessage& composed) {
+            FormatDeferred(deferred, composed, text);
           });
 }
 
 std::format_context::iterator FormatOccurrence(std::format_context& context) {
+  return formatting_context == nullptr
+             ? context.out()
+             : formatting_context->FormatOccurrences(context);
+}
+
+std::wformat_context::iterator FormatOccurrence(std::wformat_context& context) {
   return formatting_context == nullptr
              ? context.out()
              : formatting_context->FormatOccurrences(context);

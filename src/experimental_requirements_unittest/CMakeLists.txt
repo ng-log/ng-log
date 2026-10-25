@@ -47,6 +47,9 @@ set (_cases
   signal_safe/missing_precision
   signal_safe/precision
   signal_safe/type
+  signal_safe/wide_fill_non_ascii
+  signal_safe/wide_locale
+  signal_safe/wide_type
   signal_safe/width
   that/bound_non_integer
   that/byte_cstring

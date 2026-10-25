@@ -490,6 +490,14 @@ TEST_F(ExperimentalLogging, OccurrenceOfFirstMatchesMacro) {
   }
 }
 
+TEST_F(ExperimentalLogging, OccurrenceInWideFormatMatchesMacro) {
+  for (int i = 0; i != kRepetitions; ++i) {
+    EXPECT_SAME_OUTPUT(
+        LOG_EVERY_N(INFO, kEvery) << "occurrence " << LOG_OCCURRENCES,
+        ngx::Log(ngx::Every{kEvery}, L"occurrence {}", ngx::Occurrence));
+  }
+}
+
 // The type of the counter is pinned by the wraparound at its limit below.
 TEST_F(ExperimentalLogging, OccurrenceWithSizeCounterMatchesMacro) {
   constexpr std::size_t kSizeEvery = kEvery;

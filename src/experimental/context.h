@@ -11,12 +11,15 @@
 #define NGLOG_SRC_EXPERIMENTAL_CONTEXT_H
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
+#include <charconv>
 #include <cstddef>
 #include <cstring>
 #include <format>
 #include <ios>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <source_location>
 #include <span>
@@ -114,19 +117,24 @@ class ContextImpl final : public Context {
                   "the occurrence count must fit the storage of the largest "
                   "counter type");
     std::memcpy(occurrences_, &occurrences, sizeof(T));
-    format_occurrences_ = [](const unsigned char* value,
-                             std::format_context& context) {
+    // Converts like std::format() formats an integer without a
+    // specification.
+    write_occurrences_ = [](const unsigned char* value, char* text) {
       T recorded;
       std::memcpy(&recorded, value, sizeof(T));
-      return std::format_to(context.out(), "{}", recorded);
+      return std::to_chars(text, text + kOccurrenceTextLength, recorded).ptr;
     };
   }
 
-  std::format_context::iterator FormatOccurrences(
-      std::format_context& context) const {
-    return format_occurrences_ == nullptr
-               ? context.out()
-               : format_occurrences_(occurrences_, context);
+  // Formats the occurrences into a context of narrow or wide characters.
+  template <class Context>
+  typename Context::iterator FormatOccurrences(Context& context) const {
+    if (write_occurrences_ == nullptr) {
+      return context.out();
+    }
+    std::array<char, kOccurrenceTextLength> text;
+    char* const end = write_occurrences_(occurrences_, text.data());
+    return std::copy(text.data(), end, context.out());
   }
 
   // Whether a fatal message terminates only if DFATAL messages are fatal.
@@ -170,8 +178,13 @@ class ContextImpl final : public Context {
  private:
   // Large enough for every counter type.
   unsigned char occurrences_[sizeof(unsigned long long)] = {};
-  std::format_context::iterator (*format_occurrences_)(
-      const unsigned char* value, std::format_context& context) = nullptr;
+  // Length of the decimal text of any counter value. The largest unsigned
+  // value has one digit more than digits10, as many characters as a signed
+  // value with its sign.
+  static constexpr std::size_t kOccurrenceTextLength =
+      std::numeric_limits<unsigned long long>::digits10 + 1;
+  // Writes the decimal text of the occurrences and returns its end.
+  char* (*write_occurrences_)(const unsigned char* value, char* text) = nullptr;
   const std::source_location* location_;
   bool debug_;
   int preserved_errno_;

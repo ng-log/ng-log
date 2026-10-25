@@ -47,6 +47,33 @@ TEST_F(ExperimentalLogging, EnsureFailureMatchesMacro) {
                     ngx::Ensure(value > 0, "value > 0 got {}", value));
 }
 
+TEST_F(ExperimentalLogging, EnsureWithWideMessageMatchesMacro) {
+  const int value = -1;
+  EXPECT_SAME_DEATH(CHECK(value > 0) << "got " << value,
+                    ngx::Ensure(value > 0, L"value > 0 got {}", value));
+}
+
+TEST_F(ExperimentalLogging, EnsureWithErrnoAndWideMessageMatchesMacro) {
+  const bool opened = false;
+  EXPECT_SAME_DEATH(
+      (errno = EACCES, PCHECK(opened) << "file"),
+      (errno = EACCES, ngx::Ensure(opened, ngx::Errno, L"opened file")));
+}
+
+TEST_F(ExperimentalLogging, ComparisonWithWideMessageMatchesMacro) {
+  const int a = 1;
+  EXPECT_SAME_DEATH(CHECK_EQ(a, 2) << "file " << a,
+                    ngx::Ensure(NGLOG_COMPARE(a == 2), L"file {}", a));
+}
+
+#ifdef GTEST_HAS_DEATH_TEST
+TEST_F(ExperimentalLogging, ThatWithWideMessageDescribesFailure) {
+  const int a = 1;
+  EXPECT_DEATH(ngx::Ensure(ngx::That(a) == 2, L"file {}", a),
+               "Check failed: lhs == rhs \\(1 vs\\. 2\\) file 1");
+}
+#endif
+
 #ifdef GTEST_HAS_DEATH_TEST
 // A failed check terminates although FatalInDebug marks it as a debug fatal
 // message and DFATAL messages do not terminate.

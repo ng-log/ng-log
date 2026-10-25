@@ -28,6 +28,9 @@
 #include <utility>
 #include <vector>
 
+#include "context.h"
+#include "internal/log_message_access.h"
+#include "internal/utf8.h"
 #include "ng-log/experimental/attributes.h"
 #include "ng-log/experimental/ensure.h"
 #include "ng-log/experimental/sink.h"
@@ -333,6 +336,27 @@ struct Formattable {
 // Supports neither std::format nor stream insertion.
 struct Unformattable {};
 
+// Records the wide text that the composed message refers to and its encoding.
+struct WideTextRecorder {
+  std::wstring* text;
+  std::string* encoding;
+
+  void Suffix(ngx::Message& message) const {
+    const nglog::internal::WideSpan span =
+        nglog::internal::LogMessageAccess::WideSpanOf(
+            static_cast<ngx::internal::MessageImpl&>(message).message());
+    if (span.text != nullptr) {
+      text->assign(span.text, span.length);
+      encoding->assign(span.begin, span.end);
+    }
+  }
+};
+
+// Supports std::format with wide format strings only.
+struct WideFormattable {
+  std::wstring_view text;
+};
+
 }  // namespace ngx_testing
 
 template <>
@@ -340,6 +364,16 @@ struct std::formatter<ngx_testing::Formattable> : std::formatter<int> {
   auto format(const ngx_testing::Formattable& value,
               std::format_context& context) const {
     return std::formatter<int>::format(value.value, context);
+  }
+};
+
+template <>
+struct std::formatter<ngx_testing::WideFormattable, wchar_t>
+    : std::formatter<std::wstring_view, wchar_t> {
+  auto format(const ngx_testing::WideFormattable& value,
+              std::wformat_context& context) const {
+    return std::formatter<std::wstring_view, wchar_t>::format(value.text,
+                                                              context);
   }
 };
 

@@ -2016,6 +2016,9 @@ logging libraries\"\n#endif\n")
       signal_safe/leading_zero_width
       signal_safe/width
       signal_safe/type
+      signal_safe/wide_locale
+      signal_safe/wide_fill_non_ascii
+      signal_safe/wide_type
       compare/no_comparison
       compare/comma
       compare/comma_message
@@ -2065,6 +2068,9 @@ logging libraries\"\n#endif\n")
       SignalSafeFloatPrecisionIsMissing
       SignalSafeFloatWidthIsInvalid
       SignalSafeFloatWidthExceedsLimit
+      SignalSafeFloatTypeIsNotSupported
+      LocaleSpecificFormattingIsNotSignalSafe
+      SignalSafeFloatFillIsNotAscii
       SignalSafeFloatTypeIsNotSupported
       "NGLOG_COMPARE\\(\\) expects a comparison such as a == b"
       "operator ?,"

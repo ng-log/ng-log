@@ -832,6 +832,8 @@ inline constexpr bool kUsesOccurrence =
 // counted.
 NGLOG_EXPORT std::format_context::iterator FormatOccurrence(
     std::format_context& context);
+NGLOG_EXPORT std::wformat_context::iterator FormatOccurrence(
+    std::wformat_context& context);
 
 // Not constexpr, so that calling it while checking a format string at compile
 // time names the reason the format string is rejected.
@@ -926,20 +928,20 @@ inline constexpr bool kAsync<Attributes<As...>> = (kAsync<As> || ...);
 
 // Formats the occurrences of a rate-limited message like the logging macros
 // stream them.
-template <>
-struct std::formatter<nglog::experimental::OccurrenceArgument, char> {
-  constexpr std::format_parse_context::iterator parse(
-      std::format_parse_context& context) {
+template <class CharT>
+struct std::formatter<nglog::experimental::OccurrenceArgument, CharT> {
+  constexpr typename std::basic_format_parse_context<CharT>::iterator parse(
+      std::basic_format_parse_context<CharT>& context) {
     const auto it = context.begin();
-    if (it != context.end() && *it != '}') {
+    if (it != context.end() && *it != CharT{'}'}) {
       nglog::experimental::internal::OccurrenceSpecificationIsNotSupported();
     }
     return it;
   }
 
-  std::format_context::iterator format(
-      const nglog::experimental::OccurrenceArgument&,
-      std::format_context& context) const {
+  template <class Context>
+  typename Context::iterator format(
+      const nglog::experimental::OccurrenceArgument&, Context& context) const {
     return nglog::experimental::internal::FormatOccurrence(context);
   }
 };

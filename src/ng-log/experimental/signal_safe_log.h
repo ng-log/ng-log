@@ -15,6 +15,7 @@
 #if defined(NGLOG_INTERNAL_EXPERIMENTAL_LOGGING_SUPPORTED)
 
 #  include <algorithm>
+#  include <array>
 #  include <concepts>
 #  include <cstddef>
 #  include <format>
@@ -32,6 +33,7 @@
 #  include "ng-log/experimental/format.h"
 #  include "ng-log/experimental/log_call.h"  // IWYU pragma: export
 #  include "ng-log/export.h"
+#  include "ng-log/internal/utf8_encoder.h"
 
 namespace nglog::experimental {
 
@@ -71,12 +73,15 @@ NGLOG_EXPORT void SignalSafeDispatch(
 // parsed again at runtime only after they passed that check.
 inline void LocaleSpecificFormattingIsNotSignalSafe() noexcept {}
 
-constexpr bool IsAlignment(char c) noexcept {
+template <class CharT>
+constexpr bool IsAlignment(CharT c) noexcept {
   return c == '<' || c == '>' || c == '^';
 }
 
 // Rejects the locale-specific option `L` of replacement fields.
-consteval void RejectLocaleSpecificFormatting(std::string_view format) {
+template <class CharT>
+consteval void RejectLocaleSpecificFormatting(
+    std::basic_string_view<CharT> format) {
   for (std::size_t i = 0; i < format.size(); ++i) {
     if (format[i] != '{') {
       continue;
@@ -87,7 +92,7 @@ consteval void RejectLocaleSpecificFormatting(std::string_view format) {
     }
     // Finds the closing brace while skipping nested replacement fields.
     std::size_t depth = 1;
-    std::size_t spec = std::string_view::npos;
+    std::size_t spec = std::basic_string_view<CharT>::npos;
     std::size_t j = i + 1;
     for (; j < format.size() && depth != 0; ++j) {
       if (format[j] == '{') {
@@ -95,11 +100,11 @@ consteval void RejectLocaleSpecificFormatting(std::string_view format) {
       } else if (format[j] == '}') {
         --depth;
       } else if (format[j] == ':' && depth == 1 &&
-                 spec == std::string_view::npos) {
+                 spec == std::basic_string_view<CharT>::npos) {
         spec = j + 1;
       }
     }
-    if (spec != std::string_view::npos) {
+    if (spec != std::basic_string_view<CharT>::npos) {
       const std::size_t end = j - 1;
       std::size_t k = spec;
       // A fill character, which may be L, precedes an alignment.
@@ -141,12 +146,19 @@ inline constexpr bool kSignalSafeFormattable =
     std::same_as<T, std::nullptr_t> || std::same_as<T, const void*> ||
     std::same_as<T, void*> || std::same_as<T, const char*> ||
     std::same_as<T, char*> || std::same_as<T, std::string_view> ||
-    std::same_as<T, std::string>;
+    std::same_as<T, std::string> || std::same_as<T, const wchar_t*> ||
+    std::same_as<T, wchar_t*> || std::same_as<T, std::wstring_view> ||
+    std::same_as<T, std::wstring>;
 
 // Types whose formatting neither allocates nor acquires locks.
 template <class T>
 concept SignalSafeFormattable =
     kSignalSafeFormattable<std::remove_cv_t<std::decay_t<T>>>;
+
+// Number of code units a signal-safe message of a wide format string is
+// formatted into before it is encoded as UTF-8. Longer messages are too long
+// like messages that do not fit the buffer of RAW_LOG().
+inline constexpr std::size_t kSignalSafeWideLength = 1024;
 
 // Largest precision of a signal-safe floating-point argument.
 inline constexpr int kMaxSignalSafeFloatPrecision = 64;
@@ -201,34 +213,44 @@ inline void SignalSafeFloatPrecisionIsMissing() noexcept {}
 inline void SignalSafeFloatTypeIsNotSupported() noexcept {}
 inline void SignalSafeLongDoubleFixedNotationIsNotSupported() noexcept {}
 
-constexpr bool IsDigit(char c) noexcept { return c >= '0' && c <= '9'; }
+template <class CharT>
+constexpr bool IsDigit(CharT c) noexcept {
+  return c >= '0' && c <= '9';
+}
+
+template <class CharT>
+constexpr bool IsAscii(CharT c) noexcept {
+  return static_cast<std::make_unsigned_t<CharT>>(c) <= kMaxAscii;
+}
 
 // Parses the specification of a signal-safe floating-point argument up to the
 // closing brace. Fixed notation is rejected if it may exceed the buffer, which
-// is the case for long double.
-template <class T>
-constexpr const char* ParseSignalSafeFloatSpec(const char* it, const char* end,
-                                               SignalSafeFloatSpec& spec) {
+// is the case for long double. Characters are compared before they are
+// narrowed, so that a wide character never narrows to a valid one.
+template <class T, class CharT>
+constexpr const CharT* ParseSignalSafeFloatSpec(const CharT* it,
+                                                const CharT* end,
+                                                SignalSafeFloatSpec& spec) {
   if (it == end || *it == '}') {
     return it;
   }
   // Padding must fit the buffer, so a fill character takes a single byte.
-  if (static_cast<unsigned char>(*it) > kMaxAscii) {
+  if (!IsAscii(*it)) {
     SignalSafeFloatFillIsNotAscii();
   }
   if (it + 1 != end && IsAlignment(it[1])) {
     if (*it == '{' || *it == '}') {
       SignalSafeFloatFillIsInvalid();
     }
-    spec.fill = *it;
-    spec.align = it[1];
+    spec.fill = static_cast<char>(*it);
+    spec.align = static_cast<char>(it[1]);
     it += 2;
   } else if (IsAlignment(*it)) {
-    spec.align = *it;
+    spec.align = static_cast<char>(*it);
     ++it;
   }
   if (it != end && (*it == '+' || *it == '-' || *it == ' ')) {
-    spec.sign = *it;
+    spec.sign = static_cast<char>(*it);
     ++it;
   }
   if (it != end && *it == '#') {
@@ -272,10 +294,11 @@ constexpr const char* ParseSignalSafeFloatSpec(const char* it, const char* end,
   }
   if (it != end && *it != '}') {
     const std::string_view types = "aAeEfFgG";
-    if (types.find(*it) == std::string_view::npos) {
+    if (!IsAscii(*it) ||
+        types.find(static_cast<char>(*it)) == std::string_view::npos) {
       SignalSafeFloatTypeIsNotSupported();
     }
-    spec.type = *it;
+    spec.type = static_cast<char>(*it);
     ++it;
   }
   if (it != end && *it != '}') {
@@ -353,6 +376,63 @@ struct SignalSafeMessage {
   }
 };
 
+// Prefix, wide format string and wrapped arguments of a signal-safe message.
+// std::format_to_n() writes through a pointer directly only if the pointer
+// refers to the character type of the format string, so the message is
+// formatted into wide characters first and then encoded as UTF-8.
+template <class... Ws>
+struct SignalSafeWideMessage {
+  std::string_view prefix;
+  std::wformat_string<const Ws&...> format;
+  std::tuple<const Ws&...> arguments;
+
+  // Returns the length of the text if it fits, and size otherwise, since only
+  // the encoding of the formatted part of a longer text is known.
+  static int Format(void* context, char* buffer, std::size_t size) {
+    const auto& message = *static_cast<const SignalSafeWideMessage*>(context);
+    std::array<wchar_t, kSignalSafeWideLength> wide;
+    const auto result = std::apply(
+        [&message, &wide](const Ws&... arguments) {
+          return std::format_to_n(wide.data(),
+                                  static_cast<std::ptrdiff_t>(wide.size()),
+                                  message.format, arguments...);
+        },
+        message.arguments);
+    // Reserves the last byte for the terminating null character.
+    const std::size_t capacity = size == 0 ? size : size - 1;
+    std::size_t length = std::min(message.prefix.size(), capacity);
+    std::ranges::copy_n(message.prefix.data(),
+                        static_cast<std::ptrdiff_t>(length), buffer);
+    bool fits = length == message.prefix.size() &&
+                result.size <= static_cast<std::ptrdiff_t>(wide.size());
+    nglog::internal::Utf8Encoder encoder;
+    std::array<char, nglog::internal::Utf8Encoder::kMaximumLength> encoded;
+    // Copies whole code points only.
+    const auto append = [buffer, capacity, &length, &fits,
+                         &encoded](std::size_t encoded_length) {
+      if (length + encoded_length > capacity) {
+        fits = false;
+        return;
+      }
+      std::ranges::copy_n(encoded.data(),
+                          static_cast<std::ptrdiff_t>(encoded_length),
+                          buffer + length);
+      length += encoded_length;
+    };
+    for (const wchar_t* it = wide.data(); it != result.out && fits; ++it) {
+      append(encoder.Put(*it, encoded.data()));
+    }
+    if (fits) {
+      append(encoder.Finish(encoded.data()));
+    }
+    if (size != 0) {
+      buffer[length] = '\0';
+    }
+    constexpr std::size_t kMaxLength = std::numeric_limits<int>::max();
+    return static_cast<int>(std::min(fits ? length : size, kMaxLength));
+  }
+};
+
 template <class T>
 constexpr decltype(auto) WrapSignalSafeArgument(const T& value) noexcept {
   if constexpr (std::is_floating_point_v<T>) {
@@ -386,12 +466,17 @@ template <class... Args>
 class SignalSafeFormatString : public FormatString<Args...> {
  public:
   template <class T>
-    requires std::convertible_to<const T&, std::string_view>
+    requires std::convertible_to<const T&, std::string_view> ||
+             std::convertible_to<const T&, std::wstring_view>
   consteval SignalSafeFormatString(
       const T& format,
       std::source_location location = std::source_location::current())
       : FormatString<Args...>{format, location} {
-    internal::RejectLocaleSpecificFormatting(std::string_view{format});
+    if (this->wide()) {
+      internal::RejectLocaleSpecificFormatting(this->get_wide());
+    } else {
+      internal::RejectLocaleSpecificFormatting(this->get());
+    }
   }
 };
 
@@ -429,12 +514,25 @@ struct LogTraits<A, true> {
                    const SignalSafeFormatString<Fs...>& format,
                    std::string_view prefix, const Args&... args) {
     const auto erased = attributes.Erase();
+    // A single lambda handles both kinds of format strings, since gcov gives
+    // the lambdas of a function the same name.
     [&erased, &configuration, &format, prefix](const auto&... wrapped) {
-      using SignalSafeMessageType =
-          SignalSafeMessage<std::remove_cvref_t<decltype(wrapped)>...>;
-      SignalSafeMessageType message{prefix, format.checked(), {wrapped...}};
-      SignalSafeDispatch(erased, configuration, format.location(),
-                         &SignalSafeMessageType::Format, &message);
+      if (format.wide()) {
+        if constexpr ((Formattable<Fs, wchar_t> && ...)) {
+          using SignalSafeMessageType =
+              SignalSafeWideMessage<std::remove_cvref_t<decltype(wrapped)>...>;
+          SignalSafeMessageType message{
+              prefix, format.checked_wide(), {wrapped...}};
+          SignalSafeDispatch(erased, configuration, format.location(),
+                             &SignalSafeMessageType::Format, &message);
+        }
+      } else if constexpr ((Formattable<Fs, char> && ...)) {
+        using SignalSafeMessageType =
+            SignalSafeMessage<std::remove_cvref_t<decltype(wrapped)>...>;
+        SignalSafeMessageType message{prefix, format.checked(), {wrapped...}};
+        SignalSafeDispatch(erased, configuration, format.location(),
+                           &SignalSafeMessageType::Format, &message);
+      }
     }(WrapSignalSafeArgument(args)...);
   }
 };
@@ -446,10 +544,11 @@ struct LogTraits<A, true> {
 // Formats signal-safe floating-point arguments using std::to_chars. Supports
 // fill, alignment, sign, zero padding, width, a precision of at most 64 and
 // the types a, e, f, g and their uppercase variants.
-template <class T>
-struct std::formatter<nglog::experimental::internal::SignalSafeFloat<T>, char> {
-  constexpr std::format_parse_context::iterator parse(
-      std::format_parse_context& context) {
+template <class T, class CharT>
+struct std::formatter<nglog::experimental::internal::SignalSafeFloat<T>,
+                      CharT> {
+  constexpr typename std::basic_format_parse_context<CharT>::iterator parse(
+      std::basic_format_parse_context<CharT>& context) {
     return context.begin() +
            (nglog::experimental::internal::ParseSignalSafeFloatSpec<T>(
                 std::to_address(context.begin()),
@@ -457,9 +556,11 @@ struct std::formatter<nglog::experimental::internal::SignalSafeFloat<T>, char> {
             std::to_address(context.begin()));
   }
 
-  std::format_context::iterator format(
+  // The text consists of ASCII characters, which widen unchanged.
+  template <class Context>
+  typename Context::iterator format(
       const nglog::experimental::internal::SignalSafeFloat<T>& argument,
-      std::format_context& context) const {
+      Context& context) const {
     char buffer[nglog::experimental::internal::kSignalSafeFloatBufferSize];
     const std::size_t length =
         nglog::experimental::internal::FormatSignalSafeFloat(
