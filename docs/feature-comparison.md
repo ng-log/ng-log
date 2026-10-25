@@ -27,26 +27,26 @@ omitted.
 
 | Feature | ng-log | spdlog | Abseil | Boost.Log | plog | Easylogging++ |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: |
-| Format-string log statements | ⚠️[^1] | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Format-string log statements | ✅[^1] | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Wide-character text output | ❌ | ⚠️[^2] | ✅ | ✅ | ✅ | ⚠️[^3] |
-| Per-file or module verbosity | ✅ | ❌ | ✅ | ⚠️[^5] | ❌ | ✅ |
+| Per-file or module verbosity | ✅ | ❌ | ✅ | ⚠️[^4] | ❌ | ✅ |
 | Periodic or limited-count logging | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ |
 | Assertion and check macros | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ |
 | System-error logging | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ |
-| Structured or key-value fields | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ |
-| Named loggers or channels | ❌ | ✅ | ❌ | ✅ | ⚠️[^6] | ✅ |
-| Asynchronous dispatch | ❌ | ✅ | ❌ | ✅ | ❌ | ✅ |
+| Structured or key-value fields | ⚠️[^5] | ❌ | ⚠️[^6] | ✅ | ❌ | ❌ |
+| Named loggers or channels | ❌ | ✅ | ❌ | ✅ | ⚠️[^7] | ✅ |
+| Asynchronous dispatch | ❌ | ✅ | ❌ | ✅ | ❌ | ⚠️[^8] |
 
 ### Output and sink features
 
 | Feature | ng-log | spdlog | Abseil | Boost.Log | plog | Easylogging++ |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: |
-| Unicode-aware file paths | ❌ | ⚠️[^4] | ❌ | ✅ | ✅ | ❌ |
-| Explicit POSIX long-path handling | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Explicit Windows extended-path handling | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Unicode-aware file paths | ✅[^9] | ⚠️[^10] | ❌ | ✅ | ✅ | ❌ |
+| Explicit POSIX long-path handling | ✅[^11] | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Explicit Windows extended-path handling | ✅[^12] | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Syslog output | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ |
-| Platform-specific output sinks | ⚠️[^7] | ✅ | ⚠️[^8] | ✅ | ✅ | ❌ |
-| Network output sinks | ❌ | ✅ | ❌ | ⚠️[^9] | ❌ | ❌ |
+| Platform-specific output sinks | ⚠️[^13] | ✅ | ⚠️[^14] | ✅ | ✅ | ❌ |
+| Network output sinks | ❌ | ✅ | ❌ | ⚠️[^15] | ❌ | ❌ |
 | Colorized terminal output | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
 | Email output | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
@@ -55,28 +55,42 @@ omitted.
 | Feature | ng-log | spdlog | Abseil | Boost.Log | plog | Easylogging++ |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: |
 | Targeted or buffered backtrace capture | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Stack trace on fatal failures | ✅ | ❌ | ✅ | ❌ | ❌ | ⚠️[^10] |
+| Stack trace on fatal failures | ✅ | ❌ | ✅ | ❌ | ❌ | ⚠️[^16] |
 | Raw low-level logging | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
-[^1]: ng-log provides printf-style varargs through `RAW_LOG`, while its
-    regular log statements use C++ streams.
+[^1]: ng-log provides format strings through its C++20
+    [experimental logging functions](logging/experimental.md), which use
+    `std::format` and check format strings at compile time. The log macros
+    use C++ streams, and `RAW_LOG` uses printf-style varargs.
 [^2]: spdlog converts wide-character log messages to UTF-8 only when
     `SPDLOG_WCHAR_TO_UTF8_SUPPORT` is enabled.
 [^3]: Easylogging++ uses wide-character log messages and streams only when
     `ELPP_UNICODE` is enabled.
-[^4]: spdlog uses wide-character file paths on Windows only when
-    `SPDLOG_WCHAR_FILENAMES` is enabled.
-[^5]: Boost.Log supports channel and attribute filters, but does not expose a
+[^4]: Boost.Log supports channel and attribute filters, but does not expose a
     dedicated per-file verbosity control.
-[^6]: plog's template instance IDs provide separate logger instances, but not
+[^5]: Custom attributes of the experimental logging functions attach named
+    fields that structured sinks receive. The text output omits these fields.
+[^6]: Abseil records streamed values in a structured encoding for log sinks,
+    but log statements cannot attach named fields.
+[^7]: plog's template instance IDs provide separate logger instances, but not
     a named logger or channel API.
-[^7]: ng-log provides syslog output and platform-dependent logging paths, but
-    does not expose separate platform sink classes.
-[^8]: Abseil provides Android native log integration, but not a general family
+[^8]: Easylogging++ provides asynchronous logging only as an experimental
+    feature when `ELPP_EXPERIMENTAL_ASYNC` is defined.
+[^9]: ng-log expects UTF-8 paths and converts them to wide-character paths on
+    Windows.
+[^10]: spdlog uses wide-character file paths on Windows only when
+     `SPDLOG_WCHAR_FILENAMES` is enabled.
+[^11]: ng-log opens paths beyond `PATH_MAX` component by component relative to
+     their parent directories.
+[^12]: ng-log adds the `\\?\` and `\\?\UNC\` prefixes to paths beyond
+     `MAX_PATH`.
+[^13]: ng-log writes to syslog, Android logcat, the Windows debugger and the
+     Emscripten console, but does not expose separate platform sink classes.
+[^14]: Abseil provides Android native log integration, but not a general family
      of platform-specific sink classes.
-[^9]: Boost.Log provides UDP through its syslog backend, but not a general
+[^15]: Boost.Log provides UDP through its syslog backend, but not a general
      network sink family.
-[^10]: Easylogging++ provides crash logging only when
+[^16]: Easylogging++ provides crash logging only when
      `ELPP_FEATURE_CRASH_LOG` is enabled.
 
 | Mark | Meaning |
