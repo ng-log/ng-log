@@ -41,6 +41,86 @@ bool IsAbsolutePath(const char* path, std::size_t len) {
 
 bool IsPathSeparator(char c) { return c == '/' || c == '\\'; }
 
+// Whether the character can introduce a UNC path when it appears twice at the
+// start of a path. Windows accepts forward slashes there as well, while on
+// other systems a path that starts with two of them is an ordinary absolute
+// path.
+bool IsUncSeparator(char c) {
+#ifdef NGLOG_OS_WINDOWS
+  return IsPathSeparator(c);
+#else
+  return c == '\\';
+#endif
+}
+
+char ToLowerAscii(char c) {
+  return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+}
+
+// Returns whether a character may appear in a host name.
+bool IsServerNameCharacter(char c) {
+  const std::locale& locale = std::locale::classic();
+  return std::isalnum(c, locale) || c == '-' || c == '.' || c == '_';
+}
+
+// Splits a Windows UNC path, such as \\server\share\file.cc, or a path with a
+// local device prefix, such as \\?\C:\file.cc, \\.\C:\file.cc or
+// \\?\UNC\server\share\file.cc, into the server, if any, and the remaining
+// path. Returns false for other paths. Uses no allocations, since signal
+// handlers build file URIs.
+bool SplitWindowsNetworkPath(const char* path, std::size_t length,
+                             const char** server, std::size_t* server_length,
+                             const char** rest, std::size_t* rest_length) {
+  constexpr std::size_t kUncPrefixLength = 2;
+  // The \\?\ prefix of extended-length paths and the \\.\ prefix of the
+  // device namespace.
+  constexpr std::size_t kLocalDevicePrefixLength = 4;
+  constexpr char kUncName[] = "unc";
+  constexpr std::size_t kUncNameLength = sizeof(kUncName) - 1;
+
+  if (length < kUncPrefixLength || !IsUncSeparator(path[0]) ||
+      !IsUncSeparator(path[1])) {
+    return false;
+  }
+  std::size_t server_start = kUncPrefixLength;
+  if (length >= kLocalDevicePrefixLength &&
+      (path[2] == '?' || path[2] == '.') && IsUncSeparator(path[3])) {
+    const char* const device_path = path + kLocalDevicePrefixLength;
+    const std::size_t device_path_length = length - kLocalDevicePrefixLength;
+    // Windows compares the UNC name of a device path without regard to case.
+    const bool names_server =
+        device_path_length > kUncNameLength &&
+        std::equal(kUncName, kUncName + kUncNameLength, device_path,
+                   [](char expected, char actual) {
+                     return expected == ToLowerAscii(actual);
+                   }) &&
+        IsUncSeparator(device_path[kUncNameLength]);
+    if (!names_server) {
+      *server = nullptr;
+      *server_length = 0;
+      *rest = device_path;
+      *rest_length = device_path_length;
+      return true;
+    }
+    server_start = kLocalDevicePrefixLength + kUncNameLength + 1;
+  }
+
+  const char* const begin = path + server_start;
+  const char* const end = path + length;
+  const char* const server_end = std::find_if(begin, end, IsPathSeparator);
+  // The server becomes the URI authority without encoding, so it must not
+  // carry characters that URIs or terminals interpret.
+  if (server_end == begin || server_end == end ||
+      !std::all_of(begin, server_end, IsServerNameCharacter)) {
+    return false;
+  }
+  *server = begin;
+  *server_length = static_cast<std::size_t>(server_end - begin);
+  *rest = server_end;
+  *rest_length = static_cast<std::size_t>(end - server_end);
+  return true;
+}
+
 bool IsUriPathCharacter(char c) {
   const unsigned char byte = static_cast<unsigned char>(c);
   const char locale_char = static_cast<char>(byte);
@@ -176,7 +256,22 @@ bool BuildFileLineUri(const char* span, std::size_t span_length,
 
 bool BuildFileUri(const char* path, std::size_t path_len, const char* base_path,
                   const char* host, char* out, std::size_t out_size) {
-  const bool path_is_absolute = IsAbsolutePath(path, path_len);
+  // A UNC path names its server, which becomes the URI authority.
+  const char* server = nullptr;
+  std::size_t server_length = 0;
+  const char* network_rest = nullptr;
+  std::size_t network_rest_length = 0;
+  if (SplitWindowsNetworkPath(path, path_len, &server, &server_length,
+                              &network_rest, &network_rest_length)) {
+    path = network_rest;
+    path_len = network_rest_length;
+    if (server != nullptr) {
+      host = nullptr;
+    }
+  }
+
+  const bool path_is_absolute =
+      server != nullptr || IsAbsolutePath(path, path_len);
   const std::size_t base_len =
       (!path_is_absolute && base_path != nullptr) ? std::strlen(base_path) : 0;
   const bool need_base =
@@ -188,10 +283,15 @@ bool BuildFileUri(const char* path, std::size_t path_len, const char* base_path,
   const bool need_separator =
       need_base && !IsPathSeparator(base_path[base_len - 1]);
   constexpr char kLocalhost[] = "localhost";
-  const bool have_host = host != nullptr && host[0] != '\0';
-  const char* const authority = have_host ? host : kLocalhost;
-  const std::size_t authority_len =
-      have_host ? std::strlen(host) : sizeof(kLocalhost) - 1;
+  const char* authority = kLocalhost;
+  std::size_t authority_len = sizeof(kLocalhost) - 1;
+  if (server != nullptr) {
+    authority = server;
+    authority_len = server_length;
+  } else if (host != nullptr && host[0] != '\0') {
+    authority = host;
+    authority_len = std::strlen(host);
+  }
   const char* const first_segment = need_base ? base_path : path;
   const bool need_authority_separator = !IsPathSeparator(first_segment[0]);
 

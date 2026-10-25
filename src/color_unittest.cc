@@ -356,6 +356,32 @@ TEST(BuildFileUriWithoutLine, AcceptsPosixAbsolutePath) {
   EXPECT_STREQ("file://localhost/src/foo.cc", uri);
 }
 
+#ifdef NGLOG_OS_WINDOWS
+// Windows accepts forward slashes in UNC paths as well, unlike POSIX systems,
+// where such a path is an ordinary absolute one.
+TEST(BuildFileLineUri, WindowsUncPathWithForwardSlashesNamesTheServer) {
+  constexpr char kSpan[] = "//server/share/foo.cc:42";
+  char uri[kUriBufferSize];
+  ASSERT_TRUE(BuildFileLineUri(kSpan, std::strlen(kSpan), /*base_path=*/nullptr,
+                               /*host=*/nullptr, uri, sizeof(uri)));
+  EXPECT_STREQ("file://server/share/foo.cc", uri);
+}
+
+// Device prefixes with forward slashes denote local paths as well.
+TEST(BuildFileLineUri, WindowsDevicePathsWithForwardSlashesAreLocal) {
+  constexpr const char* kSpans[] = {"//?/C:/src/foo.cc:42",
+                                    "//./C:/src/foo.cc:42"};
+  for (const char* span : kSpans) {
+    char uri[kUriBufferSize];
+    ASSERT_TRUE(BuildFileLineUri(span, std::strlen(span),
+                                 /*base_path=*/nullptr, /*host=*/nullptr, uri,
+                                 sizeof(uri)))
+        << span;
+    EXPECT_STREQ("file://localhost/C:/src/foo.cc", uri) << span;
+  }
+}
+#endif
+
 struct FileLineUriCase {
   const char* name;
   const char* span;
@@ -385,6 +411,20 @@ INSTANTIATE_TEST_SUITE_P(
         FileLineUriCase{"EncodesPathCharactersReservedByUris",
                         "/src/a file#part?.cc:42", nullptr, nullptr,
                         "file://localhost/src/a%20file%23part%3F.cc"},
+        FileLineUriCase{"WindowsUncPathNamesTheServer",
+                        "\\\\server\\share\\foo.cc:42", nullptr, nullptr,
+                        "file://server/share/foo.cc"},
+        FileLineUriCase{"WindowsExtendedLengthPath",
+                        "\\\\?\\C:\\src\\foo.cc:42", nullptr, nullptr,
+                        "file://localhost/C:/src/foo.cc"},
+        FileLineUriCase{"WindowsExtendedLengthUncPath",
+                        "\\\\?\\UNC\\server\\share\\foo.cc:42", nullptr,
+                        nullptr, "file://server/share/foo.cc"},
+        FileLineUriCase{"WindowsExtendedLengthUncPathIgnoresCase",
+                        "\\\\?\\unc\\server\\share\\foo.cc:42", nullptr,
+                        nullptr, "file://server/share/foo.cc"},
+        FileLineUriCase{"WindowsDevicePath", "\\\\.\\C:\\src\\foo.cc:42",
+                        nullptr, nullptr, "file://localhost/C:/src/foo.cc"},
         FileLineUriCase{"EncodesWindowsPathSeparators", "C:\\src\\a file.cc:42",
                         nullptr, nullptr,
                         "file://localhost/C:/src/a%20file.cc"},
@@ -393,6 +433,9 @@ INSTANTIATE_TEST_SUITE_P(
                         "file://localhost/C:/build/src/foo.cc"},
         FileLineUriCase{"UsesSuppliedHost", "/src/foo.cc:42", nullptr,
                         "my-host", "file://my-host/src/foo.cc"},
+        FileLineUriCase{"WindowsUncServerTakesPrecedenceOverSuppliedHost",
+                        "\\\\server\\share\\foo.cc:42", nullptr, "my-host",
+                        "file://server/share/foo.cc"},
         FileLineUriCase{"ResolvesRelativePathAgainstBasePath", "src/foo.cc:42",
                         "/build", nullptr, "file://localhost/build/src/foo.cc"},
         FileLineUriCase{"DoesNotDuplicateSeparatorWhenJoiningBasePath",
@@ -434,6 +477,15 @@ INSTANTIATE_TEST_SUITE_P(
                     FileLineUriCase{"RelativeBasePath", "src/foo.cc:42",
                                     "relative/build", nullptr, nullptr},
                     FileLineUriCase{"MissingLineNumber", "/src/foo.cc", nullptr,
+                                    nullptr, nullptr},
+                    // A server name is copied into the URI authority as is, so
+                    // it must not carry characters that terminals or URIs
+                    // interpret, such as the BEL that ends a hyperlink.
+                    FileLineUriCase{"WindowsUncServerWithControlCharacters",
+                                    "\\\\a\a\x1b[2J\\share\\foo.cc:42", nullptr,
+                                    nullptr, nullptr},
+                    FileLineUriCase{"WindowsUncServerWithSpace",
+                                    "\\\\my server\\share\\foo.cc:42", nullptr,
                                     nullptr, nullptr}),
     CaseName{});
 
