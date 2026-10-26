@@ -93,6 +93,10 @@ SPDX-License-Identifier: BSD-3-Clause
   disposition changes
 - Keep `BUILD_SHARED_LIBS` from changing the library type of embedding
   projects
+- Eliminate race conditions in count-based occasional logging macros
+  (`LOG_EVERY_N`, `LOG_IF_EVERY_N`, `PLOG_EVERY_N`, `LOG_FIRST_N`). In
+  `LOG_IF_EVERY_N`, `nglog::COUNTER` now counts occurrences where the condition
+  evaluated to true
 
 [@devtejasx]: https://github.com/devtejasx
 

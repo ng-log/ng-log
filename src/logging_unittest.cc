@@ -4895,3 +4895,196 @@ TEST(VLOG, ConcurrentSiteInitialization) {
   EXPECT_THAT(verbose_checks, Each(0));
 }
 #endif
+
+namespace {
+
+template <int CallSiteId>
+struct OccasionalCallSite {
+  static void Run(int iters, int n, int first_n) {
+    for (int j = 0; j < iters; ++j) {
+      LOG_EVERY_N(INFO, n) << "Multithreaded every n: " << COUNTER;
+      LOG_FIRST_N(WARNING, first_n) << "Multithreaded first n: " << COUNTER;
+      LOG_IF_EVERY_N(INFO, true, n) << "Multithreaded if every n: " << COUNTER;
+      PLOG_EVERY_N(INFO, n) << "Multithreaded plog every n: " << COUNTER;
+    }
+  }
+};
+
+template <int... Is>
+void RunAllOccasionalCallsitesHelper(std::integer_sequence<int, Is...>,
+                                     int iters, int n, int first_n) {
+  int dummy[] = {0, (OccasionalCallSite<Is>::Run(iters, n, first_n), 0)...};
+  (void)dummy;
+}
+
+template <int NumCallsites>
+void RunAllOccasionalCallsites(int iters, int n, int first_n) {
+  RunAllOccasionalCallsitesHelper(
+      std::make_integer_sequence<int, NumCallsites>{}, iters, n, first_n);
+}
+
+}  // namespace
+
+TEST(Logging, MultithreadedOccasionalLogging) {
+  constexpr int kNumThreads = 8;
+  constexpr int kItersPerThread = 50;
+  constexpr int kN = 10;
+  constexpr int kFirstN = 2;
+  constexpr int kNumCallsites = 200;
+
+  static int test_run_counter = 0;
+  int const run_number = test_run_counter++;
+
+  std::int64_t const base_num_infos = LogMessage::num_messages(NGLOG_INFO);
+  std::int64_t const base_num_warnings = LogMessage::num_messages(NGLOG_WARNING);
+
+  std::atomic<int> ready{0};
+  std::atomic<bool> start_barrier{false};
+
+  std::vector<std::thread> threads;
+  threads.reserve(kNumThreads);
+  for (int i = 0; i < kNumThreads; ++i) {
+    threads.emplace_back([&ready, &start_barrier]() {
+      ready.fetch_add(1, std::memory_order_relaxed);
+      while (!start_barrier.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+      RunAllOccasionalCallsites<kNumCallsites>(kItersPerThread, kN, kFirstN);
+    });
+  }
+
+  while (ready.load(std::memory_order_relaxed) < kNumThreads) {
+    std::this_thread::yield();
+  }
+  start_barrier.store(true, std::memory_order_release);
+
+  for (auto& t : threads) {
+    t.join();
+  }
+
+  constexpr int kTotalCallsPerCallsite = kNumThreads * kItersPerThread;
+  constexpr int kExpectedEveryNPerCallsite = kTotalCallsPerCallsite / kN;
+  // LOG_EVERY_N, LOG_IF_EVERY_N, and PLOG_EVERY_N all log to NGLOG_INFO.
+  constexpr int kExpectedInfos =
+      kNumCallsites * (kExpectedEveryNPerCallsite * 3);
+  // On the first run, LOG_FIRST_N fires up to its threshold across callsites.
+  // On subsequent runs, all callsites have already reached their limit.
+  int const expected_warnings =
+      (run_number == 0) ? (kNumCallsites * kFirstN) : 0;
+
+  EXPECT_EQ(LogMessage::num_messages(NGLOG_INFO) - base_num_infos,
+            kExpectedInfos);
+  EXPECT_EQ(LogMessage::num_messages(NGLOG_WARNING) - base_num_warnings,
+            expected_warnings);
+}
+
+TEST(Logging, OccasionalLoggingInSwitchAndGoto) {
+  int const x = 1;
+  switch (x) {
+    case 1:
+      LOG_EVERY_N(INFO, 1) << "switch test every n";
+      LOG_FIRST_N(INFO, 1) << "switch test first n";
+      LOG_IF_EVERY_N(INFO, true, 1) << "switch test if every n";
+      PLOG_EVERY_N(INFO, 1) << "switch test plog every n";
+      break;
+    case 2:
+      break;
+    default:
+      break;
+  }
+
+  goto test_label;
+  LOG_EVERY_N(INFO, 1) << "unreachable";
+test_label:;
+}
+
+TEST(Logging, OccasionalLoggingNonPositiveN) {
+  std::int64_t const base_num_infos = LogMessage::num_messages(NGLOG_INFO);
+  // n = 0 logs exactly once on its first occurrence like ngx::Every{0}.
+  LOG_EVERY_N(INFO, 0) << "first occurrence logs for 0";
+  LOG_EVERY_N(INFO, 0) << "subsequent occurrence skipped for 0";
+  LOG_EVERY_N(INFO, -1) << "Should not divide by zero";
+  LOG_IF_EVERY_N(INFO, true, 0) << "first occurrence logs for if 0";
+  LOG_IF_EVERY_N(INFO, true, 0) << "subsequent occurrence skipped for if 0";
+  LOG_IF_EVERY_N(INFO, true, -5) << "Should not divide by zero";
+  PLOG_EVERY_N(INFO, 0) << "first occurrence logs for plog 0";
+  PLOG_EVERY_N(INFO, 0) << "subsequent occurrence skipped for plog 0";
+  PLOG_EVERY_N(INFO, -1) << "Should not divide by zero";
+  LOG_FIRST_N(INFO, 0) << "Should not log or crash";
+  LOG_FIRST_N(INFO, -1) << "Should not log or crash";
+  EXPECT_EQ(LogMessage::num_messages(NGLOG_INFO) - base_num_infos, 3);
+}
+
+TEST(Logging, OccasionalLoggingDanglingElse) {
+  int else_count = 0;
+  if (false)
+    LOG_EVERY_N(INFO, 1) << "skipped";
+  else
+    ++else_count;
+
+  if (false)
+    LOG_FIRST_N(INFO, 1) << "skipped";
+  else
+    ++else_count;
+
+  if (false)
+    LOG_IF_EVERY_N(INFO, true, 1) << "skipped";
+  else
+    ++else_count;
+
+  if (false)
+    PLOG_EVERY_N(INFO, 1) << "skipped";
+  else
+    ++else_count;
+
+  EXPECT_EQ(else_count, 4);
+}
+
+TEST(Logging, LogIfEveryNCounterSemantics) {
+  std::vector<int> captured_counters;
+  ScopedMockLog log;
+  EXPECT_CALL(log, Log(NGLOG_INFO, _, _))
+      .Times(3)
+      .WillRepeatedly([&captured_counters](LogSeverity, std::string const&,
+                                           std::string const& msg) {
+        captured_counters.push_back(std::stoi(msg));
+      });
+
+  for (int i = 0; i < 6; ++i) {
+    bool const cond = (i % 2 == 0);
+    LOG_IF_EVERY_N(INFO, cond, 1) << COUNTER;
+  }
+
+  ASSERT_EQ(captured_counters.size(), 3U);
+  EXPECT_EQ(captured_counters[1], captured_counters[0] + 1);
+  EXPECT_EQ(captured_counters[2], captured_counters[1] + 1);
+}
+
+TEST(Logging, OccasionalLoggingNarrowAndWideN) {
+  std::int64_t const base_num_infos = LogMessage::num_messages(NGLOG_INFO);
+
+  // Narrow n: short and signed char
+  short const short_n = 3;
+  for (int i = 0; i < 6; ++i) {
+    LOG_EVERY_N(INFO, short_n) << "narrow short n";
+  }
+
+  signed char const char_n = 2;
+  for (int i = 0; i < 4; ++i) {
+    LOG_EVERY_N(INFO, char_n) << "narrow char n";
+  }
+
+  // Wide n: std::int64_t and unsigned
+  std::int64_t const wide_n = (static_cast<std::int64_t>(1) << 32) + 2;
+  for (int i = 0; i < 2; ++i) {
+    LOG_EVERY_N(INFO, wide_n) << "wide n call";
+  }
+
+  std::size_t const unsigned_n = 2;
+  for (std::size_t i = 0; i < 4; ++i) {
+    LOG_FIRST_N(INFO, unsigned_n) << "unsigned n";
+  }
+
+  // short_n (3) logs 2 times; char_n (2) logs 2 times; wide_n logs 1 time; unsigned_n logs 2 times.
+  EXPECT_EQ(LogMessage::num_messages(NGLOG_INFO) - base_num_infos, 2 + 2 + 1 + 2);
+}
