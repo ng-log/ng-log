@@ -545,7 +545,7 @@ TEST_F(ExperimentalAsync, KeepsSettingsOfCall) {
 
 #if defined(HAVE_STACKTRACE) && defined(HAVE_SYMBOLIZE)
 // Logs the message whose call site --log_backtrace_at names.
-[[gnu::noinline]] void LogWithBacktrace(RecordingSink& sink, int& line) {
+NGLOG_ATTRIBUTE_NOINLINE void LogWithBacktrace(RecordingSink& sink, int& line) {
   line = __LINE__ + 1;
   ngx::Log(ngx::Async | ngx::ToSink{&sink} | ngx::SkipLogFile, "traced");
 }
