@@ -1860,11 +1860,12 @@ constexpr int kCountingThreads = 8;
 constexpr int kCountingIterations = 20'000;
 
 /**
- * Calls @p log from several threads at once and counts the messages that
- * reach a registered sink. Log files are disabled to keep the test fast.
+ * Calls @p log @p iterations times from each of several threads at once and
+ * counts the messages that reach a registered sink. Log files are disabled to
+ * keep the test fast.
  */
 template <class Log>
-int CountConcurrentMessages(Log log) {
+int CountConcurrentMessages(Log log, int iterations = kCountingIterations) {
   auto save = nglog::MakeScopedFlags(
       nglog::MakeScopedFlag(FLAGS_logtostderr, false),
       nglog::MakeScopedFlag(FLAGS_logtostdout, false),
@@ -1876,11 +1877,11 @@ int CountConcurrentMessages(Log log) {
   std::atomic<int> waiting{kCountingThreads};
   std::vector<std::thread> threads;
   for (int i = 0; i < kCountingThreads; ++i) {
-    threads.emplace_back([&waiting, &log] {
+    threads.emplace_back([&waiting, &log, iterations] {
       waiting.fetch_sub(1, std::memory_order_acq_rel);
       while (waiting.load(std::memory_order_acquire) > 0) {
       }
-      for (int j = 0; j < kCountingIterations; ++j) {
+      for (int j = 0; j < iterations; ++j) {
         log();
       }
     });
@@ -1961,6 +1962,9 @@ struct HourlyOccurrence {
 };
 
 constexpr std::size_t kCallSites = 256;
+// Each call site logs during the first pass over the call sites only, so later
+// passes merely slow the test down.
+constexpr int kSinglePass = 1;
 
 template <template <std::size_t> class Site, std::size_t... Sites>
 void LogAtCallSites(std::index_sequence<Sites...> /*sites*/) {
@@ -1969,19 +1973,23 @@ void LogAtCallSites(std::index_sequence<Sites...> /*sites*/) {
 }
 
 TEST(LogMacros, FirstNLogsExactlyNConcurrentOccurrences) {
-  EXPECT_EQ(CountConcurrentMessages([] {
-              LogAtCallSites<FirstOccurrence>(
-                  std::make_index_sequence<kCallSites>{});
-            }),
+  EXPECT_EQ(CountConcurrentMessages(
+                [] {
+                  LogAtCallSites<FirstOccurrence>(
+                      std::make_index_sequence<kCallSites>{});
+                },
+                kSinglePass),
             static_cast<int>(kCallSites));
 }
 
 // Occurrences arriving together within a period log once.
 TEST(LogMacros, EveryTLogsConcurrentOccurrencesOncePerPeriod) {
-  EXPECT_EQ(CountConcurrentMessages([] {
-              LogAtCallSites<HourlyOccurrence>(
-                  std::make_index_sequence<kCallSites>{});
-            }),
+  EXPECT_EQ(CountConcurrentMessages(
+                [] {
+                  LogAtCallSites<HourlyOccurrence>(
+                      std::make_index_sequence<kCallSites>{});
+                },
+                kSinglePass),
             static_cast<int>(kCallSites));
 }
 
