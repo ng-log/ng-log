@@ -28,4 +28,6 @@ Alternatively, ng-log can be incorporated into using the CMake command `#!cmake
 add_subdirectory` to include ng-log directly from a subdirectory of your project
 by replacing the `#!cmake find_package` call from the previous snippet by
 `add_subdirectory`. The `#!cmake ng-log::ng-log` target is in this case an
-`#!cmake ALIAS` library target for the `ng-log` library target.
+`#!cmake ALIAS` library target for the `ng-log` library target. ng-log then
+builds neither its tests nor its benchmarks, and its examples only if
+`BUILD_EXAMPLES` is enabled.

@@ -114,7 +114,8 @@ When built with `WITH_LINE_INFO` set to `auto` (the default), `addr2line`, or
 `libbacktrace`, ng-log resolves the source file and line number of each stack
 frame, in addition to the symbol name. This applies to both the failure signal
 handler and `LOG(FATAL)`/unsatisfied `CHECK` traces. `WITH_LINE_INFO=none`
-disables the feature.
+disables the feature. A CMake boolean selects `none` when false and `auto`
+when true, and any other value fails the configuration.
 
 Two backends provide this:
 

@@ -22,7 +22,9 @@ project (ng-log
   LANGUAGES CXX
 )
 
-list (APPEND CMAKE_MODULE_PATH ${ng-log_SOURCE_DIR}/cmake)
+# The bundled find modules take precedence over modules of the same name that
+# the user or an embedding project provides.
+list (PREPEND CMAKE_MODULE_PATH ${ng-log_SOURCE_DIR}/cmake)
 
 include (CheckCXXSourceCompiles)
 include (CheckCXXSourceRuns)
@@ -34,10 +36,15 @@ include (CheckTypeSize)
 include (CMakeDependentOption)
 include (CMakePackageConfigHelpers)
 include (CMakePushCheckState)
-include (CTest)
 include (GenerateExportHeader)
 include (GNUInstallDirs)
 include (GoogleTest)
+
+# Tests, examples and benchmarks belong to the top level project only, so that
+# projects embedding ng-log do not build and run them.
+if (PROJECT_IS_TOP_LEVEL)
+  include (CTest)
+endif (PROJECT_IS_TOP_LEVEL)
 
 # An embedding project owns the global library type. Default to a shared
 # library within this directory only.
@@ -47,7 +54,7 @@ elseif (NOT DEFINED BUILD_SHARED_LIBS)
   set (BUILD_SHARED_LIBS ON)
 endif (PROJECT_IS_TOP_LEVEL)
 
-option (BUILD_EXAMPLES "Build examples" ON)
+option (BUILD_EXAMPLES "Build examples" ${PROJECT_IS_TOP_LEVEL})
 option (WITH_LOCK_METRICS
   "Enable internal lock contention metrics" OFF)
 option (PRINT_UNSYMBOLIZED_STACK_TRACES
@@ -60,17 +67,27 @@ generator and the compiler support it" ON WITH_EXPERIMENTAL OFF)
 option (WITH_PKGCONFIG "Enable pkg-config support" OFF)
 option (WITH_SYMBOLIZE "Enable symbolize module" ON)
 
+# Unwinder used for stack traces. A CMake boolean false (OFF, FALSE, 0, NO, an
+# empty string, ...) is treated the same as "none". Any other value that is not
+# one of the names below fails the configuration.
 set (WITH_UNWIND libunwind CACHE STRING "unwind driver")
 set_property (CACHE WITH_UNWIND PROPERTY STRINGS none unwind libunwind)
+
+if (NOT WITH_UNWIND)
+  set (WITH_UNWIND none)
+elseif (NOT WITH_UNWIND MATCHES "^(none|unwind|libunwind)$")
+  message (FATAL_ERROR "WITH_UNWIND is '${WITH_UNWIND}' but must be one of "
+    "none, unwind or libunwind, or a boolean false")
+endif (NOT WITH_UNWIND)
 
 # Backend for resolving file names and line numbers in symbolized stack
 # frames. "auto" uses libbacktrace when available, since it resolves
 # in-process without spawning a subprocess per frame, and falls back to
 # addr2line otherwise. "addr2line" and "libbacktrace" force one specific
 # backend. "none" disables both. A CMake boolean false (OFF, FALSE, 0, NO,
-# an empty string, ...) is treated the same as "none", and anything else
-# that is not one of the four names above (including a boolean true such
-# as ON) is treated the same as "auto".
+# an empty string, ...) is treated the same as "none", and a boolean true
+# (ON, TRUE, 1, YES, ...) the same as "auto". Any other value fails the
+# configuration.
 # When built with MinGW, "addr2line" replaces the DbgHelp-based backend
 # entirely rather than supplementing it: DbgHelp cannot read the DWARF
 # debug info a MinGW build emits by default, so addr2line resolves the
@@ -80,18 +97,25 @@ set (WITH_LINE_INFO auto CACHE STRING
   "Backend for resolving file names and line numbers in stack traces")
 set_property (CACHE WITH_LINE_INFO PROPERTY STRINGS none auto addr2line libbacktrace)
 
+string (TOUPPER "${WITH_LINE_INFO}" _ng-log_LINE_INFO)
+
 if (NOT WITH_LINE_INFO)
   set (WITH_LINE_INFO none)
-elseif (NOT WITH_LINE_INFO MATCHES "^(none|auto|addr2line|libbacktrace)$")
+elseif (_ng-log_LINE_INFO MATCHES "^(ON|YES|TRUE|Y|[0-9.]+)$")
   set (WITH_LINE_INFO auto)
+elseif (NOT WITH_LINE_INFO MATCHES "^(none|auto|addr2line|libbacktrace)$")
+  message (FATAL_ERROR "WITH_LINE_INFO is '${WITH_LINE_INFO}' but must be "
+    "one of none, auto, addr2line or libbacktrace, or a boolean")
 endif (NOT WITH_LINE_INFO)
+
+unset (_ng-log_LINE_INFO)
 
 set (WITH_FUZZING none CACHE STRING "Fuzzing engine")
 set_property (CACHE WITH_FUZZING PROPERTY STRINGS none libfuzzer ossfuzz)
 
-if (NOT WITH_UNWIND OR WITH_UNWIND STREQUAL none)
+if (WITH_UNWIND STREQUAL none)
   set (CMAKE_DISABLE_FIND_PACKAGE_Unwind ON)
-endif (NOT WITH_UNWIND OR WITH_UNWIND STREQUAL none)
+endif (WITH_UNWIND STREQUAL none)
 
 set (_ng-log_try_addr2line OFF)
 set (_ng-log_try_libbacktrace OFF)
@@ -112,11 +136,16 @@ set (CMAKE_CXX_VISIBILITY_PRESET hidden)
 set (CMAKE_POSITION_INDEPENDENT_CODE ON)
 set (CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
-set (CMAKE_DEBUG_POSTFIX d)
+# Distinguishes debug libraries unless the user chose a postfix.
+if (NOT DEFINED CMAKE_DEBUG_POSTFIX)
+  set (CMAKE_DEBUG_POSTFIX d)
+endif (NOT DEFINED CMAKE_DEBUG_POSTFIX)
 
 # Benchmarks are optional and are skipped when Google Benchmark is not
 # available.
-find_package (benchmark 1.6 NO_MODULE)
+if (PROJECT_IS_TOP_LEVEL)
+  find_package (benchmark 1.6 NO_MODULE)
+endif (PROJECT_IS_TOP_LEVEL)
 
 if (BUILD_TESTING)
   # Tests always use the system-provided GTest/GMock. When unavailable, the
@@ -263,10 +292,13 @@ if (WIN32)
     "windows.h;processthreadsapi.h" HAVE_GET_THREAD_DESCRIPTION)
 endif (WIN32)
 
-cmake_push_check_state (RESET)
-set (CMAKE_REQUIRED_LIBRARIES dbghelp)
-check_cxx_symbol_exists (UnDecorateSymbolName "windows.h;dbghelp.h" HAVE_DBGHELP)
-cmake_pop_check_state ()
+if (WIN32)
+  cmake_push_check_state (RESET)
+  set (CMAKE_REQUIRED_LIBRARIES dbghelp)
+  check_cxx_symbol_exists (UnDecorateSymbolName "windows.h;dbghelp.h"
+    HAVE_DBGHELP)
+  cmake_pop_check_state ()
+endif (WIN32)
 
 if (NOT WITH_FUZZING OR WITH_FUZZING STREQUAL none)
   # Detect the optional system demangler for explicit on-demand use.
@@ -374,7 +406,7 @@ if (WITH_SYMBOLIZE)
       set (HAVE_SYMBOLIZE 1)
     else (MINGW AND _ng-log_try_addr2line AND HAVE_SUBPROCESS)
       cmake_push_check_state (RESET)
-      set (CMAKE_REQUIRED_LIBRARIES DbgHelp)
+      set (CMAKE_REQUIRED_LIBRARIES dbghelp)
 
       check_cxx_source_runs ([=[
       #include <windows.h>
@@ -700,8 +732,8 @@ if (HAVE_EXPERIMENTAL_LOGGING)
   target_sources (ng-log PRIVATE $<TARGET_OBJECTS:ng-log_experimental_objects>)
 endif (HAVE_EXPERIMENTAL_LOGGING)
 
-set (ng-log_libraries_options_for_static_linking)
-set (ng-log_pkgconfig_compile_options)
+# Libraries that a static ng-log requires, for the pkg-config file.
+set (_ng-log_PKGCONFIG_LIBS_PRIVATE)
 
 if (WIN32)
   target_compile_definitions (ng-log PRIVATE
@@ -714,40 +746,50 @@ endif (WIN32)
 
 if (HAVE_UNWIND OR HAVE_LIBUNWIND)
   target_link_libraries (ng-log PRIVATE unwind::unwind)
-  set (ng-log_libraries_options_for_static_linking "${ng-log_libraries_options_for_static_linking} -lunwind")
+  list (APPEND _ng-log_PKGCONFIG_LIBS_PRIVATE -lunwind)
   set (Unwind_DEPENDENCY "find_dependency (Unwind ${Unwind_VERSION})")
 endif (HAVE_UNWIND OR HAVE_LIBUNWIND)
 
 if (HAVE_LIBBACKTRACE)
   target_link_libraries (ng-log PRIVATE libbacktrace::libbacktrace)
-  set (ng-log_libraries_options_for_static_linking "${ng-log_libraries_options_for_static_linking} -lbacktrace")
+  list (APPEND _ng-log_PKGCONFIG_LIBS_PRIVATE -lbacktrace)
   set (Libbacktrace_DEPENDENCY "find_dependency (Libbacktrace)")
 endif (HAVE_LIBBACKTRACE)
 
 if (HAVE_DBGHELP)
   target_link_libraries (ng-log PRIVATE dbghelp)
-  set (ng-log_libraries_options_for_static_linking "${ng-log_libraries_options_for_static_linking} -ldbghelp")
+  list (APPEND _ng-log_PKGCONFIG_LIBS_PRIVATE -ldbghelp)
 endif (HAVE_DBGHELP)
 
 if (WIN32)
   target_link_libraries (ng-log PRIVATE advapi32 ole32 pathcch shell32 uuid)
-  set (ng-log_libraries_options_for_static_linking
-    "${ng-log_libraries_options_for_static_linking} -ladvapi32 -lole32 -lpathcch -lshell32 -luuid")
+  list (APPEND _ng-log_PKGCONFIG_LIBS_PRIVATE
+    -ladvapi32 -lole32 -lpathcch -lshell32 -luuid)
 endif (WIN32)
 
 target_link_libraries (ng-log PRIVATE Threads::Threads)
 
 if (CMAKE_THREAD_LIBS_INIT)
-  set (ng-log_libraries_options_for_static_linking "${ng-log_libraries_options_for_static_linking} ${CMAKE_THREAD_LIBS_INIT}")
+  list (APPEND _ng-log_PKGCONFIG_LIBS_PRIVATE ${CMAKE_THREAD_LIBS_INIT})
 endif (CMAKE_THREAD_LIBS_INIT)
 
 if (ANDROID)
   target_link_libraries (ng-log PRIVATE log)
-  set (ng-log_libraries_options_for_static_linking "${ng-log_libraries_options_for_static_linking} -llog")
+  list (APPEND _ng-log_PKGCONFIG_LIBS_PRIVATE -llog)
 endif (ANDROID)
 
-set_target_properties (ng-log PROPERTIES VERSION ${ng-log_VERSION})
-set_target_properties (ng-log PROPERTIES SOVERSION 0)
+# Releases before 1.0 can break compatibility with each minor version, like the
+# package version compatibility states.
+if (ng-log_VERSION_MAJOR EQUAL 0)
+  set (_ng-log_SOVERSION ${ng-log_VERSION_MAJOR}.${ng-log_VERSION_MINOR})
+else (ng-log_VERSION_MAJOR EQUAL 0)
+  set (_ng-log_SOVERSION ${ng-log_VERSION_MAJOR})
+endif (ng-log_VERSION_MAJOR EQUAL 0)
+
+set_target_properties (ng-log PROPERTIES
+  SOVERSION ${_ng-log_SOVERSION}
+  VERSION ${ng-log_VERSION}
+)
 
 set (_ng-log_SPDX_LICENSE BSD-3-Clause)
 set_property (TARGET ng-log PROPERTY SPDX_LICENSE ${_ng-log_SPDX_LICENSE})
@@ -839,26 +881,42 @@ if (HAVE_EXPERIMENTAL_LOGGING)
   add_library (ng-log::experimental ALIAS ng-log_experimental)
 endif (HAVE_EXPERIMENTAL_LOGGING)
 
-string (STRIP "${ng-log_libraries_options_for_static_linking}" ng-log_libraries_options_for_static_linking)
-
 if (WITH_PKGCONFIG)
-  set (VERSION ${ng-log_VERSION})
-  set (prefix ${CMAKE_INSTALL_PREFIX})
-  set (exec_prefix ${CMAKE_INSTALL_FULL_BINDIR})
-  set (libdir ${CMAKE_INSTALL_FULL_LIBDIR})
-  set (includedir ${CMAKE_INSTALL_FULL_INCLUDEDIR})
+  # The library name includes the postfix of the configuration.
+  set (_ng-log_PKGCONFIG_FILE
+    ${ng-log_BINARY_DIR}/pkgconfig/$<CONFIG>/libng-log.pc)
 
-  configure_file (
-    "${ng-log_SOURCE_DIR}/cmake/libng-log.pc.in"
-    "${ng-log_BINARY_DIR}/libng-log.pc"
-    @ONLY
+  block (SCOPE_FOR VARIABLES)
+    set (VERSION ${ng-log_VERSION})
+    list (JOIN _ng-log_PKGCONFIG_LIBS_PRIVATE " " libs_private)
+    set (library $<TARGET_LINKER_FILE_BASE_NAME:ng-log>)
+
+    # Locating the installation relative to the file keeps it valid wherever
+    # the installation is moved to.
+    if (IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}")
+      set (prefix ${CMAKE_INSTALL_PREFIX})
+      set (libdir ${CMAKE_INSTALL_LIBDIR})
+    else (IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}")
+      cmake_path (RELATIVE_PATH CMAKE_INSTALL_PREFIX
+        BASE_DIRECTORY ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/pkgconfig
+        OUTPUT_VARIABLE _PREFIX)
+      set (prefix "\${pcfiledir}/${_PREFIX}")
+      set (libdir "\${exec_prefix}/${CMAKE_INSTALL_LIBDIR}")
+    endif (IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}")
+
+    if (IS_ABSOLUTE "${CMAKE_INSTALL_INCLUDEDIR}")
+      set (includedir ${CMAKE_INSTALL_INCLUDEDIR})
+    else (IS_ABSOLUTE "${CMAKE_INSTALL_INCLUDEDIR}")
+      set (includedir "\${prefix}/${CMAKE_INSTALL_INCLUDEDIR}")
+    endif (IS_ABSOLUTE "${CMAKE_INSTALL_INCLUDEDIR}")
+
+    configure_file (cmake/libng-log.pc.in libng-log.pc.in @ONLY)
+  endblock ()
+
+  file (GENERATE
+    OUTPUT ${_ng-log_PKGCONFIG_FILE}
+    INPUT ${ng-log_BINARY_DIR}/libng-log.pc.in
   )
-
-  unset (VERSION)
-  unset (prefix)
-  unset (exec_prefix)
-  unset (libdir)
-  unset (includedir)
 endif (WITH_PKGCONFIG)
 
 # Unit testing
@@ -894,7 +952,7 @@ if (WITH_FUZZING AND NOT WITH_FUZZING STREQUAL none)
   endif (WITH_FUZZING STREQUAL "ossfuzz")
 endif (WITH_FUZZING AND NOT WITH_FUZZING STREQUAL none)
 
-if (BUILD_TESTING AND GTest_FOUND)
+if (PROJECT_IS_TOP_LEVEL AND BUILD_TESTING AND GTest_FOUND)
   # Discover tests when running them so that the build does not depend on
   # executing test programs.
   set (CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE PRE_TEST)
@@ -2184,7 +2242,7 @@ logging libraries\"\n#endif\n")
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:ng-log>"
     FAIL_REGULAR_EXPRESSION "no output;Assert failed"
   )
-endif (BUILD_TESTING AND GTest_FOUND)
+endif (PROJECT_IS_TOP_LEVEL AND BUILD_TESTING AND GTest_FOUND)
 
 if (benchmark_FOUND)
   add_executable (logging_benchmark
@@ -2210,15 +2268,21 @@ if (BUILD_EXAMPLES)
   endif (EMSCRIPTEN)
 endif (BUILD_EXAMPLES)
 
+# Runtime contains what programs linked against the shared library need,
+# Development everything else that building against ng-log requires.
 install (TARGETS ng-log
   EXPORT ng-log-targets
-  FILE_SET HEADERS
+  RUNTIME COMPONENT Runtime
+  LIBRARY COMPONENT Runtime NAMELINK_COMPONENT Development
+  ARCHIVE COMPONENT Development
+  FILE_SET HEADERS COMPONENT Development
 )
 
 if (WITH_PKGCONFIG)
   install (
-    FILES "${ng-log_BINARY_DIR}/libng-log.pc"
+    FILES ${_ng-log_PKGCONFIG_FILE}
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig"
+    COMPONENT Development
   )
 endif (WITH_PKGCONFIG)
 
@@ -2253,7 +2317,8 @@ export (PACKAGE ng-log)
 install (FILES
   ${ng-log_BINARY_DIR}/ng-log-config.cmake
   ${ng-log_BINARY_DIR}/ng-log-config-version.cmake
-  DESTINATION ${_ng-log_CMake_INSTALLDIR})
+  DESTINATION ${_ng-log_CMake_INSTALLDIR}
+  COMPONENT Development)
 
 list (TRANSFORM _ng-log_FIND_MODULES PREPEND cmake/)
 
@@ -2261,8 +2326,11 @@ install (FILES ${_ng-log_FIND_MODULES}
   DESTINATION ${_ng-log_CMake_INSTALLDIR}/modules
   COMPONENT Development)
 
-install (EXPORT ng-log-targets NAMESPACE ng-log:: DESTINATION
-  ${_ng-log_CMake_INSTALLDIR})
+install (EXPORT ng-log-targets
+  NAMESPACE ng-log::
+  DESTINATION ${_ng-log_CMake_INSTALLDIR}
+  COMPONENT Development
+)
 
 # The package configuration loads the module target only for consumers that
 # can import it. These compile the module interface themselves, since its
@@ -2271,12 +2339,15 @@ install (EXPORT ng-log-targets NAMESPACE ng-log:: DESTINATION
 if (HAVE_EXPERIMENTAL_MODULE)
   install (TARGETS ng-log_experimental
     EXPORT ng-log-experimental-targets
+    ARCHIVE COMPONENT Development
     FILE_SET CXX_MODULES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+      COMPONENT Development
   )
 
   install (EXPORT ng-log-experimental-targets
     NAMESPACE ng-log::
     DESTINATION ${_ng-log_CMake_INSTALLDIR}
+    COMPONENT Development
   )
 
   export (EXPORT ng-log-experimental-targets

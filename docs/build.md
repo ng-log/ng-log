@@ -31,11 +31,15 @@ Make as build tool is as follows:
   ```
 4.  Test the build software (optional).
   ``` bash
-  cmake --build build --target test
+  ctest --test-dir build
   ```
 5.  Install the built files (optional).
   ``` bash
-  cmake --build build --target install
+  cmake --install build
   ```
+  The `Runtime` component contains the shared library that programs need at
+  run time, and the `Development` component everything else needed to build
+  against ng-log. `#!bash cmake --install build --component Runtime` installs
+  only the former.
 
 Once successfully built, ng-log can be [integrated into own projects](usage.md).

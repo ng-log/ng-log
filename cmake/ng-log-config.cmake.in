@@ -12,8 +12,6 @@ if (CMAKE_VERSION VERSION_LESS @ng-log_CMake_VERSION@)
   return ()
 endif (CMAKE_VERSION VERSION_LESS @ng-log_CMake_VERSION@)
 
-@PACKAGE_INIT@
-
 foreach (_ng-log_COMPONENT IN LISTS ng-log_FIND_COMPONENTS)
   if (NOT _ng-log_COMPONENT STREQUAL experimental)
     set (ng-log_${_ng-log_COMPONENT}_FOUND FALSE)

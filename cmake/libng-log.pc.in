@@ -4,13 +4,13 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 prefix=@prefix@
-exec_prefix=@exec_prefix@
+exec_prefix=${prefix}
 libdir=@libdir@
 includedir=@includedir@
 
 Name: libng-log
 Description: C++ logging framework
 Version: @VERSION@
-Libs: -L${libdir} -lng-log
-Libs.private: @ng-log_libraries_options_for_static_linking@
-Cflags: -I${includedir} @ng-log_pkgconfig_compile_options@
+Libs: -L${libdir} -l@library@
+Libs.private: @libs_private@
+Cflags: -I${includedir}

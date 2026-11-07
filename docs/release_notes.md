@@ -32,6 +32,9 @@ SPDX-License-Identifier: BSD-3-Clause
 - Require UTF-8 for Windows path arguments
 - Require Windows 8 or Windows Server 2012
 - Restrict CMake package compatibility to the same minor version
+- Version the shared library name by minor version, such as
+  `libng-log.so.0.9`, while the major version is 0
+- Fail the CMake configuration on unknown `WITH_UNWIND` values
 - Move `DFATAL_LEVEL` and `IF_DEBUG_MODE` to `ng-log/logging.h`.
   `ng-log/log_severity.h` provides `NGLOG_DFATAL_LEVEL` and
   `NGLOG_IF_DEBUG_MODE`
@@ -73,6 +76,8 @@ SPDX-License-Identifier: BSD-3-Clause
 - Support `TruncateStdoutStderr` on Windows for output redirected to files
 - Route Emscripten output to console targets by severity
 - Install an SPDX SBOM with CMake versions that support it
+- Install the shared library as the `Runtime` component and the files for
+  building against ng-log as the `Development` component
 
 #### Bug fixes
 
@@ -111,6 +116,13 @@ SPDX-License-Identifier: BSD-3-Clause
 - Skip sanitizer frames in `backtrace` stack traces
 - Keep `BUILD_SHARED_LIBS` from changing the library type of embedding
   projects
+- Build tests, examples and benchmarks only if ng-log is the top level
+  project
+- Point the pkg-config file to the installation it belongs to and to the
+  debug library of debug builds
+- Honor `CMAKE_DEBUG_POSTFIX` set by the user
+- Prefer the bundled find modules over modules of the same name on
+  `CMAKE_MODULE_PATH`
 
 [@devtejasx]: https://github.com/devtejasx
 
