@@ -27,14 +27,17 @@ list (APPEND CMAKE_MODULE_PATH ${ng-log_SOURCE_DIR}/cmake)
 include (CheckCXXSourceCompiles)
 include (CheckCXXSourceRuns)
 include (CheckCXXSymbolExists)
+include (CheckExperimentalLogging)
 include (CheckIncludeFileCXX)
 include (CheckStructHasMember)
 include (CheckTypeSize)
+include (CMakeDependentOption)
 include (CMakePackageConfigHelpers)
 include (CMakePushCheckState)
 include (CTest)
 include (GenerateExportHeader)
 include (GNUInstallDirs)
+include (GoogleTest)
 
 # An embedding project owns the global library type. Default to a shared
 # library within this directory only.
@@ -51,9 +54,9 @@ option (PRINT_UNSYMBOLIZED_STACK_TRACES
   "Print file offsets in traces instead of symbolizing" OFF)
 option (WITH_EXPERIMENTAL
   "Build the experimental logging functions if the compiler supports them" ON)
-option (WITH_MODULES
+cmake_dependent_option (WITH_MODULES
   "Build the C++ module of the experimental logging functions if the \
-generator and the compiler support it" ON)
+generator and the compiler support it" ON WITH_EXPERIMENTAL OFF)
 option (WITH_PKGCONFIG "Enable pkg-config support" OFF)
 option (WITH_SYMBOLIZE "Enable symbolize module" ON)
 
@@ -111,6 +114,10 @@ set (CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
 set (CMAKE_DEBUG_POSTFIX d)
 
+# Benchmarks are optional and are skipped when Google Benchmark is not
+# available.
+find_package (benchmark 1.6 NO_MODULE)
+
 if (BUILD_TESTING)
   # Tests always use the system-provided GTest/GMock. When unavailable, the
   # unit test section below is skipped entirely rather than falling back to a
@@ -118,13 +125,9 @@ if (BUILD_TESTING)
   find_package (GTest 1.11 COMPONENTS GTest GMock NO_MODULE)
 endif (BUILD_TESTING)
 
-# Benchmarks are optional and are skipped when Google Benchmark is not
-# available.
-find_package (benchmark 1.6 NO_MODULE)
-
+find_package (Libbacktrace)
 find_package (Threads REQUIRED)
 find_package (Unwind)
-find_package (Libbacktrace)
 
 if (Unwind_FOUND)
   cmake_push_check_state (RESET)
@@ -465,38 +468,22 @@ set (CMAKE_REQUIRED_INCLUDES
   ${ng-log_SOURCE_DIR}/src
 )
 
-file (READ ${ng-log_SOURCE_DIR}/src/internal/stacktrace_x86.cc
-  _ng-log_STACKTRACE_X86_SOURCE)
-string (APPEND _ng-log_STACKTRACE_X86_SOURCE
-  "\nint main() {\n"
-  "  void* frames[1];\n"
-  "  return nglog::GetStackTrace(frames, 1, 0) < 0;\n"
-  "}\n"
-)
-check_cxx_source_compiles ("${_ng-log_STACKTRACE_X86_SOURCE}"
-  _ng-log_HAVE_STACKTRACE_X86)
+foreach (_ng-log_STACKTRACE IN ITEMS x86 powerpc windows)
+  file (READ ${ng-log_SOURCE_DIR}/src/internal/stacktrace_${_ng-log_STACKTRACE}.cc
+    _ng-log_STACKTRACE_SOURCE_CODE)
+  string (APPEND _ng-log_STACKTRACE_SOURCE_CODE
+    "\nint main() {\n"
+    "  void* frames[1];\n"
+    "  return nglog::GetStackTrace(frames, 1, 0) < 0;\n"
+    "}\n"
+  )
+  string (TOUPPER ${_ng-log_STACKTRACE} _ng-log_STACKTRACE_UPPER)
+  check_cxx_source_compiles ("${_ng-log_STACKTRACE_SOURCE_CODE}"
+    _ng-log_HAVE_STACKTRACE_${_ng-log_STACKTRACE_UPPER})
+endforeach (_ng-log_STACKTRACE)
 
-file (READ ${ng-log_SOURCE_DIR}/src/internal/stacktrace_powerpc.cc
-  _ng-log_STACKTRACE_POWERPC_SOURCE)
-string (APPEND _ng-log_STACKTRACE_POWERPC_SOURCE
-  "\nint main() {\n"
-  "  void* frames[1];\n"
-  "  return nglog::GetStackTrace(frames, 1, 0) < 0;\n"
-  "}\n"
-)
-check_cxx_source_compiles ("${_ng-log_STACKTRACE_POWERPC_SOURCE}"
-  _ng-log_HAVE_STACKTRACE_POWERPC)
-
-file (READ ${ng-log_SOURCE_DIR}/src/internal/stacktrace_windows.cc
-  _ng-log_STACKTRACE_WINDOWS_SOURCE)
-string (APPEND _ng-log_STACKTRACE_WINDOWS_SOURCE
-  "\nint main() {\n"
-  "  void* frames[1];\n"
-  "  return nglog::GetStackTrace(frames, 1, 0) < 0;\n"
-  "}\n"
-)
-check_cxx_source_compiles ("${_ng-log_STACKTRACE_WINDOWS_SOURCE}"
-  _ng-log_HAVE_STACKTRACE_WINDOWS)
+unset (_ng-log_STACKTRACE_SOURCE_CODE)
+unset (_ng-log_STACKTRACE_UPPER)
 
 cmake_pop_check_state ()
 
@@ -567,8 +554,6 @@ set (NGLOG_PUBLIC_H
 
 # Unless WITH_EXPERIMENTAL is disabled, the experimental logging functions are
 # built whenever the compiler supports them.
-include (cmake/CheckExperimentalLogging.cmake)
-
 if (WITH_EXPERIMENTAL)
   nglog_check_experimental_logging (HAVE_EXPERIMENTAL_LOGGING
     INCLUDES ${ng-log_SOURCE_DIR}/src)
@@ -719,10 +704,12 @@ set (ng-log_libraries_options_for_static_linking)
 set (ng-log_pkgconfig_compile_options)
 
 if (WIN32)
-  # Do not define min and max as macros
-  target_compile_definitions (ng-log PRIVATE NOMINMAX)
-  # Exclude unnecessary funcitonality
-  target_compile_definitions (ng-log PRIVATE WIN32_LEAN_AND_MEAN)
+  target_compile_definitions (ng-log PRIVATE
+    # Do not define min and max as macros
+    NOMINMAX
+    # Exclude unnecessary functionality
+    WIN32_LEAN_AND_MEAN
+  )
 endif (WIN32)
 
 if (HAVE_UNWIND OR HAVE_LIBUNWIND)
@@ -908,8 +895,6 @@ if (WITH_FUZZING AND NOT WITH_FUZZING STREQUAL none)
 endif (WITH_FUZZING AND NOT WITH_FUZZING STREQUAL none)
 
 if (BUILD_TESTING AND GTest_FOUND)
-  include (GoogleTest)
-
   # Discover tests when running them so that the build does not depend on
   # executing test programs.
   set (CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE PRE_TEST)
@@ -993,7 +978,7 @@ if (BUILD_TESTING AND GTest_FOUND)
       --build-options
       -DCMAKE_BUILD_TYPE=${_ARGS_CONFIG}
       -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-      -DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=ON
+      -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF
       -Dng-log_DIR=${_ARGS_PACKAGE_DIR}
       ${_OPTIONS}
       ${_TEST_COMMAND}
@@ -1164,23 +1149,21 @@ logging libraries\"\n#endif\n")
 
   # Separate copies of ng-log coordinate their flag names only where the
   # operating system provides an object that is private to the process.
-  if (WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  if (WIN32 OR LINUX)
     # Each module carries its own copy of the ng-log objects.
-    foreach (_ng-log_library_copy first second)
-      add_library (flags_library_copy_${_ng-log_library_copy} MODULE
+    set (_ng-log_LIBRARY_COPIES first second)
+    set (_ng-log_LIBRARY_COPY_VALUES 1 2)
+
+    foreach (_ng-log_library_copy _ng-log_library_copy_value IN ZIP_LISTS
+        _ng-log_LIBRARY_COPIES _ng-log_LIBRARY_COPY_VALUES)
+      set (_ng-log_library_copy_target flags_library_copy_${_ng-log_library_copy})
+      add_library (${_ng-log_library_copy_target} MODULE
         src/flags_library_copy.cc
         $<TARGET_OBJECTS:ng-log_internal>
       )
       # The objects were compiled for export, the module source was not.
-      target_compile_definitions (flags_library_copy_${_ng-log_library_copy}
-        PRIVATE NGLOG_STATIC_DEFINE)
-    endforeach (_ng-log_library_copy)
-
-    set (_ng-log_library_copy_value 0)
-    foreach (_ng-log_library_copy first second)
-      math (EXPR _ng-log_library_copy_value "${_ng-log_library_copy_value} + 1")
-      set (_ng-log_library_copy_target flags_library_copy_${_ng-log_library_copy})
       target_compile_definitions (${_ng-log_library_copy_target} PRIVATE
+        NGLOG_STATIC_DEFINE
         NGLOG_LIBRARY_COPY_VALUE=${_ng-log_library_copy_value}
         $<TARGET_PROPERTY:ng-log,COMPILE_DEFINITIONS>)
       target_compile_features (${_ng-log_library_copy_target} PRIVATE
@@ -1215,7 +1198,7 @@ logging libraries\"\n#endif\n")
       TEST_PREFIX flags.copies.
       DISCOVERY_TIMEOUT 30
     )
-  endif (WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  endif (WIN32 OR LINUX)
 
   gtest_discover_tests (flags_unittest
     TEST_PREFIX flags.
@@ -1427,16 +1410,10 @@ logging libraries\"\n#endif\n")
       # Statically linked so the runtime DLLs of whichever toolchain
       # built it (libwinpthread, libstdc++, ...) do not need to be on
       # PATH wherever this gets spawned as a child process.
-      target_link_options (addr2line_fake_hang PRIVATE
-        -static -static-libgcc -static-libstdc++)
-      target_link_options (addr2line_fake_empty PRIVATE
-        -static -static-libgcc -static-libstdc++)
-      target_link_options (addr2line_fake_fail PRIVATE
-        -static -static-libgcc -static-libstdc++)
-      target_link_options (addr2line_fake_slow PRIVATE
-        -static -static-libgcc -static-libstdc++)
-      target_link_options (addr2line_fake_stream PRIVATE
-        -static -static-libgcc -static-libstdc++)
+      foreach (_ng-log_FAKE IN ITEMS hang empty fail slow stream)
+        target_link_options (addr2line_fake_${_ng-log_FAKE} PRIVATE
+          -static -static-libgcc -static-libstdc++)
+      endforeach (_ng-log_FAKE)
     endif (WIN32)
   endif (HAVE_ADDR2LINE)
 
@@ -1854,7 +1831,7 @@ logging libraries\"\n#endif\n")
   add_test (NAME cleanup_init COMMAND
     ${CMAKE_COMMAND} -E make_directory ${CLEANUP_LOG_DIR})
   add_test (NAME cleanup_logdir COMMAND
-    ${CMAKE_COMMAND} -E remove_directory ${CLEANUP_LOG_DIR})
+    ${CMAKE_COMMAND} -E rm -rf ${CLEANUP_LOG_DIR})
   add_test (NAME cleanup_immediately COMMAND
     ${CMAKE_COMMAND}
     -DLOGCLEANUP=$<TARGET_FILE:cleanup_immediately_unittest>
@@ -2352,12 +2329,7 @@ endif (CMAKE_VERSION VERSION_GREATER_EQUAL 4.3
 # CPack describes the installation of the top level project and takes the
 # install components that are defined when it is included.
 if (PROJECT_IS_TOP_LEVEL)
-  set (CPACK_PACKAGE_NAME ng-log)
   set (CPACK_PACKAGE_DESCRIPTION_SUMMARY "C++ logging library")
-  set (CPACK_PACKAGE_VERSION_MAJOR ${ng-log_VERSION_MAJOR})
-  set (CPACK_PACKAGE_VERSION_MINOR ${ng-log_VERSION_MINOR})
-  set (CPACK_PACKAGE_VERSION_PATCH ${ng-log_VERSION_PATCH})
-  set (CPACK_PACKAGE_VERSION ${ng-log_VERSION})
 
   include (CPack)
 endif (PROJECT_IS_TOP_LEVEL)
