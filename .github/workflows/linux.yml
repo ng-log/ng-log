@@ -83,9 +83,12 @@ jobs:
       - name: Configure
         env:
           CXXFLAGS: -Wall -Wextra -Wsign-conversion -Wtautological-compare -Wformat-nonliteral -Wundef -Werror ${{env.CXXFLAGS}}
+        # Release builds use standard C++ and Debug builds the GNU dialect, the
+        # default of GCC, so that both are checked for every standard.
         run: |
           cmake -S . -B build_${{matrix.build_type}} \
             -DBUILD_SHARED_LIBS=${{matrix.lib == 'shared'}} \
+            ${{ matrix.build_type == 'Release' && '-DCMAKE_CXX_EXTENSIONS=OFF' || '' }} \
             -DCMAKE_CXX_STANDARD=${{matrix.std}} \
             -DCMAKE_CXX_STANDARD_REQUIRED=ON \
             -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/install \
