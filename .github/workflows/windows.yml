@@ -139,11 +139,14 @@ jobs:
                 --config ${{matrix.build_type}} `
                 --target RUN_TESTS
 
+      # Building the install target runs MSBuild again, which compiles every
+      # source anew because ccache in place of cl.exe defeats its up-to-date
+      # checks. Installing the finished build avoids linking objects that the
+      # second run left inconsistent.
       - name: Install
         run: |
-          cmake --build build_${{matrix.build_type}}/ `
-                --config ${{matrix.build_type}} `
-                --target install
+          cmake --install build_${{matrix.build_type}}/ `
+                --config ${{matrix.build_type}}
 
       - name: Perform CodeQL Analysis
         if: matrix.codeql
