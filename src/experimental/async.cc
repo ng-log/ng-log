@@ -19,6 +19,8 @@
 #include <cstdlib>
 #include <memory>
 #include <mutex>
+#include <new>
+#include <optional>
 #include <queue>
 #include <thread>
 #include <utility>
@@ -83,10 +85,11 @@ class LogThread {
   void ResumeParentAfterFork() { mutex_.unlock(); }
 
   // The logging thread does not exist in the child, which starts its own on
-  // first use. Joining the inherited handle would wait forever, so it is
-  // abandoned instead. The pending messages are the parent's to send.
+  // first use. Joining the inherited handle would wait forever and destroying
+  // it would terminate the program, so the child reuses its storage without
+  // destroying it. The pending messages are the parent's to send.
   void ResumeChildAfterFork() {
-    [[maybe_unused]] std::thread* const abandoned = thread_.release();
+    new (&thread_) std::optional<std::thread>{};
     queue_ = {};
     pending_bytes_ = 0;
     sending_ = false;
@@ -111,8 +114,8 @@ class LogThread {
     if (stopped_) {
       return false;
     }
-    if (thread_ == nullptr) {
-      thread_ = std::make_unique<std::thread>(&LogThread::Run, this);
+    if (!thread_.has_value()) {
+      thread_.emplace(&LogThread::Run, this);
       nglog::internal::SetPendingMessagesWaiter(&WaitForPendingMessages);
     }
     pending_bytes_ += size;
@@ -122,7 +125,7 @@ class LogThread {
 
   // Requires the lock.
   bool OnLoggingThread() const noexcept {
-    return thread_ != nullptr &&
+    return thread_.has_value() &&
            thread_->get_id() == std::this_thread::get_id();
   }
 
@@ -177,8 +180,9 @@ class LogThread {
   // Whether the program exits, after which messages are no longer queued.
   bool stopped_ = false;
   // Started on first use, so that programs that log synchronously only do not
-  // run the thread.
-  std::unique_ptr<std::thread> thread_;
+  // run the thread. Stored in place rather than on the heap, so that a child
+  // of a fork keeps no unreachable copy of the handle of its parent.
+  std::optional<std::thread> thread_;
 };
 
 LogThread* CreateInstance();
