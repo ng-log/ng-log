@@ -58,7 +58,7 @@ jobs:
 
       - name: Setup Compiler Cache
         if: ${{ !matrix.codeql }}
-        uses: hendrikmuhs/ccache-action@v1.2.24
+        uses: hendrikmuhs/ccache-action@v1.2.25
         with:
           key: android-C++${{matrix.std}}-${{matrix.abi}}-${{matrix.build_type}}
           evict-old-files: job

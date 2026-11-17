@@ -92,7 +92,7 @@ jobs:
       # these builds.
       - name: Setup Compiler Cache
         if: ${{ !matrix.codeql }}
-        uses: hendrikmuhs/ccache-action@v1.2.24
+        uses: hendrikmuhs/ccache-action@v1.2.25
         with:
           install: binary
           key: msvc-${{matrix.arch}}-C++${{matrix.std}}-${{matrix.build_type}}-${{matrix.lib}}
@@ -209,7 +209,7 @@ jobs:
       # these builds.
       - name: Setup Compiler Cache
         if: ${{ !matrix.codeql }}
-        uses: hendrikmuhs/ccache-action@v1.2.24
+        uses: hendrikmuhs/ccache-action@v1.2.25
         with:
           install: binary
           key: mingw-${{matrix.sys}}-C++${{matrix.std}}-${{matrix.build_type}}-${{matrix.lib}}
