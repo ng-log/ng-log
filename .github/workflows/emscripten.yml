@@ -80,7 +80,7 @@ jobs:
 
       - name: Setup Compiler Cache
         if: ${{ !matrix.codeql }}
-        uses: hendrikmuhs/ccache-action@v1.2.24
+        uses: hendrikmuhs/ccache-action@v1.2.25
         with:
           key: emscripten-C++${{matrix.std}}-${{matrix.build_type}}-${{matrix.lib}}
           evict-old-files: job
