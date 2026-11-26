@@ -2420,11 +2420,19 @@ if (CMAKE_VERSION VERSION_GREATER_EQUAL 4.3
     set (_ng-log_SBOM_EXPORT_ARGUMENTS EXPORT ng-log-targets)
   endif (CMAKE_VERSION VERSION_GREATER_EQUAL 4.4)
 
+  # The license of the SBOM data is given by DATA_LICENSE from CMake 4.5 on,
+  # which rejects the LICENSE keyword of the earlier releases.
+  if (CMAKE_VERSION VERSION_GREATER_EQUAL 4.5)
+    set (_ng-log_SBOM_DATA_LICENSE_KEYWORD DATA_LICENSE)
+  else (CMAKE_VERSION VERSION_GREATER_EQUAL 4.5)
+    set (_ng-log_SBOM_DATA_LICENSE_KEYWORD LICENSE)
+  endif (CMAKE_VERSION VERSION_GREATER_EQUAL 4.5)
+
   set (_ng-log_SBOM_ARGUMENTS
     PROJECT ng-log
     DESTINATION ${CMAKE_INSTALL_DATADIR}/sbom
     VERSION ${ng-log_VERSION}
-    LICENSE ${_ng-log_SPDX_LICENSE}
+    ${_ng-log_SBOM_DATA_LICENSE_KEYWORD} ${_ng-log_SPDX_LICENSE}
     DESCRIPTION ${ng-log_DESCRIPTION}
     HOMEPAGE_URL ${ng-log_HOMEPAGE_URL}
     FORMAT spdx-3.0+json
